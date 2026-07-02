@@ -13,6 +13,9 @@ cd "$(dirname "$0")/.."
 MEDIA="${1:-movie}"
 SIZE="${2:-500}"
 OUT_DIR="${OUT_DIR:-out}"
+# Optional vote-floor override (default = the tool's 50). VOTE_FLOOR=0 re-includes the low-vote tail for a
+# full-catalogue re-embed; anime / no-overview titles are still dropped (those filters are independent).
+FLOOR_ARG=""; [ -n "${VOTE_FLOOR:-}" ] && FLOOR_ARG="--vote-floor $VOTE_FLOOR"
 WORKLIST="$OUT_DIR/worklist-$MEDIA.json"
 LOG="$OUT_DIR/enrich-$MEDIA.log"
 
@@ -43,7 +46,7 @@ fails=0
 batch=0
 while true; do
   enterprise_login
-  json=$("$BIN" enrich --worklist "$WORKLIST" --limit "$SIZE" --out-dir "$OUT_DIR" 2>>"$OUT_DIR/enrich-$MEDIA.err")
+  json=$("$BIN" enrich --worklist "$WORKLIST" --limit "$SIZE" --out-dir "$OUT_DIR" $FLOOR_ARG 2>>"$OUT_DIR/enrich-$MEDIA.err")
   code=$?
   if [ $code -ne 0 ]; then
     fails=$((fails + 1))
