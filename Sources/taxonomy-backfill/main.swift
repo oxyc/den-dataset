@@ -33,7 +33,7 @@ struct TaxonomyBackfill {
             case "enrich":   try await Commands.enrich(args)
             case "enrich-ids": try await Commands.enrichIds(args)
             case "escalation": try Commands.escalation(args)
-            case "assemble": try Commands.assemble(args)
+            case "assemble": try await Commands.assemble(args)
             case "finalize": try Commands.finalize(args)
             case "score":    try Commands.score(args)
             default: usage(); exit(2)
@@ -145,7 +145,7 @@ enum Commands {
 
         let tmdb = try TMDB.client()
         let batchId = checkpoint.nextBatch
-        var survivors: [EnrichedDTO] = []
+        var titles: [EnrichedTitle] = []
         var belowFloor = 0, anime = 0, failures = 0, noOverview = 0
 
         try await withThrowingTaskGroup(of: EnrichOutcome.self) { group in
@@ -159,7 +159,7 @@ enum Commands {
                         if title.overview.trimmingCharacters(in: .whitespacesAndNewlines).count < 20 {
                             return .noOverview(entry.tmdbId)
                         }
-                        return .ok(EnrichedDTO(title))
+                        return .ok(title)
                     } catch {
                         return .failure(entry.tmdbId, "\(error)")
                     }
@@ -167,7 +167,7 @@ enum Commands {
             }
             for try await outcome in group {
                 switch outcome {
-                case .ok(let dto): survivors.append(dto)
+                case .ok(let title): titles.append(title)
                 case .belowFloor: belowFloor += 1
                 case .anime: anime += 1
                 case .noOverview: noOverview += 1
@@ -177,6 +177,18 @@ enum Commands {
                 }
             }
         }
+
+        // FP-2 — re-ground on Wikipedia: ONE Wikidata SPARQL maps the surviving ids to their enwiki articles,
+        // then each title's plot is fetched live. Where a plot exists it REPLACES the TMDB overview (ToS-clean
+        // grounding for the Haiku classifier); titles keep the TMDB overview only where Wikipedia has no plot.
+        // Wikipedia failures never fail enrich — a title just stays on its TMDB overview.
+        let media: MediaType = pending.first?.media ?? .movie
+        var withPlot = 0
+        let mapping = (try? await WikipediaSource().wikidata(forTMDBIds: titles.map(\.tmdbId),
+                                                             mediaType: media)) ?? [:]
+        let grounded = try await regroundOnWikipedia(titles, mapping: mapping, log: Layout.enrichLog(outDir))
+        withPlot = grounded.filter(\.hasWikiPlot).count
+        var survivors = grounded.map(EnrichedDTO.init)
 
         survivors.sort { $0.tmdbId < $1.tmdbId }
         try JSON.writePretty(survivors, to: Layout.enrichedBatch(outDir, batchId))
@@ -189,8 +201,38 @@ enum Commands {
         print(JSON.line([
             "batchId": batchId, "count": survivors.count, "belowFloor": belowFloor,
             "anime": anime, "noOverview": noOverview, "failures": failures, "remaining": remaining,
+            "wikiPlot": withPlot, "tagsOnly": survivors.count - withPlot,
             "batch": Layout.enrichedBatch(outDir, batchId),
         ]))
+    }
+
+    /// Fetch each title's live Wikipedia plot (bounded concurrency) and re-ground `overview` on it where found.
+    /// A missing mapping / missing plot / fetch error simply leaves the title on its TMDB overview.
+    static func regroundOnWikipedia(_ titles: [EnrichedTitle], mapping: [Int: WikipediaSource.Mapping],
+                                    log: String) async throws -> [EnrichedTitle] {
+        let wiki = WikipediaSource()
+        let gate = 4   // gentle on the public Wikipedia API
+        var out: [EnrichedTitle] = []
+        var index = 0
+        while index < titles.count {
+            let slice = Array(titles[index..<min(index + gate, titles.count)])
+            let grounded = try await withThrowingTaskGroup(of: EnrichedTitle.self) { group -> [EnrichedTitle] in
+                for title in slice {
+                    group.addTask {
+                        guard let article = mapping[title.tmdbId]?.article else { return title }
+                        guard let plot = try? await wiki.plot(articleTitle: article),
+                              plot.count >= 20 else { return title }
+                        return title.groundedOnWikiPlot(plot)
+                    }
+                }
+                var acc: [EnrichedTitle] = []
+                for try await t in group { acc.append(t) }
+                return acc
+            }
+            out.append(contentsOf: grounded)
+            index += gate
+        }
+        return out
     }
 
     // enrich-ids — re-fetch an EXPLICIT set of already-vetted ids (taken from a vote file) into one enriched
@@ -250,10 +292,15 @@ enum Commands {
 
     // assemble — one enriched batch + its Haiku vote passes → calibrated classification (reused, tested) →
     // embed + quantize → append to the index store. Opus never classifies; the judgment stays in DenDataset.
-    static func assemble(_ args: Args) throws {
+    static func assemble(_ args: Args) async throws {
         let outDir = try args.require("--out-dir")
         let batchId = try args.requireInt("--batch-id")
         let force = args.has("--force")   // re-process already-classified titles (targeted re-pass)
+        // Embedder: `den-embed` (default, FP-2 — bge-m3 int8[1024] via the service) or `fnv` (offline
+        // HashingEmbedder fallback, e.g. for a network-free run/test). The composed doc feeds BOTH.
+        let embedderKind = args["--embedder"] ?? "den-embed"
+        let denEmbed = DenEmbedClient()
+        let fnv = HashingEmbedder()
 
         let enriched: [EnrichedDTO] = try JSON.read(Layout.enrichedBatch(outDir, batchId))
         let passes = try loadVotePasses(outDir: outDir, batchId: batchId)
@@ -266,7 +313,6 @@ enum Commands {
             thematic: args.double("--thematic-threshold") ?? defaults.thematic,
             mood: args.double("--mood-threshold") ?? defaults.mood)
         let classifier = TaxonomyClassifier(llm: NoLLM(), samples: passes.count, thresholds: thresholds)
-        let embedder = HashingEmbedder()
         var classified = (try? JSON.read(Layout.classifyCheckpoint(outDir)) as ClassifyCheckpoint) ?? ClassifyCheckpoint()
         var noPrimary = 0, missingVotes = 0
 
@@ -282,7 +328,19 @@ enum Commands {
             guard let classification = classifier.classify(rawVotes: raws, title: title) else {
                 noPrimary += 1; classified.done.insert(dto.tmdbId); continue
             }
-            let vector = Quantizer.int8(blockingEmbed(embedder, embeddingText(title)))
+            // Compose the embedding doc from FACTS + the just-classified TAGS + the (Wikipedia) plot. A title
+            // with no wiki plot composes on facts + tags with an empty Plot — never skipped.
+            let tags = (classification.subgenres + classification.moods).map(\.label)
+            let plot = title.hasWikiPlot ? title.overview : ""
+            let composed = ComposedDoc.build(title: title, tags: tags, plot: plot)
+            // den-embed returns the FINAL int8[1024] (quantization lives in the service — do NOT re-quantize);
+            // the FNV fallback is float → local int8 quantize.
+            let vector: [Int8]
+            if embedderKind == "fnv" {
+                vector = Quantizer.int8(blockingEmbed(fnv, composed))
+            } else {
+                vector = try await denEmbed.embedInt8(composed)
+            }
             let record = classification.indexRecord(animated: title.genreIDs.contains(16))   // TMDB genre 16
             try labelsHandle.writeLine(JSON.encodeLine(record))
             try vectorsHandle.writeLine(JSON.encodeLine(VectorRow(tmdbId: dto.tmdbId, v: vector.map(Int.init))))
@@ -301,10 +359,11 @@ enum Commands {
     // and folds in the former import-dataset.mjs step: dataset.meta.json (the manifest the Rust server reads)
     // + a gzipped copy of the labels blob.
     static func finalize(_ args: Args) throws {
-        // e01 was the pilot embedding; e02 is the current HashingEmbedder output and the SHIPPED artifact
-        // name (vectors-e02.bin). Not rebuilding the vectors now — this only relabels finalize's output so a
-        // re-run matches what the app/server already expect.
-        let embeddingVersion = "e02"
+        // FP-2: the shipped embedding is now bge-m3 (den-embed) → vectors-bge-m3.bin, with `dims` taken from
+        // the ACTUAL vector length (1024). The earlier lexical builds shipped e02 (FNV, 384-dim); the app
+        // re-syncs because FP-1 keys the on-device index on embeddingModel + dims. `--embedding-version`
+        // overrides the label (e.g. an offline FNV run), but the default is the bge-m3 artifact name.
+        let embeddingVersion = args["--embedding-version"] ?? "bge-m3"
 
         let outDir = try args.require("--out-dir")
         let allRecords: [IndexRecord] = try FileIO.readLines(Layout.labelsStore(outDir)).map { try JSON.decode($0) }
@@ -496,11 +555,6 @@ func isAnime(_ title: EnrichedTitle) -> Bool {
     return false
 }
 
-/// The embedding input (kept identical to BackfillPipeline): title + overview + keyword names.
-func embeddingText(_ title: EnrichedTitle) -> String {
-    ([title.title, title.overview] + title.keywords.map(\.name)).joined(separator: " ")
-}
-
 func confidenceBucket(_ confidence: Double) -> String {
     let low = (confidence * 10).rounded(.down) / 10
     return String(format: "%.1f-%.1f", low, low + 0.1)
@@ -622,19 +676,47 @@ struct EnrichedDTO: Codable {
     let originCountry: [String]
     let originalLanguage: String?
     let voteCount: Int
+    // FP-2: credits feed the composed embedding doc; `hasWikiPlot` marks `overview` as the live Wikipedia plot
+    // (re-grounded at enrich) so `assemble` composes the Plot clause only when a real plot was found.
+    let director: String?
+    let topCast: [String]
+    let hasWikiPlot: Bool
 
     init(_ t: EnrichedTitle) {
         tmdbId = t.tmdbId; mediaType = t.mediaType.rawValue; title = t.title; year = t.year
         overview = t.overview; genreIDs = t.genreIDs; genres = t.genreNames
         keywordIDs = t.keywords.map(\.id); keywords = t.keywords.map(\.name)
         originCountry = t.originCountry; originalLanguage = t.originalLanguage; voteCount = t.voteCount
+        director = t.director; topCast = t.topCast; hasWikiPlot = t.hasWikiPlot
+    }
+
+    // Tolerant decode: a scratch batch written before FP-2's fields existed (or a hand-authored fixture)
+    // must still load — decodeIfPresent + default keeps the new credit/plot fields optional.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tmdbId = try c.decode(Int.self, forKey: .tmdbId)
+        mediaType = try c.decode(String.self, forKey: .mediaType)
+        title = try c.decode(String.self, forKey: .title)
+        year = try c.decodeIfPresent(Int.self, forKey: .year)
+        overview = try c.decodeIfPresent(String.self, forKey: .overview) ?? ""
+        genreIDs = try c.decodeIfPresent([Int].self, forKey: .genreIDs) ?? []
+        genres = try c.decodeIfPresent([String].self, forKey: .genres) ?? []
+        keywordIDs = try c.decodeIfPresent([Int].self, forKey: .keywordIDs) ?? []
+        keywords = try c.decodeIfPresent([String].self, forKey: .keywords) ?? []
+        originCountry = try c.decodeIfPresent([String].self, forKey: .originCountry) ?? []
+        originalLanguage = try c.decodeIfPresent(String.self, forKey: .originalLanguage)
+        voteCount = try c.decodeIfPresent(Int.self, forKey: .voteCount) ?? 0
+        director = try c.decodeIfPresent(String.self, forKey: .director)
+        topCast = try c.decodeIfPresent([String].self, forKey: .topCast) ?? []
+        hasWikiPlot = try c.decodeIfPresent(Bool.self, forKey: .hasWikiPlot) ?? false
     }
 
     func toEnrichedTitle() -> EnrichedTitle {
         EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType == "tv" ? .tv : .movie, title: title, year: year,
                       overview: overview, genreIDs: genreIDs, genreNames: genres,
                       keywords: zip(keywordIDs, keywords).map { Keyword(id: $0, name: $1) },
-                      originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount)
+                      originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
+                      director: director, topCast: topCast, hasWikiPlot: hasWikiPlot)
     }
 }
 
@@ -674,7 +756,7 @@ struct HaikuVote: Codable {
 struct VectorRow: Codable { let tmdbId: Int; let v: [Int] }
 
 enum EnrichOutcome {
-    case ok(EnrichedDTO)
+    case ok(EnrichedTitle)
     case belowFloor(Int)
     case anime(Int)
     case noOverview(Int)
