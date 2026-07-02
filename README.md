@@ -1,10 +1,15 @@
 # den-dataset
 
 The **dataset producer** for Den's discovery index — extracted from the Den tvOS app so it can run and
-evolve independently. It builds the shipped artifacts (a labels JSON + an int8 vector blob + a manifest) with
-the **same** calibrated classifier, FNV-1a embedder, and int8 quantizer the app was built with, so a re-run
-is byte-compatible. It has **no dependency on DenKit**: it carries its own copies of the small shared types
-and a thin TMDB client. The only coupling to the app is the artifact **format**.
+evolve independently. It builds the shipped artifacts (a labels JSON + an int8 vector blob + a manifest). It
+has **no dependency on DenKit**: it carries its own copies of the small shared types and a thin TMDB client.
+The only coupling to the app is the artifact **format**.
+
+**FP-2 (current):** movie/TV enrichment prose is sourced **live from Wikipedia** (Wikidata SPARQL → article →
+plot section, ToS-clean) rather than shipping TMDB overviews, and embeddings come from the **`den-embed`**
+service (**bge-m3**, 1024-dim int8) — the single embedding path shared with the app's live search queries, so
+corpus and query vectors are comparable. The offline FNV embedder remains as a `--embedder fnv` fallback. See
+[`docs/OPERATE.md`](docs/OPERATE.md) for the full re-embed + incremental-top-up runbooks and the alignment rule.
 
 ## Layout
 
@@ -41,7 +46,8 @@ aggregation + embeds + quantizes; `finalize` writes the shipped artifacts.
 
 - `labels-<tax>.json` — the derived labels (no raw TMDB text; asserted).
 - `labels-<tax>.json.gz` — gzip of the labels blob (via `/usr/bin/gzip`).
-- `vectors-e02.bin` — `[int32 count][int32 dim]` little-endian header + `count × dim` int8 rows.
+- `vectors-bge-m3.bin` — `[int32 count][int32 dim]` little-endian header + `count × dim` int8 rows (dim 1024
+  for the bge-m3 build; `--embedding-version` overrides the label for an FNV run).
 - `dataset.meta.json` — the manifest the server reads (dataset version, hashes, byte counts, timestamps).
 - `report.json` — coverage + primary-genre distribution + confidence histogram.
 
