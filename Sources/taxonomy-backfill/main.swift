@@ -415,6 +415,13 @@ enum Commands {
         ]))
     }
 
+    /// Expected vector dimension for a known embedding label, or nil (skip the check) for an unrecognized one.
+    static func expectedDims(forEmbeddingVersion version: String) -> Int? {
+        if version.hasPrefix("bge-m3") { return 1024 }
+        if version == "e02" || version.hasPrefix("fnv") { return 384 }
+        return nil
+    }
+
     // finalize — the index store → the shipped artifacts. DERIVED labels + quantized vectors ONLY; asserts no
     // raw TMDB text leaked in. Recomputes the run report (coverage + primary-genre dist + confidence buckets)
     // and folds in the former import-dataset.mjs step: dataset.meta.json (the manifest the Rust server reads)
@@ -441,6 +448,20 @@ enum Commands {
         let rows = allRows.enumerated().filter { keep.contains($0.offset) }.map(\.element)
         let vectors: [[Int8]] = rows.map { $0.v.map { Int8(clamping: $0) } }
 
+        // Guard the mixed-embedder / mislabel footgun: every vector must share ONE length, and it must match the
+        // dimension the --embedding-version label implies (bge-m3 = 1024, fnv/e02 = 384). A store assembled with
+        // two embedders, or a blob labelled bge-m3 but holding 384-dim FNV content, would otherwise ship a
+        // corrupt/lying artifact that the app's `data.count == 8 + count*dim` check silently drops to recipes.
+        let dimsSeen = Set(vectors.map(\.count))
+        guard dimsSeen.count == 1, let dim = dimsSeen.first, dim > 0 else {
+            throw ToolError(message: "vectors have non-uniform length \(dimsSeen.sorted()) — a mixed-embedder "
+                + "store; refusing to ship. Re-assemble the batches with a single embedder.")
+        }
+        if let expected = expectedDims(forEmbeddingVersion: embeddingVersion), expected != dim {
+            throw ToolError(message: "embedding-version '\(embeddingVersion)' implies dim \(expected) but the "
+                + "vectors are \(dim)-dim — mislabelled artifact; refusing to ship.")
+        }
+
         let taxonomyVersion = Taxonomy.current.version
         let labels = LabelsArtifact(taxonomyVersion: taxonomyVersion, records: records)
         let labelsBlob = try JSON.encodeSorted(labels)
@@ -454,7 +475,7 @@ enum Commands {
         try FileIO.write(vectorsData, to: vectorsPath)
 
         // Fold in import-dataset.mjs: the manifest + gzipped labels the Rust server serves.
-        let dims = vectors.first?.count ?? 0
+        let dims = dim   // validated above: uniform + consistent with the embedding-version label
         let labelsSha = sha256Hex(labelsBlob)
         let vectorsSha = sha256Hex(vectorsData)
         let datasetVersion = String(sha256Hex(Data("\(labelsSha):\(vectorsSha)".utf8)).prefix(12))
@@ -527,10 +548,19 @@ enum Commands {
         let primaryAcc = TaxonomyScorer.primaryGenreAccuracy(golden: goldenPrimary, predicted: predictedPrimary)
         let tax = Taxonomy.current
 
+        // Golden positive support per label + a minimum-support guard: a label with too few golden examples
+        // yields an unstable per-label F1 (a 3-title label swings the family mean; a 0-golden label — e.g. the
+        // emergent themes / Animation — can ONLY register false positives and never validate recall). Exclude
+        // sub-threshold labels from the GATE (still reported) so they can neither fail nor pass the whole run.
+        let minSupport = args.int("--min-support") ?? 10
+        var support: [String: Int] = [:]
+        for labels in goldenLabels.values { for label in labels { support[label, default: 0] += 1 } }
+
         // Per-family precision AND recall at the current acceptance thresholds — the table used to set the
         // precision knee (DT-C). Recall = tp/(tp+fn); fn is golden labels the index missed at this cutoff.
+        // Only labels meeting the min-support floor count toward the gate.
         func familyStats(_ labels: [String]) -> (p: Double, r: Double, tp: Int, fp: Int, fn: Int)? {
-            let set = Set(labels)
+            let set = Set(labels.filter { (support[$0] ?? 0) >= minSupport })
             let scores = f1.perLabel.filter { set.contains($0.key) }.values
             let tp = scores.reduce(0) { $0 + $1.truePositives }
             let fp = scores.reduce(0) { $0 + $1.falsePositives }
@@ -544,6 +574,14 @@ enum Commands {
         print("=== golden score (\(covered.count)/\(golden.titles.count) covered, taxonomy \(golden.taxonomyVersion)) ===")
         print(String(format: "primary-genre accuracy: %.3f", primaryAcc))
         print(String(format: "multi-label  micro-F1: %.3f   macro-F1: %.3f", f1.microF1, f1.macroF1))
+
+        // Surface (never silently) the labels the min-support guard drops from the gate.
+        let excluded = (tax.subgenres + tax.thematic + tax.moods)
+            .filter { (support[$0] ?? 0) < minSupport }.sorted()
+        if !excluded.isEmpty {
+            print("gate excludes \(excluded.count) label(s) with <\(minSupport) golden examples:")
+            print("  " + excluded.map { "\($0)=\(support[$0] ?? 0)" }.joined(separator: ", "))
+        }
 
         let families: [(String, [String], Double)] = [
             ("blended (subgenres)", tax.subgenres, 0.90),

@@ -54,7 +54,9 @@ final class SmokeTests: XCTestCase {
         // Drive the real CLI. `--embedder fnv` keeps this offline (the default den-embed path needs the live
         // service); the artifact plumbing (compose → embed → int8 blob → finalize) is what's under test.
         try run(["assemble", "--batch-id", "1", "--out-dir", outDir.path, "--embedder", "fnv"])
-        try run(["finalize", "--out-dir", outDir.path])
+        // Label the artifact to match the FNV embedder (384-dim → e02); finalize's dim/label guard rejects a
+        // bge-m3 label on 384-dim vectors. This keeps the offline smoke test internally consistent.
+        try run(["finalize", "--out-dir", outDir.path, "--embedding-version", "e02"])
 
         // labels-t01.json parses and has the 3 records.
         let labelsPath = outDir.appendingPathComponent("labels-t01.json")
@@ -68,9 +70,9 @@ final class SmokeTests: XCTestCase {
         XCTAssertNotNil(inception)
         XCTAssert(inception!.subgenres.contains { $0.label == "Heist" }, "bare-string 'Heist' decoded + kept")
 
-        // vectors-bge-m3.bin header count matches (FP-2 shipped name; dim is the FNV fallback's 384 here).
-        let vectorsPath = outDir.appendingPathComponent("vectors-bge-m3.bin")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: vectorsPath.path), "shipped name is vectors-bge-m3.bin")
+        // vectors-e02.bin header count matches (FNV fallback: name + dim both 384/e02, consistent per the guard).
+        let vectorsPath = outDir.appendingPathComponent("vectors-e02.bin")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: vectorsPath.path), "FNV artifact name is vectors-e02.bin")
         let vectorsData = try Data(contentsOf: vectorsPath)
         let count = vectorsData.subdata(in: 0..<4).withUnsafeBytes { Int32(littleEndian: $0.load(as: Int32.self)) }
         let dim = vectorsData.subdata(in: 4..<8).withUnsafeBytes { Int32(littleEndian: $0.load(as: Int32.self)) }
@@ -87,12 +89,12 @@ final class SmokeTests: XCTestCase {
             "vectorsSha256", "vectorsBytes", "builtAt", "lastModifiedHttp",
         ]
         XCTAssertEqual(Set(meta.keys), expectedKeys, "meta has exactly the server's keys")
-        XCTAssertEqual(meta["embeddingModel"] as? String, "bge-m3")
+        XCTAssertEqual(meta["embeddingModel"] as? String, "e02")
         XCTAssertEqual(meta["quantization"] as? String, "int8-symmetric-x127")
         XCTAssertEqual(meta["dims"] as? Int, 384)
         XCTAssertEqual(meta["count"] as? Int, 3)
         XCTAssertEqual(meta["labelsFile"] as? String, "labels-t01.json")
-        XCTAssertEqual(meta["vectorsFile"] as? String, "vectors-bge-m3.bin")
+        XCTAssertEqual(meta["vectorsFile"] as? String, "vectors-e02.bin")
         let datasetVersion = meta["datasetVersion"] as? String ?? ""
         XCTAssertEqual(datasetVersion.count, 12, "datasetVersion is 12 hex chars")
         XCTAssert(datasetVersion.allSatisfy { $0.isHexDigit }, "datasetVersion is hex")

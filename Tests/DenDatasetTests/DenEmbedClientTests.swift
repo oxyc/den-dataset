@@ -2,8 +2,9 @@ import XCTest
 @testable import DenDataset
 
 /// FP-2 — the den-embed client. Decoding is pinned by a fixture; the HTTP round-trip is exercised against a
-/// `URLProtocol` stub (deterministic, offline) that also asserts the request carries the doc as `?text=`. If a
-/// real den-embed service is reachable, one live probe additionally checks the 1024-dim int8 contract.
+/// `URLProtocol` stub (deterministic, offline) that asserts the request POSTs the doc in a JSON body (not a
+/// GET ?text= query param — a long plot would 414). If a real den-embed service is reachable, one live probe
+/// additionally checks the 1024-dim int8 contract.
 final class DenEmbedClientTests: XCTestCase {
     func testDecodeReturnsInt8Vector() throws {
         let json = #"{"vector":[1,-2,127,-127,0],"dims":5,"model":"bge-m3"}"#
@@ -13,10 +14,10 @@ final class DenEmbedClientTests: XCTestCase {
     func testEmbedInt8HitsServiceAndDecodes() async throws {
         StubURLProtocol.handler = { request in
             let url = try XCTUnwrap(request.url)
-            XCTAssertTrue(url.path.hasSuffix("/embed"), "GETs /embed")
-            let text = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first { $0.name == "text" }?.value
-            XCTAssertEqual(text, "hello world", "the doc is passed as ?text=")
+            XCTAssertTrue(url.path.hasSuffix("/embed"), "POSTs /embed")
+            XCTAssertEqual(request.httpMethod, "POST", "the doc is POSTed, not a GET ?text=")
+            let sent = Self.requestBody(request).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) }
+            XCTAssertEqual(sent?["text"], "hello world", "the doc is in the JSON body")
             let body = #"{"vector":[10,20,-30],"dims":3,"model":"bge-m3"}"#
             let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
             return (response, Data(body.utf8))
@@ -40,6 +41,21 @@ final class DenEmbedClientTests: XCTestCase {
         let vector = try await DenEmbedClient(baseURL: base).embedInt8("A neo-noir detective thriller.")
         XCTAssertEqual(vector.count, 1024, "bge-m3 is 1024-dim")
         XCTAssertTrue(vector.allSatisfy { $0 >= -127 && $0 <= 127 }, "int8 stays in [-127, 127]")
+    }
+
+    /// URLSession converts a request's `httpBody` into an `httpBodyStream` by the time the stub sees it, so read
+    /// whichever is present.
+    static func requestBody(_ request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open(); defer { stream.close() }
+        var data = Data(); var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            if read <= 0 { break }
+            data.append(buffer, count: read)
+        }
+        return data
     }
 
     private static func reachableService() -> URL? {
