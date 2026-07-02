@@ -91,4 +91,27 @@ final class WikipediaSourceTests: XCTestCase {
         """
         XCTAssertEqual(WikipediaSource.enterprisePlot(Data(json.utf8)), "A hero saves the day.")
     }
+
+    /// The real Enterprise schema nests the plot prose in the section's `has_parts` paragraphs (the section's
+    /// own `value` is empty); a flat `value` read misses it entirely. Joins the paragraphs in order.
+    func testEnterprisePlotJoinsHasPartsParagraphs() {
+        let json = """
+        [{"sections":[
+          {"name":"Abstract","has_parts":[{"type":"paragraph","value":"An intro."}]},
+          {"name":"Plot","has_parts":[
+            {"type":"paragraph","value":"First paragraph."},
+            {"type":"paragraph","value":"Second paragraph."}]}]}]
+        """
+        XCTAssertEqual(WikipediaSource.enterprisePlot(Data(json.utf8)), "First paragraph.\nSecond paragraph.")
+    }
+
+    /// A plot split into sub-sections (each a nested section with its own paragraphs) flattens recursively.
+    func testEnterprisePlotFlattensNestedSubsections() {
+        let json = """
+        [{"sections":[{"name":"Plot","has_parts":[
+          {"type":"paragraph","value":"Setup."},
+          {"type":"section","name":"Act II","has_parts":[{"type":"paragraph","value":"Rising action."}]}]}]}]
+        """
+        XCTAssertEqual(WikipediaSource.enterprisePlot(Data(json.utf8)), "Setup.\nRising action.")
+    }
 }

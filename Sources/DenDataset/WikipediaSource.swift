@@ -245,21 +245,42 @@ public struct WikipediaSource: Sendable {
     }
 
     /// Parse an Enterprise structured-contents payload (an array of articles, each with `sections`) and pull
-    /// the first Plot/Synopsis section's text. Pure + testable.
+    /// the first Plot/Synopsis section's prose. The plot text lives in the section's `has_parts` paragraphs
+    /// (each `{type:"paragraph", value:"…"}`), not the section's own `value`; sub-sections nest further, so we
+    /// flatten recursively. Pure + testable.
     static func enterprisePlot(_ data: Data) -> String? {
         guard let articles = try? JSONDecoder().decode([EnterpriseArticle].self, from: data) else { return nil }
         for article in articles {
             for section in article.sections ?? [] where isPlotSection(section.name ?? "") {
-                let text = (section.value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let text = paragraphProse(of: section)
                 if !text.isEmpty { return text }
             }
         }
         return nil
     }
 
+    /// Recursively gather prose under a section: a paragraph part carries its text in `value`; a nested
+    /// section carries empty `value` + its own `has_parts`. Joining both handles flat and sub-sectioned plots.
+    private static func paragraphProse(of section: EnterpriseSection) -> String {
+        var parts: [String] = []
+        if let value = section.value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+            parts.append(value)
+        }
+        for child in section.hasParts ?? [] {
+            let prose = paragraphProse(of: child)
+            if !prose.isEmpty { parts.append(prose) }
+        }
+        return parts.joined(separator: "\n")
+    }
+
     private struct EnterpriseArticle: Decodable {
         let sections: [EnterpriseSection]?
-        struct EnterpriseSection: Decodable { let name: String?; let value: String? }
+    }
+    private struct EnterpriseSection: Decodable {
+        let name: String?
+        let value: String?
+        let hasParts: [EnterpriseSection]?
+        enum CodingKeys: String, CodingKey { case name, value; case hasParts = "has_parts" }
     }
 
     // MARK: - Transport

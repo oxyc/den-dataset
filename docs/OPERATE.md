@@ -19,28 +19,30 @@ products are only meaningful between vectors from the same model. If you re-embe
 the app must point its query embedder at the same one. `dataset.meta.json.embeddingModel` + `dims` are how the
 app detects a mismatch and re-syncs (FP-1 keys the on-device index on those two fields).
 
-## Full 30k re-embed (MacBook)
+## Full re-embed (MacBook) — the ~58k-title universe
 
-Both TMDB and Wikipedia are hit live; `den-embed` must be running.
+Both TMDB and Wikipedia are hit live; `den-embed` must be running for step 5 (not for plot-finding).
 
 ```sh
 # 0. Boot the embedding service (first run downloads the ~560 MB bge-m3 ONNX model, then stays warm).
 cd ~/Projects/Personal/den-embed && DEN_EMBED_PORT=8791 bash run.sh        # serves :8791
 #    (health check: curl -s localhost:8791/health  ->  {"status":"ok","model":"bge-m3","dims":1024})
 
-# 1. TMDB key (enrichment only). Source it into the env; never print it.
-set -a; . ~/Projects/Personal/den/.env; set +a                            # exports TMDB_API_KEY
+# 1. Secrets — copy the template and fill it (gitignored via *.env). The run wrapper sources this.
+cd ~/Projects/Personal/den-dataset
+cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterprise username/password (optional)
 
-cd ~/Projects/Personal/den-dataset && swift build -c release
-BIN=.build/release/taxonomy-backfill
-
-# 2. Worklist — the universe (daily-export for the full run, or a discover seed for a pilot).
-$BIN worklist --mode export --media movie --file movie_ids.json --out out/worklist-movie.json
+# 2. Worklist — the universe, ORDERED popularity-desc so we process the titles most likely to have a
+#    Wikipedia article first (and can watch the plot-hit rate fall off / pick a stopping point). Build it from
+#    the shipped labels (re-embeds exactly what we ship) and sort by TMDB daily-export popularity:
+python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popularity-sorted)
 
 # 3. Enrich — TMDB detail+keywords+credits, then ONE Wikidata SPARQL + live Wikipedia plot per surviving id.
-#    The Wikipedia plot REPLACES the TMDB overview where found (re-grounding); reports wikiPlot vs tagsOnly.
-#    Loop until "remaining":0.
-$BIN enrich --worklist out/worklist-movie.json --out-dir out --limit 150
+#    The Wikipedia plot REPLACES the TMDB overview where found (re-grounding); each batch prints wikiPlot vs
+#    tagsOnly. The wrapper logs into Enterprise (if creds present) for a fresh 24h token, then runs ONE batch.
+#    Resumable via the enrich checkpoint — loop until "remaining":0.
+scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. Then: scripts/enrich-run.sh tv 150
+#    (Observed on the popular tier: ~96% wikiPlot hit; the misses are recent/obscure titles with no enwiki article.)
 
 # 4. [Agent] Haiku vote passes over each scratch batch -> out/votes/batch-<id>-pass<N>.json
 #    (Opus orchestrates the subagents; see DT-classification-prompt.md. Escalate the hard cases with
@@ -74,6 +76,11 @@ Re-embed the changed ids through the **same** `den-embed` service the full run u
 
 ## Optional: Wikimedia Enterprise plots
 
-If `WIKIMEDIA_ENTERPRISE_TOKEN` is set, `enrich` uses the Enterprise structured-contents endpoint for the
-pre-sectioned plot (fewer requests, cleaner sections) and falls back to the public action API on any miss.
-Unset, it uses the public action API only (`action=parse`), which is what the standard run above uses.
+Put `WIKIMEDIA_ENTERPRISE_USERNAME` / `WIKIMEDIA_ENTERPRISE_PASSWORD` (a free Enterprise account works) in
+`den.env`. `scripts/enrich-run.sh` exchanges them at `https://auth.enterprise.wikimedia.com/v1/login` for a
+24h bearer token (`access_token`) and exports it as `WIKIMEDIA_ENTERPRISE_TOKEN`, which `WikipediaSource` uses
+to hit the structured-contents endpoint for the pre-sectioned plot (higher rate limit, cleaner prose — the
+plot text is the section's `has_parts` paragraphs, joined). Any miss falls back to the public action API.
+Leave the two fields blank to use the public `action=parse` API only (same plot coverage, slower). Fetch is
+per-article/on-demand — **never** a Wikimedia dump (those are stale + hundreds of GB); the working set is a
+few hundred MB total.
