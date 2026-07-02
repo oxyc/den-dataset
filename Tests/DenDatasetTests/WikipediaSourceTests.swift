@@ -23,6 +23,16 @@ final class WikipediaSourceTests: XCTestCase {
         XCTAssertEqual(WikipediaSource.cleanWikitext(wikitext), "The crew escapes.")
     }
 
+    func testCleanWikitextStripsSectionHeadings() {
+        let wikitext = """
+        == Plot ==
+        A hero begins the quest.
+        === Act two ===
+        The hero prevails.
+        """
+        XCTAssertEqual(WikipediaSource.cleanWikitext(wikitext), "A hero begins the quest.\nThe hero prevails.")
+    }
+
     // MARK: - SPARQL decode
 
     func testParseWikidataMapsIdsToArticleAndImdb() {

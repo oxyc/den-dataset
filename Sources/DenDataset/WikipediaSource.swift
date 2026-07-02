@@ -190,6 +190,7 @@ public struct WikipediaSource: Sendable {
         s = replace(s, #"<ref[^>]*?/>"#, "")                    // self-closing <ref .../>
         s = replace(s, #"<ref[^>]*?>[\s\S]*?</ref>"#, "")       // <ref>…</ref> (may span lines)
         s = replace(s, #"<[^>]+>"#, "")                         // any remaining HTML tags
+        s = replace(s, #"={2,}[^=\n]+={2,}"#, "")               // section headings (== Plot ==, === … ===)
 
         // Templates {{…}} — iterate innermost-first so nested templates fully unwind.
         while let range = s.range(of: #"\{\{[^{}]*\}\}"#, options: .regularExpression) {
