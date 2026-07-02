@@ -23,6 +23,8 @@ public struct EnrichedTitle: Sendable, Equatable {
     public let mediaType: MediaType
     public let title: String
     public let year: Int?
+    /// The prose the classifier is grounded on. FP-2 re-grounds this to the WIKIPEDIA plot where one exists
+    /// (ToS-clean); it falls back to the TMDB overview only where no Wikipedia plot was found.
     public let overview: String
     public let genreIDs: [Int]
     public let genreNames: [String]
@@ -30,14 +32,30 @@ public struct EnrichedTitle: Sendable, Equatable {
     public let originCountry: [String]
     public let originalLanguage: String?
     public let voteCount: Int
+    /// Credits (FP-2, `append_to_response=credits`) — feed the composed embedding doc, not the classifier.
+    public let director: String?
+    public let topCast: [String]
+    /// True once `overview` holds a live Wikipedia plot (vs the TMDB overview fallback). The composed doc uses
+    /// the plot only when this is set; a no-plot title composes on facts + tags with an empty Plot.
+    public let hasWikiPlot: Bool
 
     public init(tmdbId: Int, mediaType: MediaType, title: String, year: Int?, overview: String,
                 genreIDs: [Int], genreNames: [String], keywords: [Keyword], originCountry: [String],
-                originalLanguage: String?, voteCount: Int) {
+                originalLanguage: String?, voteCount: Int,
+                director: String? = nil, topCast: [String] = [], hasWikiPlot: Bool = false) {
         self.tmdbId = tmdbId; self.mediaType = mediaType; self.title = title; self.year = year
         self.overview = overview; self.genreIDs = genreIDs; self.genreNames = genreNames
         self.keywords = keywords; self.originCountry = originCountry
         self.originalLanguage = originalLanguage; self.voteCount = voteCount
+        self.director = director; self.topCast = topCast; self.hasWikiPlot = hasWikiPlot
+    }
+
+    /// Return a copy with the Wikipedia plot grounded in (`overview` ← plot, `hasWikiPlot` = true).
+    public func groundedOnWikiPlot(_ plot: String) -> EnrichedTitle {
+        EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: plot,
+                      genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
+                      originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
+                      director: director, topCast: topCast, hasWikiPlot: true)
     }
 }
 

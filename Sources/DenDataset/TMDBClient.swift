@@ -117,10 +117,11 @@ public final class TMDBClient: Sendable {
         return Page(items: items, page: paged.page, totalPages: paged.totalPages)
     }
 
-    /// Single-request enrichment (DT-C) — detail + keywords in ONE call via `append_to_response=keywords`.
+    /// Single-request enrichment (DT-C) — detail + keywords + credits in ONE call via
+    /// `append_to_response=keywords,credits`. Credits feed the composed embedding doc (director + top cast).
     public func classificationRecord(_ identifier: MediaIdentifier) async throws -> EnrichedTitle {
         let data = try await get("/\(identifier.mediaType.pathSegment)/\(identifier.id.rawValue)",
-                                 ["append_to_response": "keywords"])
+                                 ["append_to_response": "keywords,credits"])
         let wire = try Self.decoder.decode(ClassificationWire.self, from: data)
         return wire.toEnrichedTitle(id: identifier.id.rawValue, mediaType: identifier.mediaType)
     }
@@ -193,22 +194,35 @@ public final class TMDBClient: Sendable {
         let originCountry: [String]?              // tv
         let productionCountries: [Country]?       // movie
         let keywords: KeywordsBlock?
+        let credits: CreditsBlock?
 
         struct GenreDTO: Decodable { let id: Int; let name: String }
         struct Country: Decodable { let iso31661: String }
         struct KeywordDTO: Decodable { let id: Int; let name: String }
         struct KeywordsBlock: Decodable { let keywords: [KeywordDTO]?; let results: [KeywordDTO]? }
+        // Credits — `cast` is billing-ordered; `crew` carries job titles (we want job == "Director").
+        struct CreditsBlock: Decodable {
+            let cast: [Person]?
+            let crew: [CrewMember]?
+            struct Person: Decodable { let name: String; let order: Int? }
+            struct CrewMember: Decodable { let name: String; let job: String? }
+        }
 
         func toEnrichedTitle(id: Int, mediaType: MediaType) -> EnrichedTitle {
             let dateString = releaseDate ?? firstAirDate
             let year = dateString.flatMap { Int($0.prefix(4)) }
             let kw = (keywords?.keywords ?? keywords?.results ?? []).map { Keyword(id: $0.id, name: $0.name) }
             let countries = originCountry ?? productionCountries?.map(\.iso31661) ?? []
+            // Director = first crew member with job "Director"; top cast = the first ~4 billed names.
+            let director = credits?.crew?.first { $0.job == "Director" }?.name
+            let billed = (credits?.cast ?? []).sorted { ($0.order ?? .max) < ($1.order ?? .max) }
+            let topCast = Array(billed.prefix(4).map(\.name))
             return EnrichedTitle(
                 tmdbId: id, mediaType: mediaType, title: title ?? name ?? "", year: year,
                 overview: overview ?? "", genreIDs: genres?.map(\.id) ?? [],
                 genreNames: genres?.map(\.name) ?? [], keywords: kw, originCountry: countries,
-                originalLanguage: originalLanguage, voteCount: voteCount ?? 0)
+                originalLanguage: originalLanguage, voteCount: voteCount ?? 0,
+                director: director, topCast: topCast)
         }
     }
 }
