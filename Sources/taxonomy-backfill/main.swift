@@ -34,6 +34,7 @@ struct TaxonomyBackfill {
             case "enrich-ids": try await Commands.enrichIds(args)
             case "escalation": try Commands.escalation(args)
             case "assemble": try await Commands.assemble(args)
+            case "embed-corpus": try await Commands.embedCorpus(args)
             case "finalize": try Commands.finalize(args)
             case "score":    try Commands.score(args)
             default: usage(); exit(2)
@@ -52,6 +53,7 @@ struct TaxonomyBackfill {
           enrich   --worklist <path> [--vote-floor 50] [--limit 150] --out-dir <dir>
           escalation --batch-id <n> --out-dir <dir>   (after pass 1: emit titles needing n=3)
           assemble --batch-id <n> --out-dir <dir>
+          embed-corpus --labels <existing labels-t01.json> --out-dir <dir> [--enriched-dir <dir>] [--chunk 128] [--limit N]
           finalize --out-dir <dir>
           score    --labels <labels.jsonl|labels-t01.json> --golden <golden.json> [--gate]
 
@@ -349,6 +351,100 @@ enum Commands {
         try JSON.writePretty(needs, to: Layout.escalateBatch(outDir, batchId))
         print(JSON.line(["batchId": batchId, "escalate": needs.count, "total": enriched.count,
                          "file": Layout.escalateBatch(outDir, batchId)]))
+    }
+
+    // embed-corpus — build bge-m3 vectors for the EXISTING (already-shipped) labels from the Wikipedia-plot
+    // enrichment, WITHOUT re-classifying. Composes facts + the existing tags + the wiki plot, batch-embeds via
+    // den-embed, and writes a FRESH index store (labels = the existing records verbatim, aligned to new
+    // vectors) into a dedicated out-dir. This is the "semantic vectors now" path: it upgrades the app's ANN
+    // from lexical FNV to bge-m3 immediately, reusing the labels we already ship, while the fresh plot-grounded
+    // reclassification (which improves the LABELS) is run later. `finalize --out-dir <same>` emits the artifact.
+    static func embedCorpus(_ args: Args) async throws {
+        let outDir = try args.require("--out-dir")
+        let labelsPath = try args.require("--labels")            // the existing labels-t01.json (its tags per title)
+        let enrichedDir = args["--enriched-dir"] ?? Layout.enrichedDir(outDir)
+        // Small chunk by default: den-embed activation memory scales with the batch, so keep requests modest.
+        let chunk = args.int("--chunk") ?? 16
+        let limit = args.int("--limit")                          // optional cap (testing)
+
+        // Lean lookup: the existing label record (tags) per (mediaType, tmdbId). No plot text held — the plots
+        // are streamed one enriched batch at a time below, so peak memory stays bounded (this was the OOM bug).
+        let existing: LabelsArtifact = try JSON.read(labelsPath)
+        var labelByKey: [String: IndexRecord] = [:]
+        for record in existing.records { labelByKey["\(record.mediaType):\(record.tmdbId)"] = record }
+
+        // RESUME: append to an existing store, skipping titles already embedded. A crash (e.g. den-embed OOM)
+        // loses at most the current chunk — re-running continues from where it stopped. First reconcile the two
+        // append-only stores in case a kill landed between a label line and its vector line (→ unequal lengths,
+        // which finalize would reject): truncate both to their common prefix so alignment holds.
+        try reconcileStore(Layout.labelsStore(outDir), Layout.vectorsStore(outDir))
+        var done: Set<String> = []
+        if FileManager.default.fileExists(atPath: Layout.labelsStore(outDir)) {
+            for line in try FileIO.readLines(Layout.labelsStore(outDir)) {
+                if let r: IndexRecord = try? JSON.decode(line) { done.insert("\(r.mediaType):\(r.tmdbId)") }
+            }
+        }
+        let labelsHandle = try FileIO.appender(Layout.labelsStore(outDir))
+        let vectorsHandle = try FileIO.appender(Layout.vectorsStore(outDir))
+        defer { try? labelsHandle.close(); try? vectorsHandle.close() }
+
+        let denEmbed = DenEmbedClient()
+        var buffer: [(record: IndexRecord, doc: String)] = []
+        var written = 0, skipped = done.count, missing = 0
+
+        func flush() async throws {
+            guard !buffer.isEmpty else { return }
+            let vectors = try await denEmbed.embedManyInt8(buffer.map(\.doc))
+            guard vectors.count == buffer.count else {
+                throw ToolError(message: "den-embed returned \(vectors.count) vectors for \(buffer.count) docs")
+            }
+            for (item, vector) in zip(buffer, vectors) {
+                try labelsHandle.writeLine(JSON.encodeLine(item.record))
+                try vectorsHandle.writeLine(JSON.encodeLine(VectorRow(tmdbId: item.record.tmdbId, v: vector.map(Int.init))))
+                written += 1
+            }
+            buffer.removeAll(keepingCapacity: true)
+            if written % 2000 == 0 { FileHandle.standardError.write(Data("  embedded \(written) (skipped \(skipped))…\n".utf8)) }
+        }
+
+        // Stream the enriched batch files one at a time — only ONE batch of plots is in memory at once.
+        let files = ((try? FileManager.default.contentsOfDirectory(atPath: enrichedDir)) ?? [])
+            .filter { $0.hasPrefix("batch-") && $0.hasSuffix(".json") }.sorted()
+        outer: for file in files {
+            let dtos: [EnrichedDTO] = try JSON.read((enrichedDir as NSString).appendingPathComponent(file))
+            for dto in dtos {
+                let key = "\(dto.mediaType):\(dto.tmdbId)"
+                if done.contains(key) { continue }
+                guard let record = labelByKey[key] else { missing += 1; continue }  // enriched but not in shipped labels
+                let title = dto.toEnrichedTitle()
+                let tags = record.subgenres.map(\.label) + record.moods.map(\.label)
+                // Plot clause only from the WIKIPEDIA plot (ToS-clean); a no-wiki-plot title composes on facts+tags.
+                let plot = title.hasWikiPlot ? title.overview : ""
+                buffer.append((record, ComposedDoc.build(title: title, tags: tags, plot: plot)))
+                done.insert(key)
+                if buffer.count >= chunk { try await flush() }
+                if let limit, written + buffer.count >= limit { break outer }
+            }
+        }
+        try await flush()
+        print(JSON.line(["written": written, "skipped": skipped, "missingLabel": missing,
+                         "store": Layout.labelsStore(outDir)]))
+    }
+
+    /// Truncate two append-only store files to their common prefix — repairs a crash that wrote a label line
+    /// but not its vector line (or vice versa), which would otherwise fail finalize's alignment check.
+    static func reconcileStore(_ labelsPath: String, _ vectorsPath: String) throws {
+        guard FileManager.default.fileExists(atPath: labelsPath),
+              FileManager.default.fileExists(atPath: vectorsPath) else { return }
+        let labels = try FileIO.readLines(labelsPath)
+        let vectors = try FileIO.readLines(vectorsPath)
+        let n = min(labels.count, vectors.count)
+        func rewrite(_ lines: [String], _ path: String) throws {
+            let body = n == 0 ? "" : lines.prefix(n).joined(separator: "\n") + "\n"
+            try FileIO.write(Data(body.utf8), to: path)
+        }
+        if labels.count != n { try rewrite(labels, labelsPath) }
+        if vectors.count != n { try rewrite(vectors, vectorsPath) }
     }
 
     // assemble — one enriched batch + its Haiku vote passes → calibrated classification (reused, tested) →
@@ -932,6 +1028,7 @@ enum Layout {
     static func enrichCheckpoint(_ dir: String) -> String { join(dir, "enrich-checkpoint.json") }
     static func classifyCheckpoint(_ dir: String) -> String { join(dir, "classify-checkpoint.json") }
     static func enrichLog(_ dir: String) -> String { join(dir, "enrich-log.txt") }
+    static func enrichedDir(_ dir: String) -> String { join(dir, "enriched") }
     static func enrichedBatch(_ dir: String, _ id: Int) -> String { join(dir, "enriched/batch-\(id).json") }
     static func escalateBatch(_ dir: String, _ id: Int) -> String { join(dir, "escalate/batch-\(id).json") }
     static func votesDir(_ dir: String) -> String { join(dir, "votes") }

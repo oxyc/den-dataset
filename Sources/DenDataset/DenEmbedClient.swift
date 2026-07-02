@@ -47,6 +47,29 @@ public struct DenEmbedClient: Sendable {
 
     private struct EmbedRequestBody: Encodable { let text: String }
 
+    /// Embed many documents in one round-trip via `POST /embed/batch` — the service batches them through the
+    /// model (far faster than N single calls for a corpus build). Returns int8 vectors 1:1 with `texts`.
+    public func embedManyInt8(_ texts: [String]) async throws -> [[Int8]] {
+        guard !texts.isEmpty else { return [] }
+        var request = URLRequest(url: baseURL.appendingPathComponent("embed/batch"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(BatchRequestBody(texts: texts))
+
+        return try await Transport.retrying {
+            let (data, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw DenEmbedError.http(http.statusCode)
+            }
+            let payload = try JSONDecoder().decode(BatchResponse.self, from: data)
+            return payload.vectors.map { $0.map { Int8(clamping: $0) } }
+        }
+    }
+
+    private struct BatchRequestBody: Encodable { let texts: [String] }
+    private struct BatchResponse: Decodable { let vectors: [[Int]] }
+
     /// Decode the `{"vector":[...]}` payload to `[Int8]`. The service always sends values in [-127, 127].
     static func decode(_ data: Data) throws -> [Int8] {
         let payload = try JSONDecoder().decode(EmbedResponse.self, from: data)
