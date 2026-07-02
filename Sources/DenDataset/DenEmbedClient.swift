@@ -6,7 +6,8 @@ import Foundation
 /// quantization lives in the SERVICE and nowhere else: this client returns the service's int8 vector verbatim
 /// and must NOT re-quantize it.
 ///
-/// Contract: `GET /embed?text=<urlenc>` → `{"vector":[int8×dims],"dims":Int,"model":String}`.
+/// Contract: `POST /embed` `{"text":"…"}` → `{"vector":[int8×dims],"dims":Int,"model":String}` (POST, not the
+/// GET ?text= form, so a multi-thousand-char plot doc can't 414 as a query param).
 public struct DenEmbedClient: Sendable {
     private let baseURL: URL
     private let session: URLSession
@@ -26,24 +27,25 @@ public struct DenEmbedClient: Sendable {
     }
 
     /// Embed one document to the service's canonical int8 vector. Returned as-is (already quantized upstream).
+    /// POST the text in the JSON body (not the GET ?text= form): a composed corpus doc can carry a multi-
+    /// thousand-char plot that would risk a 414 (URI too long) as a query param. Retries transient 5xx/timeouts.
     public func embedInt8(_ text: String) async throws -> [Int8] {
-        guard var components = URLComponents(url: baseURL.appendingPathComponent("embed"),
-                                             resolvingAgainstBaseURL: false) else {
-            throw DenEmbedError.badURL
-        }
-        components.queryItems = [URLQueryItem(name: "text", value: text)]
-        guard let url = components.url else { throw DenEmbedError.badURL }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        var request = URLRequest(url: baseURL.appendingPathComponent("embed"))
+        request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(EmbedRequestBody(text: text))
 
-        let (data, response) = try await session.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            throw DenEmbedError.http(http.statusCode)
+        return try await Transport.retrying {
+            let (data, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw DenEmbedError.http(http.statusCode)
+            }
+            return try Self.decode(data)
         }
-        return try Self.decode(data)
     }
+
+    private struct EmbedRequestBody: Encodable { let text: String }
 
     /// Decode the `{"vector":[...]}` payload to `[Int8]`. The service always sends values in [-127, 127].
     static func decode(_ data: Data) throws -> [Int8] {
