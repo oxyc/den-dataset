@@ -57,6 +57,7 @@ public struct WikipediaSource: Sendable {
           OPTIONAL { ?film wdt:P345 ?imdb . }
           OPTIONAL { ?article schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/> . }
         }
+        ORDER BY ?tmdb ?article
         """
 
         var components = URLComponents(url: sparqlEndpoint, resolvingAgainstBaseURL: false)!
@@ -68,11 +69,7 @@ public struct WikipediaSource: Sendable {
         request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
         request.httpBody = Data(query.utf8)
 
-        let (data, response) = try await session.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            throw WikipediaError.http(http.statusCode)
-        }
-        return Self.parseWikidata(data)
+        return Self.parseWikidata(try await send(request))
     }
 
     /// Decode a SPARQL JSON result into `tmdbId → Mapping`. Pure + testable (fixture JSON → mapping).
@@ -121,8 +118,10 @@ public struct WikipediaSource: Sendable {
         return try await actionAPIPlot(articleTitle: articleTitle)
     }
 
-    /// Section titles (case-insensitive) that carry the plot, in preference order.
-    static let plotSectionNames = ["plot", "plot summary", "synopsis", "story"]
+    /// Section titles (case-insensitive) that carry the plot, in preference order. "Premise"/"Storyline" are
+    /// the headings most TV-series articles use (film articles favour "Plot"), so including them materially
+    /// lifts the TV hit-rate; "Summary" is last as the loosest match.
+    static let plotSectionNames = ["plot", "plot summary", "synopsis", "storyline", "premise", "story", "summary"]
 
     /// True when a section heading is one we treat as the plot.
     static func isPlotSection(_ line: String) -> Bool {
@@ -192,6 +191,12 @@ public struct WikipediaSource: Sendable {
         s = replace(s, #"<[^>]+>"#, "")                         // any remaining HTML tags
         s = replace(s, #"={2,}[^=\n]+={2,}"#, "")               // section headings (== Plot ==, === … ===)
 
+        // Wiki tables {|…|} — iterate innermost-first (a match contains no nested `{|` before its `|}`), so a
+        // table nested in a cell unwinds outward. Done before templates so a table's inner {{…}} go with it.
+        while let range = s.range(of: #"\{\|(?:(?!\{\|)[\s\S])*?\|\}"#, options: .regularExpression) {
+            s.replaceSubrange(range, with: "")
+        }
+
         // Templates {{…}} — iterate innermost-first so nested templates fully unwind.
         while let range = s.range(of: #"\{\{[^{}]*\}\}"#, options: .regularExpression) {
             s.replaceSubrange(range, with: "")
@@ -208,11 +213,22 @@ public struct WikipediaSource: Sendable {
         s = s.replacingOccurrences(of: "'''", with: "")
         s = s.replacingOccurrences(of: "''", with: "")
 
+        // Decode the HTML entities wikitext commonly carries (&nbsp; especially) so they don't survive as
+        // literal tokens into the composed embedding doc.
+        for (entity, glyph) in htmlEntities { s = s.replacingOccurrences(of: entity, with: glyph) }
+
         s = replace(s, #"[ \t]+"#, " ")                         // collapse runs of spaces/tabs
         s = replace(s, #" *\n *"#, "\n")                         // trim around newlines
         s = replace(s, #"\n{2,}"#, "\n")                         // collapse blank lines
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    /// The handful of HTML entities that actually turn up in article wikitext, decoded to their glyphs.
+    /// `&amp;` is last so an already-encoded `&amp;nbsp;` doesn't get double-decoded into a stray space.
+    static let htmlEntities: [(String, String)] = [
+        ("&nbsp;", " "), ("&ndash;", "–"), ("&mdash;", "—"), ("&quot;", "\""),
+        ("&apos;", "'"), ("&#39;", "'"), ("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&"),
+    ]
 
     private static func replace(_ s: String, _ pattern: String, _ template: String) -> String {
         guard let re = try? NSRegularExpression(pattern: pattern) else { return s }
@@ -237,11 +253,7 @@ public struct WikipediaSource: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data(#"{"filters":[{"field":"is_part_of.identifier","value":"enwiki"}],"limit":1}"#.utf8)
 
-        let (data, response) = try await session.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            throw WikipediaError.http(http.statusCode)
-        }
-        return Self.enterprisePlot(data)
+        return Self.enterprisePlot(try await send(request))
     }
 
     /// Parse an Enterprise structured-contents payload (an array of articles, each with `sections`) and pull
@@ -291,11 +303,19 @@ public struct WikipediaSource: Sendable {
         var request = URLRequest(url: components.url!)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            throw WikipediaError.http(http.statusCode)
+        return try await send(request)
+    }
+
+    /// One HTTP round-trip with transient-failure retry (429/5xx/timeout) + a non-2xx → `WikipediaError.http`.
+    /// A definitive status (404 on a stale sitelink, 400) throws through so the caller records a plain miss.
+    private func send(_ request: URLRequest) async throws -> Data {
+        try await Transport.retrying {
+            let (data, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw WikipediaError.http(http.statusCode)
+            }
+            return data
         }
-        return data
     }
 }
 

@@ -33,6 +33,25 @@ final class WikipediaSourceTests: XCTestCase {
         XCTAssertEqual(WikipediaSource.cleanWikitext(wikitext), "A hero begins the quest.\nThe hero prevails.")
     }
 
+    func testCleanWikitextStripsTables() {
+        let wikitext = """
+        The team assembles.
+        {| class="wikitable"
+        |-
+        ! Role !! Actor
+        |-
+        | Lead || {{nowrap|A. Star}}
+        |}
+        Then they escape.
+        """
+        XCTAssertEqual(WikipediaSource.cleanWikitext(wikitext), "The team assembles.\nThen they escape.")
+    }
+
+    func testCleanWikitextDecodesHTMLEntities() {
+        let wikitext = "Tom&nbsp;&amp;&nbsp;Jerry fight&mdash;then &quot;make up&quot;."
+        XCTAssertEqual(WikipediaSource.cleanWikitext(wikitext), "Tom & Jerry fight—then \"make up\".")
+    }
+
     // MARK: - SPARQL decode
 
     func testParseWikidataMapsIdsToArticleAndImdb() {

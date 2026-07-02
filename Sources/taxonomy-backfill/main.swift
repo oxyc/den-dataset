@@ -137,8 +137,19 @@ enum Commands {
         let limit = args.int("--limit") ?? 150
 
         let worklist: [WLEntry] = try JSON.read(worklistPath)
-        var checkpoint = (try? JSON.read(Layout.enrichCheckpoint(outDir)) as EnrichCheckpoint) ?? EnrichCheckpoint()
-        let pending = worklist.filter { !checkpoint.processed.contains($0.tmdbId) }.prefix(limit)
+        // Distinguish "absent (first run)" from "present but corrupt (resume state)": a bare `try?` would
+        // silently reset a truncated checkpoint to empty and re-enrich the whole universe. Fail loudly instead.
+        let ckPath = Layout.enrichCheckpoint(outDir)
+        var checkpoint: EnrichCheckpoint
+        if FileManager.default.fileExists(atPath: ckPath) {
+            do { checkpoint = try JSON.read(ckPath) } catch {
+                throw ToolError(message: "enrich checkpoint at \(ckPath) is unreadable (\(error)); refusing to "
+                    + "reset progress — restore it, or delete it to intentionally start fresh")
+            }
+        } else {
+            checkpoint = EnrichCheckpoint()
+        }
+        let pending = worklist.filter { !checkpoint.processed.contains(EnrichCheckpoint.key($0.media, $0.tmdbId)) }.prefix(limit)
         guard !pending.isEmpty else {
             print(JSON.line(["remaining": 0, "count": 0])); return
         }
@@ -147,6 +158,9 @@ enum Commands {
         let batchId = checkpoint.nextBatch
         var titles: [EnrichedTitle] = []
         var belowFloor = 0, anime = 0, failures = 0, noOverview = 0
+        // Ids whose failure was TRANSIENT (429/5xx/timeout, retries already exhausted in transport). These are
+        // NOT checkpointed, so the next run retries them — rather than permanently dropping a title on a blip.
+        var deferred = Set<Int>()
 
         try await withThrowingTaskGroup(of: EnrichOutcome.self) { group in
             for entry in pending {
@@ -161,7 +175,10 @@ enum Commands {
                         }
                         return .ok(title)
                     } catch {
-                        return .failure(entry.tmdbId, "\(error)")
+                        // Transient → defer (retry next run); definitive (404/decoding) → a real dead id, drop.
+                        return Transport.isRetryable(error)
+                            ? .transientFailure(entry.tmdbId, "\(error)")
+                            : .failure(entry.tmdbId, "\(error)")
                     }
                 }
             }
@@ -174,6 +191,9 @@ enum Commands {
                 case .failure(let id, let reason):
                     failures += 1
                     Log.append(Layout.enrichLog(outDir), "fetch-failure id=\(id) \(reason)")
+                case .transientFailure(let id, let reason):
+                    deferred.insert(id)
+                    Log.append(Layout.enrichLog(outDir), "fetch-deferred id=\(id) (transient: \(reason))")
                 }
             }
         }
@@ -181,55 +201,96 @@ enum Commands {
         // FP-2 — re-ground on Wikipedia: ONE Wikidata SPARQL maps the surviving ids to their enwiki articles,
         // then each title's plot is fetched live. Where a plot exists it REPLACES the TMDB overview (ToS-clean
         // grounding for the Haiku classifier); titles keep the TMDB overview only where Wikipedia has no plot.
-        // Wikipedia failures never fail enrich — a title just stays on its TMDB overview.
         let media: MediaType = pending.first?.media ?? .movie
+        // A transient-exhausted Wikidata failure aborts the batch (nothing written/checkpointed) so the whole
+        // batch retries — far better than silently marking all its titles tags-only. A *successful* SPARQL with
+        // an id simply absent from the results is a definitive no-article (that title stays tags-only).
+        let mapping: [Int: WikipediaSource.Mapping]
+        do {
+            mapping = try await WikipediaSource().wikidata(forTMDBIds: titles.map(\.tmdbId), mediaType: media)
+        } catch {
+            throw ToolError(message: "Wikidata mapping failed for batch \(batchId) after retries (\(error)); "
+                + "nothing written — re-run to retry this batch")
+        }
+
         var withPlot = 0
-        let mapping = (try? await WikipediaSource().wikidata(forTMDBIds: titles.map(\.tmdbId),
-                                                             mediaType: media)) ?? [:]
-        let grounded = try await regroundOnWikipedia(titles, mapping: mapping, log: Layout.enrichLog(outDir))
-        withPlot = grounded.filter(\.hasWikiPlot).count
+        var grounded: [EnrichedTitle] = []
+        for outcome in try await regroundOnWikipedia(titles, mapping: mapping, log: Layout.enrichLog(outDir)) {
+            switch outcome {
+            case .grounded(let title): grounded.append(title); withPlot += 1
+            case .noPlot(let title): grounded.append(title)
+            case .deferred(let id): deferred.insert(id)   // transient plot fetch — retry next run, don't checkpoint
+            }
+        }
         var survivors = grounded.map(EnrichedDTO.init)
 
         survivors.sort { $0.tmdbId < $1.tmdbId }
         try JSON.writePretty(survivors, to: Layout.enrichedBatch(outDir, batchId))
-        for entry in pending { checkpoint.processed.insert(entry.tmdbId) }
+        // Checkpoint every pending id EXCEPT the deferred (transient) ones — those stay pending for a retry.
+        for entry in pending where !deferred.contains(entry.tmdbId) {
+            checkpoint.processed.insert(EnrichCheckpoint.key(entry.media, entry.tmdbId))
+        }
         checkpoint.nextBatch += 1
         checkpoint.totals.merge(belowFloor: belowFloor, anime: anime, failures: failures, noOverview: noOverview)
         try JSON.write(checkpoint, to: Layout.enrichCheckpoint(outDir))
 
-        let remaining = worklist.count - checkpoint.processed.count
+        // Per-media remaining (the shared checkpoint also holds the other media's keys).
+        let remaining = worklist.filter { !checkpoint.processed.contains(EnrichCheckpoint.key($0.media, $0.tmdbId)) }.count
         print(JSON.line([
             "batchId": batchId, "count": survivors.count, "belowFloor": belowFloor,
-            "anime": anime, "noOverview": noOverview, "failures": failures, "remaining": remaining,
-            "wikiPlot": withPlot, "tagsOnly": survivors.count - withPlot,
+            "anime": anime, "noOverview": noOverview, "failures": failures, "deferred": deferred.count,
+            "remaining": remaining, "wikiPlot": withPlot, "tagsOnly": survivors.count - withPlot,
             "batch": Layout.enrichedBatch(outDir, batchId),
         ]))
     }
 
-    /// Fetch each title's live Wikipedia plot (bounded concurrency) and re-ground `overview` on it where found.
-    /// A missing mapping / missing plot / fetch error simply leaves the title on its TMDB overview.
+    /// The per-title result of the Wikipedia plot hop: grounded on a real plot, a definitive no-plot (kept on
+    /// the TMDB overview), or deferred because the fetch failed transiently (retry next run — don't checkpoint).
+    enum PlotOutcome {
+        case grounded(EnrichedTitle)
+        case noPlot(EnrichedTitle)
+        case deferred(Int)
+    }
+
+    /// Minimum plot length to re-ground on (chars). Below this, a "Plot" section is a bare one-line logline that
+    /// adds little grounding over the TMDB overview it would replace — keep the title tags-only instead.
+    static let wikiPlotFloor = 200
+
+    /// Fetch each title's live Wikipedia plot (bounded concurrency) and classify the outcome. A missing mapping
+    /// or a plot section that is absent / below the floor is a definitive `noPlot`; a transient fetch failure
+    /// (429/5xx/timeout, retries exhausted) is `deferred` so the id is retried on the next run.
     static func regroundOnWikipedia(_ titles: [EnrichedTitle], mapping: [Int: WikipediaSource.Mapping],
-                                    log: String) async throws -> [EnrichedTitle] {
+                                    log: String) async throws -> [PlotOutcome] {
         let wiki = WikipediaSource()
         let gate = 4   // gentle on the public Wikipedia API
-        var out: [EnrichedTitle] = []
+        var out: [PlotOutcome] = []
         var index = 0
         while index < titles.count {
             let slice = Array(titles[index..<min(index + gate, titles.count)])
-            let grounded = try await withThrowingTaskGroup(of: EnrichedTitle.self) { group -> [EnrichedTitle] in
+            let outcomes = try await withThrowingTaskGroup(of: PlotOutcome.self) { group -> [PlotOutcome] in
                 for title in slice {
                     group.addTask {
-                        guard let article = mapping[title.tmdbId]?.article else { return title }
-                        guard let plot = try? await wiki.plot(articleTitle: article),
-                              plot.count >= 20 else { return title }
-                        return title.groundedOnWikiPlot(plot)
+                        guard let article = mapping[title.tmdbId]?.article else { return .noPlot(title) }
+                        do {
+                            guard let plot = try await wiki.plot(articleTitle: article),
+                                  plot.count >= wikiPlotFloor else { return .noPlot(title) }
+                            return .grounded(title.groundedOnWikiPlot(plot))
+                        } catch {
+                            if Transport.isRetryable(error) {
+                                Log.append(log, "plot-deferred id=\(title.tmdbId) (transient: \(error))")
+                                return .deferred(title.tmdbId)
+                            }
+                            // Definitive (e.g. 404 on a stale sitelink) — keep the title on its TMDB overview.
+                            Log.append(log, "plot-miss id=\(title.tmdbId) (\(error))")
+                            return .noPlot(title)
+                        }
                     }
                 }
-                var acc: [EnrichedTitle] = []
-                for try await t in group { acc.append(t) }
+                var acc: [PlotOutcome] = []
+                for try await outcome in group { acc.append(outcome) }
                 return acc
             }
-            out.append(contentsOf: grounded)
+            out.append(contentsOf: outcomes)
             index += gate
         }
         return out
@@ -760,13 +821,36 @@ enum EnrichOutcome {
     case belowFloor(Int)
     case anime(Int)
     case noOverview(Int)
-    case failure(Int, String)
+    case failure(Int, String)          // definitive (404/decoding) — a dead id, checkpointed
+    case transientFailure(Int, String) // 429/5xx/timeout after retries — deferred, NOT checkpointed
 }
 
 struct EnrichCheckpoint: Codable {
-    var processed: Set<Int> = []
+    // Keyed "movie:12345" / "tv:12345": TMDB movie and TV id namespaces OVERLAP (both start low), so a bare
+    // Set<Int> shared across a movie run then a tv run would skip every TV title whose id matches a processed
+    // movie id (e.g. tv 550 skipped because movie 550 was done). Media-qualify the key.
+    var processed: Set<String> = []
     var nextBatch: Int = 1
     var totals = Totals()
+
+    static func key(_ media: MediaType, _ id: Int) -> String { "\(media.rawValue):\(id)" }
+
+    init() {}
+    // Tolerant decode: a legacy checkpoint stored `processed` as bare [Int] (the movie-only pilot) — migrate
+    // those to movie-qualified keys so a resume across this change doesn't reset progress. Malformed/truncated
+    // JSON still throws here (the container decode fails), which the caller surfaces loudly.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let keyed = try? c.decode(Set<String>.self, forKey: .processed) {
+            processed = keyed
+        } else {
+            processed = Set((try c.decode(Set<Int>.self, forKey: .processed)).map { "movie:\($0)" })
+        }
+        nextBatch = try c.decodeIfPresent(Int.self, forKey: .nextBatch) ?? 1
+        totals = try c.decodeIfPresent(Totals.self, forKey: .totals) ?? Totals()
+    }
+    enum CodingKeys: String, CodingKey { case processed, nextBatch, totals }
+
     struct Totals: Codable {
         var belowFloor = 0, anime = 0, failures = 0, noOverview = 0
         init() {}
@@ -871,7 +955,9 @@ enum FileIO {
     }
     static func write(_ data: Data, to path: String) throws {
         try ensureParent(path)
-        try data.write(to: URL(fileURLWithPath: path))
+        // Atomic (temp-file + rename): a crash/power-loss/disk-full mid-write must not leave a truncated file.
+        // The enrich checkpoint especially — a partial write there silently resets all resume progress.
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
     static func readLines(_ path: String) throws -> [String] {
         let text = try String(contentsOfFile: path, encoding: .utf8)

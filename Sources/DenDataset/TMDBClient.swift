@@ -145,11 +145,15 @@ public final class TMDBClient: Sendable {
 
         await gate.acquire()
         defer { Task { await gate.release() } }
-        let (data, response) = try await session.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-            throw TMDBError.http(http.statusCode)
+        // Retry transient 429/5xx/timeouts (the semaphore permit is held across backoff, which also throttles
+        // the fan-out under rate-limit pressure); a 404/decoding error throws straight through.
+        return try await Transport.retrying {
+            let (data, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw TMDBError.http(http.statusCode)
+            }
+            return data
         }
-        return data
     }
 
     /// snake_case JSON → the camelCase wire structs below.
