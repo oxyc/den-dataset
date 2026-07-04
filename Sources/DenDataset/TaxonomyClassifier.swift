@@ -75,7 +75,18 @@ public struct TaxonomyClassifier: Sendable {
                               threshold: { _ in self.thresholds.mood },
                               inVocab: { self.taxonomy.moods.contains($0) })
         return Classification(tmdbId: title.tmdbId, mediaType: title.mediaType, primaryGenre: primary,
-                              subgenres: subgenres, moods: moods, source: .llm)
+                              subgenres: Self.gateWorldKnowledge(subgenres, voteCount: title.voteCount),
+                              moods: moods, source: .llm)
+    }
+
+    /// World-knowledge labels require recognising the FILM, not just its plot. The DT-G eval showed plot-only
+    /// models hallucinate them on the obscure tail (`Stockholmsnatt`, vc 15 → "Cult") but are reliable above
+    /// ~100 votes — so gate them on a min vote count (model-agnostic; cheaper than spending Opus everywhere).
+    static let worldKnowledgeLabels: Set<String> = ["Cult", "Anime", "Art House", "Epic"]
+    static let worldKnowledgeVoteFloor = 100
+    static func gateWorldKnowledge(_ subgenres: [LabelConfidence], voteCount: Int) -> [LabelConfidence] {
+        voteCount >= worldKnowledgeVoteFloor ? subgenres
+            : subgenres.filter { !worldKnowledgeLabels.contains($0.label) }
     }
 
     // MARK: - Prompt
