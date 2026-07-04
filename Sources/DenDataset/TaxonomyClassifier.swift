@@ -84,7 +84,10 @@ public struct TaxonomyClassifier: Sendable {
         """
         You are a film/TV cataloguer. Assign labels ONLY from the provided controlled vocabulary. Never \
         invent labels. Pick the single dominant primary genre. Be specific; omit weak guesses (confidence \
-        < 0.5). No anime labels. Output only JSON matching the schema.
+        < 0.5). Output only JSON matching the schema. \
+        Some labels depend on KNOWING the film, not just its plot — Cult (cult status isn't in the plot), \
+        Anime, Art House, Epic. Assign these only when you recognise the title and are confident; if you are \
+        reasoning purely from the plot text, omit them.
         """
     }
 
