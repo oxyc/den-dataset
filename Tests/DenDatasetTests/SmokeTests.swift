@@ -58,11 +58,12 @@ final class SmokeTests: XCTestCase {
         // bge-m3 label on 384-dim vectors. This keeps the offline smoke test internally consistent.
         try run(["finalize", "--out-dir", outDir.path, "--embedding-version", "e02"])
 
-        // labels-t01.json parses and has the 3 records.
-        let labelsPath = outDir.appendingPathComponent("labels-t01.json")
+        // labels-<taxonomyVersion>.json parses and has the 3 records.
+        let version = Taxonomy.current.version
+        let labelsPath = outDir.appendingPathComponent("labels-\(version).json")
         let labelsData = try Data(contentsOf: labelsPath)
         let artifact = try JSONDecoder().decode(LabelsArtifact.self, from: labelsData)
-        XCTAssertEqual(artifact.taxonomyVersion, "t01")
+        XCTAssertEqual(artifact.taxonomyVersion, version)
         XCTAssertEqual(artifact.count, 3)
         XCTAssertEqual(artifact.records.count, 3)
         // Lenient bare-string label survived as a real thematic label (with the heist grounding bonus).
@@ -93,14 +94,14 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(meta["quantization"] as? String, "int8-symmetric-x127")
         XCTAssertEqual(meta["dims"] as? Int, 384)
         XCTAssertEqual(meta["count"] as? Int, 3)
-        XCTAssertEqual(meta["labelsFile"] as? String, "labels-t01.json")
+        XCTAssertEqual(meta["labelsFile"] as? String, "labels-\(version).json")
         XCTAssertEqual(meta["vectorsFile"] as? String, "vectors-e02.bin")
         let datasetVersion = meta["datasetVersion"] as? String ?? ""
         XCTAssertEqual(datasetVersion.count, 12, "datasetVersion is 12 hex chars")
         XCTAssert(datasetVersion.allSatisfy { $0.isHexDigit }, "datasetVersion is hex")
 
         // gzipped labels blob exists.
-        XCTAssertTrue(FileManager.default.fileExists(atPath: outDir.appendingPathComponent("labels-t01.json.gz").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outDir.appendingPathComponent("labels-\(version).json.gz").path))
     }
 
     // MARK: - helpers

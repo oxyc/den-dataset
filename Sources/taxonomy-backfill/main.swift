@@ -36,6 +36,7 @@ struct TaxonomyBackfill {
             case "assemble": try await Commands.assemble(args)
             case "embed-corpus": try await Commands.embedCorpus(args)
             case "finalize": try Commands.finalize(args)
+            case "metadata": try await Commands.metadata(args)
             case "score":    try Commands.score(args)
             default: usage(); exit(2)
             }
@@ -366,6 +367,10 @@ enum Commands {
         // Small chunk by default: den-embed activation memory scales with the batch, so keep requests modest.
         let chunk = args.int("--chunk") ?? 16
         let limit = args.int("--limit")                          // optional cap (testing)
+        // Cap the PLOT portion (facts + tags are always kept). 4000 chars keeps the median plot whole and every
+        // mid-plot genre pivot the length audit found, dropping only low-value end-of-plot twist tails — the
+        // knee between similarity quality and bge-m3's O(seq^2) embedding cost.
+        let plotCap = args.int("--plot-cap") ?? 4000
 
         // Lean lookup: the existing label record (tags) per (mediaType, tmdbId). No plot text held — the plots
         // are streamed one enriched batch at a time below, so peak memory stays bounded (this was the OOM bug).
@@ -419,7 +424,7 @@ enum Commands {
                 let title = dto.toEnrichedTitle()
                 let tags = record.subgenres.map(\.label) + record.moods.map(\.label)
                 // Plot clause only from the WIKIPEDIA plot (ToS-clean); a no-wiki-plot title composes on facts+tags.
-                let plot = title.hasWikiPlot ? title.overview : ""
+                let plot = title.hasWikiPlot ? Self.cappedPlot(title.overview, maxChars: plotCap) : ""
                 buffer.append((record, ComposedDoc.build(title: title, tags: tags, plot: plot)))
                 done.insert(key)
                 if buffer.count >= chunk { try await flush() }
@@ -429,6 +434,17 @@ enum Commands {
         try await flush()
         print(JSON.line(["written": written, "skipped": skipped, "missingLabel": missing,
                          "store": Layout.labelsStore(outDir)]))
+    }
+
+    /// Cap a plot to `maxChars`, ending on the last sentence boundary within the cap (so the embedded doc reads
+    /// as complete prose rather than a mid-word cut). Facts + tags are composed separately and never capped.
+    static func cappedPlot(_ plot: String, maxChars: Int) -> String {
+        guard plot.count > maxChars else { return plot }
+        let head = String(plot.prefix(maxChars))
+        if let stop = head.range(of: ". ", options: .backwards) {
+            return String(head[..<stop.lowerBound]) + "."
+        }
+        return head
     }
 
     /// Truncate two append-only store files to their common prefix — repairs a crash that wrote a label line
@@ -453,6 +469,13 @@ enum Commands {
         let outDir = try args.require("--out-dir")
         let batchId = try args.requireInt("--batch-id")
         let force = args.has("--force")   // re-process already-classified titles (targeted re-pass)
+        // ToS: a no-Wikipedia-plot title was classified from the TMDB overview PROSE (the enrichment fallback),
+        // so its labels derive from TMDB expressive text. TMDB's terms forbid that use — drop those titles from
+        // the shipped index entirely. Their vectors were already plot-empty; here we skip the whole record.
+        let requireWikiPlot = args.has("--require-wiki-plot")
+        // Cap the embedded plot (assemble used the FULL ~6000-char overview → slow O(seq²) embeds + big RAM).
+        // The setup/premise dominates the vector anyway; a cap speeds it up and bounds memory.
+        let plotCap = args.int("--plot-cap") ?? 1500
         // Embedder: `den-embed` (default, FP-2 — bge-m3 int8[1024] via the service) or `fnv` (offline
         // HashingEmbedder fallback, e.g. for a network-free run/test). The composed doc feeds BOTH.
         let embedderKind = args["--embedder"] ?? "den-embed"
@@ -471,43 +494,62 @@ enum Commands {
             mood: args.double("--mood-threshold") ?? defaults.mood)
         let classifier = TaxonomyClassifier(llm: NoLLM(), samples: passes.count, thresholds: thresholds)
         var classified = (try? JSON.read(Layout.classifyCheckpoint(outDir)) as ClassifyCheckpoint) ?? ClassifyCheckpoint()
-        var noPrimary = 0, missingVotes = 0
+        // Opus-confirmed world-knowledge labels (DT-G title-recognition adjudication) that survive the vc gate.
+        let wkConfirmed: [Int: [String]] = (try? JSON.read(Layout.wkConfirmed(outDir))) ?? [:]
+        var noPrimary = 0, missingVotes = 0, droppedNoWiki = 0
 
         let labelsHandle = try FileIO.appender(Layout.labelsStore(outDir))
         let vectorsHandle = try FileIO.appender(Layout.vectorsStore(outDir))
         defer { try? labelsHandle.close(); try? vectorsHandle.close() }
+
+        // Embeds are BATCHED (den-embed /embed/batch). The old per-title `embedInt8` was a network round-trip
+        // each (~1/s → ~14h for the corpus); a chunked batch does the whole group at once (~20-30min). A title
+        // is only marked done once its vector is actually flushed, so a crash never checkpoints an unwritten row.
+        let denEmbedChunk = args.int("--chunk") ?? 8   // small: bge-m3 attention is O(batch·seq²) — big batches of
+                                                       // long docs spike den-embed RAM (swap-thrash). Keep it low.
+        var buffer: [(tmdbId: Int, record: IndexRecord, doc: String)] = []
+        func flush() async throws {
+            guard !buffer.isEmpty else { return }
+            let vectors: [[Int8]] = embedderKind == "fnv"
+                ? buffer.map { Quantizer.int8(blockingEmbed(fnv, $0.doc)) }
+                : try await denEmbed.embedManyInt8(buffer.map(\.doc))
+            guard vectors.count == buffer.count else {
+                throw ToolError(message: "den-embed returned \(vectors.count) vectors for \(buffer.count) docs")
+            }
+            for (item, vector) in zip(buffer, vectors) {
+                try labelsHandle.writeLine(JSON.encodeLine(item.record))
+                try vectorsHandle.writeLine(JSON.encodeLine(VectorRow(tmdbId: item.tmdbId, v: vector.map(Int.init))))
+                classified.done.insert(item.tmdbId)
+            }
+            buffer.removeAll(keepingCapacity: true)
+        }
 
         for dto in enriched where force || !classified.done.contains(dto.tmdbId) {
             // One raw-JSON string per pass for this title (re-serialized) → the calibrated aggregation seam.
             let raws: [String] = passes.compactMap { $0[dto.tmdbId] }
             guard !raws.isEmpty else { missingVotes += 1; continue }
             let title = dto.toEnrichedTitle()
-            guard let classification = classifier.classify(rawVotes: raws, title: title) else {
+            if requireWikiPlot && !title.hasWikiPlot { droppedNoWiki += 1; continue }   // ToS: no TMDB-prose labels
+            let confirmedWK = Set(wkConfirmed[dto.tmdbId] ?? [])
+            guard let classification = classifier.classify(rawVotes: raws, title: title, confirmedWK: confirmedWK) else {
                 noPrimary += 1; classified.done.insert(dto.tmdbId); continue
             }
             // Compose the embedding doc from FACTS + the just-classified TAGS + the (Wikipedia) plot. A title
             // with no wiki plot composes on facts + tags with an empty Plot — never skipped.
             let tags = (classification.subgenres + classification.moods).map(\.label)
-            let plot = title.hasWikiPlot ? title.overview : ""
+            let plot = title.hasWikiPlot ? Self.cappedPlot(title.overview, maxChars: plotCap) : ""
             let composed = ComposedDoc.build(title: title, tags: tags, plot: plot)
-            // den-embed returns the FINAL int8[1024] (quantization lives in the service — do NOT re-quantize);
-            // the FNV fallback is float → local int8 quantize.
-            let vector: [Int8]
-            if embedderKind == "fnv" {
-                vector = Quantizer.int8(blockingEmbed(fnv, composed))
-            } else {
-                vector = try await denEmbed.embedInt8(composed)
-            }
+            // Queue for the next batched embed (den-embed returns the FINAL int8[1024]; do NOT re-quantize).
             let record = classification.indexRecord(animated: title.genreIDs.contains(16))   // TMDB genre 16
-            try labelsHandle.writeLine(JSON.encodeLine(record))
-            try vectorsHandle.writeLine(JSON.encodeLine(VectorRow(tmdbId: dto.tmdbId, v: vector.map(Int.init))))
-            classified.done.insert(dto.tmdbId)
+            buffer.append((dto.tmdbId, record, composed))
+            if buffer.count >= denEmbedChunk { try await flush() }
         }
+        try await flush()
         classified.totals.merge(noPrimary: noPrimary, missingVotes: missingVotes)
         try JSON.write(classified, to: Layout.classifyCheckpoint(outDir))
         print(JSON.line([
             "batchId": batchId, "classifiedTotal": classified.done.count,
-            "noPrimary": noPrimary, "missingVotes": missingVotes,
+            "noPrimary": noPrimary, "missingVotes": missingVotes, "droppedNoWiki": droppedNoWiki,
         ]))
     }
 
@@ -615,6 +657,54 @@ enum Commands {
 
         print("finalize: \(records.count) titles · labels=\(labelsPath) vectors=\(vectorsPath) meta=\(Layout.datasetMeta(outDir)) dataset=\(datasetVersion)")
         print("primary-genre dist: \(report.byPrimaryGenre.sorted { $0.value > $1.value }.map { "\($0.key):\($0.value)" }.joined(separator: " "))")
+    }
+
+    // metadata — the on-device METADATA SIDECAR: a light TMDB pass over the finalized records fetching title +
+    // poster_path + year, written to metadata-<datasetVersion>.json. Ships as a ≤6-month SYNCED cache (den-atlas
+    // serves it beside labels/vectors; the app reads it to render a semantic/ANN neighbour without a detail call).
+    // Never bundled — a frozen poster snapshot would break TMDB's 6-month caching allowance.
+    static func metadata(_ args: Args) async throws {
+        let outDir = try args.require("--out-dir")
+        let skipFetch = args.has("--skip-fetch")   // patch meta from an existing sidecar (no TMDB re-fetch)
+        let limit = args.int("--limit")
+        let meta: DatasetMeta = try JSON.read(Layout.datasetMeta(outDir))
+        let path = Layout.metadataArtifact(outDir, meta.datasetVersion)
+
+        if !skipFetch {
+            let labels: LabelsArtifact = try JSON.read(Layout.labelsArtifact(outDir, Taxonomy.current.version))
+            var records = labels.records
+            if let limit { records = Array(records.prefix(limit)) }
+            let client = try TMDB.client()
+            var out: [PosterMeta] = []
+            let chunk = 200   // the client's semaphore throttles the real fan-out; chunk bounds task spawn count
+            for start in stride(from: 0, to: records.count, by: chunk) {
+                let slice = Array(records[start..<min(start + chunk, records.count)])
+                let batch = await withTaskGroup(of: PosterMeta?.self) { group -> [PosterMeta] in
+                    for r in slice {
+                        let id = MediaIdentifier(r.tmdbId, MediaType(rawValue: r.mediaType) ?? .movie)
+                        group.addTask { try? await client.posterMeta(id) }
+                    }
+                    var acc: [PosterMeta] = []
+                    for await m in group where m != nil { acc.append(m!) }
+                    return acc
+                }
+                out += batch
+                FileHandle.standardError.write(Data("  metadata \(out.count)/\(records.count)…\n".utf8))
+            }
+            try JSON.write(out, to: path)
+        }
+
+        // Patch dataset.meta.json to reference the sidecar (the server reads meta to know what blobs to serve;
+        // the app folds `metadataSha256` into its syncKey so a new/updated sidecar triggers a re-sync).
+        let blob = try Data(contentsOf: URL(fileURLWithPath: path))
+        var patched = meta
+        patched.metadataFile = (path as NSString).lastPathComponent
+        patched.metadataSha256 = sha256Hex(blob)
+        patched.metadataBytes = blob.count
+        try JSON.writePretty(patched, to: Layout.datasetMeta(outDir))
+        let all = (try? JSON.read(path) as [PosterMeta]) ?? []
+        print(JSON.line(["metadata": all.count, "withPoster": all.filter { $0.posterPath != nil }.count,
+                         "sha": patched.metadataSha256 ?? "", "bytes": patched.metadataBytes ?? 0]))
     }
 
     // score — labels vs the golden set: primary-genre accuracy, multi-label F1, per-family precision. The
@@ -812,6 +902,11 @@ struct DatasetMeta: Codable {
     let vectorsBytes: Int
     let builtAt: String
     let lastModifiedHttp: String
+    // Metadata sidecar (optional; set by the `metadata` command AFTER finalize). Absent ⇒ no sidecar → the
+    // server serves labels+vectors only and the app hydrates poster cards via TMDB as before (no regression).
+    var metadataFile: String? = nil
+    var metadataSha256: String? = nil
+    var metadataBytes: Int? = nil
 }
 
 enum DateFmt {
@@ -1027,6 +1122,8 @@ struct ReportExtras: Codable {
 enum Layout {
     static func enrichCheckpoint(_ dir: String) -> String { join(dir, "enrich-checkpoint.json") }
     static func classifyCheckpoint(_ dir: String) -> String { join(dir, "classify-checkpoint.json") }
+    static func wkConfirmed(_ dir: String) -> String { join(dir, "wk-confirmed.json") }
+    static func metadataArtifact(_ dir: String, _ version: String) -> String { join(dir, "metadata-\(version).json") }
     static func enrichLog(_ dir: String) -> String { join(dir, "enrich-log.txt") }
     static func enrichedDir(_ dir: String) -> String { join(dir, "enriched") }
     static func enrichedBatch(_ dir: String, _ id: Int) -> String { join(dir, "enriched/batch-\(id).json") }

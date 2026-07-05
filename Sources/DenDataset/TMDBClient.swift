@@ -126,6 +126,18 @@ public final class TMDBClient: Sendable {
         return wire.toEnrichedTitle(id: identifier.id.rawValue, mediaType: identifier.mediaType)
     }
 
+    /// Light detail fetch for the on-device METADATA SIDECAR — title + poster_path + year only (no
+    /// append_to_response). Lets the app render a semantic/ANN neighbour card without a per-result detail call.
+    /// Poster paths + titles are factual/artwork references (distinct from the expressive overviews the pipeline
+    /// strips); the sidecar ships as a ≤6-month synced cache, never bundled.
+    public func posterMeta(_ identifier: MediaIdentifier) async throws -> PosterMeta {
+        let data = try await get("/\(identifier.mediaType.pathSegment)/\(identifier.id.rawValue)", [:])
+        let wire = try Self.decoder.decode(ClassificationWire.self, from: data)
+        let year = (wire.releaseDate ?? wire.firstAirDate).flatMap { Int($0.prefix(4)) }
+        return PosterMeta(tmdbId: identifier.id.rawValue, mediaType: identifier.mediaType.pathSegment,
+                          title: wire.title ?? wire.name ?? "", posterPath: wire.posterPath, year: year)
+    }
+
     // MARK: - Transport
 
     private func get(_ path: String, _ query: [String: String]) async throws -> Data {
@@ -190,6 +202,7 @@ public final class TMDBClient: Sendable {
         let title: String?            // movie
         let name: String?             // tv
         let overview: String?
+        let posterPath: String?       // metadata-sidecar only (poster artwork reference, not expressive text)
         let releaseDate: String?      // movie
         let firstAirDate: String?     // tv
         let voteCount: Int?

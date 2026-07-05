@@ -24,14 +24,16 @@ public struct TaxonomyClassifier: Sendable {
         public var subgenre: Double      // blended (genres/blended ≥ 0.90)
         public var thematic: Double
         public var mood: Double          // moods ≥ 0.75
-        // Per-family cutoffs locked from the golden precision/recall sweep (DT-C calibration), not guessed:
-        //  • blended 0.70 — the FP-knee: drops the worst false positives (precision flat ~0.84 below it,
-        //    only reaching the 0.90 target at 0.83 where recall collapses);
-        //  • thematic 0.55 — precision is ~0.95 at every cutoff, so maximize recall;
-        //  • moods 0.60 — strictly dominates the old 0.75 (higher precision AND recall on the golden set).
-        // The earlier 0.90/0.80/0.75 cutoffs dropped moderate-confidence-but-correct labels (e.g. Time Travel
-        // on Back to the Future), leaving titles absent from their signature discovery row.
-        public init(subgenre: Double = 0.70, thematic: Double = 0.55, mood: Double = 0.60) {
+        // Per-family cutoffs, recalibrated for the Opus (t02) regime. The old 0.70/0.55/0.60 was set against a
+        // vote regime that emitted a flat 0.95 for every label; Opus emits an HONEST scale (0.85–0.9 headline,
+        // 0.6 clearly-applies-but-secondary, 0.5 minor-but-present) and already self-censors below 0.5 in the
+        // prompt — so the 0.70 blended gate guillotined correct secondary calls (Titanic → Disaster @0.5,
+        // Imitation Game → War Drama/Historical @0.6). New cutoffs trust Opus's own floor:
+        //  • blended 0.55 — keep clear blends, trim only the pure-0.5 borderline;
+        //  • thematic 0.50 — themes are factual (heist/biopic/disaster: yes/no), low FP risk → keep all Opus flags;
+        //  • moods 0.55 — keep clear moods, trim 0.5 guesses.
+        // World-knowledge labels (Cult/Anime/Art House/Epic) are gated separately by vote count, not confidence.
+        public init(subgenre: Double = 0.55, thematic: Double = 0.50, mood: Double = 0.55) {
             self.subgenre = subgenre; self.thematic = thematic; self.mood = mood
         }
     }
@@ -65,7 +67,10 @@ public struct TaxonomyClassifier: Sendable {
     /// the IDF rarity tie-break, per-family thresholds, grounding bonus, off-vocab rejection) stays here so
     /// it is identical to the in-process path and stays unit-tested. Off-vocabulary / unparseable passes are
     /// dropped. nil only when no pass yielded an in-vocabulary primary genre.
-    public func classify(rawVotes: [String], title: EnrichedTitle) -> Classification? {
+    /// `confirmedWK`: the world-knowledge labels an Opus title-recognition pass (DT-G adjudication) confirmed
+    /// for this title — they survive the vote-count gate even on the obscure tail (a genuine deep-cut cult /
+    /// art-house film Opus actually knows). Empty for titles never adjudicated (the gate then applies as before).
+    public func classify(rawVotes: [String], title: EnrichedTitle, confirmedWK: Set<String> = []) -> Classification? {
         let votes = rawVotes.compactMap(parse)
         guard let primary = fusedPrimaryGenre(votes) else { return nil }
         let subgenres = aggregate(votes.map(\.subgenres), title: title,
@@ -75,18 +80,22 @@ public struct TaxonomyClassifier: Sendable {
                               threshold: { _ in self.thresholds.mood },
                               inVocab: { self.taxonomy.moods.contains($0) })
         return Classification(tmdbId: title.tmdbId, mediaType: title.mediaType, primaryGenre: primary,
-                              subgenres: Self.gateWorldKnowledge(subgenres, voteCount: title.voteCount),
+                              subgenres: Self.gateWorldKnowledge(subgenres, voteCount: title.voteCount, confirmedWK: confirmedWK),
                               moods: moods, source: .llm)
     }
 
     /// World-knowledge labels require recognising the FILM, not just its plot. The DT-G eval showed plot-only
     /// models hallucinate them on the obscure tail (`Stockholmsnatt`, vc 15 → "Cult") but are reliable above
     /// ~100 votes — so gate them on a min vote count (model-agnostic; cheaper than spending Opus everywhere).
+    /// `confirmedWK` overrides the gate per-label: a WK label an Opus recognition pass confirmed for this title
+    /// survives even below the floor (recovers genuine deep-tail cult/art-house Sonnet flagged and the blanket
+    /// gate would otherwise strip).
     static let worldKnowledgeLabels: Set<String> = ["Cult", "Anime", "Art House", "Epic"]
     static let worldKnowledgeVoteFloor = 100
-    static func gateWorldKnowledge(_ subgenres: [LabelConfidence], voteCount: Int) -> [LabelConfidence] {
+    static func gateWorldKnowledge(_ subgenres: [LabelConfidence], voteCount: Int,
+                                   confirmedWK: Set<String> = []) -> [LabelConfidence] {
         voteCount >= worldKnowledgeVoteFloor ? subgenres
-            : subgenres.filter { !worldKnowledgeLabels.contains($0.label) }
+            : subgenres.filter { !worldKnowledgeLabels.contains($0.label) || confirmedWK.contains($0.label) }
     }
 
     // MARK: - Prompt
@@ -96,6 +105,9 @@ public struct TaxonomyClassifier: Sendable {
         You are a film/TV cataloguer. Assign labels ONLY from the provided controlled vocabulary. Never \
         invent labels. Pick the single dominant primary genre. Be specific; omit weak guesses (confidence \
         < 0.5). Output only JSON matching the schema. \
+        Animation is a MEDIUM, not a primary genre — it is not in the vocabulary and is tracked separately. \
+        For an animated title, choose its underlying STORY genre (Family, Adventure, Comedy, Action, Drama, \
+        Fantasy, Science Fiction). Apply the "Anime" subgenre to Japanese animation you recognise. \
         Some labels depend on KNOWING the film, not just its plot — Cult (cult status isn't in the plot), \
         Anime, Art House, Epic. Assign these only when you recognise the title and are confident; if you are \
         reasoning purely from the plot text, omit them.

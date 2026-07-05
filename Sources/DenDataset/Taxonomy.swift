@@ -6,7 +6,10 @@ import Foundation
 /// `Codable` so the pipeline + index can serialize it. v2 (`t02`) adds anime + thematic/interest labels.
 public struct Taxonomy: Codable, Sendable, Equatable {
     public let version: String
-    /// Exactly one per title (the "Drama is too broad" fix) — the 18 TMDB genres.
+    /// Exactly one per title (the "Drama is too broad" fix) — 17 TMDB genres. `Animation` is excluded: it is a
+    /// medium, not a story genre, and is carried separately by the `animated` flag (TMDB genre 16). An animated
+    /// title is classified by its underlying story genre (Toy Story → Adventure), so it can sit in both an
+    /// "Animated" row (from the flag) and its genre rows.
     public let primaryGenres: [String]
     /// Blended subgenres (≤3 per title).
     public let subgenres: [String]
@@ -40,7 +43,7 @@ public struct Taxonomy: Codable, Sendable, Equatable {
     public static let current = Taxonomy(
         version: "t02",
         primaryGenres: [
-            "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama", "Family",
+            "Action", "Adventure", "Comedy", "Crime", "Documentary", "Drama", "Family",
             "Fantasy", "History", "Horror", "Music", "Mystery", "Romance", "Science Fiction", "Thriller",
             "War", "Western",
         ],

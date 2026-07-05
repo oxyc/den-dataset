@@ -88,6 +88,22 @@ public struct IndexRecord: Codable, Sendable, Equatable {
     }
 }
 
+/// One row of the on-device METADATA SIDECAR (`metadata-<datasetVersion>.json`) — the minimal fields a poster
+/// card needs, so a semantic/ANN neighbour (which the index returns as a bare tmdbId) renders WITHOUT a
+/// per-result TMDB detail call. Ships as a ≤6-month synced cache (never bundled): poster_path + title are
+/// factual/artwork references, distinct from the expressive overviews the labels pipeline strips.
+public struct PosterMeta: Codable, Sendable, Equatable {
+    public let tmdbId: Int
+    public let mediaType: String     // "movie"/"tv" (pathSegment), consistent with IndexRecord
+    public let title: String
+    public let posterPath: String?
+    public let year: Int?
+    public init(tmdbId: Int, mediaType: String, title: String, posterPath: String?, year: Int?) {
+        self.tmdbId = tmdbId; self.mediaType = mediaType; self.title = title
+        self.posterPath = posterPath; self.year = year
+    }
+}
+
 /// The published labels artifact (`labels-tNN.json`), keyed by `taxonomyVersion`.
 public struct LabelsArtifact: Codable, Sendable, Equatable {
     public let taxonomyVersion: String
