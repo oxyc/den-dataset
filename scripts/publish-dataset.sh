@@ -19,7 +19,7 @@ REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
 
 # Version-agnostic: glob the finalize output (labels-<tax>.json / vectors-<embed>.bin / <labels>.gz).
 shopt -s nullglob
-assets=("$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/*.gz "$DIR"/metadata-*.json "$DIR/dataset.meta.json")
+assets=("$DIR"/facets.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/*.gz "$DIR"/metadata-*.json "$DIR/dataset.meta.json")
 [ ${#assets[@]} -ge 4 ] || { echo "error: expected labels/vectors/gz/meta in $DIR, found: ${assets[*]:-none}" >&2; exit 1; }
 
 echo "publishing → $REPO data-latest:"
