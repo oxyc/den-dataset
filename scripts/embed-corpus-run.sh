@@ -17,7 +17,9 @@ cd "$(dirname "$0")/.."
 LABELS="${1:?usage: embed-corpus-run.sh <existing labels-t01.json>}"
 OUT_DIR="${OUT_DIR:-out-vecnow}"
 ENRICHED_DIR="${ENRICHED_DIR:-out/enriched}"
-CHUNK="${CHUNK:-16}"          # docs per den-embed request
+CHUNK="${CHUNK:-16}"          # docs per den-embed request (client side)
+EMBED_BATCH="${EMBED_BATCH:-8}"       # docs the model processes at once (server) — bge-m3 attention is O(seq^2),
+MAX_CHARS="${MAX_CHARS:-5000}"        # so bound BOTH the batch and the doc length to cap activation memory.
 SEGMENT="${SEGMENT:-5000}"    # titles per den-embed lifetime, then restart it fresh
 EMBED_DIR="${EMBED_DIR:-$HOME/Projects/Personal/den-embed}"
 EMBED_LOG="${EMBED_LOG:-/tmp/den-embed.log}"
@@ -28,9 +30,9 @@ stop_embed() { pkill -f "uvicorn server:app" 2>/dev/null || true; sleep 2; }
 
 boot_embed() {
   stop_embed
-  echo "booting fresh den-embed (DEN_EMBED_BATCH=$CHUNK) …"
-  ( cd "$EMBED_DIR" && DEN_EMBED_BATCH="$CHUNK" nohup .venv/bin/uvicorn server:app --host 127.0.0.1 --port 8791 \
-      > "$EMBED_LOG" 2>&1 & )
+  echo "booting fresh den-embed (DEN_EMBED_BATCH=$EMBED_BATCH MAX_CHARS=$MAX_CHARS) …"
+  ( cd "$EMBED_DIR" && DEN_EMBED_BATCH="$EMBED_BATCH" DEN_EMBED_MAX_CHARS="$MAX_CHARS" \
+      nohup .venv/bin/uvicorn server:app --host 127.0.0.1 --port 8791 > "$EMBED_LOG" 2>&1 & )
   for _ in $(seq 1 40); do curl -s -m 2 http://localhost:8791/health >/dev/null 2>&1 && return 0; sleep 3; done
   echo "den-embed failed to come up (see $EMBED_LOG)"; return 1
 }
