@@ -38,6 +38,7 @@ struct TaxonomyBackfill {
             case "finalize": try Commands.finalize(args)
             case "metadata": try await Commands.metadata(args)
             case "score":    try Commands.score(args)
+            case "recluster": try Commands.recluster(args)
             default: usage(); exit(2)
             }
         } catch let error as ToolError {
@@ -50,13 +51,16 @@ struct TaxonomyBackfill {
     static func usage() {
         FileHandle.standardError.write(Data("""
         usage: taxonomy-backfill <command> [flags]
-          worklist --mode discover|export --media movie|tv [--count N] [--vote-floor 50] [--file export.json] --out <path>
+          worklist --mode discover|export|delta --media movie|tv [--count N] [--vote-floor 50] [--file export.json] --out <path>
+                   delta:  --since YYYY-MM-DD [--known <labels-tNN.json>]   (DT-F daily freshness pass)
           enrich   --worklist <path> [--vote-floor 50] [--limit 150] --out-dir <dir>
           escalation --batch-id <n> --out-dir <dir>   (after pass 1: emit titles needing n=3)
           assemble --batch-id <n> --out-dir <dir>
           embed-corpus --labels <existing labels-t01.json> --out-dir <dir> [--enriched-dir <dir>] [--chunk 128] [--limit N]
           finalize --out-dir <dir>
           score    --labels <labels.jsonl|labels-t01.json> --golden <golden.json> [--gate]
+          recluster --labels <labels-tNN.json> --vectors <vectors-eNN.bin> [--k 200] [--iterations 8]
+                    [--min-size 25] [--max-purity 0.35] [--min-cohesion 0.55] --out <report.json>  (DT-F weekly)
 
         """.utf8))
     }
@@ -75,6 +79,45 @@ enum Commands {
         var entries: [WLEntry] = []
 
         switch args["--mode"] ?? "discover" {
+        // DT-F — the daily freshness pass: titles released since `--since` that clear the vote floor and are
+        // NOT already in the published labels.
+        //
+        // Uses `discover` with a release-date window rather than `/movie/changes`. `/changes` is a firehose of
+        // ids with no vote or date signal, so it costs one detail lookup PER id just to discover that almost
+        // all of them are below the floor. A dated `vote_count.desc` slice selects the same titles in a few
+        // paged calls. The trade: a re-release or a late metadata fix on an OLD title won't be picked up —
+        // acceptable, because `assemble` re-reads whatever is in the worklist and a periodic full pass covers
+        // drift, whereas paying per-id daily does not scale.
+        case "delta":
+            let since = try args.require("--since")
+            let floor = args.int("--vote-floor") ?? 50
+            let tmdb = try TMDB.client()
+            // Titles already published are skipped: the point of a delta is to classify what is NEW, and
+            // re-running the catalogue daily is exactly the cost this pass exists to avoid.
+            var known = Set<Int>()
+            if let knownPath = args["--known"] {
+                struct KnownLabels: Decodable {
+                    struct Record: Decodable { let tmdbId: Int; let mediaType: String }
+                    let records: [Record]
+                }
+                let labels: KnownLabels = try JSON.read(knownPath)
+                known = Set(labels.records.filter { $0.mediaType == mediaType.rawValue }.map(\.tmdbId))
+            }
+            var seen = Set<Int>()
+            var page = 1
+            while page <= 500 {
+                let query = DiscoverQuery(mediaType: mediaType, voteCountGte: floor,
+                                          releaseDateGte: since, sortBy: "vote_count.desc")
+                let result = try await tmdb.discover(query, page: page)
+                for item in result.items where seen.insert(item.tmdbID.rawValue).inserted {
+                    guard !known.contains(item.tmdbID.rawValue) else { continue }
+                    entries.append(WLEntry(tmdbId: item.tmdbID.rawValue, mediaType: mediaType.rawValue))
+                }
+                if page >= result.totalPages { break }
+                page += 1
+            }
+            FileHandle.standardError.write(Data(
+                "delta: \(entries.count) new title(s) since \(since) at vote-floor \(floor) (skipped \(known.count) known)\n".utf8))
         case "export":
             let file = try args.require("--file")
             guard let text = try? String(contentsOfFile: file, encoding: .utf8) else {
@@ -705,6 +748,132 @@ enum Commands {
         let all = (try? JSON.read(path) as [PosterMeta]) ?? []
         print(JSON.line(["metadata": all.count, "withPoster": all.filter { $0.posterPath != nil }.count,
                          "sha": patched.metadataSha256 ?? "", "bytes": patched.metadataBytes ?? 0]))
+    }
+
+
+    // MARK: - recluster (DT-F weekly)
+
+    /// Cluster the shipped vectors and report groups the existing vocabulary does NOT explain — candidate
+    /// emergent subgenres for the review queue.
+    ///
+    /// The signal is **label purity**: for each cluster, how dominant its most common existing label is. A
+    /// tight cluster whose members share no label is the interesting case — the embedding found a coherent
+    /// group the taxonomy has no word for. High-purity clusters are just "Heist" rediscovering itself and
+    /// are dropped.
+    ///
+    /// Reports, never edits. A cluster is a hypothesis: naming it is a human judgement (and a taxonomy bump,
+    /// which under DT-F forces a whole-universe pass), so this writes candidates and stops.
+    static func recluster(_ args: Args) throws {
+        let labelsPath = try args.require("--labels")
+        let vectorsPath = try args.require("--vectors")
+        let out = try args.require("--out")
+        let k = args.int("--k") ?? 200
+        let iterations = args.int("--iterations") ?? 8
+        let minSize = args.int("--min-size") ?? 25
+        let maxPurity = Double(args["--max-purity"] ?? "") ?? 0.35
+        let minCohesion = Double(args["--min-cohesion"] ?? "") ?? 0.55
+
+        let labels: LabelsArtifact = try JSON.read(labelsPath)
+        let blob = try Data(contentsOf: URL(fileURLWithPath: vectorsPath))
+        guard blob.count >= 8 else { throw ToolError(message: "vectors blob too small") }
+        let count = Int(blob.withUnsafeBytes { Int32(littleEndian: $0.loadUnaligned(fromByteOffset: 0, as: Int32.self)) })
+        let dim = Int(blob.withUnsafeBytes { Int32(littleEndian: $0.loadUnaligned(fromByteOffset: 4, as: Int32.self)) })
+        guard count == labels.records.count, dim > 0, blob.count == 8 + count * dim else {
+            throw ToolError(message: "vectors blob (\(count)×\(dim)) doesn't match labels (\(labels.records.count))")
+        }
+
+        // Unit-normalized Doubles once: k-means runs `iterations × k × count` dot products, so paying the
+        // conversion per access would dominate the run.
+        var rows = [[Double]](repeating: [], count: count)
+        blob.withUnsafeBytes { raw in
+            let base = raw.baseAddress!.advanced(by: 8).assumingMemoryBound(to: Int8.self)
+            for i in 0..<count {
+                var v = [Double](repeating: 0, count: dim)
+                var norm = 0.0
+                for d in 0..<dim { let x = Double(base[i * dim + d]); v[d] = x; norm += x * x }
+                if norm > 0 { let inv = 1 / norm.squareRoot(); for d in 0..<dim { v[d] *= inv } }
+                rows[i] = v
+            }
+        }
+
+        // Deterministic seeding: stride-sample rather than random, so a weekly run is comparable to the last
+        // one instead of reshuffling every cluster id.
+        let stride = Swift.max(1, count / Swift.max(k, 1))
+        var centroids: [[Double]] = (0..<k).compactMap { i in
+            let idx = i * stride
+            return idx < count ? rows[idx] : nil
+        }
+        guard !centroids.isEmpty else { throw ToolError(message: "no centroids — is the corpus empty?") }
+
+        var assignment = [Int](repeating: 0, count: count)
+        for _ in 0..<iterations {
+            for i in 0..<count {
+                var best = 0
+                var bestScore = -Double.greatestFiniteMagnitude
+                for (c, centroid) in centroids.enumerated() {
+                    var dot = 0.0
+                    for d in 0..<dim { dot += rows[i][d] * centroid[d] }
+                    if dot > bestScore { bestScore = dot; best = c }
+                }
+                assignment[i] = best
+            }
+            var sums = [[Double]](repeating: [Double](repeating: 0, count: dim), count: centroids.count)
+            var counts = [Int](repeating: 0, count: centroids.count)
+            for i in 0..<count {
+                let c = assignment[i]
+                counts[c] += 1
+                for d in 0..<dim { sums[c][d] += rows[i][d] }
+            }
+            for c in 0..<centroids.count where counts[c] > 0 {
+                var norm = 0.0
+                for d in 0..<dim { norm += sums[c][d] * sums[c][d] }
+                if norm > 0 { let inv = 1 / norm.squareRoot(); for d in 0..<dim { sums[c][d] *= inv } }
+                centroids[c] = sums[c]
+            }
+        }
+
+        struct Candidate: Codable {
+            let cluster: Int
+            let size: Int
+            let dominantLabel: String?
+            let purity: Double
+            /// Mean cosine of members to their centroid. This is the discriminator: low purity ALONE just
+            /// finds grab-bags (and at a coarse k, nearly every cluster is one). Low purity plus HIGH
+            /// cohesion is the interesting case — a tight group the vocabulary has no word for.
+            let cohesion: Double
+            let examples: [String]
+        }
+        var members = [[Int]](repeating: [], count: centroids.count)
+        for i in 0..<count { members[assignment[i]].append(i) }
+
+        var candidates: [Candidate] = []
+        for (cluster, idxs) in members.enumerated() where idxs.count >= minSize {
+            var tally: [String: Int] = [:]
+            for i in idxs {
+                for lc in labels.records[i].subgenres { tally[lc.label, default: 0] += 1 }
+            }
+            let dominant = tally.max { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key }
+            let purity = Double(dominant?.value ?? 0) / Double(idxs.count)
+            guard purity <= maxPurity else { continue }   // already explained by an existing label
+            var cohesionSum = 0.0
+            for i in idxs {
+                var dot = 0.0
+                for d in 0..<dim { dot += rows[i][d] * centroids[cluster][d] }
+                cohesionSum += dot
+            }
+            let cohesion = cohesionSum / Double(idxs.count)
+            guard cohesion >= minCohesion else { continue }   // loose grab-bag, not an emergent group
+            candidates.append(Candidate(
+                cluster: cluster, size: idxs.count, dominantLabel: dominant?.key, purity: purity,
+                cohesion: cohesion,
+                examples: idxs.prefix(8).map { "\(labels.records[$0].mediaType):\(labels.records[$0].tmdbId)" }))
+        }
+        // Tightest first: cohesion is what makes a candidate worth a human's time, not raw size.
+        candidates.sort { $0.cohesion != $1.cohesion ? $0.cohesion > $1.cohesion : $0.cluster < $1.cluster }
+        try JSON.write(candidates, to: out)
+        let summary = "recluster: \(candidates.count) emergent candidate(s) of \(centroids.count) clusters "
+            + "(size >= \(minSize), purity <= \(maxPurity)) -> \(out)\n"
+        FileHandle.standardError.write(Data(summary.utf8))
     }
 
     // score — labels vs the golden set: primary-genre accuracy, multi-label F1, per-family precision. The
