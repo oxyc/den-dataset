@@ -24,10 +24,17 @@
 # PLOT_CAP is set to fit MAX_TOKENS, and `embed-corpus` refuses outright if it does not — den-embed
 # truncates server-side and says nothing, so a document longer than the cap loses its tail invisibly.
 #
-# 1500 IS a reduction, and a large one. The shipped corpus was embedded from uncapped plots (it predates
-# the commit that added capping by four hours; the Python service's own 8000-char cap hit 0.8% of titles),
-# so a re-embed at these defaults truncates 61.5% of titles to 56% of their plot text. Summarise the plots
-# first if you care about the third act — PLOT_CAP then bounds a summary rather than amputating a plot.
+# DEFAULTS ARE 1024/3500, NOT 512/1500. The shipped corpus was embedded from uncapped plots (it predates
+# the commit that added capping by four hours, against the Python service, which had no token cap at all).
+# Plot is ~87% of the composed document, so the cap is most of what the vector sees. Per title: at 512
+# tokens ~61% of titles are truncated and keep ~73% of their plot; at 1024 only ~21% are, keeping ~97%.
+# The cost is wall-clock — max_request_tokens is 8192, so CHUNK drops to 7 and the run takes ~2-3x longer.
+#
+# Do NOT summarise plots to fit a smaller budget: a ~1200-char summary compresses harder than the
+# truncation it replaces, cannot carry the proper nouns a dense retriever matches on, and is an
+# abridgement under CC BY-SA. The arc signal is already in the Themes: clause (never truncated) and in
+# the premise index.
+
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 # shellcheck source=scripts/lib/den-env.sh
@@ -37,7 +44,7 @@ LABELS="${1:?usage: embed-corpus-run.sh <existing labels-t02.json>}"
 OUT_DIR="${OUT_DIR:-out-vecnow}"
 ENRICHED_DIR="${ENRICHED_DIR:-out/enriched}"
 # Docs per /embed/batch request. Bounded by den-embed's max_request_tokens (8192) against MAX_TOKENS per
-# doc: 8192/512 = 16, and 15 leaves a margin.
+# doc: 8192/1024 = 8, and 7 leaves a margin.
 #
 # There is deliberately NO DEN_EMBED_MAX_BATCH here. It reads like a server-side micro-batch and is not one
 # — den-embed's embed_many maps embed_one SERIALLY, so it bounds no memory whatsoever; it is purely a
@@ -45,12 +52,12 @@ ENRICHED_DIR="${ENRICHED_DIR:-out/enriched}"
 # sending 15 docs meant every single request was rejected, and Transport treats 413 as definitive, so the
 # whole-corpus re-embed failed on its first flush having written nothing. MAX_TOKENS is the actual memory
 # bound, because inference is one document at a time.
-CHUNK="${CHUNK:-15}"
-MAX_TOKENS="${MAX_TOKENS:-512}"
+CHUNK="${CHUNK:-7}"
+MAX_TOKENS="${MAX_TOKENS:-1024}"
 # The plot cap must fit MAX_TOKENS or den-embed truncates the document server-side and says nothing — see
 # `assertDocFits`, which refuses rather than letting that happen. 1500 also matches what `assemble` composes,
 # which matters because both append to the same store.
-PLOT_CAP="${PLOT_CAP:-1500}"
+PLOT_CAP="${PLOT_CAP:-3500}"
 SEGMENT="${SEGMENT:-5000}"            # titles per den-embed lifetime, then restart it fresh
 IMAGE="${DEN_EMBED_IMAGE:-ghcr.io/oxyc/den-embed:latest}"
 RUNTIME="${DEN_EMBED_RUNTIME:-podman}"

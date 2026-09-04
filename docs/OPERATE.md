@@ -31,14 +31,39 @@ queried through the current one — that is a real, known violation, and the onl
 
 Both TMDB and Wikipedia are hit live; `den-embed` must be running for step 5 (not for plot-finding).
 
-**A re-embed at the defaults is NOT neutral.** The shipped corpus was embedded from uncapped plots: its
-`builtAt` is 2026-07-05T07:22:47Z and the commit that introduced plot capping (8f93235) was authored four
-hours later, so the code that built it read `plot = title.hasWikiPlot ? title.overview : ""`. The Python
-service's MAX_CHARS of 8000 truncated only 0.8% of titles. Median plot is 2,537 chars, p95 is 4,882.
+**Re-embed at `DEN_EMBED_MAX_TOKENS=1024` and `--plot-cap 3500`, not at the defaults.**
 
-Re-embedding at the 512-token default therefore truncates 61.5% of titles and keeps 56% of the plot text —
-losing the third act, where late genre pivots live. Summarise the plots first (see below) rather than
-letting the cap cut them: a summary compresses the whole arc, a truncation keeps only the opening.
+The shipped corpus was embedded from uncapped plots: its `builtAt` is 2026-07-05T07:22:47Z and the commit
+that introduced plot capping (8f93235) was authored four hours later, so the code that built it read
+`plot = title.hasWikiPlot ? title.overview : ""`. It ran against the PYTHON service, five weeks before the
+Rust rewrite, and that service had no token cap at all — only `MAX_CHARS`, ~0.8% of titles at its 8000
+default (the runtime value is unverified; `out/embed-corpus*.out` show 5000/6000/2000 on other runs).
+
+Plot is 87% of the composed document by length (median 93%), so the cap matters. Per title, which is what
+retrieval sees:
+
+| | titles truncated | plot text kept, per title |
+|---|---:|---:|
+| 512 tokens (default) | ~61% | ~73% (median 72%) |
+| **1024 tokens** | **~21%** | **~97% (median 100%)** |
+
+At 1024 tokens 79% of plots survive uncut, memory peaks ~1219 MB against the 1536 MB limit, and the only
+real cost is wall-clock: `max_request_tokens` is 8192, so `CHUNK` drops from 15 to ~7 and the run takes
+roughly 2-3x as long. That is the right trade.
+
+Do NOT summarise the plots to fit a smaller budget. It was considered and rejected: a ~1,200-char summary
+compresses harder than a 1,844-char truncation (30% of plots are already shorter than the summary target,
+and 39% survive truncation uncut), it cannot carry the ~25 distinct proper nouns a median plot uses and a
+dense retriever matches on, and a sentence-length synopsis of a Wikipedia plot is an abridgement under
+CC BY-SA where the premise tags were deliberately kept terse to avoid exactly that. The arc-level signal is
+already covered twice over — the `Themes:` clause precedes `Plot:` and is never truncated, and the premise
+index (DT-H) is the primary "More Like This" signal, having beaten raw plot 12/8 on premise discrimination.
+
+**Re-embed `vectors-premise.bin` in the same pass.** It is bge-m3 too, so the epoch change applies to it
+identically, and the premise tag strings are frozen on disk (`out-t02/premise-tags-wip/`) — zero LLM cost.
+
+**Deploy the env with the corpus.** `maxTokens` is part of the embedder identity, so the serving box must
+run `DEN_EMBED_MAX_TOKENS=1024` permanently or the manifest and the service will disagree.
 
 `embed-corpus` still refuses when a plot cap would not fit the service's token cap, because den-embed
 truncates server-side and says nothing. Its ceiling is 1024 tokens (peak RSS 1219 MB against a 1536 MB

@@ -567,24 +567,17 @@ enum Commands {
     /// no error, no field in the response. So a producer that composes documents longer than the service
     /// will embed loses their tails silently, across the whole corpus.
     ///
-    /// What the SHIPPED corpus actually used, established from the timestamps rather than the current
-    /// defaults (two earlier versions of this comment got it wrong in both directions): `dataset.meta.json`
-    /// records builtAt 2026-07-05T07:22:47Z, and 8f93235 — the commit that introduced plot capping at all —
-    /// was authored 11:40:55Z, four hours LATER. At its parent the line reads
-    /// `let plot = title.hasWikiPlot ? title.overview : ""`. Uncapped. The Python service's own MAX_CHARS
-    /// defaulted to 8000, which truncated 0.8% of titles.
+    /// What the SHIPPED corpus actually used, established from timestamps rather than current defaults
+    /// (three earlier versions of this comment got it wrong in every direction): `dataset.meta.json` records
+    /// builtAt 2026-07-05T07:22:47Z, and 8f93235 — the commit that introduced plot capping at all — was
+    /// authored 11:40:55Z, four hours LATER. At its parent, BOTH producers read
+    /// `let plot = title.hasWikiPlot ? title.overview : ""`. It ran against the Python service, five weeks
+    /// before the Rust rewrite, and that service had no token cap whatsoever.
     ///
-    /// So the corpus was embedded from essentially whole plots (median 2,537 chars, p95 4,882), and a
-    /// re-embed at the 512-token default truncates 61.5% of titles, keeping 56% of the plot text. That is
-    /// a real loss of the third act, which is where late genre pivots live — hence the summarisation pass:
-    /// compressing the whole arc preserves what truncating the tail destroys.
-    ///
-    /// The cap is still real: den-embed's ceiling is 1024 tokens because measured peak RSS is 1219 MB there
-    /// and 1598 MB at 2048, against a 1536 MB limit. A producer that wants longer documents has to lower
-    /// its plot cap or raise the service's — and be told which, rather than discovering it in the vectors.
-    ///
-    /// ~4 chars per token for English prose. Compared against the configured cap rather than a sampled
-    /// document on purpose: the answer must not depend on which title happens to be first.
+    /// Plot is ~87% of the composed document by length, so this cap is most of what the vector sees. Per
+    /// title: at 512 tokens ~61% of titles truncate, keeping ~73% of their plot; at 1024 only ~21% do,
+    /// keeping ~97%. Hence the 1024/3500 defaults in embed-corpus-run.sh — NOT summarisation, which
+    /// compresses harder than the truncation it replaces and drops the proper nouns retrieval matches on.
     static func assertDocFits(plotCap: Int, embedder: DenEmbedClient.Identity) throws {
         guard embedder.maxTokens > 0 else { return }   // a service too old to report it
         let factsAndTags = 500          // the composed doc's non-plot half
