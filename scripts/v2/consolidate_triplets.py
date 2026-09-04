@@ -94,6 +94,15 @@ def main():
 
     with open(os.path.join(JUDGE, 'truth.json'), encoding='utf-8') as fh:
         truth = json.load(fh)
+    # Which mining slot proposed each positive. `near` candidates come from keyword
+    # similarity, which correlates with plot-surface similarity, so an index result that
+    # holds only on `near` positives is partly the miner talking. Carried through so the
+    # scorer can split on it.
+    prov_path = os.path.join(V2, 'ruler', 'gen', 'provenance.json')
+    provenance = {}
+    if os.path.exists(prov_path):
+        with open(prov_path, encoding='utf-8') as fh:
+            provenance = json.load(fh)
 
     passes, problems, violations = [], {}, {}
     for p in range(1, args.passes + 1):
@@ -127,9 +136,17 @@ def main():
         by_slot_total[pos_slot] += 1
         if n >= args.min_confirm:
             by_slot[pos_slot] += 1
+            prov = provenance.get(t['anchor'], {})
+            if t['positive'] in prov.get('near', ()):
+                source = 'near'
+            elif t['positive'] in prov.get('decoy', ()):
+                source = 'decoy'
+            else:
+                source = None
             kept.append({
                 'id': cid, 'anchor': t['anchor'],
                 'positive': t['positive'], 'negative': t['negative'],
+                'positiveSource': source,
                 'confirms': n,
                 'half': half(t['anchor']),
                 'reasons': [rows[cid][pos_slot]['reason'] for rows in passes],
@@ -152,8 +169,8 @@ def main():
         'minConfirm': args.min_confirm,
         'passes': args.passes,
     }
-    split_counts = collections.Counter(t['half'] for t in kept)
-    meta['split'] = dict(split_counts)
+    meta['split'] = dict(collections.Counter(t['half'] for t in kept))
+    meta['positiveSource'] = dict(collections.Counter(str(t['positiveSource']) for t in kept))
 
     with open(args.out, 'w', encoding='utf-8') as fh:
         json.dump({'meta': meta, 'triplets': kept}, fh)

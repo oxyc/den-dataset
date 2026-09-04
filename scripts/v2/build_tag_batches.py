@@ -17,6 +17,7 @@ vocabulary and you have hidden the drift rather than fixed it.
 import argparse
 import json
 import os
+import sys
 
 CORPUS = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2/corpus/wikiplot-corpus.jsonl'
 V2 = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'
@@ -37,9 +38,25 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--per-batch', type=int, default=40)
     ap.add_argument('--passes', type=int, default=3)
-    ap.add_argument('--scope', choices=['all', 'shipped'], default='all')
+    ap.add_argument('--scope', choices=['all', 'shipped', 'ruler'], default='all')
+    ap.add_argument('--triplets', default=os.path.join(V2, 'ruler', 'triplets-final.json'))
     ap.add_argument('--out-dir', default=os.path.join(V2, 'tags-v2'))
     args = ap.parse_args()
+
+    # `ruler` scope: only the titles the premise ruler actually grades. Scoring a triplet
+    # needs a vector for all three of its titles in the arm's own tag space, so a v2 index
+    # covering a random 10% of the corpus would grade almost no complete triplet (0.1% of
+    # them) and answer nothing. Tagging the ruler's own titles buys 100% triplet coverage
+    # for a fraction of the run, which is what makes a v1-vs-v2 verdict reachable at all.
+    # It is NOT a shippable index — that still needs the full 38,460 — and the percentile
+    # metrics must then be computed against a matched subset for both arms, since a smaller
+    # distractor pool flatters every rank.
+    wanted = None
+    if args.scope == 'ruler':
+        with open(args.triplets, encoding='utf-8') as fh:
+            wanted = set()
+            for t in json.load(fh)['triplets']:
+                wanted.update((t['anchor'], t['positive'], t['negative']))
 
     rows = []
     with open(CORPUS, encoding='utf-8') as fh:
@@ -47,7 +64,12 @@ def main():
             r = json.loads(line)
             if args.scope == 'shipped' and not r['shipped']:
                 continue
+            if wanted is not None and r['key'] not in wanted:
+                continue
             rows.append(r)
+    if wanted is not None and len(rows) != len(wanted):
+        sys.exit(f'{len(wanted) - len(rows)} ruler titles are not in the wiki-plot corpus — '
+                 'a title without a wiki plot must never be tagged')
     rows.sort(key=lambda r: (r['mediaType'], r['tmdbId']))
 
     clamped = 0
@@ -79,7 +101,9 @@ def main():
         os.makedirs(os.path.join(pdir, 'out'), exist_ok=True)
         for i, b in enumerate(batches):
             with open(os.path.join(pdir, 'in', f'batch-{i:04d}.json'), 'w', encoding='utf-8') as fh:
-                json.dump(b, fh, ensure_ascii=False)
+                # indent=1 so a batch fits one Read call; minified it exceeds the limit
+                # and every worker has to pretty-print a copy first.
+                json.dump(b, fh, ensure_ascii=False, indent=1)
         with open(os.path.join(pdir, 'manifest.json'), 'w', encoding='utf-8') as fh:
             json.dump(manifest, fh)
 

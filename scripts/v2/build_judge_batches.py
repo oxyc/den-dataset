@@ -122,7 +122,9 @@ def main():
         os.makedirs(os.path.join(pdir, 'out'), exist_ok=True)
         for i, b in enumerate(batches):
             with open(os.path.join(pdir, 'in', f'batch-{i:04d}.json'), 'w', encoding='utf-8') as fh:
-                json.dump(b, fh, ensure_ascii=False)
+                # indent=1 so a batch fits one Read call; minified it exceeds the limit
+                # and every worker has to pretty-print a copy first.
+                json.dump(b, fh, ensure_ascii=False, indent=1)
         with open(os.path.join(pdir, 'manifest.json'), 'w', encoding='utf-8') as fh:
             json.dump(key_manifest, fh)
 

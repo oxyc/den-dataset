@@ -228,7 +228,11 @@ def main():
 
     for i, b in enumerate(batches):
         with open(os.path.join(args.out_dir, f'batch-{i:04d}.json'), 'w', encoding='utf-8') as fh:
-            json.dump(b, fh, ensure_ascii=False)
+            # indent=1, not minified. A 340 KB batch on one line exceeds the Read tool's
+            # per-call limit, so every worker had to shell out to `jq` to pretty-print a copy
+            # before it could read its own input — a wasted round-trip on every batch. At
+            # indent=1 the same batch is ~1,400 lines and reads in a single call.
+            json.dump(b, fh, ensure_ascii=False, indent=1)
     with open(os.path.join(args.out_dir, 'manifest.json'), 'w', encoding='utf-8') as fh:
         json.dump({**manifest, 'anchorKeys': [a['anchor']['key'] for b in batches for a in b]}, fh)
     print(json.dumps(manifest, indent=2))
