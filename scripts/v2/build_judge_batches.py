@@ -79,7 +79,12 @@ def main():
             if pos['key'] not in corpus or neg['key'] not in corpus:
                 problems.setdefault(i, 'a triplet names a key absent from the corpus')
                 continue
-            triplets.append({'id': f'{key}#{len(triplets)}', 'anchor': key,
+            # The id is the anchor key, not a running index. There is exactly one triplet
+            # per anchor, so this is unique — and unlike a positional id it does not shift
+            # when a generation batch that was missing lands later. That stability is what
+            # lets judging start on the batches already done instead of waiting for all of
+            # them: a case judged now keeps its id when the phase is rebuilt.
+            triplets.append({'id': key, 'anchor': key,
                              'positive': pos['key'], 'negative': neg['key'],
                              'genPositive': pos, 'genNegative': neg})
 
