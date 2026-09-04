@@ -432,8 +432,7 @@ enum Commands {
         // different embedder than built this store, or a plot cap the service would silently truncate. The
         // repair below rewrites files, and a run that cannot do any work has no business repairing anything.
         let denEmbed = DenEmbedClient()
-        let embedder = try await recordEmbedder(outDir: outDir, client: denEmbed)
-        try assertDocFits(plotCap: plotCap, embedder: embedder)
+        let embedder = try await recordEmbedder(outDir: outDir, client: denEmbed, plotCap: plotCap)
         FileHandle.standardError.write(Data("  embedder: \(embedder.label)\n".utf8))
 
         // RESUME: append to an existing store, skipping titles already embedded. A crash (e.g. den-embed OOM)
@@ -500,10 +499,17 @@ enum Commands {
     /// quietly produced a corpus half-embedded by each, with nothing anywhere able to say so. Same reason the
     /// identity lands in the manifest: the app and den-atlas embed live queries through the service, and a
     /// corpus embedded by a different generation retrieves subtly wrong neighbours while looking healthy.
+    /// Check the service against the store, and against what this run intends to send it, BEFORE writing
+    /// anything down. Persisting the identity first meant a run that `assertDocFits` then refused had
+    /// already recorded the current service against an empty store — so following the error's own advice
+    /// (raise DEN_EMBED_MAX_TOKENS and retry) hit the mismatch guard instead, on a store with zero rows,
+    /// and the operator had to know to delete index/embedder.json by hand.
     @discardableResult
-    static func recordEmbedder(outDir: String, client: DenEmbedClient) async throws -> DenEmbedClient.Identity {
+    static func recordEmbedder(outDir: String, client: DenEmbedClient,
+                               plotCap: Int) async throws -> DenEmbedClient.Identity {
         let path = Layout.embedderIdentity(outDir)
         let now = try await client.identity()
+        try assertDocFits(plotCap: plotCap, embedder: now)
         if let previous: DenEmbedClient.Identity = try? JSON.read(path) {
             if previous != now {
                 throw ToolError(message: "this store was embedded by \(previous.label) but den-embed now "
@@ -638,7 +644,7 @@ enum Commands {
         // generations of the service into one corpus. `--embedder fnv` is the offline fallback and has no
         // service to ask.
         if embedderKind != "fnv" {
-            try assertDocFits(plotCap: plotCap, embedder: try await recordEmbedder(outDir: outDir, client: denEmbed))
+            try await recordEmbedder(outDir: outDir, client: denEmbed, plotCap: plotCap)
         }
 
         let enriched: [EnrichedDTO] = try JSON.read(Layout.enrichedBatch(outDir, batchId))
@@ -687,6 +693,12 @@ enum Commands {
         let wkConfirmed: [Int: [String]] = (try? JSON.read(Layout.wkConfirmed(outDir))) ?? [:]
         var noPrimary = 0, missingVotes = 0, droppedNoWiki = 0
 
+        // Same repair embed-corpus does, for the same reason: assemble appends to the SAME two stores, and
+        // a kill between its label write and its vector write tears them exactly the same way. Without this
+        // the next assemble appended past the tear and every row after it was permanently misaligned —
+        // finalize would refuse to ship it (so no wrong data), but once the run had added more than
+        // maxTearRepair rows the repair refuses too, and the only way out is discarding the store.
+        try reconcileStore(Layout.labelsStore(outDir), Layout.vectorsStore(outDir))
         let labelsHandle = try FileIO.appender(Layout.labelsStore(outDir))
         let vectorsHandle = try FileIO.appender(Layout.vectorsStore(outDir))
         defer { try? labelsHandle.close(); try? vectorsHandle.close() }
@@ -801,7 +813,15 @@ enum Commands {
 
         // Written by whichever command embedded the store. Absent for a corpus built before it was recorded,
         // or by the offline FNV embedder — both legitimate, so this is carried through, not required.
-        let embedder: DenEmbedClient.Identity? = try? JSON.read(Layout.embedderIdentity(outDir))
+        var embedder: DenEmbedClient.Identity? = nil
+        if FileManager.default.fileExists(atPath: Layout.embedderIdentity(outDir)) {
+            // Loudly, not `try?`: a malformed identity file silently turned the cross-check below into a
+            // no-op AND dropped the identity from the manifest, with nothing said either way.
+            do { embedder = try JSON.read(Layout.embedderIdentity(outDir)) } catch {
+                throw ToolError(message: "\(Layout.embedderIdentity(outDir)) is unreadable (\(error)) — it "
+                    + "records what embedded this store, so shipping without it would misdescribe the corpus")
+            }
+        }
         if let embedder, embedder.dims > 0, embedder.dims != dim {
             throw ToolError(message: "the store was embedded by \(embedder.label) but its vectors are "
                 + "\(dim)-dim — refusing to ship a manifest that would misdescribe them.")
@@ -896,7 +916,14 @@ enum Commands {
                 let batch = await withTaskGroup(of: PosterMeta?.self) { group -> [PosterMeta] in
                     for r in slice {
                         let id = MediaIdentifier(r.tmdbId, MediaType(rawValue: r.mediaType) ?? .movie)
-                        group.addTask { try? await client.posterMeta(id) }
+                        group.addTask {
+                            do { return try await client.posterMeta(id) } catch {
+                                // Discarding these is what made the coverage floor below undiagnosable:
+                                // it asserts TMDB is failing without having looked at a single error.
+                                Log.append(Layout.enrichLog(outDir), "metadata-miss id=\(r.tmdbId) (\(error))")
+                                return nil
+                            }
+                        }
                     }
                     var acc: [PosterMeta] = []
                     for await m in group where m != nil { acc.append(m!) }
@@ -916,16 +943,18 @@ enum Commands {
                     + "TMDB failing, not titles without posters. Nothing written; the existing sidecar and "
                     + "manifest are unchanged.")
             }
+            // Stable order. TaskGroup yields in completion order, so two identical runs produced different
+            // bytes, a different metadataSha256, and — since the app folds that into its syncKey — a forced
+            // 4.6 MB re-download on every device for a file whose contents did not change.
+            out.sort { $0.tmdbId < $1.tmdbId }
             try JSON.write(out, to: path)
         }
 
         // Patch dataset.meta.json to reference the sidecar (the server reads meta to know what blobs to serve;
         // the app folds `metadataSha256` into its syncKey so a new/updated sidecar triggers a re-sync).
         let blob = try Data(contentsOf: URL(fileURLWithPath: path))
-        var patched = meta
-        patched.metadataFile = (path as NSString).lastPathComponent
-        patched.metadataSha256 = sha256Hex(blob)
-        patched.metadataBytes = blob.count
+        let patched = meta.namingSidecar(file: (path as NSString).lastPathComponent,
+                                         sha256: sha256Hex(blob), bytes: blob.count)
         try JSON.writeMeta(patched, to: Layout.datasetMeta(outDir))
         let all = (try? JSON.read(path) as [PosterMeta]) ?? []
         print(JSON.line(["metadata": all.count, "withPoster": all.filter { $0.posterPath != nil }.count,
@@ -1237,49 +1266,6 @@ func sha256Hex(_ data: Data) -> String {
 }
 
 /// The manifest the Rust server reads (former import-dataset.mjs output). Field names are the JSON keys.
-struct DatasetMeta: Codable {
-    let datasetVersion: String
-    let taxonomyVersion: String
-    let embeddingModel: String
-    let dims: Int
-    let count: Int
-    let quantization: String
-    let labelsFile: String
-    let vectorsFile: String
-    let labelsGzFile: String
-    let labelsSha256: String
-    let labelsBytes: Int
-    let vectorsSha256: String
-    let vectorsBytes: Int
-    let builtAt: String
-    let lastModifiedHttp: String
-    // Metadata sidecar (optional; set by the `metadata` command AFTER finalize). Absent ⇒ no sidecar → the
-    // server serves labels+vectors only and the app hydrates poster cards via TMDB as before (no regression).
-    var metadataFile: String? = nil
-    var metadataSha256: String? = nil
-    var metadataBytes: Int? = nil
-    // What actually embedded this corpus, as den-embed's /health reported it during the build (see
-    // DenEmbedClient.Identity). `embeddingModel` and `dims` say "bge-m3" and 1024 for every generation of
-    // the service, so they cannot express the couplings that DO move vectors — the ORT 1.22 → 1.28 bump and
-    // the Rust rewrite's token cap. Absent means a corpus built before this was recorded.
-    var embedderRuntime: String? = nil
-    var embedderMaxTokens: Int? = nil
-
-    /// Declared explicitly, not synthesized, so `ownedKeys` cannot fall behind the struct: Swift refuses to
-    /// synthesize Codable for a stored property with no case here, so adding a field without listing it is
-    /// a compile error rather than a manifest that silently inherits a stale value for it.
-    enum CodingKeys: String, CodingKey, CaseIterable {
-        case datasetVersion, taxonomyVersion, embeddingModel, dims, count, quantization
-        case labelsFile, vectorsFile, labelsGzFile, labelsSha256, labelsBytes, vectorsSha256, vectorsBytes
-        case builtAt, lastModifiedHttp
-        case metadataFile, metadataSha256, metadataBytes
-        case embedderRuntime, embedderMaxTokens
-    }
-
-    /// The keys this struct is authoritative for — including when it omits one. Everything else in the file
-    /// belongs to a producer that is not in this repo and must survive a rewrite untouched.
-    static let ownedKeys = Set(CodingKeys.allCases.map(\.rawValue))
-}
 
 enum DateFmt {
     static func iso8601(_ date: Date) -> String {
@@ -1467,56 +1453,6 @@ struct EnrichCheckpoint: Codable {
         mutating func merge(belowFloor: Int, anime: Int, failures: Int, noOverview: Int) {
             self.belowFloor += belowFloor; self.anime += anime; self.failures += failures
             self.noOverview += noOverview
-        }
-    }
-}
-
-struct ClassifyCheckpoint: Codable {
-    /// Keyed `"movie:123"` / `"tv:123"`, because TMDB's movie and TV id namespaces OVERLAP — the same
-    /// reason `EnrichCheckpoint` is keyed that way, which this one never was.
-    ///
-    /// As a bare `Set<Int>` it made `assemble` skip any TV title whose id had already been classified as a
-    /// movie. Measured on the shipped corpus: of 7,832 enriched TV titles, 940 share an id with a shipped
-    /// movie, and **all 940 are missing** from the index — against a 43.5% baseline drop rate for the
-    /// rest. Buffy, Doctor Who, Star Trek, Avatar: The Last Airbender, Cheers. Every one was enriched, with
-    /// the TMDB, Wikidata and Wikipedia calls paid for, and then silently never classified. `finalize`'s
-    /// de-dup key was already media-qualified, so this was the only place at fault.
-    var done: Set<String> = []
-    /// Set when the file on disk was the legacy bare-Int form. Those ints cannot be re-qualified from the
-    /// checkpoint alone — nothing recorded which media each belonged to — so `assemble` rebuilds the set
-    /// from the labels store, which does, and rewrites the checkpoint in the keyed form.
-    var needsMigration = false
-    var totals = Totals()
-
-    static func key(_ media: String, _ id: Int) -> String { "\(media):\(id)" }
-
-    init() {}
-
-    /// Tolerant decode, mirroring `EnrichCheckpoint`: a legacy `[Int]` still loads rather than resetting
-    /// progress to empty and re-classifying (and re-embedding) the whole out-dir.
-    init(from decoder: any Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        if let keyed = try? c.decode(Set<String>.self, forKey: .done) {
-            done = keyed
-        } else {
-            _ = try c.decode(Set<Int>.self, forKey: .done)   // legacy; rebuilt from the store, not from this
-            needsMigration = true
-        }
-        totals = try c.decodeIfPresent(Totals.self, forKey: .totals) ?? Totals()
-    }
-
-    func encode(to encoder: any Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(done, forKey: .done)
-        try c.encode(totals, forKey: .totals)
-    }
-
-    enum CodingKeys: String, CodingKey { case done, totals }
-
-    struct Totals: Codable {
-        var noPrimary = 0, missingVotes = 0
-        mutating func merge(noPrimary: Int, missingVotes: Int) {
-            self.noPrimary += noPrimary; self.missingVotes += missingVotes
         }
     }
 }

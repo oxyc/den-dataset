@@ -292,3 +292,46 @@ final class RedactTests: XCTestCase {
         XCTAssertEqual(Redact.secrets(raw), raw)
     }
 }
+
+/// Two fixes that shipped with no test at all — verified: reverting either left the whole suite green.
+final class SilentEmptyDecodeTests: XCTestCase {
+
+    /// `PagedList.results` defaulting to [] turned any unexpected body — an auth error, a schema change —
+    /// into a valid EMPTY page. `worklist`'s collect loop stops after page 1, and the delta pass reports
+    /// "0 new titles" rather than failing. Silently, and every day.
+    func testAResponseWithoutResultsIsAnError() throws {
+        let decoder = JSONDecoder()
+
+        // A real page decodes.
+        XCTAssertNoThrow(try decoder.decode(
+            TMDBClient.PagedList.self,
+            from: Data(#"{"page":1,"total_pages":3,"results":[]}"#.utf8)))
+
+        // An error body is NOT a page with no titles in it.
+        XCTAssertThrowsError(try decoder.decode(
+            TMDBClient.PagedList.self,
+            from: Data(#"{"success":false,"status_message":"Invalid API key"}"#.utf8)),
+            "an auth failure must not read as an empty page")
+    }
+
+    /// Redact has two passes: the query-parameter regex, and a verbatim sweep for known secret VALUES.
+    /// The second exists for text where the key appears without its parameter name.
+    func testAKnownSecretValueIsRemovedEvenWithoutItsParameterName() {
+        setenv("TMDB_API_KEY", "verysecretkeyvalue123", 1)
+        defer { unsetenv("TMDB_API_KEY") }
+
+        let clean = Redact.secrets("auth failed for token verysecretkeyvalue123 (401)")
+
+        XCTAssertFalse(clean.contains("verysecretkeyvalue123"), "the verbatim pass did not run: \(clean)")
+        XCTAssertTrue(clean.contains("401"), "the diagnosis must survive")
+    }
+
+    /// A short value is not swept verbatim — matching a 3-character secret would redact ordinary words and
+    /// destroy the diagnostic instead of protecting anything.
+    func testAnImplausiblyShortSecretIsNotSweptVerbatim() {
+        setenv("TMDB_API_KEY", "abc", 1)
+        defer { unsetenv("TMDB_API_KEY") }
+
+        XCTAssertEqual(Redact.secrets("abcdef is fine"), "abcdef is fine")
+    }
+}

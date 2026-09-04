@@ -177,7 +177,9 @@ public final class TMDBClient: Sendable {
 
     // MARK: - Wire
 
-    private struct PagedList: Decodable {
+    /// Internal, not private: `results` being REQUIRED is the guard that stops an error body decoding as
+    /// an empty page, and it shipped with nothing pinning it.
+    struct PagedList: Decodable {
         let page: Int
         let totalPages: Int
         let results: [ListRow]
@@ -194,7 +196,7 @@ public final class TMDBClient: Sendable {
         }
     }
 
-    private struct ListRow: Decodable {
+    struct ListRow: Decodable {
         let id: Int
         let releaseDate: String?   // movie
         let firstAirDate: String?  // tv
