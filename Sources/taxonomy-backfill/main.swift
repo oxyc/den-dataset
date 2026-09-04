@@ -759,8 +759,10 @@ enum Commands {
         let vectorsHandle = try FileIO.appender(Layout.vectorsStore(outDir))
         defer { try? labelsHandle.close(); try? vectorsHandle.close() }
 
-        // Embeds are BATCHED (den-embed /embed/batch). The old per-title `embedInt8` was a network round-trip
-        // each (~1/s → ~14h for the corpus); a chunked batch does the whole group at once (~20-30min). A title
+        // Embeds are BATCHED (den-embed /embed/batch). The old per-title `embedInt8` paid a network round-trip
+        // each (~1/s → ~14h for the corpus); a chunked batch removes that overhead — but NOT the inference
+        // cost, because den-embed's `embed_many` maps `embed_one` serially. At its measured ~0.33s/512
+        // tokens the floor for a full corpus is ~4-5h, not the "~20-30min" this comment used to claim. A title
         // is only marked done once its vector is actually flushed, so a crash never checkpoints an unwritten row.
         let denEmbedChunk = args.int("--chunk") ?? 8   // small: bge-m3 attention is O(batch·seq²) — big batches of
                                                        // long docs spike den-embed RAM (swap-thrash). Keep it low.
