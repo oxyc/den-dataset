@@ -26,6 +26,7 @@ LOG="$OUT_DIR/enrich-$MEDIA.log"
 den_load_env || exit 1
 [ -f "$WORKLIST" ] || { echo "missing $WORKLIST — run scripts/build-worklist.py"; exit 1; }
 
+mkdir -p "$OUT_DIR"     # the tee below writes into it before anything else does
 swift build -c release >/dev/null
 BIN=.build/release/taxonomy-backfill
 

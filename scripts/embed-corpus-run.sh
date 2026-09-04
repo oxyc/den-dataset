@@ -34,11 +34,17 @@ cd "$(dirname "$0")/.." || exit 1
 LABELS="${1:?usage: embed-corpus-run.sh <existing labels-t02.json>}"
 OUT_DIR="${OUT_DIR:-out-vecnow}"
 ENRICHED_DIR="${ENRICHED_DIR:-out/enriched}"
-# 15, not 16: den-embed rejects a request whose total exceeds max_request_tokens (8192), and 16 x 512 is
-# exactly 8192 — one token of slack from a 413, which Transport treats as definitive and does not retry.
-CHUNK="${CHUNK:-15}"                  # docs per den-embed request (client side)
-EMBED_BATCH="${EMBED_BATCH:-8}"       # docs the model processes at once (server) — bge-m3 attention is O(seq^2),
-MAX_TOKENS="${MAX_TOKENS:-512}"       # so bound BOTH the batch and the doc length to cap activation memory.
+# Docs per /embed/batch request. Bounded by den-embed's max_request_tokens (8192) against MAX_TOKENS per
+# doc: 8192/512 = 16, and 15 leaves a margin.
+#
+# There is deliberately NO DEN_EMBED_MAX_BATCH here. It reads like a server-side micro-batch and is not one
+# — den-embed's embed_many maps embed_one SERIALLY, so it bounds no memory whatsoever; it is purely a
+# rejection threshold, returning 413 when a request carries more texts than it allows. Setting it to 8 while
+# sending 15 docs meant every single request was rejected, and Transport treats 413 as definitive, so the
+# whole-corpus re-embed failed on its first flush having written nothing. MAX_TOKENS is the actual memory
+# bound, because inference is one document at a time.
+CHUNK="${CHUNK:-15}"
+MAX_TOKENS="${MAX_TOKENS:-512}"
 # The plot cap must fit MAX_TOKENS or den-embed truncates the document server-side and says nothing — see
 # `assertDocFits`, which refuses rather than letting that happen. 1500 also matches what `assemble` composes,
 # which matters because both append to the same store.
@@ -64,9 +70,9 @@ stop_embed() { "$RUNTIME" rm -f "$NAME" >/dev/null 2>&1 || true; }
 
 boot_embed() {
   stop_embed
-  echo "booting fresh den-embed ($IMAGE, batch=$EMBED_BATCH max_tokens=$MAX_TOKENS) …"
+  echo "booting fresh den-embed ($IMAGE, max_tokens=$MAX_TOKENS) …"
   "$RUNTIME" run -d --rm --name "$NAME" \
-    -e DEN_EMBED_MAX_BATCH="$EMBED_BATCH" -e DEN_EMBED_MAX_TOKENS="$MAX_TOKENS" \
+    -e DEN_EMBED_MAX_TOKENS="$MAX_TOKENS" \
     -e DEN_EMBED_HOST=0.0.0.0 \
     -p "127.0.0.1:$PORT:8080" "$IMAGE" >/dev/null 2>>"$EMBED_LOG" || {
       echo "could not start $IMAGE (see $EMBED_LOG)"; return 1; }
@@ -90,9 +96,19 @@ BIN=.build/release/taxonomy-backfill
 trap stop_embed EXIT
 fails=0
 MAX_FAILS="${MAX_FAILS:-6}"
+: > "$ERR_LOG"    # fresh per run, so `tail` below cannot report a previous run's failure as this one's
 
 for attempt in $(seq 1 200); do
-  boot_embed || { stop_embed; sleep 5; continue; }
+  if ! boot_embed; then
+    # Counts against MAX_FAILS like any other failure. It did not, so the cap bounded only embed-corpus's
+    # own refusals while a container that boots but never serves still burned 200 x 40 probes — the very
+    # seven-hour no-op the cap was added to end.
+    fails=$((fails + 1))
+    stop_embed
+    [ "$fails" -ge "$MAX_FAILS" ] && { echo "$MAX_FAILS consecutive boot failures — stopping"; exit 1; }
+    sleep $((fails * 15))
+    continue
+  fi
   # One segment: embed up to SEGMENT new titles, then exit so den-embed can be recycled.
   out=$("$BIN" embed-corpus --labels "$LABELS" --enriched-dir "$ENRICHED_DIR" --out-dir "$OUT_DIR" \
         --chunk "$CHUNK" --plot-cap "$PLOT_CAP" --limit "$SEGMENT" 2>>"$ERR_LOG") || {
@@ -120,6 +136,10 @@ for attempt in $(seq 1 200); do
     echo "=== all titles embedded → finalizing ==="
     stop_embed
     "$BIN" finalize --out-dir "$OUT_DIR" || { echo "finalize failed — nothing published"; exit 1; }
+    # finalize just minted a new datasetVersion, and the sidecar's filename carries it. This is the only
+    # finalize in the repo that runs with no operator present, so it is the one that most needs the step
+    # the runbook spells out — without it the manifest names the previous version's sidecar.
+    "$BIN" metadata --out-dir "$OUT_DIR" || { echo "metadata failed — do not publish this out-dir"; exit 1; }
     exit 0
   fi
 done

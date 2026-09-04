@@ -41,7 +41,8 @@ alignment that matters still holds: queries go through the same service.
 # 0. Boot the embedding service. Run the PUBLISHED CONTAINER, not a local build — the model is pinned inside
 #    the image, so the corpus is embedded by exactly the runtime that serves queries. (The old `bash run.sh`
 #    here booted a Python service that was deleted in the Rust rewrite at 5cf9e72.)
-podman run --rm -p 127.0.0.1:8791:8080 -e DEN_EMBED_HOST=0.0.0.0 ghcr.io/oxyc/den-embed:latest
+podman run -d --rm --name den-embed -p 127.0.0.1:8791:8080 -e DEN_EMBED_HOST=0.0.0.0 \
+    ghcr.io/oxyc/den-embed:latest     # -d: the remaining steps run in this same terminal
 #    Health is a CONSTANT — it answers ok while the model is missing and every /embed 500s. Probe the real
 #    thing instead:
 #    curl -fsS -H 'content-type: application/json' -d '{"text":"probe"}' localhost:8791/embed | head -c 80
@@ -50,6 +51,7 @@ podman run --rm -p 127.0.0.1:8791:8080 -e DEN_EMBED_HOST=0.0.0.0 ghcr.io/oxyc/de
 
 # 1. Secrets — copy the template and fill it (gitignored via *.env). The run wrapper sources this.
 cd ~/Projects/Personal/den-dataset
+swift build -c release && BIN=.build/release/taxonomy-backfill
 cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterprise username/password (optional)
 
 # 2. Worklist — the universe, ORDERED popularity-desc so we process the titles most likely to have a

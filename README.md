@@ -13,10 +13,11 @@ corpus and query vectors are comparable. The offline FNV embedder remains as a `
 
 ## Layout
 
-- `Sources/DenDataset/` — the library: the calibrated `TaxonomyClassifier`, the `t01` `Taxonomy`, the
+- `Sources/DenDataset/` — the library: the calibrated `TaxonomyClassifier`, the `t02` `Taxonomy`, the
   `TaxonomyScorer` + `GoldenSet`, the `HashingEmbedder` + `Quantizer`, the format + producer model types, the
   baked `GroundingKeywords` map, and a thin `TMDBClient` (two endpoints only).
-- `Sources/taxonomy-backfill/` — the CLI that drives the 7 resumable phases.
+- `Sources/taxonomy-backfill/` — the CLI that drives the resumable phases (`worklist`, `enrich`,
+  `enrich-ids`, `escalation`, `assemble`, `embed-corpus`, `finalize`, `metadata`, `score`, `recluster`).
 - `Tests/DenDatasetTests/` — golden (embedder/quantizer determinism), conformance (artifact format), and a
   fixture-based end-to-end smoke test (no TMDB, no network).
 

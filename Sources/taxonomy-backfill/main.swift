@@ -54,10 +54,17 @@ struct TaxonomyBackfill {
           worklist --mode discover|export|delta --media movie|tv [--count N] [--vote-floor 50] [--file export.json] --out <path>
                    delta:  --since YYYY-MM-DD [--known <labels-tNN.json>]   (DT-F daily freshness pass)
           enrich   --worklist <path> [--vote-floor 50] [--limit 150] --out-dir <dir>
+          enrich-ids --ids <a,b,c> --media movie|tv --out-dir <dir>   (targeted re-enrich)
           escalation --batch-id <n> --out-dir <dir>   (after pass 1: emit titles needing n=3)
           assemble --batch-id <n> --out-dir <dir>
-          embed-corpus --labels <existing labels-t02.json> --out-dir <dir> [--enriched-dir <dir>] [--chunk 128] [--limit N]
+          embed-corpus --labels <existing labels-t02.json> --out-dir <dir> [--enriched-dir <dir>]
+                       [--chunk 15] [--plot-cap 1500] [--limit N]
+                       (--chunk is bounded by den-embed's per-request token budget: 8192 / --plot-cap's
+                        token cost. Above it every request is a 413, which is not retried.)
           finalize --out-dir <dir>
+          metadata --out-dir <dir> [--skip-fetch] [--limit N]
+                   (the poster sidecar; its filename carries the datasetVersion, so run it after EVERY
+                    finalize that changed the corpus, before publishing)
           score    --labels <labels.jsonl|labels-t02.json> --golden <golden.json> [--gate]
           recluster --labels <labels-tNN.json> --vectors <vectors-eNN.bin> [--k 200] [--iterations 8]
                     [--min-size 25] [--max-purity 0.35] [--min-cohesion 0.55] --out <report.json>  (DT-F weekly)
