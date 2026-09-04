@@ -24,10 +24,10 @@
 # PLOT_CAP is set to fit MAX_TOKENS, and `embed-corpus` refuses outright if it does not — den-embed
 # truncates server-side and says nothing, so a document longer than the cap loses its tail invisibly.
 #
-# 1500 is not a reduction: the shipped corpus was built by `assemble`, whose plot cap has been 1500 since
-# it was introduced and was never overridden, so these defaults reproduce the original document length.
-# (An earlier version of this header claimed the corpus used ~4000 — that was `embed-corpus`'s own old
-# default, for a different out-dir, and it was wrong about the shipped artifact.)
+# 1500 IS a reduction, and a large one. The shipped corpus was embedded from uncapped plots (it predates
+# the commit that added capping by four hours; the Python service's own 8000-char cap hit 0.8% of titles),
+# so a re-embed at these defaults truncates 61.5% of titles to 56% of their plot text. Summarise the plots
+# first if you care about the third act — PLOT_CAP then bounds a summary rather than amputating a plot.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 # shellcheck source=scripts/lib/den-env.sh

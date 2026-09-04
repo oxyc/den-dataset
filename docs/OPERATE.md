@@ -31,10 +31,14 @@ queried through the current one — that is a real, known violation, and the onl
 
 Both TMDB and Wikipedia are hit live; `den-embed` must be running for step 5 (not for plot-finding).
 
-A re-embed at the defaults reproduces the current documents. The shipped corpus was built by `assemble`,
-whose `--plot-cap` has been 1500 since it was introduced and was never overridden; 1500 plot chars plus
-~300 of facts is ~450 tokens, inside den-embed's 512 default. So the only difference between the old corpus
-and a new one is the ONNX Runtime version — which is exactly what `vector_epoch` records.
+**A re-embed at the defaults is NOT neutral.** The shipped corpus was embedded from uncapped plots: its
+`builtAt` is 2026-07-05T07:22:47Z and the commit that introduced plot capping (8f93235) was authored four
+hours later, so the code that built it read `plot = title.hasWikiPlot ? title.overview : ""`. The Python
+service's MAX_CHARS of 8000 truncated only 0.8% of titles. Median plot is 2,537 chars, p95 is 4,882.
+
+Re-embedding at the 512-token default therefore truncates 61.5% of titles and keeps 56% of the plot text —
+losing the third act, where late genre pivots live. Summarise the plots first (see below) rather than
+letting the cap cut them: a summary compresses the whole arc, a truncation keeps only the opening.
 
 `embed-corpus` still refuses when a plot cap would not fit the service's token cap, because den-embed
 truncates server-side and says nothing. Its ceiling is 1024 tokens (peak RSS 1219 MB against a 1536 MB

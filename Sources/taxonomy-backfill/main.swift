@@ -567,12 +567,17 @@ enum Commands {
     /// no error, no field in the response. So a producer that composes documents longer than the service
     /// will embed loses their tails silently, across the whole corpus.
     ///
-    /// For the record, since an earlier version of this comment got it wrong: the SHIPPED corpus was built
-    /// by `assemble`, whose `--plot-cap` has been 1500 since it was introduced (8f93235) and was never
-    /// overridden. 1500 plot chars plus ~300 of facts is ~450 tokens, comfortably inside the 512 default —
-    /// so re-embedding at the defaults reproduces the original document length, and the only difference
-    /// between the old corpus and a new one is the ONNX Runtime version. The 4000 figure belonged to
-    /// `embed-corpus`, a different command that built a different out-dir.
+    /// What the SHIPPED corpus actually used, established from the timestamps rather than the current
+    /// defaults (two earlier versions of this comment got it wrong in both directions): `dataset.meta.json`
+    /// records builtAt 2026-07-05T07:22:47Z, and 8f93235 — the commit that introduced plot capping at all —
+    /// was authored 11:40:55Z, four hours LATER. At its parent the line reads
+    /// `let plot = title.hasWikiPlot ? title.overview : ""`. Uncapped. The Python service's own MAX_CHARS
+    /// defaulted to 8000, which truncated 0.8% of titles.
+    ///
+    /// So the corpus was embedded from essentially whole plots (median 2,537 chars, p95 4,882), and a
+    /// re-embed at the 512-token default truncates 61.5% of titles, keeping 56% of the plot text. That is
+    /// a real loss of the third act, which is where late genre pivots live — hence the summarisation pass:
+    /// compressing the whole arc preserves what truncating the tail destroys.
     ///
     /// The cap is still real: den-embed's ceiling is 1024 tokens because measured peak RSS is 1219 MB there
     /// and 1598 MB at 2048, against a 1536 MB limit. A producer that wants longer documents has to lower
