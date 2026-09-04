@@ -31,11 +31,14 @@ queried through the current one — that is a real, known violation, and the onl
 
 Both TMDB and Wikipedia are hit live; `den-embed` must be running for step 5 (not for plot-finding).
 
-A re-embed today produces SHORTER documents than the corpus currently shipping: den-embed truncates at 512
-tokens and the Python service it replaced had no token cap. Raising it is not available — the ceiling is
-1024 tokens because peak RSS is 1219 MB there against a 1536 MB cgroup — so `--plot-cap` is lowered to fit
-instead, and `embed-corpus` refuses outright rather than letting the service cut documents silently. The
-alignment that matters still holds: queries go through the same service.
+A re-embed at the defaults reproduces the current documents. The shipped corpus was built by `assemble`,
+whose `--plot-cap` has been 1500 since it was introduced and was never overridden; 1500 plot chars plus
+~300 of facts is ~450 tokens, inside den-embed's 512 default. So the only difference between the old corpus
+and a new one is the ONNX Runtime version — which is exactly what `vector_epoch` records.
+
+`embed-corpus` still refuses when a plot cap would not fit the service's token cap, because den-embed
+truncates server-side and says nothing. Its ceiling is 1024 tokens (peak RSS 1219 MB against a 1536 MB
+limit), so a longer cap needs both settings raised together.
 
 ```sh
 # 0. Boot the embedding service. Run the PUBLISHED CONTAINER, not a local build — the model is pinned inside

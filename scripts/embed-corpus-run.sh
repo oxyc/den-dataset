@@ -21,13 +21,13 @@
 # the whole retrieval design rests on (docs/OPERATE.md) — embedding the corpus with a hand-built binary and
 # serving queries from the image is precisely how it silently breaks.
 #
-# WHAT THIS COSTS, STATED PLAINLY: the Rust service truncates at 512 tokens and the Python one it replaced
-# had no token cap, so documents re-embedded here are shorter than the ones in the corpus shipping today.
-# Raising the cap is not an option — den-embed's ceiling is 1024 tokens because peak RSS is 1219 MB there
-# and 1598 MB at 2048, against a 1536 MB cgroup. So PLOT_CAP is set to fit instead, and `embed-corpus`
-# refuses outright if it does not: a re-embed changes the corpus, and that has to be a decision rather than
-# something discovered later in the retrieval quality. The alignment that matters still holds, because
-# queries go through this same service.
+# PLOT_CAP is set to fit MAX_TOKENS, and `embed-corpus` refuses outright if it does not — den-embed
+# truncates server-side and says nothing, so a document longer than the cap loses its tail invisibly.
+#
+# 1500 is not a reduction: the shipped corpus was built by `assemble`, whose plot cap has been 1500 since
+# it was introduced and was never overridden, so these defaults reproduce the original document length.
+# (An earlier version of this header claimed the corpus used ~4000 — that was `embed-corpus`'s own old
+# default, for a different out-dir, and it was wrong about the shipped artifact.)
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 # shellcheck source=scripts/lib/den-env.sh

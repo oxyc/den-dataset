@@ -564,14 +564,19 @@ enum Commands {
     /// Refuse to compose documents the service will silently cut in half.
     ///
     /// den-embed truncates at `max_tokens` server-side, returns a normal-looking vector, and says nothing —
-    /// no error, no field in the response. The Python service it replaced had no token cap at all, so the
-    /// shipped corpus was embedded from documents of up to ~4000 plot chars while a re-embed today gets
-    /// ~2000: half of every long plot dropped, uniformly and invisibly, across the whole corpus.
+    /// no error, no field in the response. So a producer that composes documents longer than the service
+    /// will embed loses their tails silently, across the whole corpus.
     ///
-    /// Parity with the old corpus is NOT reachable by raising the cap. den-embed's ceiling is 1024 tokens
-    /// because measured peak RSS is 1219 MB there and 1598 MB at 2048, against a 1536 MB cgroup — so the cap
-    /// is real and the plot cap is what has to give. That is acceptable (the alignment that matters is
-    /// corpus versus QUERY, and both go through this service) as long as it is a decision, not a surprise.
+    /// For the record, since an earlier version of this comment got it wrong: the SHIPPED corpus was built
+    /// by `assemble`, whose `--plot-cap` has been 1500 since it was introduced (8f93235) and was never
+    /// overridden. 1500 plot chars plus ~300 of facts is ~450 tokens, comfortably inside the 512 default —
+    /// so re-embedding at the defaults reproduces the original document length, and the only difference
+    /// between the old corpus and a new one is the ONNX Runtime version. The 4000 figure belonged to
+    /// `embed-corpus`, a different command that built a different out-dir.
+    ///
+    /// The cap is still real: den-embed's ceiling is 1024 tokens because measured peak RSS is 1219 MB there
+    /// and 1598 MB at 2048, against a 1536 MB limit. A producer that wants longer documents has to lower
+    /// its plot cap or raise the service's — and be told which, rather than discovering it in the vectors.
     ///
     /// ~4 chars per token for English prose. Compared against the configured cap rather than a sampled
     /// document on purpose: the answer must not depend on which title happens to be first.
