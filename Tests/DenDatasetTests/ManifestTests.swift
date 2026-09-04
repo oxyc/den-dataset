@@ -51,15 +51,30 @@ final class ManifestTests: XCTestCase {
         XCTAssertNil(result["embedderRuntime"])
     }
 
-    func testNamingASidecarChangesOnlyTheSidecarFields() {
-        let patched = meta(embedderRuntime: "den-embed/3.0.0")
-            .namingSidecar(file: "metadata-v1.json", sha256: "cc", bytes: 9)
+    /// `namingSidecar` is a hand-written 20-argument copy, and it is the ONE place the CodingKeys
+    /// compile-time guarantee does not reach: a future field with a defaulted init parameter compiles and
+    /// is silently dropped here — the facets/premise loss class through a new door.
+    ///
+    /// So this compares the whole encoded manifest rather than spot-checking a few fields. Verified by
+    /// mutation: the five-field version passed while `namingSidecar` zeroed labelsSha256, labelsBytes,
+    /// vectorsSha256 and vectorsBytes.
+    func testNamingASidecarChangesTheSidecarFieldsAndNothingElse() throws {
+        let before = meta(embedderRuntime: "den-embed/3.0.0")
+        let after = before.namingSidecar(file: "metadata-v1.json", sha256: "cc", bytes: 9)
 
-        XCTAssertEqual(patched.metadataFile, "metadata-v1.json")
-        XCTAssertEqual(patched.metadataSha256, "cc")
-        XCTAssertEqual(patched.metadataBytes, 9)
-        XCTAssertEqual(patched.datasetVersion, "v1")
-        XCTAssertEqual(patched.embedderRuntime, "den-embed/3.0.0", "the identity must ride along untouched")
+        XCTAssertEqual(after.metadataFile, "metadata-v1.json")
+        XCTAssertEqual(after.metadataSha256, "cc")
+        XCTAssertEqual(after.metadataBytes, 9)
+
+        func fieldsOtherThanTheSidecar(_ m: DatasetMeta) throws -> [String: String] {
+            let encoded = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(m))
+            let dict = try XCTUnwrap(encoded as? [String: Any])
+            return dict
+                .filter { !["metadataFile", "metadataSha256", "metadataBytes"].contains($0.key) }
+                .mapValues { "\($0)" }
+        }
+        XCTAssertEqual(try fieldsOtherThanTheSidecar(after), try fieldsOtherThanTheSidecar(before),
+                       "namingSidecar altered or dropped a field it does not own")
     }
 }
 
@@ -123,5 +138,52 @@ final class ClassifyCheckpointTests: XCTestCase {
             #"{"done":["movie:1"],"totals":{"noPrimary":7}}"#.utf8))
         XCTAssertEqual(ck.totals.noPrimary, 7)
         XCTAssertEqual(ck.totals.missingVotes, 0)
+    }
+}
+
+extension ClassifyCheckpointTests {
+    /// The rebuild that follows a legacy load needs something to check itself against. Without the count,
+    /// an absent or truncated labels store rebuilds to nothing and `assemble` silently re-classifies and
+    /// re-embeds the whole out-dir — the exact reset the loud-checkpoint guard refuses to perform.
+    func testALegacyCheckpointCarriesItsCountForTheRebuildToCheck() throws {
+        let legacy = Data(#"{"done":[603,95,27205],"totals":{"noPrimary":0,"missingVotes":0}}"#.utf8)
+        let ck = try JSONDecoder().decode(ClassifyCheckpoint.self, from: legacy)
+
+        XCTAssertEqual(ck.legacyCount, 3)
+        XCTAssertTrue(ck.needsMigration)
+    }
+
+    func testLegacyCountNeverReachesDisk() throws {
+        var ck = ClassifyCheckpoint()
+        ck.legacyCount = 37_533
+        let keys = Set(try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: try JSONEncoder().encode(ck)) as? [String: Any]).keys)
+        XCTAssertEqual(keys, ["done", "totals"])
+    }
+}
+
+/// The sidecar's row order feeds `metadataSha256`, which the app folds into its syncKey — so an unstable
+/// order costs every device a 4.6 MB re-download of a file that did not change.
+final class SidecarOrderTests: XCTestCase {
+    /// Sorting on tmdbId ALONE is not a total order here: 940 ids in the corpus are both a movie and a
+    /// series (the titles the media-qualified checkpoint restores), and `sort` is unstable.
+    func testTheSortIsTotalAcrossCollidingIds() {
+        let rows = [
+            PosterMeta(tmdbId: 95, mediaType: "tv", title: "Buffy", posterPath: nil, year: 1997),
+            PosterMeta(tmdbId: 95, mediaType: "movie", title: "Armageddon", posterPath: nil, year: 1998),
+            PosterMeta(tmdbId: 12, mediaType: "movie", title: "Finding Nemo", posterPath: nil, year: 2003),
+        ]
+        let order: (PosterMeta, PosterMeta) -> Bool = {
+            ($0.tmdbId, $0.mediaType) < ($1.tmdbId, $1.mediaType)
+        }
+
+        // Every permutation must reach the same sequence, or the sha256 moves run to run.
+        let expected = rows.sorted(by: order).map { "\($0.tmdbId):\($0.mediaType)" }
+        for shuffle in 0..<50 {
+            _ = shuffle
+            let got = rows.shuffled().sorted(by: order).map { "\($0.tmdbId):\($0.mediaType)" }
+            XCTAssertEqual(got, expected)
+        }
+        XCTAssertEqual(expected, ["12:movie", "95:movie", "95:tv"])
     }
 }

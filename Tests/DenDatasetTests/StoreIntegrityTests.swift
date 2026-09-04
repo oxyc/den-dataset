@@ -85,14 +85,9 @@ final class StoreIntegrityTests: XCTestCase {
 
     /// The twelve keys the shipped manifest actually carries, and which a `finalize` or `metadata` re-run
     /// used to delete — taking premise search and facets down with them, silently, on both sides.
-    /// Stands in for `DatasetMeta.ownedKeys` — every key the struct is authoritative for, including the
-    /// optionals it omits when there is nothing to say.
-    private let owned: Set<String> = [
-        "datasetVersion", "taxonomyVersion", "embeddingModel", "dims", "count", "quantization",
-        "labelsFile", "vectorsFile", "labelsGzFile", "labelsSha256", "labelsBytes",
-        "vectorsSha256", "vectorsBytes", "builtAt", "lastModifiedHttp",
-        "metadataFile", "metadataSha256", "metadataBytes", "embedderRuntime", "embedderMaxTokens",
-    ]
+    /// The real thing, not a hand-copy. A 20-key literal here would drift from the struct silently, and
+    /// these tests would then pass against an `owned` set the production write never uses.
+    private let owned = DatasetMeta.ownedKeys
 
     private static let unmodelledKeys = [
         "premiseEmbeddingModel", "premiseDims", "premiseCount",

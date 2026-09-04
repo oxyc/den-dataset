@@ -95,6 +95,9 @@ public struct ClassifyCheckpoint: Codable {
     /// checkpoint alone — nothing recorded which media each belonged to — so `assemble` rebuilds the set
     /// from the labels store, which does, and rewrites the checkpoint in the keyed form.
     public var needsMigration = false
+    /// How many ids the legacy checkpoint held, for the rebuild to sanity-check itself against. Load-time
+    /// only — like `needsMigration`, it never reaches disk.
+    public var legacyCount = 0
     public var totals = Totals()
 
     public static func key(_ media: String, _ id: Int) -> String { "\(media):\(id)" }
@@ -108,7 +111,11 @@ public struct ClassifyCheckpoint: Codable {
         if let keyed = try? c.decode(Set<String>.self, forKey: .done) {
             done = keyed
         } else {
-            _ = try c.decode(Set<Int>.self, forKey: .done)   // legacy; rebuilt from the store, not from this
+            // The ids themselves are unusable as keys, but the COUNT is not: `assemble` rebuilds `done`
+            // from the labels store, and without something to compare against, a rebuild that produced
+            // nothing (an absent or emptied store) would silently re-classify and re-embed the whole
+            // out-dir. That is precisely the reset the loud-checkpoint guard refuses to do by design.
+            legacyCount = (try c.decode(Set<Int>.self, forKey: .done)).count
             needsMigration = true
         }
         totals = try c.decodeIfPresent(Totals.self, forKey: .totals) ?? Totals()

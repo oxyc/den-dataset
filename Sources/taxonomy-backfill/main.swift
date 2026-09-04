@@ -420,7 +420,10 @@ enum Commands {
         // Cap the PLOT portion (facts + tags are always kept). 4000 chars keeps the median plot whole and every
         // mid-plot genre pivot the length audit found, dropping only low-value end-of-plot twist tails — the
         // knee between similarity quality and bge-m3's O(seq^2) embedding cost.
-        let plotCap = args.int("--plot-cap") ?? 4000
+        // 1500, matching `assemble`: both append to the SAME store and must compose comparable documents,
+        // and 4000 + facts cannot fit any token cap den-embed will accept (its ceiling is 1024 tokens, so
+        // ~4096 chars). The old default was from the Python era, which had no token cap at all.
+        let plotCap = args.int("--plot-cap") ?? 1500
 
         // Lean lookup: the existing label record (tags) per (mediaType, tmdbId). No plot text held — the plots
         // are streamed one enriched batch at a time below, so peak memory stays bounded (this was the OOM bug).
@@ -509,13 +512,15 @@ enum Commands {
                                plotCap: Int) async throws -> DenEmbedClient.Identity {
         let path = Layout.embedderIdentity(outDir)
         let now = try await client.identity()
-        try assertDocFits(plotCap: plotCap, embedder: now)
+        // Identity first: on a service upgrade "this would mix two embedders" is the finding that matters,
+        // and leading with the plot-cap error sent the operator off to fix the lesser one.
         if let previous: DenEmbedClient.Identity = try? JSON.read(path) {
             if previous != now {
                 throw ToolError(message: "this store was embedded by \(previous.label) but den-embed now "
                     + "reports \(now.label) — appending would mix two embedders into one corpus. Either "
                     + "restore the previous service, or start a fresh --out-dir and re-embed from scratch.")
             }
+            try assertDocFits(plotCap: plotCap, embedder: now)
             return now
         }
         // A store with rows but no recorded identity predates this check, and adopting the CURRENT service as
@@ -530,6 +535,7 @@ enum Commands {
                 + #"{"model":"bge-m3","dims":1024,"runtime":"pre-3.0.0","maxTokens":0}"#
                 + " — or start a fresh --out-dir.")
         }
+        try assertDocFits(plotCap: plotCap, embedder: now)
         try FileIO.ensureParent(path)
         try JSON.writePretty(now, to: path)
         return now
@@ -671,6 +677,10 @@ enum Commands {
         } else {
             classified = ClassifyCheckpoint()
         }
+        // Repaired BEFORE the rebuild below reads it — embed-corpus does it in this order too. Reading
+        // first would mark rows done that the repair is about to drop, and they would never be re-embedded.
+        try reconcileStore(Layout.labelsStore(outDir), Layout.vectorsStore(outDir))
+
         // A legacy bare-Int checkpoint cannot say which media each id belonged to, so rebuild the set from
         // the labels store, which records mediaType per row. Titles that were classified but DROPPED
         // (noPrimary / no-wiki) have no store row and are re-processed once — CPU and an embed, no LLM
@@ -684,8 +694,17 @@ enum Commands {
                     }
                 }
             }
+            // The store is the only record of which media each legacy id was, so a rebuild that finds far
+            // fewer than the checkpoint claimed means the store is missing or truncated — not that the work
+            // was never done. Silently accepting it re-classifies and re-embeds the whole out-dir.
+            if rebuilt.count * 2 < classified.legacyCount {
+                throw ToolError(message: "the classify checkpoint records \(classified.legacyCount) titles "
+                    + "but only \(rebuilt.count) are in \(Layout.labelsStore(outDir)), so migrating it "
+                    + "would discard most of the run's progress. Restore the labels store, or delete the "
+                    + "checkpoint to intentionally start fresh.")
+            }
             FileHandle.standardError.write(Data(("  migrated the classify checkpoint to media-qualified "
-                + "keys (\(rebuilt.count) from the labels store)\n").utf8))
+                + "keys (\(rebuilt.count) from the labels store, was \(classified.legacyCount))\n").utf8))
             classified.done = rebuilt
             classified.needsMigration = false
         }
@@ -693,12 +712,6 @@ enum Commands {
         let wkConfirmed: [Int: [String]] = (try? JSON.read(Layout.wkConfirmed(outDir))) ?? [:]
         var noPrimary = 0, missingVotes = 0, droppedNoWiki = 0
 
-        // Same repair embed-corpus does, for the same reason: assemble appends to the SAME two stores, and
-        // a kill between its label write and its vector write tears them exactly the same way. Without this
-        // the next assemble appended past the tear and every row after it was permanently misaligned —
-        // finalize would refuse to ship it (so no wrong data), but once the run had added more than
-        // maxTearRepair rows the repair refuses too, and the only way out is discarding the store.
-        try reconcileStore(Layout.labelsStore(outDir), Layout.vectorsStore(outDir))
         let labelsHandle = try FileIO.appender(Layout.labelsStore(outDir))
         let vectorsHandle = try FileIO.appender(Layout.vectorsStore(outDir))
         defer { try? labelsHandle.close(); try? vectorsHandle.close() }
@@ -920,7 +933,8 @@ enum Commands {
                             do { return try await client.posterMeta(id) } catch {
                                 // Discarding these is what made the coverage floor below undiagnosable:
                                 // it asserts TMDB is failing without having looked at a single error.
-                                Log.append(Layout.enrichLog(outDir), "metadata-miss id=\(r.tmdbId) (\(error))")
+                                Log.append(Layout.enrichLog(outDir),
+                                           "metadata-miss \(r.mediaType):\(r.tmdbId) (\(error))")
                                 return nil
                             }
                         }
@@ -943,10 +957,13 @@ enum Commands {
                     + "TMDB failing, not titles without posters. Nothing written; the existing sidecar and "
                     + "manifest are unchanged.")
             }
-            // Stable order. TaskGroup yields in completion order, so two identical runs produced different
-            // bytes, a different metadataSha256, and — since the app folds that into its syncKey — a forced
-            // 4.6 MB re-download on every device for a file whose contents did not change.
-            out.sort { $0.tmdbId < $1.tmdbId }
+            // A TOTAL order — (id, mediaType), not id alone. TaskGroup yields in completion order, so two
+            // identical runs produced different bytes, a different metadataSha256, and, since the app folds
+            // that into its syncKey, a forced 4.6 MB re-download on every device for a file that had not
+            // changed. Sorting on the id alone does not fix that: `sort` is unstable, and the corpus
+            // contains 940 ids that are BOTH a movie and a series — the very titles the media-qualified
+            // checkpoint restores. Measured: 8 shuffles of that corpus produced 8 distinct sha256.
+            out.sort { ($0.tmdbId, $0.mediaType) < ($1.tmdbId, $1.mediaType) }
             try JSON.write(out, to: path)
         }
 
@@ -1571,7 +1588,14 @@ final class LineAppender {
 }
 
 enum Log {
+    /// Serialises writes. `metadata` logs from inside a 200-task group, and this opens its own handle and
+    /// seeks to the end with no lock — concurrent first-writers took the `data.write(to:)` fallback below,
+    /// which TRUNCATES, so the diagnostics the logging exists to produce were partly lost.
+    private static let lock = NSLock()
+
     static func append(_ path: String, _ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
         try? FileIO.ensureParent(path)
         // Redacted HERE, at the sink, not at each of the dozen call sites that interpolate an error —
         // TMDB's api_key rides in the query string and `URLError`'s description carries the failing URL.
