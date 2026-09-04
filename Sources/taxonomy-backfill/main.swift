@@ -733,13 +733,22 @@ enum Commands {
         // out-dir and delta-run/enrich-all put both media in the same one, so a bare Int key let a
         // series' Opus-confirmed world-knowledge labels apply to the movie sharing its id — for exactly
         // the 940 colliding titles, and exactly the hallucinated-tail label the vote gate exists to strip.
-        // Legacy bare-Int files still load, qualified as movie, which is what they were written from.
+        // A legacy bare id applies to BOTH media: it does not record which was adjudicated, and reading
+        // them all as movies dropped 87 series-only entries outright.
         let wkPath = Layout.wkConfirmed(outDir)
-        let wkConfirmed = WorldKnowledge.load(at: wkPath)
-        if let raw = try? JSON.read(wkPath) as [String: [String]],
-           case let unkeyed = WorldKnowledge.unkeyedCount(raw), unkeyed > 0 {
-            FileHandle.standardError.write(Data(("  note: \(wkPath) holds \(unkeyed) bare id(s); each "
-                + "applies to BOTH media — the file does not record which was adjudicated\n").utf8))
+        let wkConfirmed = try WorldKnowledge.load(at: wkPath)
+        if let raw = try? JSON.read(wkPath) as [String: [String]] {
+            let unkeyed = WorldKnowledge.unkeyedCount(raw)
+            if unkeyed > 0 {
+                FileHandle.standardError.write(Data(("  note: \(wkPath) holds \(unkeyed) bare id(s); each "
+                    + "applies to BOTH media — the file does not record which was adjudicated\n").utf8))
+            }
+            let unusable = WorldKnowledge.unusableKeys(raw)
+            if !unusable.isEmpty {
+                FileHandle.standardError.write(Data(("  warning: \(wkPath) has \(unusable.count) key(s) "
+                    + "that are neither qualified nor a plain id and were DROPPED: "
+                    + "\(unusable.prefix(5).joined(separator: ", "))\n").utf8))
+            }
         }
         var noPrimary = 0, missingVotes = 0, droppedNoWiki = 0
 

@@ -75,12 +75,15 @@ final class ClassifierDeterminismTests: XCTestCase {
         let classifier = TaxonomyClassifier(llm: NoLLMStub(), samples: 4)
 
         for (winner, other) in pairs {
-            let votes = [vote(primary: winner), vote(primary: other),
-                         vote(primary: other), vote(primary: winner)]
+            // NOT a palindrome. [w, o, o, w] reversed is itself, so the second assertion re-ran the first
+            // and the pair proved nothing about order-independence — verified: replacing the whole fusion
+            // with `votes.first` survived it.
+            let votes = [vote(primary: winner), vote(primary: winner),
+                         vote(primary: other), vote(primary: other)]
             XCTAssertEqual(classifier.classify(rawVotes: votes, title: title())?.primaryGenre, winner,
                            "\(winner)/\(other)")
             XCTAssertEqual(classifier.classify(rawVotes: votes.reversed(), title: title())?.primaryGenre,
-                           winner, "\(winner)/\(other) reversed")
+                           winner, "\(winner)/\(other) reversed — a tie must not depend on vote order")
         }
     }
 
@@ -98,6 +101,70 @@ final class ClassifierDeterminismTests: XCTestCase {
 
         XCTAssertEqual(result.moods.map(\.label), ["Campy", "Cozy", "Wholesome"])
         XCTAssertEqual(Set(result.moods.map(\.confidence)).count, 1, "all three must be tied for this to test the tiebreak")
+    }
+
+    /// The IDF rarity prior: a NEAR-tie resolves toward the rarer, more specific genre. This is the DT-A
+    /// "Drama -> Crime" fix, and flattening every weight to 1.0 used to survive the whole suite.
+    func testANearTieResolvesTowardTheRarerGenre() throws {
+        // 3 Drama (weight 0.50, the most common) vs 2 Crime (1.35) — inside the 0.25 tie margin.
+        let votes = [vote(primary: "Drama"), vote(primary: "Drama"), vote(primary: "Drama"),
+                     vote(primary: "Crime"), vote(primary: "Crime")]
+        let result = TaxonomyClassifier(llm: NoLLMStub(), samples: 5)
+            .classify(rawVotes: votes, title: title())
+
+        XCTAssertEqual(result?.primaryGenre, "Crime",
+                       "a plurality of Drama inside the tie margin must yield to the rarer Crime")
+    }
+
+    /// ...and a CLEAR majority is not overridden by rarity, or the prior would rewrite every answer.
+    func testAClearMajorityIsNotOverriddenByRarity() throws {
+        let votes = [vote(primary: "Drama"), vote(primary: "Drama"), vote(primary: "Drama"),
+                     vote(primary: "Drama"), vote(primary: "Western")]
+        XCTAssertEqual(TaxonomyClassifier(llm: NoLLMStub(), samples: 5)
+                        .classify(rawVotes: votes, title: title())?.primaryGenre, "Drama")
+    }
+
+    /// Off-vocabulary rejection is a documented guarantee of the shipped artifact: the labels blob may
+    /// only contain taxonomy terms. Removing the check used to survive every test.
+    func testOffVocabularyLabelsAreRejected() throws {
+        let raw = vote(primary: "Drama",
+                       moods: [("Wholesome", 0.9), ("Vibes-Immaculate", 0.95)],
+                       subgenres: [("Heist", 0.9), ("Not-A-Real-Subgenre", 0.99)])
+        let result = try XCTUnwrap(classifier.classify(rawVotes: [raw], title: title()))
+
+        XCTAssertFalse(result.moods.map(\.label).contains("Vibes-Immaculate"))
+        XCTAssertFalse(result.subgenres.map(\.label).contains("Not-A-Real-Subgenre"))
+        XCTAssertTrue(result.moods.map(\.label).contains("Wholesome"), "in-vocab labels still pass")
+        XCTAssertTrue(result.subgenres.map(\.label).contains("Heist"))
+    }
+
+    /// The per-family confidence thresholds. Dropping the filter shipped every label a pass mentioned.
+    func testLabelsBelowTheFamilyThresholdAreDropped() throws {
+        let raw = vote(primary: "Drama", moods: [("Wholesome", 0.9), ("Campy", 0.2)])
+        let result = try XCTUnwrap(classifier.classify(rawVotes: [raw], title: title()))
+
+        XCTAssertEqual(result.moods.map(\.label), ["Wholesome"], "0.2 is below the 0.55 mood cutoff")
+    }
+
+    /// World-knowledge labels require recognising the FILM, so below the vote floor they are stripped —
+    /// unless an Opus adjudication pass confirmed that specific title. That override is the entire reason
+    /// wk-confirmed.json exists, and deleting it used to survive every test in the suite.
+    func testWorldKnowledgeIsGatedBelowTheVoteFloorButSurvivesConfirmation() throws {
+        let raw = vote(primary: "Drama", subgenres: [("Cult", 0.9)])
+        let obscure = title(voteCount: 15)
+
+        let gated: Classification = try XCTUnwrap(classifier.classify(rawVotes: [raw], title: obscure))
+        XCTAssertFalse(gated.subgenres.map(\.label).contains("Cult"),
+                       "an unrecognised deep-tail title must not keep a hallucinated Cult label")
+
+        let confirmed: Classification = try XCTUnwrap(
+            classifier.classify(rawVotes: [raw], title: obscure, confirmedWK: ["Cult"]))
+        XCTAssertTrue(confirmed.subgenres.map(\.label).contains("Cult"),
+                      "an Opus-confirmed label must survive the floor — this is what the override is for")
+
+        let known: Classification = try XCTUnwrap(
+            classifier.classify(rawVotes: [raw], title: title(voteCount: 5000)))
+        XCTAssertTrue(known.subgenres.map(\.label).contains("Cult"), "above the floor the gate is off")
     }
 }
 

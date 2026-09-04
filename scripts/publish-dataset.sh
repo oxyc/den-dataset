@@ -49,8 +49,11 @@ for key, name in sorted(meta.items()):
     if key.endswith("File") and name:
         print("  " + name)
 ' "$meta"
+# Only what the second pass will ACTUALLY upload. Listing every unnamed glob hit re-promised the
+# superseded sidecars that pass explicitly skips — the over-promise this banner was rewritten to remove.
 for f in "${blobs[@]}"; do
   b="$(basename "$f")"
+  case "$b" in metadata-*.json) continue ;; esac
   grep -q "\"$b\"" "$meta" || echo "  $b (not named by the manifest)"
 done
 echo "  $(basename "$meta")"
@@ -156,72 +159,54 @@ print(" ".join(sorted(k for k, v in old.items() if k.endswith("File") and v and 
     # exit — and that override is exactly what makes atlas-dataset-sync delete the sidecar. Forgetting
     # `metadata` after a finalize is the most-warned-about slip in this pipeline, so it is also the
     # likeliest way to arrive here.
-    # ONE ordered recipe, not two independent blocks. Both used to fire for a fresh out-dir (which drops
-    # every unowned key AND metadataFile), printing metadata first and finalize second — and running them
-    # in that order strips metadataFile again, so the next publish failed identically. finalize must come
-    # before metadata, always, because finalize is what mints the datasetVersion the sidecar is named for.
+    # ONE finalize step, then metadata. Every key here except metadataFile is restored the same way —
+    # `finalize` merges unowned keys forward from the manifest at the target path — so splitting them into a
+    # premise/facets step and a separate catch-all printed the SAME two commands twice, the second numbered
+    # after the metadata step it would then undo. And metadata must come last, because finalize strips
+    # metadataFile; a recipe that ends on finalize refuses again on the next publish.
+    merge_forward=""
+    for key in $dropped; do
+      case "$key" in
+        metadataFile) : ;;
+        *) merge_forward="$merge_forward $key" ;;
+      esac
+    done
+
+    # metadata is needed when the key was dropped, and ALSO whenever a finalize is prescribed while the
+    # manifest still declares a sidecar — that finalize is about to remove it.
+    needs_metadata=no
+    case " $dropped " in *" metadataFile "*) needs_metadata=yes ;; esac
+    if [ "$needs_metadata" = no ] && [ -n "$merge_forward" ]; then
+      # `if`, not `a && b`: as the last command in a branch, a failing && list is that branch's status and
+      # would abort the whole script under set -e.
+      if grep -q '"metadataFile"' "$meta"; then needs_metadata=yes; fi
+    fi
+
     echo "       Fix, in this order:" >&2
     echo "" >&2
     step=1
-    case " $dropped " in
-      *premise*|*facets*)
-        echo "       $step. The premise and facets keys have no producer in this repo — they survive only by" >&2
-        echo "          being merged forward from the manifest already at the target path. Copy the PUBLISHED" >&2
-        echo "          MANIFEST (not the blobs) into $DIR, then re-run finalize:" >&2
-        echo "" >&2
-        echo "             gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
-        echo "             <taxonomy-backfill> finalize --out-dir $DIR" >&2
-        echo "" >&2
-        echo "          (Those blobs must also be in $DIR, or this script's local check will say so.)" >&2
-        echo "" >&2
-        step=$((step + 1))
-        ;;
-    esac
-    # Also when only the premise/facets keys were dropped: step 1 tells the operator to re-run finalize,
-    # and finalize STRIPS metadataFile — which is still present right now. Printing the recipe without
-    # this step means following it produces a second refusal naming metadataFile. It converges, but the
-    # step it is missing is the one already written two lines below.
-    needs_metadata=no
-    case " $dropped " in *" metadataFile "*) needs_metadata=yes ;; esac
-    if [ "$needs_metadata" = no ]; then
-      case " $dropped " in
-        *premise*|*facets*)
-          # `if`, not `a && b`: as the last command in a case arm, a failing && list is the arm's status
-          # and would abort the whole script under set -e.
-          if grep -q '"metadataFile"' "$meta"; then needs_metadata=yes; fi
-          ;;
-      esac
-    fi
-    if [ "$needs_metadata" = yes ]; then
-        echo "       $step. metadataFile: run the metadata step, which is what writes it. finalize cannot —" >&2
-        echo "          finalize is the command that REMOVES it, so this has to come last." >&2
-        echo "" >&2
-        echo "             <taxonomy-backfill> metadata --out-dir $DIR" >&2
-        echo "" >&2
-        echo "          If labels and vectors did not change then datasetVersion did not either, the existing" >&2
-        echo "          sidecar still applies, and --skip-fetch re-patches from it with no TMDB spend:" >&2
-        echo "" >&2
-        echo "             <taxonomy-backfill> metadata --skip-fetch --out-dir $DIR" >&2
-        echo "" >&2
-        step=$((step + 1))
-    fi
-    # Any dropped key NOT covered above still needs a remedy. Suppressing this whenever some other key
-    # matched left the uncovered one explained by nothing — the same "only the override is visible" trap
-    # the branch exists to close, one case narrower.
-    unexplained=""
-    for key in $dropped; do
-      case "$key" in
-        metadataFile|*premise*|*facets*) : ;;
-        *) unexplained="$unexplained $key" ;;
-      esac
-    done
-    if [ -n "$unexplained" ]; then
-      echo "       $step. No specific remedy is known for:$unexplained. Like the premise and facets keys," >&2
-      echo "          they are carried forward from the manifest already in $DIR, so copy the published one" >&2
-      echo "          there and re-run finalize (before any metadata step above):" >&2
+    if [ -n "$merge_forward" ]; then
+      echo "       $step. These have no producer in this repo —$merge_forward. They survive only by being" >&2
+      echo "          merged forward, so copy the PUBLISHED MANIFEST (not the blobs) into $DIR and re-run" >&2
+      echo "          finalize, which carries every unowned key across in one pass:" >&2
       echo "" >&2
       echo "             gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
       echo "             <taxonomy-backfill> finalize --out-dir $DIR" >&2
+      echo "" >&2
+      echo "          (Those blobs must also be in $DIR, or this script's local check will say so.)" >&2
+      echo "" >&2
+      step=$((step + 1))
+    fi
+    if [ "$needs_metadata" = yes ]; then
+      echo "       $step. metadataFile: run the metadata step, which is what writes it. finalize cannot —" >&2
+      echo "          finalize is the command that REMOVES it, so this has to come last." >&2
+      echo "" >&2
+      echo "             <taxonomy-backfill> metadata --out-dir $DIR" >&2
+      echo "" >&2
+      echo "          If labels and vectors did not change then datasetVersion did not either, the existing" >&2
+      echo "          sidecar still applies, and --skip-fetch re-patches from it with no TMDB spend:" >&2
+      echo "" >&2
+      echo "             <taxonomy-backfill> metadata --skip-fetch --out-dir $DIR" >&2
       echo "" >&2
     fi
 

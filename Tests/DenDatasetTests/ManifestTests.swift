@@ -268,6 +268,28 @@ final class WorldKnowledgeTests: XCTestCase {
         XCTAssertTrue(WorldKnowledge.expand(["not-an-id": ["Cult"]]).isEmpty)
     }
 
+    /// `"007"` is not id 7 and `"+95"` is not id 95 — `Int()` accepts both, so a typo'd key used to attach
+    /// an override to a DIFFERENT title. Unusable keys are dropped, and reported rather than dropped
+    /// silently, since a lost override is a label nobody notices going missing.
+    func testAKeyThatIsNotExactlyAnIdIsRejectedAndReported() {
+        let raw = ["007": ["Cult"], "+95": ["Epic"], " 12": ["Cult"], "95.0": ["Cult"]]
+
+        XCTAssertTrue(WorldKnowledge.expand(raw).isEmpty, "none of these are ids")
+        XCTAssertEqual(WorldKnowledge.unkeyedCount(raw), 0, "an unusable key is not a countable bare id")
+        XCTAssertEqual(WorldKnowledge.unusableKeys(raw), [" 12", "+95", "007", "95.0"])
+    }
+
+    /// A keyed entry states which medium was adjudicated; a legacy one cannot. When a file holds both for
+    /// the same id, the specific one has to win — and it must win EVERY run. Assigning in Dictionary order
+    /// meant the legacy entry took it roughly one run in six.
+    func testAKeyedEntryBeatsALegacyOneForTheSameId() {
+        for _ in 0..<20 {
+            let expanded = WorldKnowledge.expand(["95": ["Epic"], "tv:95": ["Cult"]])
+            XCTAssertEqual(expanded["tv:95"], ["Cult"], "the explicit entry must win, every time")
+            XCTAssertEqual(expanded["movie:95"], ["Epic"], "the legacy one still fills the other medium")
+        }
+    }
+
     func testAnEmptyFileIsEmptyNotAnError() {
         XCTAssertTrue(WorldKnowledge.expand([:]).isEmpty)
         XCTAssertEqual(WorldKnowledge.unkeyedCount([:]), 0)
