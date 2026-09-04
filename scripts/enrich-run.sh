@@ -8,35 +8,18 @@
 #
 # Watch the JSON line it prints: `wikiPlot` vs `tagsOnly` = live plot-hit rate for that batch.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=scripts/lib/den-env.sh
+. scripts/lib/den-env.sh
 
 MEDIA="${1:-movie}"          # movie | tv
 LIMIT="${2:-150}"
 OUT_DIR="${OUT_DIR:-out}"
 WORKLIST="$OUT_DIR/worklist-$MEDIA.json"
 
-[ -f den.env ] || { echo "missing den.env — cp den.env.example den.env and fill it"; exit 1; }
-set -a; source den.env; set +a
-[ -n "${TMDB_API_KEY:-}" ] || { echo "TMDB_API_KEY is empty in den.env"; exit 1; }
+den_load_env
 [ -f "$WORKLIST" ] || { echo "missing $WORKLIST — build it first"; exit 1; }
-
-# Wikimedia Enterprise login → 24h bearer (optional). A login failure must NOT kill the run — degrade to the
-# free action API, which has the same plot coverage. The `if …; then` guards the substitution against set -e.
-if [ -n "${WIKIMEDIA_ENTERPRISE_USERNAME:-}" ] && [ -n "${WIKIMEDIA_ENTERPRISE_PASSWORD:-}" ]; then
-  echo "logging into Wikimedia Enterprise as $WIKIMEDIA_ENTERPRISE_USERNAME …"
-  # Pipe the credential JSON to curl on STDIN (--data @-), never as an argv arg — a `-d "{...password...}"`
-  # would be visible to any local user via `ps`/`/proc/<pid>/cmdline` for the life of the request.
-  if TOKEN=$(python3 -c 'import json,os;print(json.dumps({"username":os.environ["WIKIMEDIA_ENTERPRISE_USERNAME"],"password":os.environ["WIKIMEDIA_ENTERPRISE_PASSWORD"]}))' \
-      | curl -fsSL https://auth.enterprise.wikimedia.com/v1/login -H "Content-Type: application/json" --data @- \
-      | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])') && [ -n "$TOKEN" ]; then
-    export WIKIMEDIA_ENTERPRISE_TOKEN="$TOKEN"
-    echo "→ Enterprise token acquired (structured-contents plots)."
-  else
-    echo "⚠ Enterprise login failed — falling back to the free Wikipedia action API."
-  fi
-else
-  echo "no Enterprise creds — using the free Wikipedia action API."
-fi
+enterprise_login
 
 swift build -c release >/dev/null
 echo "enrich: media=$MEDIA limit=$LIMIT out=$OUT_DIR"

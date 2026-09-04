@@ -9,6 +9,8 @@
 # Per-batch JSON (wikiPlot / tagsOnly / deferred / remaining) is teed to out/enrich-<media>.log.
 set -uo pipefail                        # NOT -e: a failed batch must not abort the whole run
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=scripts/lib/den-env.sh
+. scripts/lib/den-env.sh
 
 MEDIA="${1:-movie}"
 SIZE="${2:-500}"
@@ -19,31 +21,17 @@ FLOOR_ARG=""; [ -n "${VOTE_FLOOR:-}" ] && FLOOR_ARG="--vote-floor $VOTE_FLOOR"
 WORKLIST="$OUT_DIR/worklist-$MEDIA.json"
 LOG="$OUT_DIR/enrich-$MEDIA.log"
 
-[ -f den.env ] || { echo "missing den.env"; exit 1; }
-set -a; source den.env; set +a
-[ -n "${TMDB_API_KEY:-}" ] || { echo "TMDB_API_KEY empty in den.env"; exit 1; }
+den_load_env
 [ -f "$WORKLIST" ] || { echo "missing $WORKLIST — run scripts/build-worklist.py"; exit 1; }
 
 swift build -c release >/dev/null
 BIN=.build/release/taxonomy-backfill
 
-# Mint a fresh 24h Enterprise bearer (degrade to the free action API on failure). Called once per batch.
-enterprise_login() {
-  unset WIKIMEDIA_ENTERPRISE_TOKEN
-  [ -n "${WIKIMEDIA_ENTERPRISE_USERNAME:-}" ] && [ -n "${WIKIMEDIA_ENTERPRISE_PASSWORD:-}" ] || return 0
-  local tok
-  if tok=$(python3 -c 'import json,os;print(json.dumps({"username":os.environ["WIKIMEDIA_ENTERPRISE_USERNAME"],"password":os.environ["WIKIMEDIA_ENTERPRISE_PASSWORD"]}))' \
-        | curl -fsSL https://auth.enterprise.wikimedia.com/v1/login -H "Content-Type: application/json" --data @- \
-        | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])') && [ -n "$tok" ]; then
-    export WIKIMEDIA_ENTERPRISE_TOKEN="$tok"
-  else
-    echo "⚠ Enterprise login failed — this batch uses the free action API." | tee -a "$LOG"
-  fi
-}
-
 echo "=== enrich-all $MEDIA (size $SIZE) starting $(date) ===" | tee -a "$LOG"
 fails=0
 batch=0
+stalls=0
+last_remaining=""
 while true; do
   enterprise_login
   json=$("$BIN" enrich --worklist "$WORKLIST" --limit "$SIZE" --out-dir "$OUT_DIR" $FLOOR_ARG 2>>"$OUT_DIR/enrich-$MEDIA.err")
@@ -61,4 +49,18 @@ while true; do
   echo "$line" | tee -a "$LOG"
   remaining=$(printf '%s' "$line" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("remaining","?"))' 2>/dev/null || echo "?")
   [ "$remaining" = "0" ] && { echo "=== $MEDIA DONE ($batch batches) $(date) ===" | tee -a "$LOG"; break; }
+
+  # A batch can exit 0 having made NO progress: ids that fail transiently (429/5xx) are deliberately not
+  # checkpointed, so during a TMDB or Wikipedia outage every id defers and `remaining` does not move. The
+  # loop above only counts non-zero EXITS, so it spun with no sleep — re-minting a token and re-issuing the
+  # whole batch as fast as the upstream could refuse it, indefinitely.
+  if [ "$remaining" = "$last_remaining" ]; then
+    stalls=$((stalls + 1))
+    echo "no progress ($remaining still pending) — attempt $stalls, backing off" | tee -a "$LOG"
+    [ $stalls -ge 6 ] && { echo "6 batches with no progress — upstream is refusing; stopping" | tee -a "$LOG"; exit 1; }
+    sleep $((stalls * 60))
+  else
+    stalls=0
+  fi
+  last_remaining="$remaining"
 done
