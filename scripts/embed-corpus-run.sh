@@ -30,6 +30,8 @@
 # queries go through this same service.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
+# shellcheck source=scripts/lib/den-env.sh
+. scripts/lib/den-env.sh
 
 LABELS="${1:?usage: embed-corpus-run.sh <existing labels-t02.json>}"
 OUT_DIR="${OUT_DIR:-out-vecnow}"
@@ -63,6 +65,10 @@ export DEN_EMBED_URL="http://127.0.0.1:$PORT"
 [ -f "$LABELS" ] || { echo "missing labels file: $LABELS"; exit 1; }
 mkdir -p "$OUT_DIR"
 command -v "$RUNTIME" >/dev/null || { echo "no $RUNTIME on PATH — set DEN_EMBED_RUNTIME=docker"; exit 1; }
+# Checked UP FRONT, not when it is needed: the `metadata` step at the end calls TMDB, and a multi-hour
+# unattended re-embed that finalizes and then exits on a missing key has wasted the whole run's tail.
+# `|| exit 1` because this script runs without -e on purpose.
+den_load_env || exit 1
 
 # Kill by CONTAINER NAME, not by process pattern. The old `pkill -f "uvicorn server:app"` was a machine-wide
 # pattern kill wired to the EXIT trap, so it could take out an unrelated uvicorn the operator was running.

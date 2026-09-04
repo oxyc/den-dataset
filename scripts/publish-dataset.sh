@@ -58,11 +58,13 @@ upload_one() {
 
 # 1) CHECK LOCALLY, BEFORE UPLOADING ANYTHING.
 #
-# Blobs used to go up first and the checks ran after, so an abort left the moving release holding NEW blobs
-# under the OLD meta. A box already at that meta is fine (atlas-dataset-sync short-circuits on `cmp`), but a
-# lagging or fresh one fetches the old meta, downloads the new blobs, fails `sha256sum -c`, and its timer
-# fails every tick until someone publishes again. Nothing here needs the network, so none of it belongs
-# after the first upload.
+# Blobs used to go up first and the checks ran after. Nothing in these checks needs the network, so running
+# them first removes every LOCAL reason to abort mid-clobber — a bad hash, a missing file, a manifest that
+# drops a key. It does not make publishing atomic: `gh release upload` clobbers asset by asset, so an upload
+# that exhausts its retries in step 3 still leaves new blobs under the old meta. A box already at that meta
+# short-circuits on `cmp` and is unaffected; a fresh or lagging one fetches the old meta, gets a mixed set of
+# blobs, fails `sha256sum -c` and retries every 4h until someone republishes. Nothing is ever SERVED wrong —
+# the sync refuses before touching its data dir — but re-publishing is the only way out.
 manifest_files="$(mktemp)"
 trap 'rm -f "$manifest_files"' EXIT
 python3 -c '
@@ -101,8 +103,26 @@ done < "$manifest_files"
 # so publishing one of these takes premise "More Like This", facet search and the poster sidecar dark on
 # den-atlas — with no error on either side.
 published_meta="$(mktemp)"
-trap 'rm -f "$manifest_files" "$published_meta"' EXIT
-if gh release download data-latest -R "$REPO" -p dataset.meta.json -O "$published_meta" --clobber 2>/dev/null; then
+download_err="$(mktemp)"
+trap 'rm -f "$manifest_files" "$published_meta" "$download_err"' EXIT
+
+# A guard that cannot tell "there is no release yet" from "I could not ask" is not a guard. Bare
+# `2>/dev/null` collapsed an expired token, a 5xx, a rate limit and a `gh` too old for these flags all into
+# "skip the check" — silently, and permanently in the last case.
+have_published=0
+if gh release download data-latest -R "$REPO" -p dataset.meta.json -O "$published_meta" --clobber \
+     2>"$download_err"; then
+  have_published=1
+elif grep -qiE 'release not found|no assets|asset not found|not found' "$download_err"; then
+  echo "no published manifest yet — nothing to compare against."
+else
+  echo "error: could not read the published manifest to compare against:" >&2
+  sed 's/^/       /' "$download_err" >&2
+  echo "       Refusing to publish blind. Fix the above, or set DEN_ALLOW_DROPPING_BLOBS=1 to skip." >&2
+  [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
+fi
+
+if [ "$have_published" -eq 1 ]; then
   dropped="$(python3 -c '
 import json, sys
 old = json.load(open(sys.argv[1]))
@@ -111,16 +131,44 @@ print(" ".join(sorted(k for k, v in old.items() if k.endswith("File") and v and 
 ' "$published_meta" "$meta")"
   if [ -n "$dropped" ]; then
     echo "error: the published manifest declares files this one does not: $dropped" >&2
-    echo "       Publishing would make den-atlas delete them. If they still exist, copy them into $DIR and" >&2
-    echo "       re-run finalize there so their keys are carried forward; if dropping them is deliberate," >&2
-    echo "       set DEN_ALLOW_DROPPING_BLOBS=1." >&2
+    echo "       Publishing would make den-atlas delete them." >&2
+    echo "" >&2
+    echo "       To carry those keys forward, copy the PUBLISHED MANIFEST — not the blobs — into $DIR and" >&2
+    echo "       re-run finalize there:" >&2
+    echo "" >&2
+    echo "           gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
+    echo "           <taxonomy-backfill> finalize --out-dir $DIR" >&2
+    echo "" >&2
+    echo "       finalize merges unowned keys from the manifest already at that path, so copying the blobs" >&2
+    echo "       alone changes nothing — you would see this same error and reach for the override below." >&2
+    echo "       (The blobs themselves must also be in $DIR, or step 1 will say so.)" >&2
+    echo "       If dropping them is deliberate, set DEN_ALLOW_DROPPING_BLOBS=1." >&2
     [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
     echo "       DEN_ALLOW_DROPPING_BLOBS=1 — continuing." >&2
   fi
 fi
 
-# 3) BLOBS — everything the meta references. The meta is deliberately NOT in this batch.
-for f in "${blobs[@]}"; do echo "→ $(basename "$f")"; upload_one "$f" || exit 1; done
+# 3) BLOBS — driven by the MANIFEST, not by a parallel list of globs.
+#
+# The globs above decide what is *worth looking at*; the manifest decides what actually ships. When those
+# two lists were separate, a declared file whose name matched no glob was hash-checked locally, never
+# uploaded, and still passed step 4 — because `data-latest` is a moving release and the previous publish's
+# same-named asset satisfies a name check. Consumers would then verify a stale blob against a new sha and
+# wedge. den-atlas already models a `metadataGzFile` that no glob here covers.
+while read -r name _sha; do
+  [ -z "$name" ] && continue
+  echo "→ $name"
+  upload_one "$DIR/$name" || exit 1
+done < "$manifest_files"
+
+# Anything else the globs found that the manifest does not name — the labels .gz has no sha, and older
+# sidecars linger in a long-lived out-dir. Uploaded, but never verified, because nothing declares them.
+for f in "${blobs[@]}"; do
+  base="$(basename "$f")"
+  grep -q "^$base " "$manifest_files" && continue
+  echo "→ $base (not named by the manifest)"
+  upload_one "$f" || exit 1
+done
 
 # 4) VERIFY every file the meta names actually landed on the release, before publishing the meta.
 #

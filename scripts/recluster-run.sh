@@ -21,7 +21,11 @@ REPORT="$OUT_DIR/recluster-$(date -u +%Y-%m-%d).json"
 
 [ -x "$BIN" ] || { echo "building release binary…"; swift build -c release; }
 
-labels="$OUT_DIR/labels-t02.json"
+# Globbed for the same reason the vectors are: the name carries the taxonomy version, and hardcoding it
+# breaks the weekly re-cluster on a taxonomy bump.
+labels=""
+for f in "$OUT_DIR"/labels-t*.json; do [ -f "$f" ] && labels="$f"; done
+[ -n "$labels" ] || { echo "no labels-t*.json in $OUT_DIR" >&2; exit 1; }
 # The plot vectors, not the premise ones — a glob plus a case, because `ls | grep` loses ls's exit
 # status through the pipe and mangles any name a glob would have handled.
 vectors=""
