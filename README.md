@@ -31,7 +31,7 @@ swift test
 ## The tool — phases
 
 ```
-taxonomy-backfill worklist  --mode discover|export --media movie|tv [--count N] --out <path>
+taxonomy-backfill worklist  --mode discover|export|delta --media movie|tv [--count N] --out <path>
 taxonomy-backfill enrich    --worklist <path> [--limit 150] --out-dir <dir>
 taxonomy-backfill escalation --batch-id <n> --out-dir <dir>
 taxonomy-backfill assemble  --batch-id <n> --out-dir <dir>

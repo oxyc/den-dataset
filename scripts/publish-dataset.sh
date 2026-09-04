@@ -30,16 +30,25 @@ REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
 shopt -s nullglob
 meta="$DIR/dataset.meta.json"
 # `labels-*.json.gz`, not a bare `*.gz`: that also swept up the TMDB daily-export dumps build-worklist.py
-# writes into the same out-dir (movie_ids + the two tv ones, ~36 MB), publishing TMDB's raw export data as
-# release assets from a repo that otherwise refuses to ship raw TMDB text.
+# writes into the same out-dir (movie_ids.json.gz plus the two tv dumps, ~36 MB), publishing TMDB's
+# raw export data as release assets from a repo that otherwise refuses to ship raw TMDB text.
 # Every entry is a GLOB, including facets: a literal path is not subject to nullglob, so `"$DIR"/facets.bin`
 # stayed in the array when the file was absent and the uploader failed on it three times with a message
 # about an upload rather than a missing file.
 blobs=("$DIR"/facets*.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json)
 [ ${#blobs[@]} -ge 3 ] || { echo "error: expected labels/vectors/gz/metadata in $DIR, found: ${blobs[*]:-none}" >&2; exit 1; }
 
+# The manifest decides what actually publishes (step 3), so list that rather than the glob results — the
+# banner used to promise superseded sidecars that the upload pass then skipped.
 echo "publishing → $REPO data-latest:"
-printf '  %s\n' "${blobs[@]}" "$meta"
+python3 -c '
+import json, sys
+meta = json.load(open(sys.argv[1]))
+for key, name in sorted(meta.items()):
+    if key.endswith("File") and name:
+        print("  " + name)
+' "$meta"
+echo "  $(basename "$meta")"
 
 # Create the release if it doesn't exist yet.
 gh release view data-latest -R "$REPO" >/dev/null 2>&1 \
@@ -142,32 +151,53 @@ print(" ".join(sorted(k for k, v in old.items() if k.endswith("File") and v and 
     # exit — and that override is exactly what makes atlas-dataset-sync delete the sidecar. Forgetting
     # `metadata` after a finalize is the most-warned-about slip in this pipeline, so it is also the
     # likeliest way to arrive here.
-    case " $dropped " in
-      *" metadataFile "*)
-        echo "       metadataFile: run the metadata step, which is what writes it. finalize cannot —" >&2
-        echo "       finalize is the command that removes it." >&2
-        echo "" >&2
-        echo "           <taxonomy-backfill> metadata --out-dir $DIR" >&2
-        echo "" >&2
-        echo "       If labels and vectors did not change then datasetVersion did not either, the existing" >&2
-        echo "       sidecar still applies, and --skip-fetch re-patches from it with no TMDB spend:" >&2
-        echo "" >&2
-        echo "           <taxonomy-backfill> metadata --skip-fetch --out-dir $DIR" >&2
-        echo "" >&2
-        ;;
-    esac
-
-    # The premise and facets keys have no producer in this repo; they survive only by being merged
-    # forward from the manifest already at the target path.
+    # ONE ordered recipe, not two independent blocks. Both used to fire for a fresh out-dir (which drops
+    # every unowned key AND metadataFile), printing metadata first and finalize second — and running them
+    # in that order strips metadataFile again, so the next publish failed identically. finalize must come
+    # before metadata, always, because finalize is what mints the datasetVersion the sidecar is named for.
+    echo "       Fix, in this order:" >&2
+    echo "" >&2
+    step=1
     case " $dropped " in
       *premise*|*facets*)
-        echo "       The premise and facets keys have no producer here — they survive only by being merged" >&2
-        echo "       forward. Copy the PUBLISHED MANIFEST, not the blobs, into $DIR and re-run finalize:" >&2
+        echo "       $step. The premise and facets keys have no producer in this repo — they survive only by" >&2
+        echo "          being merged forward from the manifest already at the target path. Copy the PUBLISHED" >&2
+        echo "          MANIFEST (not the blobs) into $DIR, then re-run finalize:" >&2
         echo "" >&2
-        echo "           gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
-        echo "           <taxonomy-backfill> finalize --out-dir $DIR" >&2
+        echo "             gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
+        echo "             <taxonomy-backfill> finalize --out-dir $DIR" >&2
         echo "" >&2
-        echo "       (Those blobs must also be in $DIR, or step 1 will say so.)" >&2
+        echo "          (Those blobs must also be in $DIR, or step 1 of this script will say so.)" >&2
+        echo "" >&2
+        step=$((step + 1))
+        ;;
+    esac
+    case " $dropped " in
+      *" metadataFile "*)
+        echo "       $step. metadataFile: run the metadata step, which is what writes it. finalize cannot —" >&2
+        echo "          finalize is the command that REMOVES it, so this has to come last." >&2
+        echo "" >&2
+        echo "             <taxonomy-backfill> metadata --out-dir $DIR" >&2
+        echo "" >&2
+        echo "          If labels and vectors did not change then datasetVersion did not either, the existing" >&2
+        echo "          sidecar still applies, and --skip-fetch re-patches from it with no TMDB spend:" >&2
+        echo "" >&2
+        echo "             <taxonomy-backfill> metadata --skip-fetch --out-dir $DIR" >&2
+        echo "" >&2
+        step=$((step + 1))
+        ;;
+    esac
+    # A dropped key matching neither branch would otherwise print no remedy at all — leaving the override
+    # as the only visible option, which is the trap this whole message exists to avoid.
+    case " $dropped " in
+      *premise*|*facets*|*" metadataFile "*) : ;;
+      *)
+        echo "       $step. No specific remedy is known for these keys. They are carried forward from the" >&2
+        echo "          manifest already in $DIR, so copy the published one there and re-run finalize:" >&2
+        echo "" >&2
+        echo "             gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
+        echo "             <taxonomy-backfill> finalize --out-dir $DIR" >&2
+        echo "" >&2
         ;;
     esac
 
@@ -193,15 +223,16 @@ done < "$manifest_files"
 # Anything else the globs found that the manifest does not name. Uploaded, but never verified, because
 # nothing declares a hash for them.
 #
-# Superseded sidecars are SKIPPED. `metadata` writes a new ~4.6 MB metadata-<datasetVersion>.json per
-# publish and nothing ever deletes the old one, so a long-lived out-dir accumulates them — re-uploading
-# every one on every run grew publish time and release size without bound, for assets no consumer fetches.
+# Sidecars the manifest does not name are SKIPPED. `metadata` writes a new ~4.6 MB
+# metadata-<datasetVersion>.json per publish and nothing deletes the old one, so a long-lived out-dir
+# accumulates them and every run re-clobbered all of them. This removes the repeated UPLOAD cost only —
+# assets already on the release stay there, so the release itself still grows one per datasetVersion.
 for f in "${blobs[@]}"; do
   base="$(basename "$f")"
   grep -q "^$base " "$manifest_files" && continue
   case "$base" in
     metadata-*.json)
-      echo "  skipping $base (superseded — the manifest names a different sidecar)"
+      echo "  skipping $base (the manifest does not name it)"
       continue ;;
   esac
   echo "→ $base (not named by the manifest)"
