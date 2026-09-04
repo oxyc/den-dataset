@@ -70,6 +70,50 @@ public struct DenEmbedClient: Sendable {
     private struct BatchRequestBody: Encodable { let texts: [String] }
     private struct BatchResponse: Decodable { let vectors: [[Int]] }
 
+    /// Who is embedding — model, dimensions, service version and token cap, as `/health` reports them.
+    ///
+    /// The corpus and live queries MUST be embedded by the same thing (docs/OPERATE.md's alignment rule),
+    /// and `model` + `dims` alone cannot tell two of our own runtimes apart: both say bge-m3/1024 while
+    /// returning different vectors for the same text. `runtime` and `maxTokens` are what distinguish
+    /// them, so the corpus build records this and refuses to mix two.
+    public struct Identity: Codable, Equatable, Sendable {
+        public let model: String
+        public let dims: Int
+        public let runtime: String
+        public let maxTokens: Int
+
+        /// One line, for the manifest and for error messages.
+        public var label: String { "\(model)/\(dims) \(runtime) max_tokens=\(maxTokens)" }
+    }
+
+    public func identity() async throws -> Identity {
+        var request = URLRequest(url: baseURL.appendingPathComponent("health"))
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return try await Transport.retrying {
+            let (data, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                throw DenEmbedError.http(http.statusCode)
+            }
+            let health = try JSONDecoder().decode(HealthResponse.self, from: data)
+            // A service predating the `runtime` field is a real answer, not an error — that is the Python
+            // era, which is the generation the currently shipped corpus came from.
+            return Identity(model: health.model ?? "unknown", dims: health.dims ?? 0,
+                            runtime: health.runtime ?? "pre-3.0.0", maxTokens: health.maxTokens ?? 0)
+        }
+    }
+
+    private struct HealthResponse: Decodable {
+        let model: String?
+        let dims: Int?
+        let runtime: String?
+        let maxTokens: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case model, dims, runtime
+            case maxTokens = "max_tokens"
+        }
+    }
+
     /// Decode the `{"vector":[...]}` payload to `[Int8]`. The service always sends values in [-127, 127].
     static func decode(_ data: Data) throws -> [Int8] {
         let payload = try JSONDecoder().decode(EmbedResponse.self, from: data)

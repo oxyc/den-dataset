@@ -437,6 +437,8 @@ enum Commands {
         defer { try? labelsHandle.close(); try? vectorsHandle.close() }
 
         let denEmbed = DenEmbedClient()
+        let embedder = try await recordEmbedder(outDir: outDir, client: denEmbed)
+        FileHandle.standardError.write(Data("  embedder: \(embedder.label)\n".utf8))
         var buffer: [(record: IndexRecord, doc: String)] = []
         var written = 0, skipped = done.count, missing = 0
 
@@ -479,6 +481,27 @@ enum Commands {
                          "store": Layout.labelsStore(outDir)]))
     }
 
+    /// Record WHICH embedder is building this store, and refuse to append to a store built by a different one.
+    ///
+    /// The store is append-only and resumable across days, and `finalize` only ever checked that the vectors
+    /// share one LENGTH — which every bge-m3 generation does. So a run resumed after a den-embed upgrade
+    /// quietly produced a corpus half-embedded by each, with nothing anywhere able to say so. Same reason the
+    /// identity lands in the manifest: the app and den-atlas embed live queries through the service, and a
+    /// corpus embedded by a different generation retrieves subtly wrong neighbours while looking healthy.
+    @discardableResult
+    static func recordEmbedder(outDir: String, client: DenEmbedClient) async throws -> DenEmbedClient.Identity {
+        let path = Layout.embedderIdentity(outDir)
+        let now = try await client.identity()
+        if let previous: DenEmbedClient.Identity = try? JSON.read(path), previous != now {
+            throw ToolError(message: "this store was embedded by \(previous.label) but den-embed now reports "
+                + "\(now.label) — appending would mix two embedders into one corpus. Either restore the "
+                + "previous service, or start a fresh --out-dir and re-embed the whole corpus.")
+        }
+        try FileIO.ensureParent(path)
+        try JSON.writePretty(now, to: path)
+        return now
+    }
+
     /// Cap a plot to `maxChars`, ending on the last sentence boundary within the cap (so the embedded doc reads
     /// as complete prose rather than a mid-word cut). Facts + tags are composed separately and never capped.
     static func cappedPlot(_ plot: String, maxChars: Int) -> String {
@@ -490,14 +513,21 @@ enum Commands {
         return head
     }
 
-    /// Truncate two append-only store files to their common prefix — repairs a crash that wrote a label line
-    /// but not its vector line (or vice versa), which would otherwise fail finalize's alignment check.
+    /// Truncate two append-only store files to their longest prefix of lines that both parse AND name the same
+    /// title — repairs a crash that wrote a label line but not its vector line (or vice versa).
+    ///
+    /// Line count alone is not enough. `flush` writes label-then-vector per title, so a kill between the two
+    /// leaves labels one line longer; but a kill mid-`write` leaves a TRUNCATED final line, which still counts
+    /// as a line — so the two files can look equal-length while the last vector belongs to no title. Repairing
+    /// on count alone kept that pair, and `finalize` compared only counts, so every title after the tear would
+    /// ship carrying its neighbour's vector: no error anywhere, and a whole tail of the corpus retrieving the
+    /// wrong titles.
     static func reconcileStore(_ labelsPath: String, _ vectorsPath: String) throws {
         guard FileManager.default.fileExists(atPath: labelsPath),
               FileManager.default.fileExists(atPath: vectorsPath) else { return }
         let labels = try FileIO.readLines(labelsPath)
         let vectors = try FileIO.readLines(vectorsPath)
-        let n = min(labels.count, vectors.count)
+        let n = StoreIntegrity.alignedPrefix(labels: labels, vectors: vectors)
         func rewrite(_ lines: [String], _ path: String) throws {
             let body = n == 0 ? "" : lines.prefix(n).joined(separator: "\n") + "\n"
             try FileIO.write(Data(body.utf8), to: path)
@@ -524,6 +554,10 @@ enum Commands {
         let embedderKind = args["--embedder"] ?? "den-embed"
         let denEmbed = DenEmbedClient()
         let fnv = HashingEmbedder()
+        // Same guard as embed-corpus: assemble appends to the SAME store, so it is just as able to mix two
+        // generations of the service into one corpus. `--embedder fnv` is the offline fallback and has no
+        // service to ask.
+        if embedderKind != "fnv" { try await recordEmbedder(outDir: outDir, client: denEmbed) }
 
         let enriched: [EnrichedDTO] = try JSON.read(Layout.enrichedBatch(outDir, batchId))
         let passes = try loadVotePasses(outDir: outDir, batchId: batchId)
@@ -620,6 +654,14 @@ enum Commands {
         guard allRecords.count == allRows.count else {
             throw ToolError(message: "store misaligned: \(allRecords.count) labels vs \(allRows.count) vectors")
         }
+        // ...and that line i of each names the same title. The two stores are positionally zipped from here
+        // on — nothing downstream carries the vector's own id — so equal counts with a shifted body ships a
+        // corpus where every title holds someone else's vector, and looks perfectly healthy doing it.
+        if let bad = StoreIntegrity.firstMisalignment(records: allRecords, rows: allRows) {
+            throw ToolError(message: "store misaligned at line \(bad + 1): labels say tmdbId "
+                + "\(allRecords[bad].tmdbId), vectors say \(allRows[bad].tmdbId) — refusing to ship. "
+                + "Re-run embed-corpus, which reconciles the stores before appending.")
+        }
         // De-dup by (mediaType, tmdbId) keeping the LAST occurrence — a targeted re-pass (assemble --force)
         // appends superseding records, and finalize keeps the newest while preserving aligned vectors.
         var lastIndex: [String: Int] = [:]
@@ -641,6 +683,14 @@ enum Commands {
         if let expected = expectedDims(forEmbeddingVersion: embeddingVersion), expected != dim {
             throw ToolError(message: "embedding-version '\(embeddingVersion)' implies dim \(expected) but the "
                 + "vectors are \(dim)-dim — mislabelled artifact; refusing to ship.")
+        }
+
+        // Written by whichever command embedded the store. Absent for a corpus built before it was recorded,
+        // or by the offline FNV embedder — both legitimate, so this is carried through, not required.
+        let embedder: DenEmbedClient.Identity? = try? JSON.read(Layout.embedderIdentity(outDir))
+        if let embedder, embedder.dims > 0, embedder.dims != dim {
+            throw ToolError(message: "the store was embedded by \(embedder.label) but its vectors are "
+                + "\(dim)-dim — refusing to ship a manifest that would misdescribe them.")
         }
 
         let taxonomyVersion = Taxonomy.current.version
@@ -677,8 +727,10 @@ enum Commands {
             vectorsSha256: vectorsSha,
             vectorsBytes: vectorsData.count,
             builtAt: DateFmt.iso8601(now),
-            lastModifiedHttp: DateFmt.rfc1123(now))
-        try JSON.writePretty(meta, to: Layout.datasetMeta(outDir))
+            lastModifiedHttp: DateFmt.rfc1123(now),
+            embedderRuntime: embedder?.runtime,
+            embedderMaxTokens: embedder?.maxTokens)
+        try JSON.writeMetaPreservingUnknownKeys(meta, to: Layout.datasetMeta(outDir))
 
         var report = RunReport()
         report.processed = records.count
@@ -744,7 +796,7 @@ enum Commands {
         patched.metadataFile = (path as NSString).lastPathComponent
         patched.metadataSha256 = sha256Hex(blob)
         patched.metadataBytes = blob.count
-        try JSON.writePretty(patched, to: Layout.datasetMeta(outDir))
+        try JSON.writeMetaPreservingUnknownKeys(patched, to: Layout.datasetMeta(outDir))
         let all = (try? JSON.read(path) as [PosterMeta]) ?? []
         print(JSON.line(["metadata": all.count, "withPoster": all.filter { $0.posterPath != nil }.count,
                          "sha": patched.metadataSha256 ?? "", "bytes": patched.metadataBytes ?? 0]))
@@ -1076,6 +1128,12 @@ struct DatasetMeta: Codable {
     var metadataFile: String? = nil
     var metadataSha256: String? = nil
     var metadataBytes: Int? = nil
+    // What actually embedded this corpus, as den-embed's /health reported it during the build (see
+    // DenEmbedClient.Identity). `embeddingModel` and `dims` say "bge-m3" and 1024 for every generation of
+    // the service, so they cannot express the couplings that DO move vectors — the ORT 1.22 → 1.28 bump and
+    // the Rust rewrite's token cap. Absent means a corpus built before this was recorded.
+    var embedderRuntime: String? = nil
+    var embedderMaxTokens: Int? = nil
 }
 
 enum DateFmt {
@@ -1212,7 +1270,6 @@ struct HaikuVote: Codable {
     }
 }
 
-struct VectorRow: Codable { let tmdbId: Int; let v: [Int] }
 
 enum EnrichOutcome {
     case ok(EnrichedTitle)
@@ -1297,6 +1354,7 @@ enum Layout {
     static func enrichedDir(_ dir: String) -> String { join(dir, "enriched") }
     static func enrichedBatch(_ dir: String, _ id: Int) -> String { join(dir, "enriched/batch-\(id).json") }
     static func escalateBatch(_ dir: String, _ id: Int) -> String { join(dir, "escalate/batch-\(id).json") }
+    static func embedderIdentity(_ dir: String) -> String { join(dir, "index/embedder.json") }
     static func votesDir(_ dir: String) -> String { join(dir, "votes") }
     static func votePass(_ dir: String, _ id: Int, _ pass: Int) -> String { join(dir, "votes/batch-\(id)-pass\(pass).json") }
     static func labelsStore(_ dir: String) -> String { join(dir, "index/labels.jsonl") }
@@ -1336,6 +1394,12 @@ enum JSON {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try FileIO.write(try encoder.encode(value), to: path)
     }
+    /// Write `dataset.meta.json` through `ManifestMerge`, so keys the struct does not model survive.
+    static func writeMetaPreservingUnknownKeys<T: Encodable>(_ value: T, to path: String) throws {
+        let existing = try? Data(contentsOf: URL(fileURLWithPath: path))
+        try FileIO.write(try ManifestMerge.merge(new: try encodeSorted(value), existing: existing), to: path)
+    }
+
     static func encodeSorted<T: Encodable>(_ value: T) throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(value)
