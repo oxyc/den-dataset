@@ -72,6 +72,45 @@ python3 scripts/v2/llm_phase.py --phase out-t02/v2/ruler/gen --verify   # exit 1
 output covering under 80% of the ids it was given. Re-running those exact batches is
 idempotent — each writes only its own fixed path.
 
+## Embedding: it cannot be done on an Apple Silicon Mac
+
+**The published den-embed image is amd64 only, and it cannot run under emulation here.**
+ONNX Runtime's prebuilt binaries require **AVX2**, which Rosetta/QEMU does not provide. The
+container starts and `/health` answers — health needs no inference — and then the process
+dies with an illegal instruction on the *first embed request*, which reads as "connection
+refused" from the client. The log line is the only honest signal:
+
+```
+WARNING: This CPU does not support AVX2, which is required by ort's prebuilt ONNX Runtime
+binaries. The app will likely crash with an illegal instruction error
+```
+
+This also means **`scripts/embed-corpus-run.sh` cannot work on this machine at all**, since
+it boots that same published container.
+
+So embedding runs **on the homelab box**, against the service that answers live queries:
+
+```sh
+ssh root@pve 'incus exec den -- tee /root/tags.jsonl > /dev/null' < docs.jsonl
+ssh root@pve 'incus exec den -- sh /root/run-embed.sh'      # nohup inside the container
+ssh root@pve 'incus exec den -- tail -4 /root/embed.log'
+```
+
+den-embed is not published to the LAN; from inside the `den` container it is
+`http://10.89.0.10:8080` (podman network). Note that a `&` or a redirect written into the
+`ssh root@pve 'incus exec …'` string binds to the **pve host shell**, not the container —
+put the backgrounding in a script file inside the container instead.
+
+### Two measured properties of the service
+
+- **~8.7 docs/s on tag-length documents, independent of chunk size** (16/32/64 all measured
+  8.6–8.8). `embed_many` maps `embed_one` serially, so batching removes round-trips, not
+  inference. A full 38,460-document premise embed is therefore **~74 minutes** — cheap next
+  to the 4–5 hours a whole-plot corpus embed takes, because tag documents are ~250 chars.
+- **Responses are cached.** Re-sending 128 identical texts returns in 0.02 s against 14.7 s
+  cold. Undocumented, and it makes the cutoff sweep nearly free: variants that share tag
+  strings re-embed at cache speed after the first pass.
+
 ## Python environment
 
 `out-t02/v2/.venv` (numpy, scipy). It is under a gitignored `out-*/` directory, so it is
