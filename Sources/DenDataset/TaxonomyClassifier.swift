@@ -172,8 +172,13 @@ public struct TaxonomyClassifier: Sendable {
         var tally: [String: Int] = [:]
         for genre in primaries { tally[genre, default: 0] += 1 }
         let total = Double(primaries.count)
-        let ranked = tally.sorted { ($0.value, GenreRarity.weight(genreID(for: $0.key))) >
-                                    ($1.value, GenreRarity.weight(genreID(for: $1.key))) }
+        // Genre name is the final tiebreak, for the same reason as `aggregate`: `tally` is a Dictionary,
+        // and the rarity prior cannot separate two genres that SHARE a weight (Fantasy/Family both 1.15,
+        // Documentary/History both 1.45, and three more such pairs) — so an even split between them
+        // resolved by hash order, which changes between processes. `contenders` is filtered from `ranked`
+        // and `max` returns the last maximal element, so fixing the order here settles the whole function.
+        let ranked = tally.sorted { ($0.value, GenreRarity.weight(genreID(for: $0.key)), $1.key) >
+                                    ($1.value, GenreRarity.weight(genreID(for: $1.key)), $0.key) }
         guard let top = ranked.first else { return nil }
         // Near-tie with the runner-up → pick the rarer of the close contenders (the Drama→Crime fix).
         let contenders = ranked.filter { Double(top.value - $0.value) / total <= tieMargin }
@@ -197,9 +202,16 @@ public struct TaxonomyClassifier: Sendable {
             }
             return LabelConfidence(label: label, confidence: confidence)
         }
+        // Ties break on the LABEL, not on dictionary order. `sum` is a Dictionary, so `map` yields an
+        // arbitrary order that Swift's per-process String hash seed changes between runs, and
+        // `sorted(by:)` is not stable — so equal confidences produced an arbitrary order AND an
+        // arbitrary subset surviving `prefix(3)`. Measured on the shipped corpus: 9.6% of records
+        // have a tied subgenre confidence, 15.5% a tied mood, and 996 sit exactly on the cut, so the
+        // same inputs shipped different labels run to run. Reproducibility is the point — `assemble
+        // --force` on an unchanged batch must not change what ships.
         return grounded
             .filter { $0.confidence >= threshold($0.label) }
-            .sorted { $0.confidence > $1.confidence }
+            .sorted { ($0.confidence, $1.label) > ($1.confidence, $0.label) }
             .prefix(3)
             .map { $0 }
     }
