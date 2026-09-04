@@ -35,7 +35,7 @@ taxonomy-backfill enrich    --worklist <path> [--limit 150] --out-dir <dir>
 taxonomy-backfill escalation --batch-id <n> --out-dir <dir>
 taxonomy-backfill assemble  --batch-id <n> --out-dir <dir>
 taxonomy-backfill finalize  --out-dir <dir>
-taxonomy-backfill score     --labels labels-t01.json --golden golden.json [--gate]
+taxonomy-backfill score     --labels labels-t02.json --golden golden.json [--gate]
 ```
 
 `worklist`/`enrich`/`enrich-ids` hit TMDB and need `TMDB_API_KEY`. The per-title labels come from Haiku

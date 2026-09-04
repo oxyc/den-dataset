@@ -11,9 +11,17 @@
 # so they live as release assets, never in git.
 set -euo pipefail
 
-DIR="${1:-out}"
-[ -f "$DIR/dataset.meta.json" ] || DIR="data"
-[ -f "$DIR/dataset.meta.json" ] || { echo "error: no dataset.meta.json in ./out or ./data — run finalize first" >&2; exit 1; }
+# An explicit argument is taken at its word. Falling back to ./data when the NAMED directory has no manifest
+# meant `publish-dataset.sh out-t03` — a typo, or a dir not yet finalized — silently published ./data
+# instead and reported success.
+DIR="${1:-}"
+if [ -n "$DIR" ]; then
+  [ -f "$DIR/dataset.meta.json" ] || { echo "error: no dataset.meta.json in $DIR — run finalize first" >&2; exit 1; }
+else
+  DIR=out
+  [ -f "$DIR/dataset.meta.json" ] || DIR="data"
+  [ -f "$DIR/dataset.meta.json" ] || { echo "error: no dataset.meta.json in ./out or ./data — run finalize first" >&2; exit 1; }
+fi
 
 REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
 
@@ -21,7 +29,10 @@ REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
 # dataset.meta.json is kept SEPARATE from the blobs on purpose (see the ordering below).
 shopt -s nullglob
 meta="$DIR/dataset.meta.json"
-blobs=("$DIR"/facets.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/*.gz "$DIR"/metadata-*.json)
+# `labels-*.json.gz`, not a bare `*.gz`: that also swept up the TMDB daily-export dumps build-worklist.py
+# writes into the same out-dir (movie_ids + the two tv ones, ~36 MB), publishing TMDB's raw export data as
+# release assets from a repo that otherwise refuses to ship raw TMDB text.
+blobs=("$DIR"/facets.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json)
 [ ${#blobs[@]} -ge 3 ] || { echo "error: expected labels/vectors/gz/metadata in $DIR, found: ${blobs[*]:-none}" >&2; exit 1; }
 
 echo "publishing → $REPO data-latest:"
@@ -45,14 +56,49 @@ upload_one() {
 # 1) BLOBS FIRST — everything the meta references. The meta is deliberately NOT in this batch.
 for f in "${blobs[@]}"; do echo "→ $(basename "$f")"; upload_one "$f" || exit 1; done
 
-# 2) VERIFY every file the meta will point at is actually on the release, BEFORE publishing the meta.
+# 2) VERIFY, before publishing the meta, that every file it names is on the release AND that the local copy
+# hashes to what the meta swears it does.
+#
+# Names alone are not enough. `data-latest` is a MOVING release, so the previous publish's asset satisfies a
+# name check trivially: a blob the meta names but that is absent from $DIR is never uploaded, and last run's
+# copy passes. A stale <x>Sha256 is worse than a missing file — both consumers hard-verify it
+# (den/deploy/atlas-dataset-sync.sh runs sha256sum -c, and the app's index store drops a blob on mismatch),
+# so the refresh does not degrade, it STOPS: den-atlas keeps serving the old dataset and the 4-hourly timer
+# fails forever with the only signal in the journal.
+#
+# Read from a temp file, not a process substitution: `while read` fed by <(…) hides the generator's exit
+# status from set -e, so an unparseable meta yielded zero lines and missing=0 — this gate waving through
+# exactly the broken manifest it exists to catch.
+manifest_files="$(mktemp)"
+trap 'rm -f "$manifest_files"' EXIT
+python3 -c '
+import json, sys
+meta = json.load(open(sys.argv[1]))
+for key, name in meta.items():
+    if key.endswith("File") and name:
+        print(name, meta.get(key[:-4] + "Sha256", ""))
+' "$meta" > "$manifest_files"
+
 present="$(gh release view data-latest -R "$REPO" --json assets -q '.assets[].name')"
 missing=0
-while read -r name; do
+while read -r name sha; do
   [ -z "$name" ] && continue
-  grep -qxF "$name" <<<"$present" || { echo "error: meta references '$name' but it is NOT on the release" >&2; missing=1; }
-done < <(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); [print(m[k]) for k in m if k.endswith("File") and m.get(k)]' "$meta")
-[ "$missing" -eq 0 ] || { echo "aborting: refusing to publish a meta that points at missing blobs (half-published release)" >&2; exit 1; }
+  if ! grep -qxF "$name" <<<"$present"; then
+    echo "error: meta references '$name' but it is NOT on the release" >&2; missing=1; continue
+  fi
+  if [ ! -f "$DIR/$name" ]; then
+    echo "error: meta references '$name' but it is not in $DIR — the release copy is from an earlier publish" >&2
+    missing=1; continue
+  fi
+  if [ -n "$sha" ]; then
+    local_sha="$(shasum -a 256 "$DIR/$name" | cut -d' ' -f1)"
+    if [ "$local_sha" != "$sha" ]; then
+      echo "error: '$name' hashes to $local_sha but the meta declares $sha — consumers verify this and would refuse the whole refresh" >&2
+      missing=1
+    fi
+  fi
+done < "$manifest_files"
+[ "$missing" -eq 0 ] || { echo "aborting: refusing to publish a meta that does not describe what is on the release" >&2; exit 1; }
 
 # 3) META LAST — the atomic commit point. It declares the new datasetVersion + names the blobs, so it must be
 # the final write. If any blob upload above failed, we already exited and the OLD meta still stands, so

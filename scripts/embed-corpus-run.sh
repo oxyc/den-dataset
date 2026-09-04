@@ -20,25 +20,42 @@
 # the corpus is embedded by exactly the runtime the box serves queries with. That alignment is the invariant
 # the whole retrieval design rests on (docs/OPERATE.md) — embedding the corpus with a hand-built binary and
 # serving queries from the image is precisely how it silently breaks.
+#
+# WHAT THIS COSTS, STATED PLAINLY: the Rust service truncates at 512 tokens and the Python one it replaced
+# had no token cap, so documents re-embedded here are shorter than the ones in the corpus shipping today.
+# Raising the cap is not an option — den-embed's ceiling is 1024 tokens because peak RSS is 1219 MB there
+# and 1598 MB at 2048, against a 1536 MB cgroup. So PLOT_CAP is set to fit instead, and `embed-corpus`
+# refuses outright if it does not: a re-embed changes the corpus, and that has to be a decision rather than
+# something discovered later in the retrieval quality. The alignment that matters still holds, because
+# queries go through this same service.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
 LABELS="${1:?usage: embed-corpus-run.sh <existing labels-t02.json>}"
 OUT_DIR="${OUT_DIR:-out-vecnow}"
 ENRICHED_DIR="${ENRICHED_DIR:-out/enriched}"
-CHUNK="${CHUNK:-16}"                  # docs per den-embed request (client side)
+# 15, not 16: den-embed rejects a request whose total exceeds max_request_tokens (8192), and 16 x 512 is
+# exactly 8192 — one token of slack from a 413, which Transport treats as definitive and does not retry.
+CHUNK="${CHUNK:-15}"                  # docs per den-embed request (client side)
 EMBED_BATCH="${EMBED_BATCH:-8}"       # docs the model processes at once (server) — bge-m3 attention is O(seq^2),
 MAX_TOKENS="${MAX_TOKENS:-512}"       # so bound BOTH the batch and the doc length to cap activation memory.
+# The plot cap must fit MAX_TOKENS or den-embed truncates the document server-side and says nothing — see
+# `assertDocFits`, which refuses rather than letting that happen. 1500 also matches what `assemble` composes,
+# which matters because both append to the same store.
+PLOT_CAP="${PLOT_CAP:-1500}"
 SEGMENT="${SEGMENT:-5000}"            # titles per den-embed lifetime, then restart it fresh
 IMAGE="${DEN_EMBED_IMAGE:-ghcr.io/oxyc/den-embed:latest}"
 RUNTIME="${DEN_EMBED_RUNTIME:-podman}"
 PORT="${DEN_EMBED_PORT:-8791}"
 NAME="den-embed-corpus-$$"
-EMBED_LOG="${EMBED_LOG:-/tmp/den-embed.log}"
+# Under the out-dir, not /tmp: predictable world-writable paths, and the logs belong with the run anyway.
+EMBED_LOG="${EMBED_LOG:-$OUT_DIR/den-embed.log}"
+ERR_LOG="${ERR_LOG:-$OUT_DIR/embed-corpus.err}"
 
 export DEN_EMBED_URL="http://127.0.0.1:$PORT"
 
 [ -f "$LABELS" ] || { echo "missing labels file: $LABELS"; exit 1; }
+mkdir -p "$OUT_DIR"
 command -v "$RUNTIME" >/dev/null || { echo "no $RUNTIME on PATH — set DEN_EMBED_RUNTIME=docker"; exit 1; }
 
 # Kill by CONTAINER NAME, not by process pattern. The old `pkill -f "uvicorn server:app"` was a machine-wide
@@ -68,16 +85,30 @@ boot_embed() {
   return 1
 }
 
-swift build -c release >/dev/null
+swift build -c release >/dev/null || { echo "build failed"; exit 1; }
 BIN=.build/release/taxonomy-backfill
 trap stop_embed EXIT
+fails=0
+MAX_FAILS="${MAX_FAILS:-6}"
 
 for attempt in $(seq 1 200); do
   boot_embed || { stop_embed; sleep 5; continue; }
   # One segment: embed up to SEGMENT new titles, then exit so den-embed can be recycled.
   out=$("$BIN" embed-corpus --labels "$LABELS" --enriched-dir "$ENRICHED_DIR" --out-dir "$OUT_DIR" \
-        --chunk "$CHUNK" --limit "$SEGMENT" 2>>/tmp/embed-corpus.err) || {
-    echo "segment $attempt failed (den-embed likely died) — restarting + resuming…"; stop_embed; continue; }
+        --chunk "$CHUNK" --plot-cap "$PLOT_CAP" --limit "$SEGMENT" 2>>"$ERR_LOG") || {
+    # Not every failure is a dead container. A refusal from embed-corpus itself — a mixed embedder, a plot
+    # cap the service would truncate, a missing binary — is DETERMINISTIC, and retrying it 200 times boots
+    # the 555 MB model 200 times to reach the same answer. That was the shape of the seven-hour no-op this
+    # script used to be; the trigger was fixed and the amplifier was not.
+    fails=$((fails + 1))
+    echo "segment $attempt failed (attempt $fails of $MAX_FAILS) — see $ERR_LOG"
+    tail -3 "$ERR_LOG" | sed "s/^/    /"
+    stop_embed
+    [ "$fails" -ge "$MAX_FAILS" ] && { echo "$MAX_FAILS consecutive failures — stopping"; exit 1; }
+    sleep $((fails * 15))
+    continue
+  }
+  fails=0
   echo "$out"
   # A parse failure must NOT read as "written: 0" → "everything is embedded" → finalize a PARTIAL store and
   # exit 0. Distinguish the two: empty means unparseable, and that is a hard stop.
@@ -88,7 +119,7 @@ for attempt in $(seq 1 200); do
   if [ "$written" -eq 0 ]; then
     echo "=== all titles embedded → finalizing ==="
     stop_embed
-    "$BIN" finalize --out-dir "$OUT_DIR"
+    "$BIN" finalize --out-dir "$OUT_DIR" || { echo "finalize failed — nothing published"; exit 1; }
     exit 0
   fi
 done

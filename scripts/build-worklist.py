@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the popularity-ordered enrich worklists (FP-2).
 
-The universe = the TMDB ids Den already ships (extracted from the bundled `labels-t01.json`), so a re-embed
+The universe = the TMDB ids Den already ships (extracted from the bundled `labels-t02.json`), so a re-embed
 covers exactly the current catalogue. Ordering = TMDB daily-export `popularity` desc, so enrich processes the
 titles most likely to have a Wikipedia article first (the low-popularity tail rarely does — watch the per-batch
 wikiPlot rate fall off and stop when it's not worth continuing).
@@ -9,7 +9,7 @@ wikiPlot rate fall off and stop when it's not worth continuing).
     python3 scripts/build-worklist.py            # -> out/worklist-{movie,tv}.json
 
 Env:
-    LABELS  path to the shipped labels-t01.json (default: ../den/Sources/DenKit/Resources/labels-t01.json)
+    LABELS  path to the shipped labels blob (default: ../den/Sources/DenKit/Resources/labels-t02.json)
     OUT_DIR output dir (default: out)
 No API key needed — the daily exports are public static files.
 """
@@ -21,9 +21,12 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 OUT = os.environ.get("OUT_DIR", "out")
+# The shipped labels blob. t02 is current; the t01 default this used to carry no longer exists, so the
+# documented `python3 scripts/build-worklist.py` raised FileNotFoundError and step 2 of the re-embed
+# runbook was blocked with nothing pointing at the cause.
 LABELS = os.environ.get(
     "LABELS",
-    os.path.expanduser("~/Projects/Personal/den/Sources/DenKit/Resources/labels-t01.json"),
+    os.path.expanduser("~/Projects/Personal/den/Sources/DenKit/Resources/labels-t02.json"),
 )
 UA = "den-dataset/1.0 (github.com/oxyc/den-dataset)"
 

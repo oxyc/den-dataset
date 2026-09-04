@@ -21,7 +21,9 @@ FLOOR_ARG=""; [ -n "${VOTE_FLOOR:-}" ] && FLOOR_ARG="--vote-floor $VOTE_FLOOR"
 WORKLIST="$OUT_DIR/worklist-$MEDIA.json"
 LOG="$OUT_DIR/enrich-$MEDIA.log"
 
-den_load_env
+# `|| exit 1`: this script deliberately runs without -e, so a bare call would print its message and
+# continue into six failing batches before giving up on the wrong cause.
+den_load_env || exit 1
 [ -f "$WORKLIST" ] || { echo "missing $WORKLIST — run scripts/build-worklist.py"; exit 1; }
 
 swift build -c release >/dev/null

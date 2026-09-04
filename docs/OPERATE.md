@@ -19,14 +19,34 @@ products are only meaningful between vectors from the same model. If you re-embe
 the app must point its query embedder at the same one. `dataset.meta.json.embeddingModel` + `dims` are how the
 app detects a mismatch and re-syncs (FP-1 keys the on-device index on those two fields).
 
-## Full re-embed (MacBook) — the ~58k-title universe
+`embeddingModel` + `dims` are NOT enough on their own, and were the whole reason this rule went unenforced:
+every generation of den-embed reports `bge-m3` and `1024`, including the two that return different vectors
+for the same text (ORT 1.22 → 1.28 moved int8 output, and the Rust rewrite added a 512-token truncation the
+Python service never had). So the manifest also carries `embedderRuntime` + `embedderMaxTokens`, taken from
+the service's own `/health` at build time, and the corpus build refuses to append to a store that a
+different embedder created. **The corpus shipping today was built by the Python/ORT-1.22 generation** and is
+queried through the current one — that is a real, known violation, and the only remedy is a full re-embed.
+
+## Full re-embed (MacBook) — the shipped 37.5k-title corpus
 
 Both TMDB and Wikipedia are hit live; `den-embed` must be running for step 5 (not for plot-finding).
 
+A re-embed today produces SHORTER documents than the corpus currently shipping: den-embed truncates at 512
+tokens and the Python service it replaced had no token cap. Raising it is not available — the ceiling is
+1024 tokens because peak RSS is 1219 MB there against a 1536 MB cgroup — so `--plot-cap` is lowered to fit
+instead, and `embed-corpus` refuses outright rather than letting the service cut documents silently. The
+alignment that matters still holds: queries go through the same service.
+
 ```sh
-# 0. Boot the embedding service (first run downloads the ~560 MB bge-m3 ONNX model, then stays warm).
-cd ~/Projects/Personal/den-embed && DEN_EMBED_PORT=8791 bash run.sh        # serves :8791
-#    (health check: curl -s localhost:8791/health  ->  {"status":"ok","model":"bge-m3","dims":1024})
+# 0. Boot the embedding service. Run the PUBLISHED CONTAINER, not a local build — the model is pinned inside
+#    the image, so the corpus is embedded by exactly the runtime that serves queries. (The old `bash run.sh`
+#    here booted a Python service that was deleted in the Rust rewrite at 5cf9e72.)
+podman run --rm -p 127.0.0.1:8791:8080 -e DEN_EMBED_HOST=0.0.0.0 ghcr.io/oxyc/den-embed:latest
+#    Health is a CONSTANT — it answers ok while the model is missing and every /embed 500s. Probe the real
+#    thing instead:
+#    curl -fsS -H 'content-type: application/json' -d '{"text":"probe"}' localhost:8791/embed | head -c 80
+#
+#    Or skip step 0 and 5 entirely and let scripts/embed-corpus-run.sh manage the container for you.
 
 # 1. Secrets — copy the template and fill it (gitignored via *.env). The run wrapper sources this.
 cd ~/Projects/Personal/den-dataset
@@ -45,19 +65,30 @@ scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. 
 #    (Observed on the popular tier: ~96% wikiPlot hit; the misses are recent/obscure titles with no enwiki article.)
 
 # 4. [Agent] Haiku vote passes over each scratch batch -> out/votes/batch-<id>-pass<N>.json
-#    (Opus orchestrates the subagents; see DT-classification-prompt.md. Escalate the hard cases with
+#    (Opus orchestrates the subagents; see `tickets/DT-classification-prompt.md` in the **den app** repo. Escalate the hard cases with
 #    `$BIN escalation --batch-id <id> --out-dir out` before pass 2/3.)
 
 # 5. Assemble — compose(facts + classified tags + Wikipedia plot) -> den-embed -> int8[1024]; append to index.
 export DEN_EMBED_URL=http://127.0.0.1:8791     # default; set if the service is elsewhere
 $BIN assemble --batch-id <id> --out-dir out    # per batch (default embedder = den-embed)
+#    First run in a fresh out-dir records the service's identity to out/index/embedder.json; later runs
+#    refuse if the service no longer matches it. An out-dir with a store but no embedder.json also refuses —
+#    what built it is unknown, and guessing is how the corpus/query drift went unnoticed in the first place.
 
-# 6. Finalize — index store -> labels-t01.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
+# 6. Finalize — index store -> labels-t02.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
 $BIN finalize --out-dir out
 
-# 7. Publish — the moving `data-latest` GitHub release the app + den-atlas both fetch.
+# 7. Metadata sidecar — poster/title/year per shipped id, so a neighbour renders without a TMDB detail call.
+#    Its filename carries the datasetVersion, which step 6 just changed, so this belongs after EVERY finalize
+#    that adds titles. Skipping it leaves the manifest naming the previous version's sidecar: it still hashes
+#    correctly, so both consumers accept it and never re-sync — the new titles render with no poster forever.
+$BIN metadata --out-dir out
+
+# 8. Publish — the moving `data-latest` GitHub release the app + den-atlas both fetch.
 scripts/publish-dataset.sh out
 ```
+
+`$BIN` is `.build/release/taxonomy-backfill` (`swift build -c release`).
 
 `assemble --embedder fnv` falls back to the offline FNV embedder (float → local int8) for a network-free run;
 `finalize --embedding-version <v>` overrides the artifact label. The default path is the bge-m3 build above.
