@@ -151,3 +151,48 @@ public struct ClassifyCheckpoint: Codable {
     }
 }
 
+
+
+/// The sidecar's row order feeds `metadataSha256`, and the app folds that into its sync key — so an
+/// unstable order costs every device a ~4.6 MB re-download of a file that did not change.
+///
+/// A free function, in the library, because it is the ONE line of the sidecar write that can be wrong: as
+/// a closure inside the CLI it was unreachable from the tests, and mutation proved it — reverting it to
+/// `$0.tmdbId < $1.tmdbId` left the whole suite green while a test claiming to cover it restated the
+/// comparator locally instead of calling it.
+public enum SidecarOrder {
+    /// A TOTAL order. `tmdbId` alone is not one here: 940 ids in the corpus are both a movie and a series,
+    /// and Swift's `sort` is unstable, so ties landed in TaskGroup completion order.
+    public static func before(_ a: PosterMeta, _ b: PosterMeta) -> Bool {
+        (a.tmdbId, a.mediaType) < (b.tmdbId, b.mediaType)
+    }
+
+    public static func sorted(_ rows: [PosterMeta]) -> [PosterMeta] { rows.sorted(by: before) }
+}
+
+/// Whether a run may append to an existing store, given what built it and what is about to.
+///
+/// Free function for the same reason: the decision lived inline in `recordEmbedder`, and disabling it
+/// wholesale left every test green.
+public enum EmbedderGate {
+    public enum Decision: Equatable {
+        /// The store was built by this same embedder — append.
+        case matches
+        /// A different embedder built it. Appending would mix two generations into one corpus.
+        case mismatch(previous: String, now: String)
+        /// Rows exist but nothing recorded what built them, so it cannot be known.
+        case unknownProvenance
+        /// Nothing there yet — record this identity and proceed.
+        case firstUse
+    }
+
+    public static func decide(previous: DenEmbedClient.Identity?, now: DenEmbedClient.Identity,
+                              storeHasRows: Bool) -> Decision {
+        if let previous {
+            return previous == now ? .matches : .mismatch(previous: previous.label, now: now.label)
+        }
+        // Adopting the CURRENT service as an existing store's identity would write a guess down as a fact,
+        // and the guard would then pass forever on the one corpus that actually has the problem.
+        return storeHasRows ? .unknownProvenance : .firstUse
+    }
+}

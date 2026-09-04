@@ -162,28 +162,70 @@ extension ClassifyCheckpointTests {
     }
 }
 
-/// The sidecar's row order feeds `metadataSha256`, which the app folds into its syncKey — so an unstable
-/// order costs every device a 4.6 MB re-download of a file that did not change.
+/// The sidecar's row order feeds `metadataSha256`, which the app folds into its sync key — so an unstable
+/// order costs every device a ~4.6 MB re-download of a file that did not change.
 final class SidecarOrderTests: XCTestCase {
-    /// Sorting on tmdbId ALONE is not a total order here: 940 ids in the corpus are both a movie and a
-    /// series (the titles the media-qualified checkpoint restores), and `sort` is unstable.
-    func testTheSortIsTotalAcrossCollidingIds() {
-        let rows = [
-            PosterMeta(tmdbId: 95, mediaType: "tv", title: "Buffy", posterPath: nil, year: 1997),
-            PosterMeta(tmdbId: 95, mediaType: "movie", title: "Armageddon", posterPath: nil, year: 1998),
-            PosterMeta(tmdbId: 12, mediaType: "movie", title: "Finding Nemo", posterPath: nil, year: 2003),
-        ]
-        let order: (PosterMeta, PosterMeta) -> Bool = {
-            ($0.tmdbId, $0.mediaType) < ($1.tmdbId, $1.mediaType)
-        }
+    private func row(_ id: Int, _ media: String) -> PosterMeta {
+        PosterMeta(tmdbId: id, mediaType: media, title: "t", posterPath: nil, year: nil)
+    }
 
-        // Every permutation must reach the same sequence, or the sha256 moves run to run.
-        let expected = rows.sorted(by: order).map { "\($0.tmdbId):\($0.mediaType)" }
-        for shuffle in 0..<50 {
-            _ = shuffle
-            let got = rows.shuffled().sorted(by: order).map { "\($0.tmdbId):\($0.mediaType)" }
-            XCTAssertEqual(got, expected)
+    /// Calls the PRODUCTION comparator. The previous version of this test declared its own copy and so
+    /// tested Swift's tuple `<` — mutation confirmed it stayed green while the real sort was reverted.
+    func testTheOrderIsTotalAcrossCollidingIds() {
+        let rows = [row(95, "tv"), row(95, "movie"), row(12, "movie")]
+        let expected = ["12:movie", "95:movie", "95:tv"]
+
+        for _ in 0..<50 {
+            let got = SidecarOrder.sorted(rows.shuffled()).map { "\($0.tmdbId):\($0.mediaType)" }
+            XCTAssertEqual(got, expected, "the same rows must always encode to the same bytes")
         }
-        XCTAssertEqual(expected, ["12:movie", "95:movie", "95:tv"])
+    }
+
+    func testConfidenceInTheIdStillDominates() {
+        XCTAssertTrue(SidecarOrder.before(row(12, "tv"), row(95, "movie")))
+    }
+}
+
+/// Whether a run may append to an existing store. Disabling this decision wholesale used to leave the
+/// entire suite green, because it lived inline in the CLI target the tests cannot import.
+final class EmbedderGateTests: XCTestCase {
+    private func identity(epoch: Int = 1, maxTokens: Int = 512) -> DenEmbedClient.Identity {
+        DenEmbedClient.Identity(model: "bge-m3", dims: 1024, vectorEpoch: epoch,
+                                runtime: "den-embed/3.1.0", maxTokens: maxTokens)
+    }
+
+    func testAFreshOutDirRecordsTheIdentityAndProceeds() {
+        XCTAssertEqual(EmbedderGate.decide(previous: nil, now: identity(), storeHasRows: false), .firstUse)
+    }
+
+    func testTheSameEmbedderMayAppend() {
+        XCTAssertEqual(EmbedderGate.decide(previous: identity(), now: identity(), storeHasRows: true),
+                       .matches)
+    }
+
+    /// The failure this whole mechanism exists for: two generations of vectors in one corpus, with every
+    /// field either side used to compare (bge-m3, 1024) identical.
+    func testADifferentEmbedderIsRefused() {
+        let decision = EmbedderGate.decide(previous: identity(epoch: 1), now: identity(epoch: 2),
+                                           storeHasRows: true)
+        guard case .mismatch = decision else { return XCTFail("expected a mismatch, got \(decision)") }
+    }
+
+    /// Rows with no recorded identity must NOT adopt the current service. Doing so writes a guess down as
+    /// a fact, and the guard then passes forever on the one corpus that actually has the problem — the
+    /// shipped 37.5k-title store, built by the Python service.
+    func testAnExistingStoreWithNoRecordedIdentityIsRefused() {
+        XCTAssertEqual(EmbedderGate.decide(previous: nil, now: identity(), storeHasRows: true),
+                       .unknownProvenance)
+    }
+
+    /// A release that does not move vectors must not invalidate a corpus — that is why the comparison
+    /// ignores the build string.
+    func testANewBuildOfTheSameEpochMayStillAppend() {
+        let old = DenEmbedClient.Identity(model: "bge-m3", dims: 1024, vectorEpoch: 1,
+                                          runtime: "den-embed/3.1.0", maxTokens: 512)
+        let new = DenEmbedClient.Identity(model: "bge-m3", dims: 1024, vectorEpoch: 1,
+                                          runtime: "den-embed/3.9.9", maxTokens: 512)
+        XCTAssertEqual(EmbedderGate.decide(previous: old, now: new, storeHasRows: true), .matches)
     }
 }

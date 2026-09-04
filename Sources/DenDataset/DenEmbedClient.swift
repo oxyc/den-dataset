@@ -104,6 +104,27 @@ public struct DenEmbedClient: Sendable {
         /// Parse a `/health` body. Split out from the request so the mapping is testable without a service:
         /// this is a hard gate on the pipeline, and the one field whose JSON name differs from its Swift
         /// name (`max_tokens`) is exactly the kind of thing that fails silently as a nil default.
+        /// Tolerant decode. `Identity` is not only a wire type — it is written to `index/embedder.json` and
+        /// read back on every later run — so a new key with synthesized `Decodable` makes every file
+        /// already on disk fail with `keyNotFound`. `ClassifyCheckpoint.Totals` carries a comment about
+        /// exactly this and I added `vectorEpoch` without it: `finalize` then refused to ship the out-dir,
+        /// and `recordEmbedder`, which reads with `try?`, saw the file as ABSENT and told the operator to
+        /// write a literal that itself does not decode — advice that loops forever, with a full 37.5k-title
+        /// re-embed as the only way out.
+        ///
+        /// Absent means the file predates the field, which is the same thing an absent `vector_epoch` from
+        /// /health means: epoch 0, the Python generation.
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            model = try c.decode(String.self, forKey: .model)
+            dims = try c.decode(Int.self, forKey: .dims)
+            vectorEpoch = try c.decodeIfPresent(Int.self, forKey: .vectorEpoch) ?? 0
+            runtime = try c.decode(String.self, forKey: .runtime)
+            maxTokens = try c.decode(Int.self, forKey: .maxTokens)
+        }
+
+        enum CodingKeys: String, CodingKey { case model, dims, vectorEpoch, runtime, maxTokens }
+
         public init(model: String, dims: Int, vectorEpoch: Int = 0, runtime: String, maxTokens: Int) {
             self.model = model; self.dims = dims; self.vectorEpoch = vectorEpoch
             self.runtime = runtime; self.maxTokens = maxTokens

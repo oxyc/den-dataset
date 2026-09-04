@@ -64,7 +64,9 @@ struct TaxonomyBackfill {
           finalize --out-dir <dir>
           metadata --out-dir <dir> [--skip-fetch] [--limit N]
                    (the poster sidecar; its filename carries the datasetVersion, so run it after EVERY
-                    finalize that changed the corpus, before publishing)
+                    finalize that changed the corpus, before publishing.
+                    --limit N is a PROBE: it fetches N and reports, writing no sidecar and touching no
+                    manifest — a partial sidecar would re-sync every device onto a gutted one.)
           score    --labels <labels.jsonl|labels-t02.json> --golden <golden.json> [--gate]
           recluster --labels <labels-tNN.json> --vectors <vectors-eNN.bin> [--k 200] [--iterations 8]
                     [--min-size 25] [--max-purity 0.35] [--min-cohesion 0.55] --out <report.json>  (DT-F weekly)
@@ -415,7 +417,12 @@ enum Commands {
         let labelsPath = try args.require("--labels")            // the existing labels-t02.json (its tags per title)
         let enrichedDir = args["--enriched-dir"] ?? Layout.enrichedDir(outDir)
         // Small chunk by default: den-embed activation memory scales with the batch, so keep requests modest.
-        let chunk = args.int("--chunk") ?? 16
+        // 15, not 16. den-embed's per-request budget is sum(min(actual_tokens, max_tokens)) <= 8192, and
+        // 16 fits ONLY because the min() clips every doc to exactly 16x512 = 8192 and the test is `>`.
+        // Raise DEN_EMBED_MAX_TOKENS — which `assertDocFits` explicitly advises — and the clip stops
+        // binding, a 16-doc request can exceed the budget, and it 413s. Transport treats 413 as definitive,
+        // so the run dies on its first flush having written nothing: the same shape as the max_batch bug.
+        let chunk = args.int("--chunk") ?? 15
         let limit = args.int("--limit")                          // optional cap (testing)
         // Cap the PLOT portion (facts + tags are always kept). 4000 chars keeps the median plot whole and every
         // mid-plot genre pivot the length audit found, dropping only low-value end-of-plot twist tails — the
@@ -514,31 +521,33 @@ enum Commands {
         let now = try await client.identity()
         // Identity first: on a service upgrade "this would mix two embedders" is the finding that matters,
         // and leading with the plot-cap error sent the operator off to fix the lesser one.
-        if let previous: DenEmbedClient.Identity = try? JSON.read(path) {
-            if previous != now {
-                throw ToolError(message: "this store was embedded by \(previous.label) but den-embed now "
-                    + "reports \(now.label) — appending would mix two embedders into one corpus. Either "
-                    + "restore the previous service, or start a fresh --out-dir and re-embed from scratch.")
-            }
-            try assertDocFits(plotCap: plotCap, embedder: now)
-            return now
+        let previous: DenEmbedClient.Identity? = try? JSON.read(path)
+        var hasRows = false
+        if FileManager.default.fileExists(atPath: Layout.labelsStore(outDir)) {
+            hasRows = !(try FileIO.readLines(Layout.labelsStore(outDir))).isEmpty
         }
-        // A store with rows but no recorded identity predates this check, and adopting the CURRENT service as
-        // its identity would write a guess down as a fact — the guard would then pass forever on the one
-        // corpus that actually has the problem. The shipped store is exactly that case: 37.5k rows embedded
-        // by the Python/ORT-1.22 service, which this one does not match.
-        if FileManager.default.fileExists(atPath: Layout.labelsStore(outDir)),
-           !(try FileIO.readLines(Layout.labelsStore(outDir))).isEmpty {
+
+        switch EmbedderGate.decide(previous: previous, now: now, storeHasRows: hasRows) {
+        case .mismatch(let was, let isNow):
+            throw ToolError(message: "this store was embedded by \(was) but den-embed now reports "
+                + "\(isNow) — appending would mix two embedders into one corpus. Either restore the "
+                + "previous service, or start a fresh --out-dir and re-embed from scratch.")
+        case .unknownProvenance:
+            // The shipped store is exactly this case: 37.5k rows from the Python/ORT-1.22 service.
             throw ToolError(message: "\(outDir) holds an existing store but no \(path), so what embedded it "
                 + "is unknown and appending \(now.label) may mix two embedders. Write that file with the "
                 + "identity that built it — a corpus from before the Rust rewrite is "
                 + #"{"model":"bge-m3","dims":1024,"runtime":"pre-3.0.0","maxTokens":0}"#
                 + " — or start a fresh --out-dir.")
+        case .matches:
+            try assertDocFits(plotCap: plotCap, embedder: now)
+            return now
+        case .firstUse:
+            try assertDocFits(plotCap: plotCap, embedder: now)
+            try FileIO.ensureParent(path)
+            try JSON.writePretty(now, to: path)
+            return now
         }
-        try assertDocFits(plotCap: plotCap, embedder: now)
-        try FileIO.ensureParent(path)
-        try JSON.writePretty(now, to: path)
-        return now
     }
 
     /// Refuse to compose documents the service will silently cut in half.
@@ -566,6 +575,18 @@ enum Commands {
                 + "\(budget - factsAndTags) or below, or raise DEN_EMBED_MAX_TOKENS on the service — its "
                 + "ceiling is 1024, above which it exceeds the memory the container is given.")
         }
+    }
+
+    /// Opus-confirmed world-knowledge labels, media-qualified. Accepts either the keyed form or a legacy
+    /// bare-Int map (read as movie ids, which is what produced them).
+    static func loadWorldKnowledge(_ path: String) -> [String: [String]] {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
+        if let keyed = try? JSONDecoder().decode([String: [String]].self, from: data),
+           keyed.keys.allSatisfy({ $0.contains(":") }) {
+            return keyed
+        }
+        guard let legacy = try? JSONDecoder().decode([Int: [String]].self, from: data) else { return [:] }
+        return Dictionary(uniqueKeysWithValues: legacy.map { (ClassifyCheckpoint.key("movie", $0.key), $0.value) })
     }
 
     /// Cap a plot to `maxChars`, ending on the last sentence boundary within the cap (so the embedded doc reads
@@ -709,7 +730,12 @@ enum Commands {
             classified.needsMigration = false
         }
         // Opus-confirmed world-knowledge labels (DT-G title-recognition adjudication) that survive the vc gate.
-        let wkConfirmed: [Int: [String]] = (try? JSON.read(Layout.wkConfirmed(outDir))) ?? [:]
+        // Keyed "movie:123"/"tv:123" like every other map here. wk-confirmed.json is ONE file per
+        // out-dir and delta-run/enrich-all put both media in the same one, so a bare Int key let a
+        // series' Opus-confirmed world-knowledge labels apply to the movie sharing its id — for exactly
+        // the 940 colliding titles, and exactly the hallucinated-tail label the vote gate exists to strip.
+        // Legacy bare-Int files still load, qualified as movie, which is what they were written from.
+        let wkConfirmed: [String: [String]] = Self.loadWorldKnowledge(Layout.wkConfirmed(outDir))
         var noPrimary = 0, missingVotes = 0, droppedNoWiki = 0
 
         let labelsHandle = try FileIO.appender(Layout.labelsStore(outDir))
@@ -744,7 +770,7 @@ enum Commands {
             guard !raws.isEmpty else { missingVotes += 1; continue }
             let title = dto.toEnrichedTitle()
             if requireWikiPlot && !title.hasWikiPlot { droppedNoWiki += 1; continue }   // ToS: no TMDB-prose labels
-            let confirmedWK = Set(wkConfirmed[dto.tmdbId] ?? [])
+            let confirmedWK = Set(wkConfirmed[ClassifyCheckpoint.key(dto.mediaType, dto.tmdbId)] ?? [])
             guard let classification = classifier.classify(rawVotes: raws, title: title, confirmedWK: confirmedWK) else {
                 noPrimary += 1
                 classified.done.insert(ClassifyCheckpoint.key(dto.mediaType, dto.tmdbId))
@@ -920,6 +946,12 @@ enum Commands {
         if !skipFetch {
             let labels: LabelsArtifact = try JSON.read(Layout.labelsArtifact(outDir, Taxonomy.current.version))
             var records = labels.records
+            // --limit is a PROBE: fetch a handful, report, write nothing. It used to truncate `records`
+            // here — before the coverage floor below is computed against `records.count` — so coverage was
+            // always ~100% and the floor could never fire, and the N rows were then written over the
+            // shipped 37.5k-row sidecar with their sha stamped into the manifest. The app folds that sha
+            // into its syncKey, so `metadata --limit 50`, the obvious cheap credential smoke-test, would
+            // have re-synced every device to a sidecar missing 37,483 titles.
             if let limit { records = Array(records.prefix(limit)) }
             let client = try TMDB.client()
             var out: [PosterMeta] = []
@@ -963,7 +995,13 @@ enum Commands {
             // changed. Sorting on the id alone does not fix that: `sort` is unstable, and the corpus
             // contains 940 ids that are BOTH a movie and a series — the very titles the media-qualified
             // checkpoint restores. Measured: 8 shuffles of that corpus produced 8 distinct sha256.
-            out.sort { ($0.tmdbId, $0.mediaType) < ($1.tmdbId, $1.mediaType) }
+            out = SidecarOrder.sorted(out)
+            if limit != nil {
+                print(JSON.line(["probe": out.count, "of": records.count,
+                                 "withPoster": out.filter { $0.posterPath != nil }.count,
+                                 "wrote": "nothing (--limit is a probe)"]))
+                return
+            }
             try JSON.write(out, to: path)
         }
 

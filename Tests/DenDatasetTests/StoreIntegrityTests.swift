@@ -246,14 +246,40 @@ final class RepairAndIdentityTests: XCTestCase {
             #"{"model":"bge-m3","dims":1024,"vector_epoch":1,"runtime":"den-embed/3.1.0","max_tokens":512}"#.utf8)))
     }
 
-    /// The identity is written to disk and compared on the next run, so it has to survive a round-trip
-    /// through JSON exactly — a lossy field would make the mixed-embedder guard fire on every run.
+    /// An identity file written before `vectorEpoch` existed must still LOAD. This type is persisted to
+    /// index/embedder.json and read on every later run, so a required new key makes every out-dir on disk
+    /// fail with keyNotFound — finalize refuses to ship, and recordEmbedder (which reads with `try?`) sees
+    /// the file as absent and prescribes a literal that does not decode either.
+    func testAnIdentityFileWrittenBeforeTheEpochExistedStillLoads() throws {
+        for stored in [
+            #"{"dims":1024,"maxTokens":512,"model":"bge-m3","runtime":"den-embed/3.0.0"}"#,
+            // The exact literal recordEmbedder's error message tells the operator to write.
+            #"{"model":"bge-m3","dims":1024,"runtime":"pre-3.0.0","maxTokens":0}"#,
+        ] {
+            let identity = try JSONDecoder().decode(DenEmbedClient.Identity.self, from: Data(stored.utf8))
+            XCTAssertEqual(identity.vectorEpoch, 0, "absent means the pre-epoch generation, not an error")
+            XCTAssertEqual(identity.dims, 1024)
+        }
+    }
+
+    /// The identity is written to disk and compared on the next run, so every field has to survive the
+    /// round-trip. Asserted on the ENCODED JSON, not on `==`: equality deliberately ignores `runtime`, so
+    /// comparing values here would not notice `runtime` being lost — and `finalize` stamps it into the
+    /// shipped manifest as `embedderRuntime`.
     func testIdentityRoundTripsThroughItsStoredForm() throws {
         let original = DenEmbedClient.Identity(model: "bge-m3", dims: 1024, vectorEpoch: 1,
                                                runtime: "den-embed/3.1.0", maxTokens: 512)
-        let restored = try JSONDecoder().decode(DenEmbedClient.Identity.self,
-                                                from: try JSONEncoder().encode(original))
+        let encoded = try JSONEncoder().encode(original)
+        let restored = try JSONDecoder().decode(DenEmbedClient.Identity.self, from: encoded)
         XCTAssertEqual(original, restored)
+
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(json["model"] as? String, "bge-m3")
+        XCTAssertEqual(json["dims"] as? Int, 1024)
+        XCTAssertEqual(json["vectorEpoch"] as? Int, 1)
+        XCTAssertEqual(json["maxTokens"] as? Int, 512)
+        XCTAssertEqual(json["runtime"] as? String, "den-embed/3.1.0",
+                       "runtime is ignored by == but is what finalize stamps into the manifest")
     }
 }
 
