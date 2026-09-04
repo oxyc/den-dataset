@@ -1,0 +1,63 @@
+name: ci
+
+# This repo had no CI at all. It builds the corpus den-atlas serves and the app searches, so a
+# change that breaks assembly or publishing was previously discovered by running the pipeline by
+# hand — or by the box picking up a bad release.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  swift:
+    # macOS, because Package.swift declares `platforms: [.macOS(.v13)]` and the sources use
+    # Foundation APIs that differ on corelibs. Building elsewhere would test something else.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - run: swift build --build-tests
+      - run: swift test
+
+  # The shell scripts are the half that actually runs in production: they drive enrichment, the
+  # delta pass, the corpus embed, and the publish that den-atlas's sync consumes. `sh -n` is a
+  # floor, not a test suite — it catches the syntax error that would otherwise surface as a failed
+  # nightly run — and shellcheck catches the quoting mistakes that have bitten the sibling repos.
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Parse under dash
+        run: |
+          for f in scripts/*.sh; do
+            head -1 "$f" | grep -q bash && sh="bash" || sh="dash"
+            "$sh" -n "$f" || exit 1
+            echo "ok  $f ($sh)"
+          done
+      - uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./scripts
+          severity: warning
+      - name: Python worklist builder compiles
+        run: python3 -m py_compile scripts/build-worklist.py
+
+  ci-ok:
+    # One required status check. `always()` so a skipped job does not fail branch protection.
+    needs: [swift, scripts]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          results='${{ needs.swift.result }} ${{ needs.scripts.result }}'
+          echo "results: $results"
+          for r in $results; do
+            case "$r" in failure|cancelled) echo "a required job failed"; exit 1 ;; esac
+          done
+          echo "ci-ok"

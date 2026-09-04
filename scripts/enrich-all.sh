@@ -8,7 +8,7 @@
 #
 # Per-batch JSON (wikiPlot / tagsOnly / deferred / remaining) is teed to out/enrich-<media>.log.
 set -uo pipefail                        # NOT -e: a failed batch must not abort the whole run
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 MEDIA="${1:-movie}"
 SIZE="${2:-500}"

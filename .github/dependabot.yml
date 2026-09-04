@@ -1,0 +1,30 @@
+# Weekly dependency PRs, grouped so a refresh is one reviewable PR rather than several.
+#
+# This package currently declares NO external Swift dependencies — every target is local — so the
+# `swift` entry will sit quiet until one is added. It is here so that the first dependency someone
+# adds is watched from the moment it lands, rather than whenever anyone remembers to come back.
+#
+# The artifacts this repo consumes and produces are pinned by other means and dependabot has no
+# ecosystem for them: the corpus is embedded through den-embed (whose ONNX Runtime version changes
+# vector output — see den-embed's CLAUDE.md), and the published release is consumed by den-atlas's
+# sync. Those couplings are documented in docs/, not here, because nothing can automate them.
+version: 2
+updates:
+  - package-ecosystem: swift
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      swift-minor:
+        update-types: [minor, patch]
+    labels: [dependencies]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [dependencies]

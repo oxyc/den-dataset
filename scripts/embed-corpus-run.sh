@@ -12,7 +12,7 @@
 #   scripts/embed-corpus-run.sh /path/to/labels-t01.json
 #
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 LABELS="${1:?usage: embed-corpus-run.sh <existing labels-t01.json>}"
 OUT_DIR="${OUT_DIR:-out-vecnow}"

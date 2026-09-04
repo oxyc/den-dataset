@@ -22,7 +22,13 @@ REPORT="$OUT_DIR/recluster-$(date -u +%Y-%m-%d).json"
 [ -x "$BIN" ] || { echo "building release binary…"; swift build -c release; }
 
 labels="$OUT_DIR/labels-t02.json"
-vectors="$(ls "$OUT_DIR"/vectors-*.bin 2>/dev/null | grep -v premise | head -1 || true)"
+# The plot vectors, not the premise ones — a glob plus a case, because `ls | grep` loses ls's exit
+# status through the pipe and mangles any name a glob would have handled.
+vectors=""
+for v in "$OUT_DIR"/vectors-*.bin; do
+  case "$v" in *premise*) continue ;; esac
+  [ -f "$v" ] && { vectors="$v"; break; }
+done
 [ -f "$labels" ] || { echo "error: no labels in $OUT_DIR" >&2; exit 1; }
 [ -n "$vectors" ] || { echo "error: no vectors blob in $OUT_DIR" >&2; exit 1; }
 
