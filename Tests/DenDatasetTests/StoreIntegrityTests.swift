@@ -85,6 +85,15 @@ final class StoreIntegrityTests: XCTestCase {
 
     /// The twelve keys the shipped manifest actually carries, and which a `finalize` or `metadata` re-run
     /// used to delete — taking premise search and facets down with them, silently, on both sides.
+    /// Stands in for `DatasetMeta.ownedKeys` — every key the struct is authoritative for, including the
+    /// optionals it omits when there is nothing to say.
+    private let owned: Set<String> = [
+        "datasetVersion", "taxonomyVersion", "embeddingModel", "dims", "count", "quantization",
+        "labelsFile", "vectorsFile", "labelsGzFile", "labelsSha256", "labelsBytes",
+        "vectorsSha256", "vectorsBytes", "builtAt", "lastModifiedHttp",
+        "metadataFile", "metadataSha256", "metadataBytes", "embedderRuntime", "embedderMaxTokens",
+    ]
+
     private static let unmodelledKeys = [
         "premiseEmbeddingModel", "premiseDims", "premiseCount",
         "premiseLabelsFile", "premiseLabelsSha256", "premiseLabelsBytes",
@@ -98,7 +107,7 @@ final class StoreIntegrityTests: XCTestCase {
         let existing = try JSONSerialization.data(withJSONObject: old)
         let fresh = try JSONSerialization.data(withJSONObject: ["datasetVersion": "new", "count": 2])
 
-        let merged = try ManifestMerge.merge(new: fresh, existing: existing)
+        let merged = try ManifestMerge.merge(new: fresh, existing: existing, owned: owned)
         let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
 
         for (i, key) in Self.unmodelledKeys.enumerated() {
@@ -110,23 +119,51 @@ final class StoreIntegrityTests: XCTestCase {
         let existing = try JSONSerialization.data(withJSONObject: ["count": 1, "facetsFile": "facets.bin"])
         let fresh = try JSONSerialization.data(withJSONObject: ["count": 2])
 
-        let merged = try ManifestMerge.merge(new: fresh, existing: existing)
+        let merged = try ManifestMerge.merge(new: fresh, existing: existing, owned: owned)
         let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
 
         XCTAssertEqual(result["count"] as? Int, 2, "a stale value must not survive the merge")
         XCTAssertEqual(result["facetsFile"] as? String, "facets.bin")
     }
 
+    /// The half of the merge that matters as much as preserving: a key the struct OWNS but leaves out is
+    /// saying "there is no sidecar", and that has to win too.
+    ///
+    /// `JSONEncoder` omits nil Optionals, so an omitted `metadataFile` was indistinguishable from an
+    /// unmodelled key and inherited the previous run's value — a manifest naming a sidecar built for an
+    /// older datasetVersion and swearing to its old sha256. Both consumers hard-verify that sha, so the
+    /// refresh does not degrade, it STOPS: den-atlas keeps serving the old dataset and the 4-hourly timer
+    /// fails silently forever. Worse than the loss the merge was written to prevent.
+    func testAnOwnedKeyTheStructOmittedIsNotInherited() throws {
+        let existing = try JSONSerialization.data(withJSONObject: [
+            "count": 1,
+            "metadataFile": "metadata-OLDVERSION.json",
+            "metadataSha256": "STALE-SHA",
+            "embedderRuntime": "den-embed/2.9.0",
+            "facetsFile": "facets.bin",              // NOT owned — must survive
+        ])
+        let fresh = try JSONSerialization.data(withJSONObject: ["count": 2])
+
+        let merged = try ManifestMerge.merge(new: fresh, existing: existing, owned: owned)
+        let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
+
+        XCTAssertNil(result["metadataFile"], "a sidecar the struct no longer names must not come back")
+        XCTAssertNil(result["metadataSha256"])
+        XCTAssertNil(result["embedderRuntime"], "an embedder identity must never be inherited")
+        XCTAssertEqual(result["facetsFile"] as? String, "facets.bin", "unmodelled keys still survive")
+        XCTAssertEqual(result["count"] as? Int, 2)
+    }
+
     func testAFirstEverWriteHasNothingToPreserve() throws {
         let fresh = try JSONSerialization.data(withJSONObject: ["count": 2])
-        let merged = try ManifestMerge.merge(new: fresh, existing: nil)
+        let merged = try ManifestMerge.merge(new: fresh, existing: nil, owned: owned)
         let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
         XCTAssertEqual(result.keys.sorted(), ["count"])
     }
 
     func testAnUnreadableExistingManifestDoesNotBlockTheWrite() throws {
         let fresh = try JSONSerialization.data(withJSONObject: ["count": 2])
-        let merged = try ManifestMerge.merge(new: fresh, existing: Data("{corrupt".utf8))
+        let merged = try ManifestMerge.merge(new: fresh, existing: Data("{corrupt".utf8), owned: owned)
         let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
         XCTAssertEqual(result["count"] as? Int, 2)
     }
@@ -138,11 +175,120 @@ final class StoreIntegrityTests: XCTestCase {
             withJSONObject: ["premiseDims": 1024, "premiseCount": 37533, "facetsBytes": 900_123])
         let fresh = try JSONSerialization.data(withJSONObject: ["count": 2])
 
-        let merged = try ManifestMerge.merge(new: fresh, existing: existing)
+        let merged = try ManifestMerge.merge(new: fresh, existing: existing, owned: owned)
         let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
 
         XCTAssertEqual(result["premiseDims"] as? Int, 1024)
         XCTAssertEqual(result["premiseCount"] as? Int, 37533)
         XCTAssertEqual(result["facetsBytes"] as? Int, 900_123)
+    }
+}
+
+/// The repair rule and the embedder identity are both hard gates on the pipeline: one decides whether to
+/// rewrite the append-only store, the other decides whether a run may append to it at all.
+final class RepairAndIdentityTests: XCTestCase {
+
+    // MARK: - When NOT to repair
+
+    func testAnInterruptedWriteIsRepaired() {
+        XCTAssertEqual(StoreIntegrity.repair(labelCount: 100, vectorCount: 99, aligned: 99, maxDrop: 1000),
+                       .truncate(keeping: 99))
+    }
+
+    func testAlignedStoresAreLeftAlone() {
+        XCTAssertEqual(StoreIntegrity.repair(labelCount: 100, vectorCount: 100, aligned: 100, maxDrop: 1000),
+                       .nothingToDo)
+    }
+
+    /// One unparseable line in the middle of a 37.5k store is not a torn write, and truncating to it would
+    /// delete the corpus — hours of den-embed time, replaced atomically, with nothing left to recover.
+    func testADivergenceInTheMiddleIsRefusedNotTruncated() {
+        XCTAssertEqual(StoreIntegrity.repair(labelCount: 37_533, vectorCount: 37_533, aligned: 49,
+                                             maxDrop: 1000),
+                       .refuse(dropping: 37_484, divergesAtLine: 50))
+    }
+
+    /// The case that would erase the store outright: a field added to `IndexRecord` makes every existing
+    /// line fail to decode, because synthesized `Decodable` requires every key.
+    func testAStoreThatDecodesNowhereIsRefused() {
+        XCTAssertEqual(StoreIntegrity.repair(labelCount: 37_533, vectorCount: 37_533, aligned: 0,
+                                             maxDrop: 1000),
+                       .refuse(dropping: 37_533, divergesAtLine: 1))
+    }
+
+    func testTheBoundaryIsRepairedAndOneBeyondItIsNot() {
+        XCTAssertEqual(StoreIntegrity.repair(labelCount: 5000, vectorCount: 4000, aligned: 4000, maxDrop: 1000),
+                       .truncate(keeping: 4000))
+        XCTAssertEqual(StoreIntegrity.repair(labelCount: 5001, vectorCount: 4000, aligned: 4000, maxDrop: 1000),
+                       .refuse(dropping: 1001, divergesAtLine: 4001))
+    }
+
+    // MARK: - Reading the service's identity
+
+    func testIdentityReadsEveryFieldIncludingTheSnakeCasedOne() throws {
+        let body = Data(#"{"status":"ok","model":"bge-m3","dims":1024,"runtime":"den-embed/3.0.0","max_tokens":512}"#.utf8)
+        let identity = try DenEmbedClient.Identity(healthJSON: body)
+
+        XCTAssertEqual(identity.model, "bge-m3")
+        XCTAssertEqual(identity.dims, 1024)
+        XCTAssertEqual(identity.runtime, "den-embed/3.0.0")
+        // The one field whose JSON name differs from its Swift name. A broken CodingKey yields 0 here,
+        // which reads as "the service does not report a cap" and disables the truncation guard entirely.
+        XCTAssertEqual(identity.maxTokens, 512)
+    }
+
+    /// A service too old to report `runtime` is a real answer, not an error — it is the Python generation,
+    /// which is what built the corpus shipping today. It has to be distinguishable from the current one.
+    func testAServicePredatingTheRuntimeFieldIsIdentifiedAsSuch() throws {
+        let body = Data(#"{"status":"ok","model":"bge-m3","dims":1024}"#.utf8)
+        let identity = try DenEmbedClient.Identity(healthJSON: body)
+
+        XCTAssertEqual(identity.runtime, "pre-3.0.0")
+        XCTAssertEqual(identity.maxTokens, 0)
+        XCTAssertNotEqual(identity, try DenEmbedClient.Identity(healthJSON: Data(
+            #"{"model":"bge-m3","dims":1024,"runtime":"den-embed/3.0.0","max_tokens":512}"#.utf8)))
+    }
+
+    /// The identity is written to disk and compared on the next run, so it has to survive a round-trip
+    /// through JSON exactly — a lossy field would make the mixed-embedder guard fire on every run.
+    func testIdentityRoundTripsThroughItsStoredForm() throws {
+        let original = DenEmbedClient.Identity(model: "bge-m3", dims: 1024,
+                                               runtime: "den-embed/3.0.0", maxTokens: 512)
+        let restored = try JSONDecoder().decode(DenEmbedClient.Identity.self,
+                                                from: try JSONEncoder().encode(original))
+        XCTAssertEqual(original, restored)
+    }
+}
+
+/// TMDB authenticates with a query PARAMETER, and `URLError`'s description embeds the failing URL — so
+/// every timeout on a multi-hour enrich run wrote the real key into out/enrich-<media>.log.
+final class RedactTests: XCTestCase {
+
+    func testAnApiKeyInAFailingUrlIsRemoved() {
+        let raw = """
+        Error Domain=NSURLErrorDomain Code=-1001 "timed out" \
+        NSErrorFailingURLStringKey=https://api.themoviedb.org/3/movie/603?api_key=abc123def456&language=en, \
+        NSErrorFailingURLKey=https://api.themoviedb.org/3/movie/603?api_key=abc123def456
+        """
+        let clean = Redact.secrets(raw)
+
+        XCTAssertFalse(clean.contains("abc123def456"), "the key survived: \(clean)")
+        XCTAssertTrue(clean.contains("api_key=REDACTED"))
+        // Everything an operator needs to diagnose it is still there.
+        XCTAssertTrue(clean.contains("-1001"))
+        XCTAssertTrue(clean.contains("api.themoviedb.org/3/movie/603"))
+        XCTAssertTrue(clean.contains("language=en"), "the & terminated the match, as it must")
+    }
+
+    func testOtherCredentialParametersAreRemovedToo() {
+        for param in ["access_token", "token", "password"] {
+            let clean = Redact.secrets("POST /login?\(param)=s3cr3tvalue failed")
+            XCTAssertFalse(clean.contains("s3cr3tvalue"), "\(param) survived")
+        }
+    }
+
+    func testTextWithNoCredentialIsUnchanged() {
+        let raw = "fetch-failure id=603 (HTTP 404)"
+        XCTAssertEqual(Redact.secrets(raw), raw)
     }
 }

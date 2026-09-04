@@ -42,9 +42,9 @@ struct TaxonomyBackfill {
             default: usage(); exit(2)
             }
         } catch let error as ToolError {
-            FileHandle.standardError.write(Data("error: \(error.message)\n".utf8)); exit(1)
+            FileHandle.standardError.write(Data(Redact.secrets("error: \(error.message)\n").utf8)); exit(1)
         } catch {
-            FileHandle.standardError.write(Data("error: \(error)\n".utf8)); exit(1)
+            FileHandle.standardError.write(Data(Redact.secrets("error: \(error)\n").utf8)); exit(1)
         }
     }
 
@@ -56,9 +56,9 @@ struct TaxonomyBackfill {
           enrich   --worklist <path> [--vote-floor 50] [--limit 150] --out-dir <dir>
           escalation --batch-id <n> --out-dir <dir>   (after pass 1: emit titles needing n=3)
           assemble --batch-id <n> --out-dir <dir>
-          embed-corpus --labels <existing labels-t01.json> --out-dir <dir> [--enriched-dir <dir>] [--chunk 128] [--limit N]
+          embed-corpus --labels <existing labels-t02.json> --out-dir <dir> [--enriched-dir <dir>] [--chunk 128] [--limit N]
           finalize --out-dir <dir>
-          score    --labels <labels.jsonl|labels-t01.json> --golden <golden.json> [--gate]
+          score    --labels <labels.jsonl|labels-t02.json> --golden <golden.json> [--gate]
           recluster --labels <labels-tNN.json> --vectors <vectors-eNN.bin> [--k 200] [--iterations 8]
                     [--min-size 25] [--max-purity 0.35] [--min-cohesion 0.55] --out <report.json>  (DT-F weekly)
 
@@ -405,7 +405,7 @@ enum Commands {
     // reclassification (which improves the LABELS) is run later. `finalize --out-dir <same>` emits the artifact.
     static func embedCorpus(_ args: Args) async throws {
         let outDir = try args.require("--out-dir")
-        let labelsPath = try args.require("--labels")            // the existing labels-t01.json (its tags per title)
+        let labelsPath = try args.require("--labels")            // the existing labels-t02.json (its tags per title)
         let enrichedDir = args["--enriched-dir"] ?? Layout.enrichedDir(outDir)
         // Small chunk by default: den-embed activation memory scales with the batch, so keep requests modest.
         let chunk = args.int("--chunk") ?? 16
@@ -421,10 +421,18 @@ enum Commands {
         var labelByKey: [String: IndexRecord] = [:]
         for record in existing.records { labelByKey["\(record.mediaType):\(record.tmdbId)"] = record }
 
+        // Everything that can refuse the run happens BEFORE the store is touched: an unreachable service, a
+        // different embedder than built this store, or a plot cap the service would silently truncate. The
+        // repair below rewrites files, and a run that cannot do any work has no business repairing anything.
+        let denEmbed = DenEmbedClient()
+        let embedder = try await recordEmbedder(outDir: outDir, client: denEmbed)
+        try assertDocFits(plotCap: plotCap, embedder: embedder)
+        FileHandle.standardError.write(Data("  embedder: \(embedder.label)\n".utf8))
+
         // RESUME: append to an existing store, skipping titles already embedded. A crash (e.g. den-embed OOM)
         // loses at most the current chunk — re-running continues from where it stopped. First reconcile the two
-        // append-only stores in case a kill landed between a label line and its vector line (→ unequal lengths,
-        // which finalize would reject): truncate both to their common prefix so alignment holds.
+        // append-only stores in case a kill landed between a label line and its vector line, which would leave
+        // them unpaired from that point on.
         try reconcileStore(Layout.labelsStore(outDir), Layout.vectorsStore(outDir))
         var done: Set<String> = []
         if FileManager.default.fileExists(atPath: Layout.labelsStore(outDir)) {
@@ -436,9 +444,6 @@ enum Commands {
         let vectorsHandle = try FileIO.appender(Layout.vectorsStore(outDir))
         defer { try? labelsHandle.close(); try? vectorsHandle.close() }
 
-        let denEmbed = DenEmbedClient()
-        let embedder = try await recordEmbedder(outDir: outDir, client: denEmbed)
-        FileHandle.standardError.write(Data("  embedder: \(embedder.label)\n".utf8))
         var buffer: [(record: IndexRecord, doc: String)] = []
         var written = 0, skipped = done.count, missing = 0
 
@@ -492,14 +497,56 @@ enum Commands {
     static func recordEmbedder(outDir: String, client: DenEmbedClient) async throws -> DenEmbedClient.Identity {
         let path = Layout.embedderIdentity(outDir)
         let now = try await client.identity()
-        if let previous: DenEmbedClient.Identity = try? JSON.read(path), previous != now {
-            throw ToolError(message: "this store was embedded by \(previous.label) but den-embed now reports "
-                + "\(now.label) — appending would mix two embedders into one corpus. Either restore the "
-                + "previous service, or start a fresh --out-dir and re-embed the whole corpus.")
+        if let previous: DenEmbedClient.Identity = try? JSON.read(path) {
+            if previous != now {
+                throw ToolError(message: "this store was embedded by \(previous.label) but den-embed now "
+                    + "reports \(now.label) — appending would mix two embedders into one corpus. Either "
+                    + "restore the previous service, or start a fresh --out-dir and re-embed from scratch.")
+            }
+            return now
+        }
+        // A store with rows but no recorded identity predates this check, and adopting the CURRENT service as
+        // its identity would write a guess down as a fact — the guard would then pass forever on the one
+        // corpus that actually has the problem. The shipped store is exactly that case: 37.5k rows embedded
+        // by the Python/ORT-1.22 service, which this one does not match.
+        if FileManager.default.fileExists(atPath: Layout.labelsStore(outDir)),
+           !(try FileIO.readLines(Layout.labelsStore(outDir))).isEmpty {
+            throw ToolError(message: "\(outDir) holds an existing store but no \(path), so what embedded it "
+                + "is unknown and appending \(now.label) may mix two embedders. Write that file with the "
+                + "identity that built it — a corpus from before the Rust rewrite is "
+                + #"{"model":"bge-m3","dims":1024,"runtime":"pre-3.0.0","maxTokens":0}"#
+                + " — or start a fresh --out-dir.")
         }
         try FileIO.ensureParent(path)
         try JSON.writePretty(now, to: path)
         return now
+    }
+
+    /// Refuse to compose documents the service will silently cut in half.
+    ///
+    /// den-embed truncates at `max_tokens` server-side, returns a normal-looking vector, and says nothing —
+    /// no error, no field in the response. The Python service it replaced had no token cap at all, so the
+    /// shipped corpus was embedded from documents of up to ~4000 plot chars while a re-embed today gets
+    /// ~2000: half of every long plot dropped, uniformly and invisibly, across the whole corpus.
+    ///
+    /// Parity with the old corpus is NOT reachable by raising the cap. den-embed's ceiling is 1024 tokens
+    /// because measured peak RSS is 1219 MB there and 1598 MB at 2048, against a 1536 MB cgroup — so the cap
+    /// is real and the plot cap is what has to give. That is acceptable (the alignment that matters is
+    /// corpus versus QUERY, and both go through this service) as long as it is a decision, not a surprise.
+    ///
+    /// ~4 chars per token for English prose. Compared against the configured cap rather than a sampled
+    /// document on purpose: the answer must not depend on which title happens to be first.
+    static func assertDocFits(plotCap: Int, embedder: DenEmbedClient.Identity) throws {
+        guard embedder.maxTokens > 0 else { return }   // a service too old to report it
+        let factsAndTags = 500          // the composed doc's non-plot half
+        let budget = embedder.maxTokens * 4
+        guard plotCap + factsAndTags <= budget else {
+            throw ToolError(message: "--plot-cap \(plotCap) composes documents of roughly "
+                + "\(plotCap + factsAndTags) chars, but \(embedder.label) truncates at \(embedder.maxTokens) "
+                + "tokens (~\(budget) chars) and would cut them silently. Lower --plot-cap to "
+                + "\(budget - factsAndTags) or below, or raise DEN_EMBED_MAX_TOKENS on the service — its "
+                + "ceiling is 1024, above which it exceeds the memory the container is given.")
+        }
     }
 
     /// Cap a plot to `maxChars`, ending on the last sentence boundary within the cap (so the embedded doc reads
@@ -522,12 +569,38 @@ enum Commands {
     /// on count alone kept that pair, and `finalize` compared only counts, so every title after the tear would
     /// ship carrying its neighbour's vector: no error anywhere, and a whole tail of the corpus retrieving the
     /// wrong titles.
+    /// A tear loses the in-flight chunk, so this only ever drops a TAIL — and it refuses anything larger.
+    ///
+    /// Checking alignment rather than line counts means a disagreement can now be found ANYWHERE in the
+    /// file, not just at the end, and truncating to the first one would delete everything after it. A store
+    /// whose 50th line is unparseable would lose 37,000 rows; a store written before a field was added to
+    /// `IndexRecord` (whose synthesized `Decodable` requires every key) would decode nothing and be erased
+    /// outright. Both are hours of den-embed time, destroyed by a repair that runs before any work starts,
+    /// with an atomic replace leaving nothing to recover. Repairing on line count alone could never do that,
+    /// so the alignment check needs a bound the count check did not.
+    ///
+    /// Beyond the bound this is not a tear and this is not the tool for it: name the line and change nothing.
+    static let maxTearRepair = 1000
+
     static func reconcileStore(_ labelsPath: String, _ vectorsPath: String) throws {
         guard FileManager.default.fileExists(atPath: labelsPath),
               FileManager.default.fileExists(atPath: vectorsPath) else { return }
         let labels = try FileIO.readLines(labelsPath)
         let vectors = try FileIO.readLines(vectorsPath)
         let n = StoreIntegrity.alignedPrefix(labels: labels, vectors: vectors)
+        switch StoreIntegrity.repair(labelCount: labels.count, vectorCount: vectors.count,
+                                     aligned: n, maxDrop: maxTearRepair) {
+        case .nothingToDo:
+            return
+        case .refuse(let dropping, let line):
+            throw ToolError(message: "the store diverges at line \(line); repairing that would discard "
+                + "\(dropping) rows, which is a corrupt store rather than an interrupted write. Nothing was "
+                + "changed — inspect line \(line) of \(labelsPath) and \(vectorsPath).")
+        case .truncate:
+            let dropped = max(labels.count, vectors.count) - n
+            FileHandle.standardError.write(Data(("  repaired an interrupted write: dropped \(dropped) "
+                + "unpaired row(s), store now \(n)\n").utf8))
+        }
         func rewrite(_ lines: [String], _ path: String) throws {
             let body = n == 0 ? "" : lines.prefix(n).joined(separator: "\n") + "\n"
             try FileIO.write(Data(body.utf8), to: path)
@@ -557,7 +630,9 @@ enum Commands {
         // Same guard as embed-corpus: assemble appends to the SAME store, so it is just as able to mix two
         // generations of the service into one corpus. `--embedder fnv` is the offline fallback and has no
         // service to ask.
-        if embedderKind != "fnv" { try await recordEmbedder(outDir: outDir, client: denEmbed) }
+        if embedderKind != "fnv" {
+            try assertDocFits(plotCap: plotCap, embedder: try await recordEmbedder(outDir: outDir, client: denEmbed))
+        }
 
         let enriched: [EnrichedDTO] = try JSON.read(Layout.enrichedBatch(outDir, batchId))
         let passes = try loadVotePasses(outDir: outDir, batchId: batchId)
@@ -570,7 +645,37 @@ enum Commands {
             thematic: args.double("--thematic-threshold") ?? defaults.thematic,
             mood: args.double("--mood-threshold") ?? defaults.mood)
         let classifier = TaxonomyClassifier(llm: NoLLM(), samples: passes.count, thresholds: thresholds)
-        var classified = (try? JSON.read(Layout.classifyCheckpoint(outDir)) as ClassifyCheckpoint) ?? ClassifyCheckpoint()
+        // Loud on a corrupt checkpoint, like `enrich` twenty lines away — a silent reset here re-classifies
+        // and re-embeds the whole out-dir, which is hours of den-embed time rather than a wrong answer, but
+        // it should still be the operator's decision.
+        let classifyCkPath = Layout.classifyCheckpoint(outDir)
+        var classified: ClassifyCheckpoint
+        if FileManager.default.fileExists(atPath: classifyCkPath) {
+            do { classified = try JSON.read(classifyCkPath) } catch {
+                throw ToolError(message: "classify checkpoint at \(classifyCkPath) is unreadable (\(error)); "
+                    + "refusing to reset progress — restore it, or delete it to intentionally start fresh")
+            }
+        } else {
+            classified = ClassifyCheckpoint()
+        }
+        // A legacy bare-Int checkpoint cannot say which media each id belonged to, so rebuild the set from
+        // the labels store, which records mediaType per row. Titles that were classified but DROPPED
+        // (noPrimary / no-wiki) have no store row and are re-processed once — CPU and an embed, no LLM
+        // spend — which is the cost of recovering the 940 TV series the un-keyed set was hiding.
+        if classified.needsMigration {
+            var rebuilt: Set<String> = []
+            if FileManager.default.fileExists(atPath: Layout.labelsStore(outDir)) {
+                for line in try FileIO.readLines(Layout.labelsStore(outDir)) {
+                    if let r: IndexRecord = try? JSON.decode(line) {
+                        rebuilt.insert(ClassifyCheckpoint.key(r.mediaType, r.tmdbId))
+                    }
+                }
+            }
+            FileHandle.standardError.write(Data(("  migrated the classify checkpoint to media-qualified "
+                + "keys (\(rebuilt.count) from the labels store)\n").utf8))
+            classified.done = rebuilt
+            classified.needsMigration = false
+        }
         // Opus-confirmed world-knowledge labels (DT-G title-recognition adjudication) that survive the vc gate.
         let wkConfirmed: [Int: [String]] = (try? JSON.read(Layout.wkConfirmed(outDir))) ?? [:]
         var noPrimary = 0, missingVotes = 0, droppedNoWiki = 0
@@ -596,12 +701,12 @@ enum Commands {
             for (item, vector) in zip(buffer, vectors) {
                 try labelsHandle.writeLine(JSON.encodeLine(item.record))
                 try vectorsHandle.writeLine(JSON.encodeLine(VectorRow(tmdbId: item.tmdbId, v: vector.map(Int.init))))
-                classified.done.insert(item.tmdbId)
+                classified.done.insert(ClassifyCheckpoint.key(item.record.mediaType, item.tmdbId))
             }
             buffer.removeAll(keepingCapacity: true)
         }
 
-        for dto in enriched where force || !classified.done.contains(dto.tmdbId) {
+        for dto in enriched where force || !classified.done.contains(ClassifyCheckpoint.key(dto.mediaType, dto.tmdbId)) {
             // One raw-JSON string per pass for this title (re-serialized) → the calibrated aggregation seam.
             let raws: [String] = passes.compactMap { $0[dto.tmdbId] }
             guard !raws.isEmpty else { missingVotes += 1; continue }
@@ -609,7 +714,9 @@ enum Commands {
             if requireWikiPlot && !title.hasWikiPlot { droppedNoWiki += 1; continue }   // ToS: no TMDB-prose labels
             let confirmedWK = Set(wkConfirmed[dto.tmdbId] ?? [])
             guard let classification = classifier.classify(rawVotes: raws, title: title, confirmedWK: confirmedWK) else {
-                noPrimary += 1; classified.done.insert(dto.tmdbId); continue
+                noPrimary += 1
+                classified.done.insert(ClassifyCheckpoint.key(dto.mediaType, dto.tmdbId))
+                continue
             }
             // Compose the embedding doc from FACTS + the just-classified TAGS + the (Wikipedia) plot. A title
             // with no wiki plot composes on facts + tags with an empty Plot — never skipped.
@@ -730,7 +837,7 @@ enum Commands {
             lastModifiedHttp: DateFmt.rfc1123(now),
             embedderRuntime: embedder?.runtime,
             embedderMaxTokens: embedder?.maxTokens)
-        try JSON.writeMetaPreservingUnknownKeys(meta, to: Layout.datasetMeta(outDir))
+        try JSON.writeMeta(meta, to: Layout.datasetMeta(outDir))
 
         var report = RunReport()
         report.processed = records.count
@@ -758,6 +865,11 @@ enum Commands {
     // poster_path + year, written to metadata-<datasetVersion>.json. Ships as a ≤6-month SYNCED cache (den-atlas
     // serves it beside labels/vectors; the app reads it to render a semantic/ANN neighbour without a detail call).
     // Never bundled — a frozen poster snapshot would break TMDB's 6-month caching allowance.
+    /// Below this share of titles returning metadata, the run is a failure rather than a thin result.
+    /// Real coverage is ~99% (a title without a poster still returns a row); anything near zero is auth or
+    /// rate-limiting.
+    static let metadataCoverageFloor = 0.90
+
     static func metadata(_ args: Args) async throws {
         let outDir = try args.require("--out-dir")
         let skipFetch = args.has("--skip-fetch")   // patch meta from an existing sidecar (no TMDB re-fetch)
@@ -786,6 +898,17 @@ enum Commands {
                 out += batch
                 FileHandle.standardError.write(Data("  metadata \(out.count)/\(records.count)…\n".utf8))
             }
+            // Every fetch is a `try?`, so an expired TMDB_API_KEY or a rate-limit storm yields an EMPTY
+            // sidecar — which was then written over the good one and its sha stamped into the manifest.
+            // The app folds that sha into its syncKey, so the device happily re-syncs to a sidecar with no
+            // posters in it. A partial result is not a result; refuse it and leave what is there.
+            let coverage = records.isEmpty ? 1.0 : Double(out.count) / Double(records.count)
+            guard coverage >= Self.metadataCoverageFloor else {
+                throw ToolError(message: "only \(out.count) of \(records.count) titles returned metadata "
+                    + "(\(Int(coverage * 100))%, floor \(Int(Self.metadataCoverageFloor * 100))%) — that is "
+                    + "TMDB failing, not titles without posters. Nothing written; the existing sidecar and "
+                    + "manifest are unchanged.")
+            }
             try JSON.write(out, to: path)
         }
 
@@ -796,7 +919,7 @@ enum Commands {
         patched.metadataFile = (path as NSString).lastPathComponent
         patched.metadataSha256 = sha256Hex(blob)
         patched.metadataBytes = blob.count
-        try JSON.writeMetaPreservingUnknownKeys(patched, to: Layout.datasetMeta(outDir))
+        try JSON.writeMeta(patched, to: Layout.datasetMeta(outDir))
         let all = (try? JSON.read(path) as [PosterMeta]) ?? []
         print(JSON.line(["metadata": all.count, "withPoster": all.filter { $0.posterPath != nil }.count,
                          "sha": patched.metadataSha256 ?? "", "bytes": patched.metadataBytes ?? 0]))
@@ -1134,6 +1257,21 @@ struct DatasetMeta: Codable {
     // the Rust rewrite's token cap. Absent means a corpus built before this was recorded.
     var embedderRuntime: String? = nil
     var embedderMaxTokens: Int? = nil
+
+    /// Declared explicitly, not synthesized, so `ownedKeys` cannot fall behind the struct: Swift refuses to
+    /// synthesize Codable for a stored property with no case here, so adding a field without listing it is
+    /// a compile error rather than a manifest that silently inherits a stale value for it.
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case datasetVersion, taxonomyVersion, embeddingModel, dims, count, quantization
+        case labelsFile, vectorsFile, labelsGzFile, labelsSha256, labelsBytes, vectorsSha256, vectorsBytes
+        case builtAt, lastModifiedHttp
+        case metadataFile, metadataSha256, metadataBytes
+        case embedderRuntime, embedderMaxTokens
+    }
+
+    /// The keys this struct is authoritative for — including when it omits one. Everything else in the file
+    /// belongs to a producer that is not in this repo and must survive a rewrite untouched.
+    static let ownedKeys = Set(CodingKeys.allCases.map(\.rawValue))
 }
 
 enum DateFmt {
@@ -1327,8 +1465,47 @@ struct EnrichCheckpoint: Codable {
 }
 
 struct ClassifyCheckpoint: Codable {
-    var done: Set<Int> = []
+    /// Keyed `"movie:123"` / `"tv:123"`, because TMDB's movie and TV id namespaces OVERLAP — the same
+    /// reason `EnrichCheckpoint` is keyed that way, which this one never was.
+    ///
+    /// As a bare `Set<Int>` it made `assemble` skip any TV title whose id had already been classified as a
+    /// movie. Measured on the shipped corpus: of 7,832 enriched TV titles, 940 share an id with a shipped
+    /// movie, and **all 940 are missing** from the index — against a 43.5% baseline drop rate for the
+    /// rest. Buffy, Doctor Who, Star Trek, Avatar: The Last Airbender, Cheers. Every one was enriched, with
+    /// the TMDB, Wikidata and Wikipedia calls paid for, and then silently never classified. `finalize`'s
+    /// de-dup key was already media-qualified, so this was the only place at fault.
+    var done: Set<String> = []
+    /// Set when the file on disk was the legacy bare-Int form. Those ints cannot be re-qualified from the
+    /// checkpoint alone — nothing recorded which media each belonged to — so `assemble` rebuilds the set
+    /// from the labels store, which does, and rewrites the checkpoint in the keyed form.
+    var needsMigration = false
     var totals = Totals()
+
+    static func key(_ media: String, _ id: Int) -> String { "\(media):\(id)" }
+
+    init() {}
+
+    /// Tolerant decode, mirroring `EnrichCheckpoint`: a legacy `[Int]` still loads rather than resetting
+    /// progress to empty and re-classifying (and re-embedding) the whole out-dir.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let keyed = try? c.decode(Set<String>.self, forKey: .done) {
+            done = keyed
+        } else {
+            _ = try c.decode(Set<Int>.self, forKey: .done)   // legacy; rebuilt from the store, not from this
+            needsMigration = true
+        }
+        totals = try c.decodeIfPresent(Totals.self, forKey: .totals) ?? Totals()
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(done, forKey: .done)
+        try c.encode(totals, forKey: .totals)
+    }
+
+    enum CodingKeys: String, CodingKey { case done, totals }
+
     struct Totals: Codable {
         var noPrimary = 0, missingVotes = 0
         mutating func merge(noPrimary: Int, missingVotes: Int) {
@@ -1394,10 +1571,13 @@ enum JSON {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try FileIO.write(try encoder.encode(value), to: path)
     }
-    /// Write `dataset.meta.json` through `ManifestMerge`, so keys the struct does not model survive.
-    static func writeMetaPreservingUnknownKeys<T: Encodable>(_ value: T, to path: String) throws {
+    /// Write `dataset.meta.json` through `ManifestMerge`, so keys `DatasetMeta` does not model survive
+    /// while every key it DOES model — including ones it deliberately omits — comes from this write.
+    static func writeMeta(_ value: DatasetMeta, to path: String) throws {
         let existing = try? Data(contentsOf: URL(fileURLWithPath: path))
-        try FileIO.write(try ManifestMerge.merge(new: try encodeSorted(value), existing: existing), to: path)
+        let merged = try ManifestMerge.merge(new: try encodeSorted(value), existing: existing,
+                                             owned: DatasetMeta.ownedKeys)
+        try FileIO.write(merged, to: path)
     }
 
     static func encodeSorted<T: Encodable>(_ value: T) throws -> Data {
@@ -1450,7 +1630,9 @@ final class LineAppender {
 enum Log {
     static func append(_ path: String, _ message: String) {
         try? FileIO.ensureParent(path)
-        if let data = (message + "\n").data(using: .utf8) {
+        // Redacted HERE, at the sink, not at each of the dozen call sites that interpolate an error —
+        // TMDB's api_key rides in the query string and `URLError`'s description carries the failing URL.
+        if let data = (Redact.secrets(message) + "\n").data(using: .utf8) {
             if let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: path)) {
                 handle.seekToEndOfFile(); handle.write(data); try? handle.close()
             } else {

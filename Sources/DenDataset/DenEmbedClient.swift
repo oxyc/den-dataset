@@ -84,6 +84,21 @@ public struct DenEmbedClient: Sendable {
 
         /// One line, for the manifest and for error messages.
         public var label: String { "\(model)/\(dims) \(runtime) max_tokens=\(maxTokens)" }
+
+        /// Parse a `/health` body. Split out from the request so the mapping is testable without a service:
+        /// this is a hard gate on the pipeline, and the one field whose JSON name differs from its Swift
+        /// name (`max_tokens`) is exactly the kind of thing that fails silently as a nil default.
+        public init(model: String, dims: Int, runtime: String, maxTokens: Int) {
+            self.model = model; self.dims = dims; self.runtime = runtime; self.maxTokens = maxTokens
+        }
+
+        public init(healthJSON data: Data) throws {
+            let health = try JSONDecoder().decode(HealthResponse.self, from: data)
+            // A service predating the `runtime` field is a real answer, not an error — that is the Python
+            // era, which is the generation the currently shipped corpus came from.
+            self.init(model: health.model ?? "unknown", dims: health.dims ?? 0,
+                      runtime: health.runtime ?? "pre-3.0.0", maxTokens: health.maxTokens ?? 0)
+        }
     }
 
     public func identity() async throws -> Identity {
@@ -94,15 +109,11 @@ public struct DenEmbedClient: Sendable {
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 throw DenEmbedError.http(http.statusCode)
             }
-            let health = try JSONDecoder().decode(HealthResponse.self, from: data)
-            // A service predating the `runtime` field is a real answer, not an error — that is the Python
-            // era, which is the generation the currently shipped corpus came from.
-            return Identity(model: health.model ?? "unknown", dims: health.dims ?? 0,
-                            runtime: health.runtime ?? "pre-3.0.0", maxTokens: health.maxTokens ?? 0)
+            return try Identity(healthJSON: data)
         }
     }
 
-    private struct HealthResponse: Decodable {
+    struct HealthResponse: Decodable {
         let model: String?
         let dims: Int?
         let runtime: String?
