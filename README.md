@@ -11,6 +11,36 @@ service (**bge-m3**, 1024-dim int8) — the single embedding path shared with th
 corpus and query vectors are comparable. The offline FNV embedder remains as a `--embedder fnv` fallback. See
 [`docs/OPERATE.md`](docs/OPERATE.md) for the full re-embed + incremental-top-up runbooks and the alignment rule.
 
+## What's in the shipped dataset
+
+Measured from `out-t02/` (taxonomy `t02`), the corpus currently published as `data-latest`:
+
+| | Movies | TV series | Total |
+|---|---:|---:|---:|
+| **Shipped** (in `labels-t02.json`) | 33,641 | 3,892 | **37,533** |
+| Enriched (TMDB + Wikipedia fetched) | 49,883 | 7,832 | 57,715 |
+| — of those, with a Wikipedia plot | 34,018 (68.2%) | 4,442 (56.7%) | 38,460 (66.6%) |
+| — with no plot found | 15,865 | 3,390 | 19,255 |
+
+2,329 shipped titles are animated (a *format* flag, not a genre — see DT-C).
+
+**Why 57,715 enriched becomes 37,533 shipped.** 19,255 of the 20,182 dropped titles have no Wikipedia
+plot. Those were classified from the TMDB overview *prose*, which TMDB's terms forbid us deriving from,
+so `assemble --require-wiki-plot` drops them from the index entirely rather than shipping labels we are
+not entitled to. That single rule accounts for 95.4% of the gap. The remaining 927 are titles that *do*
+have a plot and still did not ship — 519 of them because of the media-id collision described below.
+
+**The universe these are drawn from.** TMDB's daily exports list 1,216,343 movie ids and 225,504 TV
+series ids. The enrichment worklist is not that universe: it is the ids Den already ships, ordered by
+TMDB popularity, and bounded by a vote floor (default 50) — a title with almost no votes has no plot
+worth classifying and would be re-billed daily until it earned some. So the numbers above are "of what
+we chose to enrich", not "of everything TMDB knows about".
+
+**Known gap:** 940 TV series share a TMDB id with a shipped movie (Buffy/Armageddon, Doctor Who, Star
+Trek), and all 940 are missing because the classify checkpoint keyed on a bare id. The keying is fixed;
+recovering them in the data needs a re-run, and only the 519 with a Wikipedia plot are recoverable —
+the other 421 would be dropped by the ToS rule regardless.
+
 ## Layout
 
 - `Sources/DenDataset/` — the library: the calibrated `TaxonomyClassifier`, the `t02` `Taxonomy`, the
