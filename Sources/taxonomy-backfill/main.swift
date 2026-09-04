@@ -529,9 +529,20 @@ enum Commands {
 
         switch EmbedderGate.decide(previous: previous, now: now, storeHasRows: hasRows) {
         case .mismatch(let was, let isNow):
+            // Differing ONLY in the epoch means the file predates that field, not that a different
+            // embedder built the store — and "restore the previous service" is then impossible advice,
+            // naming the same build on both sides of the message.
+            let epochOnly = previous.map {
+                $0.vectorEpoch == 0 && now.vectorEpoch > 0 && $0.model == now.model
+                    && $0.dims == now.dims && $0.maxTokens == now.maxTokens
+            } ?? false
             throw ToolError(message: "this store was embedded by \(was) but den-embed now reports "
-                + "\(isNow) — appending would mix two embedders into one corpus. Either restore the "
-                + "previous service, or start a fresh --out-dir and re-embed from scratch.")
+                + "\(isNow) — appending would mix two embedders into one corpus. "
+                + (epochOnly
+                   ? "These differ only in the epoch, so \(path) predates that field rather than recording "
+                     + "a different embedder: if this service did build the store, add a vectorEpoch of "
+                     + "\(now.vectorEpoch) to that file."
+                   : "Either restore the previous service, or start a fresh --out-dir and re-embed."))
         case .unknownProvenance:
             // The shipped store is exactly this case: 37.5k rows from the Python/ORT-1.22 service.
             throw ToolError(message: "\(outDir) holds an existing store but no \(path), so what embedded it "
@@ -575,18 +586,6 @@ enum Commands {
                 + "\(budget - factsAndTags) or below, or raise DEN_EMBED_MAX_TOKENS on the service — its "
                 + "ceiling is 1024, above which it exceeds the memory the container is given.")
         }
-    }
-
-    /// Opus-confirmed world-knowledge labels, media-qualified. Accepts either the keyed form or a legacy
-    /// bare-Int map (read as movie ids, which is what produced them).
-    static func loadWorldKnowledge(_ path: String) -> [String: [String]] {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
-        if let keyed = try? JSONDecoder().decode([String: [String]].self, from: data),
-           keyed.keys.allSatisfy({ $0.contains(":") }) {
-            return keyed
-        }
-        guard let legacy = try? JSONDecoder().decode([Int: [String]].self, from: data) else { return [:] }
-        return Dictionary(uniqueKeysWithValues: legacy.map { (ClassifyCheckpoint.key("movie", $0.key), $0.value) })
     }
 
     /// Cap a plot to `maxChars`, ending on the last sentence boundary within the cap (so the embedded doc reads
@@ -735,7 +734,13 @@ enum Commands {
         // series' Opus-confirmed world-knowledge labels apply to the movie sharing its id — for exactly
         // the 940 colliding titles, and exactly the hallucinated-tail label the vote gate exists to strip.
         // Legacy bare-Int files still load, qualified as movie, which is what they were written from.
-        let wkConfirmed: [String: [String]] = Self.loadWorldKnowledge(Layout.wkConfirmed(outDir))
+        let wkPath = Layout.wkConfirmed(outDir)
+        let wkConfirmed = WorldKnowledge.load(at: wkPath)
+        if let raw = try? JSON.read(wkPath) as [String: [String]],
+           case let unkeyed = WorldKnowledge.unkeyedCount(raw), unkeyed > 0 {
+            FileHandle.standardError.write(Data(("  note: \(wkPath) holds \(unkeyed) bare id(s); each "
+                + "applies to BOTH media — the file does not record which was adjudicated\n").utf8))
+        }
         var noPrimary = 0, missingVotes = 0, droppedNoWiki = 0
 
         let labelsHandle = try FileIO.appender(Layout.labelsStore(outDir))
@@ -940,6 +945,12 @@ enum Commands {
         let outDir = try args.require("--out-dir")
         let skipFetch = args.has("--skip-fetch")   // patch meta from an existing sidecar (no TMDB re-fetch)
         let limit = args.int("--limit")
+        // --limit is only consulted inside the fetch path, so pairing it with --skip-fetch skipped the
+        // probe and went straight to patching the manifest — which usage() promises it never does.
+        if limit != nil && skipFetch {
+            throw ToolError(message: "--limit is a probe and --skip-fetch patches the manifest from an "
+                + "existing sidecar; together they would do the second without the first. Pick one.")
+        }
         let meta: DatasetMeta = try JSON.read(Layout.datasetMeta(outDir))
         let path = Layout.metadataArtifact(outDir, meta.datasetVersion)
 

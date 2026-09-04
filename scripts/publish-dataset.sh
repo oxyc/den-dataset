@@ -30,7 +30,7 @@ REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
 shopt -s nullglob
 meta="$DIR/dataset.meta.json"
 # `labels-*.json.gz`, not a bare `*.gz`: that also swept up the TMDB daily-export dumps build-worklist.py
-# writes into the same out-dir (movie_ids.json.gz plus the two tv dumps, ~36 MB), publishing TMDB's
+# writes into the same out-dir (movie_ids.json.gz + tv_series_ids.json.gz, ~31 MB), publishing TMDB's
 # raw export data as release assets from a repo that otherwise refuses to ship raw TMDB text.
 # Every entry is a GLOB, including facets: a literal path is not subject to nullglob, so `"$DIR"/facets.bin`
 # stayed in the array when the file was absent and the uploader failed on it three times with a message
@@ -38,8 +38,9 @@ meta="$DIR/dataset.meta.json"
 blobs=("$DIR"/facets*.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json)
 [ ${#blobs[@]} -ge 3 ] || { echo "error: expected labels/vectors/gz/metadata in $DIR, found: ${blobs[*]:-none}" >&2; exit 1; }
 
-# The manifest decides what actually publishes (step 3), so list that rather than the glob results — the
-# banner used to promise superseded sidecars that the upload pass then skipped.
+# What actually publishes: the files the manifest names, plus whatever else the globs found that it does
+# not (announced as such). Listing only the globs over-promised superseded sidecars the upload pass skips;
+# listing only the manifest under-promised the premise and facets blobs, ~86 MB of it.
 echo "publishing → $REPO data-latest:"
 python3 -c '
 import json, sys
@@ -48,6 +49,10 @@ for key, name in sorted(meta.items()):
     if key.endswith("File") and name:
         print("  " + name)
 ' "$meta"
+for f in "${blobs[@]}"; do
+  b="$(basename "$f")"
+  grep -q "\"$b\"" "$meta" || echo "  $b (not named by the manifest)"
+done
 echo "  $(basename "$meta")"
 
 # Create the release if it doesn't exist yet.
@@ -167,13 +172,27 @@ print(" ".join(sorted(k for k, v in old.items() if k.endswith("File") and v and 
         echo "             gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
         echo "             <taxonomy-backfill> finalize --out-dir $DIR" >&2
         echo "" >&2
-        echo "          (Those blobs must also be in $DIR, or step 1 of this script will say so.)" >&2
+        echo "          (Those blobs must also be in $DIR, or this script's local check will say so.)" >&2
         echo "" >&2
         step=$((step + 1))
         ;;
     esac
-    case " $dropped " in
-      *" metadataFile "*)
+    # Also when only the premise/facets keys were dropped: step 1 tells the operator to re-run finalize,
+    # and finalize STRIPS metadataFile — which is still present right now. Printing the recipe without
+    # this step means following it produces a second refusal naming metadataFile. It converges, but the
+    # step it is missing is the one already written two lines below.
+    needs_metadata=no
+    case " $dropped " in *" metadataFile "*) needs_metadata=yes ;; esac
+    if [ "$needs_metadata" = no ]; then
+      case " $dropped " in
+        *premise*|*facets*)
+          # `if`, not `a && b`: as the last command in a case arm, a failing && list is the arm's status
+          # and would abort the whole script under set -e.
+          if grep -q '"metadataFile"' "$meta"; then needs_metadata=yes; fi
+          ;;
+      esac
+    fi
+    if [ "$needs_metadata" = yes ]; then
         echo "       $step. metadataFile: run the metadata step, which is what writes it. finalize cannot —" >&2
         echo "          finalize is the command that REMOVES it, so this has to come last." >&2
         echo "" >&2
@@ -185,21 +204,26 @@ print(" ".join(sorted(k for k, v in old.items() if k.endswith("File") and v and 
         echo "             <taxonomy-backfill> metadata --skip-fetch --out-dir $DIR" >&2
         echo "" >&2
         step=$((step + 1))
-        ;;
-    esac
-    # A dropped key matching neither branch would otherwise print no remedy at all — leaving the override
-    # as the only visible option, which is the trap this whole message exists to avoid.
-    case " $dropped " in
-      *premise*|*facets*|*" metadataFile "*) : ;;
-      *)
-        echo "       $step. No specific remedy is known for these keys. They are carried forward from the" >&2
-        echo "          manifest already in $DIR, so copy the published one there and re-run finalize:" >&2
-        echo "" >&2
-        echo "             gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
-        echo "             <taxonomy-backfill> finalize --out-dir $DIR" >&2
-        echo "" >&2
-        ;;
-    esac
+    fi
+    # Any dropped key NOT covered above still needs a remedy. Suppressing this whenever some other key
+    # matched left the uncovered one explained by nothing — the same "only the override is visible" trap
+    # the branch exists to close, one case narrower.
+    unexplained=""
+    for key in $dropped; do
+      case "$key" in
+        metadataFile|*premise*|*facets*) : ;;
+        *) unexplained="$unexplained $key" ;;
+      esac
+    done
+    if [ -n "$unexplained" ]; then
+      echo "       $step. No specific remedy is known for:$unexplained. Like the premise and facets keys," >&2
+      echo "          they are carried forward from the manifest already in $DIR, so copy the published one" >&2
+      echo "          there and re-run finalize (before any metadata step above):" >&2
+      echo "" >&2
+      echo "             gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
+      echo "             <taxonomy-backfill> finalize --out-dir $DIR" >&2
+      echo "" >&2
+    fi
 
     echo "       If dropping them is deliberate, set DEN_ALLOW_DROPPING_BLOBS=1." >&2
     [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1

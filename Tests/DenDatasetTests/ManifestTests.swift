@@ -229,3 +229,47 @@ final class EmbedderGateTests: XCTestCase {
         XCTAssertEqual(EmbedderGate.decide(previous: old, now: new, storeHasRows: true), .matches)
     }
 }
+
+/// Opus-confirmed world-knowledge labels are the only thing that lets a Cult/Art House/Epic label survive
+/// the 100-vote gate on the obscure tail, so losing one silently discards paid adjudication.
+final class WorldKnowledgeTests: XCTestCase {
+
+    /// A legacy bare-Int entry applies to BOTH media. Reading them as movies — which an earlier version
+    /// did, claiming movies were what produced them — was measurably wrong: of the 2,950 entries in the
+    /// shipped file, 87 are series-only (Berlin Alexanderplatz, The Prisoner, Heimat) and every one is
+    /// under the vote floor, so filing them under `movie:` drops their labels entirely.
+    func testALegacyIdAppliesToBothMedia() {
+        let expanded = WorldKnowledge.expand(["43189": ["Art House", "Epic"]])
+
+        XCTAssertEqual(expanded["tv:43189"], ["Art House", "Epic"], "a series-only id must not be lost")
+        XCTAssertEqual(expanded["movie:43189"], ["Art House", "Epic"])
+    }
+
+    func testAKeyedEntryIsTakenAsWritten() {
+        let expanded = WorldKnowledge.expand(["tv:95": ["Cult"]])
+
+        XCTAssertEqual(expanded["tv:95"], ["Cult"])
+        XCTAssertNil(expanded["movie:95"], "a keyed entry says which medium; it must not spread")
+    }
+
+    /// A hand-edit in progress. The previous version required EVERY key to be qualified and then fell
+    /// through to an Int-keyed decode that cannot parse "tv:95", so a mixed file returned nothing at all —
+    /// silently stripping every confirmed label in it.
+    func testAMixedFileKeepsBothForms() {
+        let expanded = WorldKnowledge.expand(["tv:95": ["Cult"], "603": ["Epic"]])
+
+        XCTAssertEqual(expanded["tv:95"], ["Cult"])
+        XCTAssertEqual(expanded["movie:603"], ["Epic"])
+        XCTAssertEqual(expanded["tv:603"], ["Epic"])
+        XCTAssertEqual(WorldKnowledge.unkeyedCount(["tv:95": ["Cult"], "603": ["Epic"]]), 1)
+    }
+
+    func testAnUnparseableKeyIsDroppedRatherThanCrashing() {
+        XCTAssertTrue(WorldKnowledge.expand(["not-an-id": ["Cult"]]).isEmpty)
+    }
+
+    func testAnEmptyFileIsEmptyNotAnError() {
+        XCTAssertTrue(WorldKnowledge.expand([:]).isEmpty)
+        XCTAssertEqual(WorldKnowledge.unkeyedCount([:]), 0)
+    }
+}

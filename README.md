@@ -36,6 +36,7 @@ taxonomy-backfill enrich    --worklist <path> [--limit 150] --out-dir <dir>
 taxonomy-backfill escalation --batch-id <n> --out-dir <dir>
 taxonomy-backfill assemble  --batch-id <n> --out-dir <dir>
 taxonomy-backfill finalize  --out-dir <dir>
+taxonomy-backfill metadata  --out-dir <dir> [--skip-fetch]   # the poster sidecar; after EVERY finalize
 taxonomy-backfill score     --labels labels-t02.json --golden golden.json [--gate]
 ```
 
