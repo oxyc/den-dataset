@@ -175,8 +175,9 @@ public struct TaxonomyClassifier: Sendable {
         // Genre name is the final tiebreak, for the same reason as `aggregate`: `tally` is a Dictionary,
         // and the rarity prior cannot separate two genres that SHARE a weight (Fantasy/Family both 1.15,
         // Documentary/History both 1.45, and three more such pairs) — so an even split between them
-        // resolved by hash order, which changes between processes. `contenders` is filtered from `ranked`
-        // and `max` returns the last maximal element, so fixing the order here settles the whole function.
+        // resolved by hash order, which changes between processes. `contenders` is filtered from `ranked`,
+        // and `max(by:)` replaces only on a strict increase — so it returns the FIRST of equal elements and
+        // fixing the order here settles the whole function.
         let ranked = tally.sorted { ($0.value, GenreRarity.weight(genreID(for: $0.key)), $1.key) >
                                     ($1.value, GenreRarity.weight(genreID(for: $1.key)), $0.key) }
         guard let top = ranked.first else { return nil }

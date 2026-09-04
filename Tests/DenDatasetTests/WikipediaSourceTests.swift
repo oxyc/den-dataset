@@ -54,7 +54,7 @@ final class WikipediaSourceTests: XCTestCase {
 
     // MARK: - SPARQL decode
 
-    func testParseWikidataMapsIdsToArticleAndImdb() {
+    func testParseWikidataMapsIdsToArticleAndImdb() throws {
         let json = """
         {"head":{"vars":["tmdb","article","imdb"]},"results":{"bindings":[
           {"tmdb":{"type":"literal","value":"27205"},
@@ -64,7 +64,7 @@ final class WikipediaSourceTests: XCTestCase {
            "article":{"type":"uri","value":"https://en.wikipedia.org/wiki/The_Matrix"}}
         ]}}
         """
-        let map = WikipediaSource.parseWikidata(Data(json.utf8))
+        let map = try WikipediaSource.parseWikidata(Data(json.utf8))
         XCTAssertEqual(map[27205]?.article, "Inception")
         XCTAssertEqual(map[27205]?.imdb, "tt1375666")
         XCTAssertEqual(map[603]?.article, "The Matrix")
@@ -132,5 +132,17 @@ final class WikipediaSourceTests: XCTestCase {
           {"type":"section","name":"Act II","has_parts":[{"type":"paragraph","value":"Rising action."}]}]}]}]
         """
         XCTAssertEqual(WikipediaSource.enterprisePlot(Data(json.utf8)), "Setup.\nRising action.")
+    }
+
+    /// An empty result set and an undecodable body mean opposite things to the enrich checkpoint: the first
+    /// is "these titles have no Wikipedia article" (definitive, checkpoint them), the second is "ask again"
+    /// (transient, retry the batch). Returning [:] for both made a WDQS maintenance page permanently strip
+    /// the whole batch's plots — and with --require-wiki-plot, drop it from the shipped index entirely.
+    func testZeroBindingsIsAnAnswerButAnUndecodableBodyIsNot() throws {
+        let empty = try WikipediaSource.parseWikidata(Data(#"{"results":{"bindings":[]}}"#.utf8))
+        XCTAssertTrue(empty.isEmpty)
+
+        XCTAssertThrowsError(try WikipediaSource.parseWikidata(Data("<html>service unavailable</html>".utf8)))
+        XCTAssertThrowsError(try WikipediaSource.parseWikidata(Data()))
     }
 }

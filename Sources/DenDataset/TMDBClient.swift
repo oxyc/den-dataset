@@ -182,11 +182,15 @@ public final class TMDBClient: Sendable {
         let totalPages: Int
         let results: [ListRow]
         enum CodingKeys: String, CodingKey { case page, totalPages, results }
+        // `results` is REQUIRED. page/totalPages tolerate absence because a single-page response legitimately
+        // omits them, but defaulting `results` to [] turned every unexpected shape — an auth error body, a
+        // schema change — into a valid empty page. `worklist`'s collect loop then stops after page 1 and the
+        // delta pass reports "0 new titles" instead of failing, silently and daily.
         init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             page = (try? c.decode(Int.self, forKey: .page)) ?? 1
             totalPages = (try? c.decode(Int.self, forKey: .totalPages)) ?? 1
-            results = (try? c.decode([ListRow].self, forKey: .results)) ?? []
+            results = try c.decode([ListRow].self, forKey: .results)
         }
     }
 

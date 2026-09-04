@@ -69,12 +69,24 @@ public struct WikipediaSource: Sendable {
         request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
         request.httpBody = Data(query.utf8)
 
-        return Self.parseWikidata(try await send(request))
+        return try Self.parseWikidata(try await send(request))
     }
 
     /// Decode a SPARQL JSON result into `tmdbId → Mapping`. Pure + testable (fixture JSON → mapping).
-    static func parseWikidata(_ data: Data) -> [Int: Mapping] {
-        guard let root = try? JSONDecoder().decode(SPARQLResult.self, from: data) else { return [:] }
+    ///
+    /// THROWS on an undecodable body rather than returning an empty map. `enrich` treats an absent id in a
+    /// SUCCESSFUL result as definitive (the title has no Wikipedia article, checkpoint it and move on) and a
+    /// transport failure as transient (retry the batch). Collapsing an unparseable 200 into "no bindings"
+    /// merged those two: a WDQS maintenance page or an HTML error body would make every title in the batch
+    /// tags-only, checkpointed, and never re-grounded — and with `--require-wiki-plot` the whole batch is
+    /// then dropped from the shipped index.
+    static func parseWikidata(_ data: Data) throws -> [Int: Mapping] {
+        let root: SPARQLResult
+        do {
+            root = try JSONDecoder().decode(SPARQLResult.self, from: data)
+        } catch {
+            throw WikidataError.unparseableResponse(String(decoding: data.prefix(200), as: UTF8.self))
+        }
         var map: [Int: Mapping] = [:]
         for binding in root.results.bindings {
             guard let tmdbRaw = binding.tmdb?.value, let tmdbId = Int(tmdbRaw) else { continue }
@@ -321,4 +333,18 @@ public struct WikipediaSource: Sendable {
 
 public enum WikipediaError: Error, Sendable {
     case http(Int)
+}
+
+
+/// A 200 that is not a SPARQL result — WDQS maintenance HTML, a proxy error page. Distinguished from "no
+/// bindings" because the two mean opposite things to the enrich checkpoint.
+public enum WikidataError: Error, CustomStringConvertible {
+    case unparseableResponse(String)
+
+    public var description: String {
+        switch self {
+        case .unparseableResponse(let head):
+            return "Wikidata returned a 200 that is not a SPARQL result (starts: \(head))"
+        }
+    }
 }

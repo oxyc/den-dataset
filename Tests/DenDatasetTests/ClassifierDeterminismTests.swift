@@ -64,7 +64,7 @@ final class ClassifierDeterminismTests: XCTestCase {
     /// equal votes AND equal rarity fell all the way through to hash order — the rarity prior, which exists
     /// to break ties, cannot break a tie between two genres that share a weight.
     ///
-    /// The taxonomy has five such pairs; all five are checked, because a single pair is a coin flip against
+    /// The taxonomy has five such pairs and four are usable; all four are checked, because a single pair is a coin flip against
     /// the old code — the hash seed is fixed WITHIN a process, so one pair would have passed on the broken
     /// version about half the time. Asserting the specific winner (not merely "stable") across all five
     /// leaves the old behaviour about one chance in sixteen of slipping through.
@@ -84,18 +84,20 @@ final class ClassifierDeterminismTests: XCTestCase {
         }
     }
 
-    /// The grounding bonus creates ties where the raw confidences had none — it clamps at 1.0, so two labels
-    /// 0.05 apart both land exactly there. That is a tie the pipeline produces on real data, not a contrived
-    /// one, and it goes through the same ordering.
-    func testGroundingBonusTiesAlsoResolveByLabel() throws {
-        let raw = vote(primary: "Drama", moods: [("Wholesome", 0.98), ("Cozy", 0.95)])
-        let grounded = title(keywords: ["wholesome", "cozy"])
+    /// Ties are not contrived — averaging across passes manufactures them. Two labels that appear in
+    /// different subsets of three passes land on the same mean, and that is the common case on real votes.
+    func testTiesFromVoteAveragingResolveByLabel() throws {
+        // Each of these appears in exactly two of the three passes, so all four average to 0.6.
+        let passes = [
+            vote(primary: "Drama", moods: [("Wholesome", 0.9), ("Campy", 0.9)]),
+            vote(primary: "Drama", moods: [("Wholesome", 0.9), ("Cozy", 0.9)]),
+            vote(primary: "Drama", moods: [("Campy", 0.9), ("Cozy", 0.9), ("Bingeable", 0.9)]),
+        ]
+        let result = try XCTUnwrap(
+            TaxonomyClassifier(llm: NoLLMStub(), samples: 3).classify(rawVotes: passes, title: title()))
 
-        let a = try XCTUnwrap(classifier.classify(rawVotes: [raw], title: grounded))
-        let b = try XCTUnwrap(classifier.classify(rawVotes: [raw], title: grounded))
-
-        XCTAssertEqual(a.moods.map(\.label), b.moods.map(\.label))
-        XCTAssertEqual(a.moods.map(\.confidence), b.moods.map(\.confidence))
+        XCTAssertEqual(result.moods.map(\.label), ["Campy", "Cozy", "Wholesome"])
+        XCTAssertEqual(Set(result.moods.map(\.confidence)).count, 1, "all three must be tied for this to test the tiebreak")
     }
 }
 
