@@ -79,17 +79,34 @@ public struct DenEmbedClient: Sendable {
     public struct Identity: Codable, Equatable, Sendable {
         public let model: String
         public let dims: Int
+        /// Which generation of vectors the service produces — see den-embed's `VECTOR_EPOCH`. 0 for the
+        /// Python service that predates the field, which is correctly not equal to any Rust build.
+        public let vectorEpoch: Int
+        /// Build identity for logs and messages. Deliberately NOT part of equality below.
         public let runtime: String
         public let maxTokens: Int
 
         /// One line, for the manifest and for error messages.
-        public var label: String { "\(model)/\(dims) \(runtime) max_tokens=\(maxTokens)" }
+        public var label: String {
+            "\(model)/\(dims) epoch \(vectorEpoch) (\(runtime)) max_tokens=\(maxTokens)"
+        }
+
+        /// Two services are the same embedder when they produce the same NUMBERS — not when they are the
+        /// same build. The version string moves on every release, so comparing it would invalidate a
+        /// 37.5k-title corpus over a log-line fix and demand hours of re-embedding; den-embed carries an
+        /// epoch that is bumped only when output actually moves. `maxTokens` is part of it because
+        /// truncation changes the vector for anything longer than the cap.
+        public static func == (a: Identity, b: Identity) -> Bool {
+            a.model == b.model && a.dims == b.dims
+                && a.vectorEpoch == b.vectorEpoch && a.maxTokens == b.maxTokens
+        }
 
         /// Parse a `/health` body. Split out from the request so the mapping is testable without a service:
         /// this is a hard gate on the pipeline, and the one field whose JSON name differs from its Swift
         /// name (`max_tokens`) is exactly the kind of thing that fails silently as a nil default.
-        public init(model: String, dims: Int, runtime: String, maxTokens: Int) {
-            self.model = model; self.dims = dims; self.runtime = runtime; self.maxTokens = maxTokens
+        public init(model: String, dims: Int, vectorEpoch: Int = 0, runtime: String, maxTokens: Int) {
+            self.model = model; self.dims = dims; self.vectorEpoch = vectorEpoch
+            self.runtime = runtime; self.maxTokens = maxTokens
         }
 
         public init(healthJSON data: Data) throws {
@@ -97,6 +114,7 @@ public struct DenEmbedClient: Sendable {
             // A service predating the `runtime` field is a real answer, not an error — that is the Python
             // era, which is the generation the currently shipped corpus came from.
             self.init(model: health.model ?? "unknown", dims: health.dims ?? 0,
+                      vectorEpoch: health.vectorEpoch ?? 0,
                       runtime: health.runtime ?? "pre-3.0.0", maxTokens: health.maxTokens ?? 0)
         }
     }
@@ -116,11 +134,13 @@ public struct DenEmbedClient: Sendable {
     struct HealthResponse: Decodable {
         let model: String?
         let dims: Int?
+        let vectorEpoch: Int?
         let runtime: String?
         let maxTokens: Int?
 
         enum CodingKeys: String, CodingKey {
             case model, dims, runtime
+            case vectorEpoch = "vector_epoch"
             case maxTokens = "max_tokens"
         }
     }

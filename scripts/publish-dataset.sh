@@ -50,7 +50,9 @@ gh release view data-latest -R "$REPO" >/dev/null 2>&1 \
 # progress and lets a transient failure retry just the slow one.
 upload_one() {
   local f="$1" n=0
-  until gh release upload data-latest -R "$REPO" --clobber "$f"; do
+  # </dev/null: this is called from inside a `while read` fed by $manifest_files, so anything the uploader
+  # read from stdin would consume the list being iterated. gh does not today; not depending on it is free.
+  until gh release upload data-latest -R "$REPO" --clobber "$f" </dev/null; do
     n=$((n + 1)); [ "$n" -ge 3 ] && { echo "error: failed to upload $(basename "$f") after 3 tries" >&2; return 1; }
     echo "  retry $n for $(basename "$f")…" >&2; sleep 5
   done
@@ -133,15 +135,42 @@ print(" ".join(sorted(k for k, v in old.items() if k.endswith("File") and v and 
     echo "error: the published manifest declares files this one does not: $dropped" >&2
     echo "       Publishing would make den-atlas delete them." >&2
     echo "" >&2
-    echo "       To carry those keys forward, copy the PUBLISHED MANIFEST — not the blobs — into $DIR and" >&2
-    echo "       re-run finalize there:" >&2
-    echo "" >&2
-    echo "           gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
-    echo "           <taxonomy-backfill> finalize --out-dir $DIR" >&2
-    echo "" >&2
-    echo "       finalize merges unowned keys from the manifest already at that path, so copying the blobs" >&2
-    echo "       alone changes nothing — you would see this same error and reach for the override below." >&2
-    echo "       (The blobs themselves must also be in $DIR, or step 1 will say so.)" >&2
+    # metadataFile is the one dropped key `finalize` CANNOT restore — it is the key finalize removes.
+    # DatasetMeta owns it, and an owned key the struct omits always wins the merge, so every finalize
+    # strips it and only `metadata` writes it back. Advising a re-run of finalize here printed
+    # instructions that reproduce this identical error, leaving DEN_ALLOW_DROPPING_BLOBS=1 as the only
+    # exit — and that override is exactly what makes atlas-dataset-sync delete the sidecar. Forgetting
+    # `metadata` after a finalize is the most-warned-about slip in this pipeline, so it is also the
+    # likeliest way to arrive here.
+    case " $dropped " in
+      *" metadataFile "*)
+        echo "       metadataFile: run the metadata step, which is what writes it. finalize cannot —" >&2
+        echo "       finalize is the command that removes it." >&2
+        echo "" >&2
+        echo "           <taxonomy-backfill> metadata --out-dir $DIR" >&2
+        echo "" >&2
+        echo "       If labels and vectors did not change then datasetVersion did not either, the existing" >&2
+        echo "       sidecar still applies, and --skip-fetch re-patches from it with no TMDB spend:" >&2
+        echo "" >&2
+        echo "           <taxonomy-backfill> metadata --skip-fetch --out-dir $DIR" >&2
+        echo "" >&2
+        ;;
+    esac
+
+    # The premise and facets keys have no producer in this repo; they survive only by being merged
+    # forward from the manifest already at the target path.
+    case " $dropped " in
+      *premise*|*facets*)
+        echo "       The premise and facets keys have no producer here — they survive only by being merged" >&2
+        echo "       forward. Copy the PUBLISHED MANIFEST, not the blobs, into $DIR and re-run finalize:" >&2
+        echo "" >&2
+        echo "           gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
+        echo "           <taxonomy-backfill> finalize --out-dir $DIR" >&2
+        echo "" >&2
+        echo "       (Those blobs must also be in $DIR, or step 1 will say so.)" >&2
+        ;;
+    esac
+
     echo "       If dropping them is deliberate, set DEN_ALLOW_DROPPING_BLOBS=1." >&2
     [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
     echo "       DEN_ALLOW_DROPPING_BLOBS=1 — continuing." >&2
@@ -161,11 +190,20 @@ while read -r name _sha; do
   upload_one "$DIR/$name" || exit 1
 done < "$manifest_files"
 
-# Anything else the globs found that the manifest does not name — the labels .gz has no sha, and older
-# sidecars linger in a long-lived out-dir. Uploaded, but never verified, because nothing declares them.
+# Anything else the globs found that the manifest does not name. Uploaded, but never verified, because
+# nothing declares a hash for them.
+#
+# Superseded sidecars are SKIPPED. `metadata` writes a new ~4.6 MB metadata-<datasetVersion>.json per
+# publish and nothing ever deletes the old one, so a long-lived out-dir accumulates them — re-uploading
+# every one on every run grew publish time and release size without bound, for assets no consumer fetches.
 for f in "${blobs[@]}"; do
   base="$(basename "$f")"
   grep -q "^$base " "$manifest_files" && continue
+  case "$base" in
+    metadata-*.json)
+      echo "  skipping $base (superseded — the manifest names a different sidecar)"
+      continue ;;
+  esac
   echo "→ $base (not named by the manifest)"
   upload_one "$f" || exit 1
 done

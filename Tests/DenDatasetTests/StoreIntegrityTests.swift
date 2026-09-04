@@ -220,13 +220,14 @@ final class RepairAndIdentityTests: XCTestCase {
 
     // MARK: - Reading the service's identity
 
-    func testIdentityReadsEveryFieldIncludingTheSnakeCasedOne() throws {
-        let body = Data(#"{"status":"ok","model":"bge-m3","dims":1024,"runtime":"den-embed/3.0.0","max_tokens":512}"#.utf8)
+    func testIdentityReadsEveryFieldIncludingTheSnakeCasedOnes() throws {
+        let body = Data(#"{"status":"ok","model":"bge-m3","dims":1024,"vector_epoch":1,"runtime":"den-embed/3.1.0","max_tokens":512}"#.utf8)
         let identity = try DenEmbedClient.Identity(healthJSON: body)
 
         XCTAssertEqual(identity.model, "bge-m3")
         XCTAssertEqual(identity.dims, 1024)
-        XCTAssertEqual(identity.runtime, "den-embed/3.0.0")
+        XCTAssertEqual(identity.runtime, "den-embed/3.1.0")
+        XCTAssertEqual(identity.vectorEpoch, 1)
         // The one field whose JSON name differs from its Swift name. A broken CodingKey yields 0 here,
         // which reads as "the service does not report a cap" and disables the truncation guard entirely.
         XCTAssertEqual(identity.maxTokens, 512)
@@ -239,16 +240,17 @@ final class RepairAndIdentityTests: XCTestCase {
         let identity = try DenEmbedClient.Identity(healthJSON: body)
 
         XCTAssertEqual(identity.runtime, "pre-3.0.0")
+        XCTAssertEqual(identity.vectorEpoch, 0, "no epoch means a generation that predates the field")
         XCTAssertEqual(identity.maxTokens, 0)
         XCTAssertNotEqual(identity, try DenEmbedClient.Identity(healthJSON: Data(
-            #"{"model":"bge-m3","dims":1024,"runtime":"den-embed/3.0.0","max_tokens":512}"#.utf8)))
+            #"{"model":"bge-m3","dims":1024,"vector_epoch":1,"runtime":"den-embed/3.1.0","max_tokens":512}"#.utf8)))
     }
 
     /// The identity is written to disk and compared on the next run, so it has to survive a round-trip
     /// through JSON exactly — a lossy field would make the mixed-embedder guard fire on every run.
     func testIdentityRoundTripsThroughItsStoredForm() throws {
-        let original = DenEmbedClient.Identity(model: "bge-m3", dims: 1024,
-                                               runtime: "den-embed/3.0.0", maxTokens: 512)
+        let original = DenEmbedClient.Identity(model: "bge-m3", dims: 1024, vectorEpoch: 1,
+                                               runtime: "den-embed/3.1.0", maxTokens: 512)
         let restored = try JSONDecoder().decode(DenEmbedClient.Identity.self,
                                                 from: try JSONEncoder().encode(original))
         XCTAssertEqual(original, restored)
@@ -328,5 +330,40 @@ final class SilentEmptyDecodeTests: XCTestCase {
         defer { unsetenv("TMDB_API_KEY") }
 
         XCTAssertEqual(Redact.secrets("abcdef is fine"), "abcdef is fine")
+    }
+}
+
+/// Identity equality decides whether a run may append to a 37.5k-title corpus, so what it ignores matters
+/// as much as what it compares.
+final class EmbedderIdentityEqualityTests: XCTestCase {
+
+    private func identity(epoch: Int = 1, runtime: String = "den-embed/3.1.0",
+                          maxTokens: Int = 512) -> DenEmbedClient.Identity {
+        DenEmbedClient.Identity(model: "bge-m3", dims: 1024, vectorEpoch: epoch,
+                                runtime: runtime, maxTokens: maxTokens)
+    }
+
+    /// A release that changes nothing about the numbers must not invalidate a corpus. Comparing the build
+    /// string would have demanded a full re-embed — hours of den-embed time — for a log-line fix.
+    func testAReleaseThatDoesNotMoveVectorsIsTheSameEmbedder() {
+        XCTAssertEqual(identity(runtime: "den-embed/3.1.0"), identity(runtime: "den-embed/3.4.2"))
+    }
+
+    /// ...and a release that DOES move them must be caught. That is the whole point: bge-m3/1024 is
+    /// reported by every generation, including the ORT 1.22 -> 1.28 bump that shifted int8 output.
+    func testABumpedEpochIsADifferentEmbedder() {
+        XCTAssertNotEqual(identity(epoch: 1), identity(epoch: 2))
+    }
+
+    /// The token cap is part of the identity because truncation changes the vector for any document
+    /// longer than it — the corpus shipping today was embedded with no cap at all.
+    func testADifferentTokenCapIsADifferentEmbedder() {
+        XCTAssertNotEqual(identity(maxTokens: 512), identity(maxTokens: 1024))
+    }
+
+    func testThePythonGenerationIsNotTheRustOne() {
+        let python = DenEmbedClient.Identity(model: "bge-m3", dims: 1024, vectorEpoch: 0,
+                                             runtime: "pre-3.0.0", maxTokens: 0)
+        XCTAssertNotEqual(python, identity())
     }
 }
