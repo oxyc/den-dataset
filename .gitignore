@@ -6,3 +6,4 @@ out/
 .swiftpm/
 out-vecnow*/
 out-*/
+__pycache__/

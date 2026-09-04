@@ -36,12 +36,14 @@ jobs:
       - uses: actions/checkout@v5
       - name: Parse under dash
         run: |
-          for f in scripts/*.sh; do
+          for f in scripts/*.sh scripts/lib/*.sh; do
             head -1 "$f" | grep -q bash && sh="bash" || sh="dash"
             "$sh" -n "$f" || exit 1
             echo "ok  $f ($sh)"
           done
-      - uses: ludeeus/action-shellcheck@master
+      # Pinned to a commit, not @master: a mutable third-party ref runs whatever that branch holds at the
+      # moment CI fires, and the `actions` dependabot group below can bump a pinned SHA but not a branch.
+      - uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38  # v2.0.0
         with:
           scandir: ./scripts
           severity: warning
