@@ -103,10 +103,15 @@ put the backgrounding in a script file inside the container instead.
 
 ### Two measured properties of the service
 
-- **~8.7 docs/s on tag-length documents, independent of chunk size** (16/32/64 all measured
-  8.6–8.8). `embed_many` maps `embed_one` serially, so batching removes round-trips, not
-  inference. A full 38,460-document premise embed is therefore **~74 minutes** — cheap next
-  to the 4–5 hours a whole-plot corpus embed takes, because tag documents are ~250 chars.
+- **Throughput is chunk-independent** — 16/32/64 all measured 8.6–8.8 docs/s in a
+  microbenchmark. `embed_many` maps `embed_one` serially, so batching removes round-trips,
+  not inference; this is the same fact behind the ~4–5 h whole-plot corpus estimate.
+- **Budget the real rate, not the benchmark: ~5.0 docs/s.** The 8.7 figure came from a
+  microbenchmark whose 128 documents differed only by a short suffix. The sustained rate on
+  a real 37,314-document run is **5.0 docs/s**, ~40% lower — the service is also answering
+  atlas's live queries, and real tag documents tokenize less uniformly. So a full-corpus
+  premise embed is **~2 hours**, not 74 minutes. Take the number from `embed.log`'s own
+  running rate, which is what it prints for exactly this reason.
 - **Responses are cached.** Re-sending 128 identical texts returns in 0.02 s against 14.7 s
   cold. Undocumented, and it makes the cutoff sweep nearly free: variants that share tag
   strings re-embed at cache speed after the first pass.

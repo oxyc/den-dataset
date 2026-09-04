@@ -109,8 +109,33 @@ def main():
         arms[idx.name] = idx
 
     results = {name: score(index, triplets) for name, index in arms.items()}
+
+    # Split by which mining slot proposed the positive. `near` positives come from keyword
+    # similarity, which tilts toward the plot index (measured: 1.23 sd of lift vs the premise
+    # index's 0.98). If an arm's advantage exists only on `near`, it is the miner's, not the
+    # index's — so the two are always reported side by side rather than pooled.
+    by_source = {}
+    for source in ('near', 'decoy'):
+        subset = [t for t in triplets if t.get('positiveSource') == source]
+        if subset:
+            by_source[source] = {'triplets': len(subset),
+                                 'arms': {n: score(i, subset) for n, i in arms.items()}}
+
+    # Split by the anchor's media type. This is the ONLY measurement in the whole v2
+    # programme that says anything about series: MovieLens ml-32m carries no TV ids, so the
+    # co-rating ruler is structurally blind to the ~10% of the index that is television.
+    # Reporting it separately is the difference between "we measured the index" and "we
+    # measured the movie part of the index and hoped".
+    by_media = {}
+    for media in ('movie', 'tv'):
+        subset = [t for t in triplets if t['anchor'].startswith(media + ':')]
+        if subset:
+            by_media[media] = {'triplets': len(subset),
+                               'arms': {n: score(i, subset) for n, i in arms.items()}}
+
     report = {'half': args.half, 'triplets': len(triplets),
-              'rulerAgreement': blob.get('meta', {}), 'arms': results}
+              'rulerAgreement': blob.get('meta', {}), 'arms': results,
+              'byPositiveSource': by_source, 'byMedia': by_media}
     out = args.out or os.path.join(V2, 'ruler', f'triplet-scores-{args.half}.json')
     with open(out, 'w', encoding='utf-8') as fh:
         json.dump(report, fh, indent=2)
