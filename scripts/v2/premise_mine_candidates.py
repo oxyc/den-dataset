@@ -71,6 +71,8 @@ def main():
     ap.add_argument('--per-batch', type=int, default=20)
     ap.add_argument('--rng', type=int, default=20260904)
     ap.add_argument('--out-dir', default=os.path.join(V2, 'ruler', 'gen'))
+    ap.add_argument('--provenance-only', action='store_true',
+                    help='rewrite provenance.json without touching in/ — safe while workers read it')
     args = ap.parse_args()
 
     corpus = {}
@@ -158,6 +160,7 @@ def main():
     batches = []
     current = []
     dropped = 0
+    provenance = {}
     for k in anchors:
         rec = corpus[k]
         lab = labels.get(k, {})
@@ -187,6 +190,14 @@ def main():
             continue
         rng.shuffle(cands)
 
+        # Which slot proposed each candidate. Not shown to the judge — it is only used
+        # afterwards, to report triplet accuracy split by slot. `near` candidates are mined
+        # by keyword similarity, which correlates with plot-surface similarity (measured:
+        # they lift plot-index similarity 1.23 sd above random against the premise index's
+        # 0.98 sd), so a result that holds only on `near` positives is partly an artefact of
+        # the mining rather than a property of the index.
+        provenance[k] = {'near': list(near), 'decoy': list(decoy)}
+
         current.append({
             'anchor': {'key': k, 'title': rec['title'], 'year': rec.get('year'),
                        'plot': excerpt(rec['plot'])},
@@ -208,6 +219,13 @@ def main():
         'nearN': NEAR_N, 'decoyN': DECOY_N, 'rng': args.rng,
         'candidateSource': 'IDF-weighted TMDB keyword-id cosine (df<=4000), franchise-filtered by title tokens',
     }
+    with open(os.path.join(args.out_dir, 'provenance.json'), 'w', encoding='utf-8') as fh:
+        json.dump(provenance, fh)
+    if args.provenance_only:
+        print(json.dumps({'provenanceAnchors': len(provenance),
+                          'note': 'in/ and manifest.json left untouched'}, indent=2))
+        return
+
     for i, b in enumerate(batches):
         with open(os.path.join(args.out_dir, f'batch-{i:04d}.json'), 'w', encoding='utf-8') as fh:
             json.dump(b, fh, ensure_ascii=False)

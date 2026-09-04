@@ -34,7 +34,20 @@ def load_manifest(phase):
     if not os.path.exists(path):
         sys.exit(f'no manifest at {path} — a phase without an id-set cannot be verified')
     with open(path, encoding='utf-8') as fh:
-        return json.load(fh)
+        manifest = json.load(fh)
+    # A phase may be run over a prefix of what was built — the mining is cheap and was sized
+    # generously, the LLM pass is not. `scope.json` records how far the run is meant to go so
+    # coverage is judged against the batches actually in scope, not against everything on disk.
+    scope_path = os.path.join(phase, 'scope.json')
+    if os.path.exists(scope_path):
+        with open(scope_path, encoding='utf-8') as fh:
+            scope = json.load(fh)
+        if scope['batches'] > manifest['batches']:
+            sys.exit(f"scope.json asks for {scope['batches']} batches but only "
+                     f"{manifest['batches']} were built")
+        manifest['batches'] = scope['batches']
+        manifest['scopeReason'] = scope.get('reason')
+    return manifest
 
 
 def expected_ids(phase, index):
