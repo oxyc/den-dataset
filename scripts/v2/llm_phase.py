@@ -134,6 +134,17 @@ def audit(phase):
                 problems[i] = (f'{len(missing_here)} of this batch\'s ids unanswered, '
                                f'e.g. {sorted(missing_here)[:3]}')
                 continue
+            # Order, because a positional slip is the one id failure the set checks cannot
+            # see: every key is present, none repeats, none is invented — and each answer is
+            # attached to the neighbouring title's plot. Every prompt here asks for input
+            # order, so a reordered output is a worker that lost its place, and for rows that
+            # will ship it means a film carrying another film's tags.
+            if got != want:
+                first = next(j for j, (g, w) in enumerate(zip(got, want)) if g != w)
+                problems[i] = (f'answers are out of input order from position {first} '
+                               f'({got[first]} where {want[first]} was asked) — a positional '
+                               'slip attaches each answer to the wrong title')
+                continue
             covered.update(got)
             ok.append(i)
     all_ids = set()
