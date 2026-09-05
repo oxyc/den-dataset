@@ -325,7 +325,13 @@ enum Commands {
             let outcomes = try await withThrowingTaskGroup(of: PlotOutcome.self) { group -> [PlotOutcome] in
                 for title in slice {
                     group.addTask {
-                        guard let article = mapping[title.tmdbId]?.article else { return .noPlot(title) }
+                        // Runtime + creators come from the SAME hop that resolved the article, so they are
+                        // folded in for EVERY title — including the ones with no plot, which keep no other
+                        // trace of this call.
+                        let facts = mapping[title.tmdbId]
+                        let title = title.mergingWikidata(runtimeMinutes: facts?.runtimeMinutes,
+                                                          creators: facts?.creators ?? [])
+                        guard let article = facts?.article else { return .noPlot(title) }
                         do {
                             guard let plot = try await wiki.plot(articleTitle: article),
                                   plot.count >= wikiPlotFloor else { return .noPlot(title) }
@@ -1411,6 +1417,8 @@ struct EnrichedDTO: Codable {
     /// TV showrunners — the credit that links a series to its creator's other work, since `director` is
     /// null for nearly all series.
     let createdBy: [String]
+    /// Minutes, from Wikidata — the enriched record has no other runtime source.
+    let runtimeMinutes: Int?
     let hasWikiPlot: Bool
 
     init(_ t: EnrichedTitle) {
@@ -1419,6 +1427,7 @@ struct EnrichedDTO: Codable {
         keywordIDs = t.keywords.map(\.id); keywords = t.keywords.map(\.name)
         originCountry = t.originCountry; originalLanguage = t.originalLanguage; voteCount = t.voteCount
         director = t.director; topCast = t.topCast; createdBy = t.createdBy
+        runtimeMinutes = t.runtimeMinutes
         hasWikiPlot = t.hasWikiPlot
     }
 
@@ -1441,6 +1450,7 @@ struct EnrichedDTO: Codable {
         director = try c.decodeIfPresent(String.self, forKey: .director)
         topCast = try c.decodeIfPresent([String].self, forKey: .topCast) ?? []
         createdBy = try c.decodeIfPresent([String].self, forKey: .createdBy) ?? []
+        runtimeMinutes = try c.decodeIfPresent(Int.self, forKey: .runtimeMinutes)
         hasWikiPlot = try c.decodeIfPresent(Bool.self, forKey: .hasWikiPlot) ?? false
     }
 
@@ -1450,7 +1460,7 @@ struct EnrichedDTO: Codable {
                       keywords: zip(keywordIDs, keywords).map { Keyword(id: $0, name: $1) },
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast, createdBy: createdBy,
-                      hasWikiPlot: hasWikiPlot)
+                      runtimeMinutes: runtimeMinutes, hasWikiPlot: hasWikiPlot)
     }
 }
 

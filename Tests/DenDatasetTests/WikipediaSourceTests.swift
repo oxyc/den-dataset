@@ -72,6 +72,53 @@ final class WikipediaSourceTests: XCTestCase {
         XCTAssertNil(map[999])
     }
 
+    /// Runtime and creators ride along on the article hop. A title binds once PER creator, so they must
+    /// ACCUMULATE across rows — first-wins would silently drop the second Duffer brother.
+    func testParseWikidataAccumulatesCreatorsAndTakesShortestRuntime() throws {
+        let json = Data("""
+        {"results":{"bindings":[
+          {"tmdb":{"value":"66732"},"article":{"value":"https://en.wikipedia.org/wiki/Stranger_Things"},
+           "runtime":{"value":"70"},"creatorLabel":{"value":"Ross Duffer"}},
+          {"tmdb":{"value":"66732"},"article":{"value":"https://en.wikipedia.org/wiki/Stranger_Things"},
+           "runtime":{"value":"50.0"},"creatorLabel":{"value":"Matt Duffer"}}
+        ]}}
+        """.utf8)
+        let map = try WikipediaSource.parseWikidata(json)
+        let entry = try XCTUnwrap(map[66732])
+        XCTAssertEqual(entry.creators, ["Matt Duffer", "Ross Duffer"], "both creators, sorted for stability")
+        XCTAssertEqual(entry.runtimeMinutes, 50, "the shortest cut answers 'have I got time for this'")
+        XCTAssertEqual(entry.article, "Stranger Things")
+    }
+
+    /// The facts are OPTIONAL in the query; a title with neither still returns its article, which is what
+    /// the call exists for.
+    func testParseWikidataToleratesMissingRuntimeAndCreators() throws {
+        let json = Data("""
+        {"results":{"bindings":[
+          {"tmdb":{"value":"1"},"article":{"value":"https://en.wikipedia.org/wiki/Nothing"}}
+        ]}}
+        """.utf8)
+        let entry = try XCTUnwrap(try WikipediaSource.parseWikidata(json)[1])
+        XCTAssertNil(entry.runtimeMinutes)
+        XCTAssertTrue(entry.creators.isEmpty)
+        XCTAssertEqual(entry.article, "Nothing")
+    }
+
+    /// Wikidata wins over TMDB's `created_by` where it has creators — the same rule the plot follows, since
+    /// this text reaches an embedder and Wikidata is CC0 — and TMDB fills the gap where it does not.
+    func testMergingWikidataPrefersWikidataCreatorsAndFallsBackToTMDB() {
+        let base = EnrichedTitle(tmdbId: 1, mediaType: .tv, title: "S", year: 2020, overview: "",
+                                 genreIDs: [], genreNames: [], keywords: [], originCountry: [],
+                                 originalLanguage: "en", voteCount: 1, createdBy: ["TMDB Person"])
+        let wiki = base.mergingWikidata(runtimeMinutes: 42, creators: ["Wikidata Person"])
+        XCTAssertEqual(wiki.createdBy, ["Wikidata Person"])
+        XCTAssertEqual(wiki.runtimeMinutes, 42)
+
+        let noWiki = base.mergingWikidata(runtimeMinutes: nil, creators: [])
+        XCTAssertEqual(noWiki.createdBy, ["TMDB Person"], "TMDB covers what Wikidata misses")
+        XCTAssertNil(noWiki.runtimeMinutes)
+    }
+
     func testArticleTitlePercentDecodesAndUnderscores() {
         XCTAssertEqual(WikipediaSource.articleTitle(fromURL: "https://en.wikipedia.org/wiki/The_Matrix"), "The Matrix")
         XCTAssertEqual(WikipediaSource.articleTitle(fromURL: "https://en.wikipedia.org/wiki/Am%C3%A9lie"), "Amélie")

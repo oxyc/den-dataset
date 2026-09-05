@@ -35,9 +35,13 @@ public struct EnrichedTitle: Sendable, Equatable {
     /// Credits (FP-2, `append_to_response=credits`) — feed the composed embedding doc, not the classifier.
     public let director: String?
     public let topCast: [String]
-    /// TV showrunners (`created_by`). Kept separate from `director`, which TMDB leaves null for nearly all
-    /// series — so this is the only credit that links a series to its creator's other work.
+    /// TV showrunners. Sourced from Wikidata (P170) where it has them and TMDB `created_by` otherwise —
+    /// kept separate from `director`, which TMDB leaves null for nearly all series, so this is the only
+    /// credit that links a series to its creator's other work.
     public let createdBy: [String]
+    /// Runtime in minutes, from Wikidata (P2047) — ~93% of films carry it, and the enriched record has no
+    /// other source for it. Series values are per-episode and much sparser (~37%), so this is a film fact.
+    public let runtimeMinutes: Int?
     /// True once `overview` holds a live Wikipedia plot (vs the TMDB overview fallback). The composed doc uses
     /// the plot only when this is set; a no-plot title composes on facts + tags with an empty Plot.
     public let hasWikiPlot: Bool
@@ -46,12 +50,13 @@ public struct EnrichedTitle: Sendable, Equatable {
                 genreIDs: [Int], genreNames: [String], keywords: [Keyword], originCountry: [String],
                 originalLanguage: String?, voteCount: Int,
                 director: String? = nil, topCast: [String] = [], createdBy: [String] = [],
-                hasWikiPlot: Bool = false) {
+                runtimeMinutes: Int? = nil, hasWikiPlot: Bool = false) {
         self.tmdbId = tmdbId; self.mediaType = mediaType; self.title = title; self.year = year
         self.overview = overview; self.genreIDs = genreIDs; self.genreNames = genreNames
         self.keywords = keywords; self.originCountry = originCountry
         self.originalLanguage = originalLanguage; self.voteCount = voteCount
         self.director = director; self.topCast = topCast; self.createdBy = createdBy
+        self.runtimeMinutes = runtimeMinutes
         self.hasWikiPlot = hasWikiPlot
     }
 
@@ -60,7 +65,23 @@ public struct EnrichedTitle: Sendable, Equatable {
         EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: plot,
                       genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
-                      director: director, topCast: topCast, createdBy: createdBy, hasWikiPlot: true)
+                      director: director, topCast: topCast, createdBy: createdBy,
+                      runtimeMinutes: runtimeMinutes, hasWikiPlot: true)
+    }
+
+    /// Fold in the facts that ride along on the Wikidata hop.
+    ///
+    /// Wikidata's creators WIN over TMDB's `created_by` where it has them. That is the same rule the plot
+    /// already follows and for the same reason: this text is fed to an embedder, and TMDB's terms (§1.C)
+    /// speak directly to using their content with a machine-learning application, while Wikidata is CC0.
+    /// TMDB stays as the fallback for the ~63% of series Wikidata has no creator for.
+    public func mergingWikidata(runtimeMinutes wikiRuntime: Int?, creators: [String]) -> EnrichedTitle {
+        EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: overview,
+                      genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
+                      originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
+                      director: director, topCast: topCast,
+                      createdBy: creators.isEmpty ? createdBy : creators,
+                      runtimeMinutes: wikiRuntime ?? runtimeMinutes, hasWikiPlot: hasWikiPlot)
     }
 }
 

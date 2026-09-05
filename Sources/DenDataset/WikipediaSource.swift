@@ -4,7 +4,8 @@ import Foundation
 /// shipping TMDB overviews. NEVER a dump: every call hits the live public APIs. Two hops:
 ///
 ///  1. `wikidata(forTMDBIds:mediaType:)` — ONE Wikidata SPARQL POST maps a batch of TMDB ids to their
-///     Wikidata film/series entity, the linked English Wikipedia article title, and (optionally) the IMDb id.
+///     Wikidata film/series entity, the linked English Wikipedia article title, the IMDb id, and the runtime
+///     + creators that ride along for free (CC0, so free of TMDB's terms).
 ///     Movies key on `wdt:P4947` (TMDB movie id), TV on `wdt:P4983` (TMDB series id); `wdt:P345` is the IMDb
 ///     id; the enwiki article is `?a schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/>`.
 ///  2. `plot(articleTitle:)` — the article's Plot/Synopsis section as plain prose. With a Wikimedia Enterprise
@@ -17,11 +18,25 @@ import Foundation
 /// `schema:dateModified` filter on the entity, and re-embed a title when its article `revid` changes
 /// (`action=parse&prop=revid`).
 public struct WikipediaSource: Sendable {
-    /// The mapping returned per TMDB id: the enwiki article title (for the plot hop) and the IMDb id.
+    /// The mapping returned per TMDB id: the enwiki article title (for the plot hop), the IMDb id, and the
+    /// facts that ride along on the same query for free.
     public struct Mapping: Sendable, Equatable {
         public let article: String?
         public let imdb: String?
-        public init(article: String?, imdb: String?) { self.article = article; self.imdb = imdb }
+        /// Minutes (P2047). Measured coverage: ~93% of films, ~37% of series — and a series' value is
+        /// per-episode, so treat it as a film fact and let TV fall back elsewhere.
+        public let runtimeMinutes: Int?
+        /// Showrunners (P170), sorted for stability. Measured coverage: ~37% of a RANDOM series sample —
+        /// famous shows are near-complete, the long tail is not. So this complements TMDB's `created_by`
+        /// rather than replacing it: free where present, TMDB fills the rest.
+        public let creators: [String]
+
+        public init(article: String?, imdb: String?, runtimeMinutes: Int? = nil, creators: [String] = []) {
+            self.article = article
+            self.imdb = imdb
+            self.runtimeMinutes = runtimeMinutes
+            self.creators = creators
+        }
     }
 
     /// A polite, identifying User-Agent is REQUIRED by the Wikimedia APIs (unidentified traffic is throttled).
@@ -50,12 +65,18 @@ public struct WikipediaSource: Sendable {
         guard !unique.isEmpty else { return [:] }
         let property = mediaType == .tv ? "P4983" : "P4947"   // TMDB series id / TMDB movie id
         let values = unique.map { "\"\($0)\"" }.joined(separator: " ")
+        // Runtime and creators ride along on the hop that already happens — no extra request, and Wikidata is
+        // CC0, so neither fact carries TMDB's terms with it. Both are OPTIONAL: a title missing them still
+        // returns its article, which is what this call exists for.
         let query = """
-        SELECT ?tmdb ?article ?imdb WHERE {
+        SELECT ?tmdb ?article ?imdb ?runtime ?creatorLabel WHERE {
           VALUES ?tmdb { \(values) }
           ?film wdt:\(property) ?tmdb .
           OPTIONAL { ?film wdt:P345 ?imdb . }
+          OPTIONAL { ?film wdt:P2047 ?runtime . }
+          OPTIONAL { ?film wdt:P170 ?creator . }
           OPTIONAL { ?article schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/> . }
+          SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
         }
         ORDER BY ?tmdb ?article
         """
@@ -92,10 +113,21 @@ public struct WikipediaSource: Sendable {
             guard let tmdbRaw = binding.tmdb?.value, let tmdbId = Int(tmdbRaw) else { continue }
             let article = (binding.article?.value).flatMap { Self.articleTitle(fromURL: $0) }
             let imdb = binding.imdb?.value
-            // A film can bind more than once (e.g. two IMDb ids); keep the first article/imdb seen but fill
-            // in any field a later row supplies.
+            // Wikidata stores runtime as a decimal ("96" / "96.0"); a series may carry several (a 50- and a
+            // 70-minute cut). The SMALLEST is the useful one for "have I got time for this".
+            let runtime = (binding.runtime?.value).flatMap { Double($0) }.map { Int($0.rounded()) }
+            // A film binds once PER creator (and per IMDb id), so creators accumulate across rows rather than
+            // first-wins — taking only the first would silently drop the second Duffer brother.
             let existing = map[tmdbId]
-            map[tmdbId] = Mapping(article: existing?.article ?? article, imdb: existing?.imdb ?? imdb)
+            var creators = existing?.creators ?? []
+            if let creator = binding.creatorLabel?.value, !creator.isEmpty, !creators.contains(creator) {
+                creators.append(creator)
+            }
+            map[tmdbId] = Mapping(
+                article: existing?.article ?? article,
+                imdb: existing?.imdb ?? imdb,
+                runtimeMinutes: [existing?.runtimeMinutes, runtime].compactMap { $0 }.min(),
+                creators: creators.sorted())
         }
         return map
     }
@@ -116,6 +148,8 @@ public struct WikipediaSource: Sendable {
             let tmdb: Cell?
             let article: Cell?
             let imdb: Cell?
+            let runtime: Cell?
+            let creatorLabel: Cell?
         }
         struct Cell: Decodable { let value: String }
     }
