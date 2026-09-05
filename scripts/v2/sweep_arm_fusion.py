@@ -17,6 +17,7 @@ constant to be tested once on the sealed half — never swept there.
 import argparse
 import json
 import os
+import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -51,6 +52,11 @@ def main():
     ap.add_argument('--a', required=True)
     ap.add_argument('--b', required=True)
     ap.add_argument('--weights', default='0,0.125,0.25,0.375,0.5,0.625,0.75,1,1.5,2,4,1000')
+    ap.add_argument('--nested-folds', type=int, default=0,
+                    help='honest estimate: repeatedly split these triplets, pick w on one half '
+                         'and score it on the other, so the reported gain excludes the '
+                         'advantage of having chosen w on the cases being scored')
+    ap.add_argument('--seed', type=int, default=20260905)
     ap.add_argument('--out', default=None)
     args = ap.parse_args()
 
@@ -104,12 +110,40 @@ def main():
     c_only = sum(1 for c in cids if best['cases'][c] and not base[c])
     test = mcnemar(b_only, c_only)
 
+    # The DEV argmax is optimistic by construction: w was chosen on the same triplets it is
+    # scored on. Splitting repeatedly — pick w on one half, score it on the other — costs
+    # nothing and answers how much of the gain survives honest selection, which is exactly
+    # the question the sealed half will be asked and the one this can answer first.
+    nested = None
+    if args.nested_folds:
+        rng = random.Random(args.seed)
+        held, picks = [], []
+        for _ in range(args.nested_folds):
+            order = cids[:]
+            rng.shuffle(order)
+            mid = len(order) // 2
+            for tune, hold in ((order[:mid], order[mid:]), (order[mid:], order[:mid])):
+                best_w = max(rows, key=lambda r: sum(r['cases'][c] for c in tune))['w']
+                row = next(r for r in rows if r['w'] == best_w)
+                held.append(sum(row['cases'][c] for c in hold) / len(hold))
+                picks.append(best_w)
+        base_acc = sum(base[c] for c in cids) / len(cids)
+        nested = {
+            'folds': len(held),
+            'meanHeldOutAccuracy': round(sum(held) / len(held), 4),
+            'minHeldOutAccuracy': round(min(held), 4),
+            'baselineAccuracy': round(base_acc, 4),
+            'meanGainOverBaseline': round(sum(held) / len(held) - base_acc, 4),
+            'weightsPicked': sorted(set(picks)),
+        }
+
     report = {
         'half': args.half, 'pairedTriplets': len(cids),
         'a': args.a, 'b': args.b,
         'ceilingEitherArmRight': round(either / len(cids), 4),
         'sweep': [{'w': r['w'], 'accuracy': r['accuracy']} for r in rows],
         'best': {'w': best['w'], 'accuracy': best['accuracy']},
+        'nestedSelection': nested,
         'bestVsA': {'table': {f'only {args.a}': b_only, 'only fused': c_only}, 'mcnemar': test},
         'verdict': ('fusion beats the baseline arm' if (test['p'] or 1.0) < 0.05 and c_only > b_only
                     else 'fusion does not significantly beat the baseline arm'),
