@@ -23,11 +23,26 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from index_io import load_plot_index, load_premise_v1_index  # noqa: E402
+from index_io import load_plot_index, load_premise_v1_index, Index, read_blob  # noqa: E402
 from reco_metrics import evaluate, compare  # noqa: E402
 from split import half  # noqa: E402
 
 V2 = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'
+
+
+def load_extra(spec):
+    """--arm name=vectors.bin:keys.json — score a v2 or cutoff-variant blob alongside the
+    shipped arms without touching them."""
+    name, paths = spec.split('=', 1)
+    vec_path, keys_path = paths.split(':', 1)
+    with open(keys_path, encoding='utf-8') as fh:
+        keys = json.load(fh)
+    if isinstance(keys, dict):
+        keys = keys.get('keys') or keys.get('ids')
+    vectors, count, _ = read_blob(vec_path)
+    if count != len(keys):
+        raise SystemExit(f'{name}: blob has {count} rows, key file has {len(keys)}')
+    return Index(keys, vectors, name)
 
 
 def arm_recommendations(index, seeds, k, mask):
@@ -39,6 +54,8 @@ def main():
     ap.add_argument('--cases', default=os.path.join(V2, 'eval', 'reco-cases.json'))
     ap.add_argument('--half', choices=['dev', 'test', 'all'], default='dev')
     ap.add_argument('--k', type=int, default=10)
+    ap.add_argument('--arm', action='append', default=[],
+                    help='name=vectors.bin:keys.json — adds an arm beside plot and premise-v1')
     ap.add_argument('--out', default=None)
     args = ap.parse_args()
 
@@ -60,7 +77,8 @@ def main():
     results = {}
     per_arm_recs = {}
 
-    for name, index in (('plot', plot), ('premise-v1', prem)):
+    extra = [load_extra(spec) for spec in args.arm]
+    for name, index in [('plot', plot), ('premise-v1', prem)] + [(i.name, i) for i in extra]:
         mask = np.array([k in judgeable for k in index.keys])
         present = [s for s in seeds if s in index.pos]
         recs = arm_recommendations(index, present, args.k, mask)
@@ -108,6 +126,9 @@ def main():
         'gates': {
             'premise-v1 vs plot': compare(results['premise-v1'], results['plot']),
             'fused vs plot': compare(results['fused'], results['plot']),
+            **{f'{i.name} vs premise-v1': compare(results[i.name], results['premise-v1'])
+               for i in extra},
+            **{f'{i.name} vs plot': compare(results[i.name], results['plot']) for i in extra},
         },
     }
     out = args.out or os.path.join(V2, 'eval', f'reco-baseline-{args.half}.json')
