@@ -36,6 +36,14 @@ def clamp(plot):
 
 def main():
     ap = argparse.ArgumentParser()
+    # 40 is at the edge, and which side of it you land on depends on the MODEL.
+    #
+    # A 40-title batch emits 40 x ~15 tags, each with a salience and a kind. Haiku fits that
+    # inside the 64,000-token output cap comfortably; Sonnet, which writes more per tag and
+    # narrates more around it, exceeded the cap on a bake-off batch and wrote nothing at all.
+    # So the safe batch size is not a property of the task, it is a property of the model
+    # running it: keep 40 for Haiku, drop to ~25 for Sonnet, and remember that an over-large
+    # batch does not degrade — it produces an empty file.
     ap.add_argument('--per-batch', type=int, default=40)
     ap.add_argument('--passes', type=int, default=3)
     ap.add_argument('--scope', choices=['all', 'shipped', 'ruler'], default='all')
