@@ -48,6 +48,15 @@ def main():
     ap.add_argument('--passes', type=int, default=3)
     ap.add_argument('--scope', choices=['all', 'shipped', 'ruler', 'uncovered'], default='all')
     ap.add_argument('--triplets', default=os.path.join(V2, 'ruler', 'triplets-final.json'))
+    # Repeatable JSON key list whose keys are dropped. The reason this exists: a richer ruler
+    # adds triplets over titles the previous ruler never selected, so extending an arm to
+    # cover it means tagging the DIFFERENCE, not rebuilding the whole scope. Going from the
+    # 2-pass ruler to the 3-pass one needed 108 more DEV titles and 132 more TEST titles
+    # against arms of 457 and 443 — six batches rather than thirty-three.
+    ap.add_argument('--exclude-keys', action='append', default=[],
+                    help='JSON list (or {keys:[...]}) of keys already covered; repeatable')
+    ap.add_argument('--half', choices=['dev', 'test', 'all'], default='all',
+                    help='with --scope ruler, restrict to one half of the split')
     ap.add_argument('--out-dir', default=os.path.join(V2, 'tags-v2'))
     args = ap.parse_args()
 
@@ -78,10 +87,29 @@ def main():
         from index_io import load_premise_v1_index
         already_covered = set(load_premise_v1_index().keys)
     elif args.scope == 'ruler':
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from split import half as split_half
         with open(args.triplets, encoding='utf-8') as fh:
             wanted = set()
             for t in json.load(fh)['triplets']:
+                if args.half != 'all' and split_half(t['anchor']) != args.half:
+                    continue
                 wanted.update((t['anchor'], t['positive'], t['negative']))
+
+    # Excludes apply to every scope, and they subtract from `wanted` rather than filtering
+    # later, so the "every wanted title must be in the corpus" assertion below still means
+    # what it says instead of firing on titles that were deliberately dropped.
+    excluded = set()
+    for path in args.exclude_keys:
+        with open(path, encoding='utf-8') as fh:
+            keys = json.load(fh)
+        if isinstance(keys, dict):
+            keys = keys.get('keys') or keys.get('ids')
+        excluded.update(keys)
+    if excluded:
+        if wanted is not None:
+            wanted -= excluded
+        already_covered = (already_covered or set()) | excluded
 
     rows = []
     with open(CORPUS, encoding='utf-8') as fh:
