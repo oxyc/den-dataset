@@ -121,6 +121,19 @@ def audit(phase):
             if unexpected:
                 problems[i] = f'{len(unexpected)} ids not in this batch, e.g. {sorted(unexpected)[:3]}'
                 continue
+            # A repeated key always means a dropped one, and the row count still matches, so
+            # nothing else here would catch it. Seen in the wild: a tagging batch answered
+            # one title twice and silently omitted another, and came back the right length.
+            dupes = [k for k in set(got) if got.count(k) > 1]
+            if dupes:
+                problems[i] = (f'{len(dupes)} duplicated ids, e.g. {sorted(dupes)[:3]} — '
+                               'a repeat means another title was dropped')
+                continue
+            missing_here = set(want) - set(got)
+            if missing_here:
+                problems[i] = (f'{len(missing_here)} of this batch\'s ids unanswered, '
+                               f'e.g. {sorted(missing_here)[:3]}')
+                continue
             covered.update(got)
             ok.append(i)
     all_ids = set()
