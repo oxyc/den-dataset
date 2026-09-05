@@ -47,8 +47,8 @@ def verdict_from_axes(axes):
     return 'unrelated'
 
 
-def load_pass(p):
-    phase = os.path.join(JUDGE, f'pass{p}')
+def load_pass(p, judge_dir=JUDGE):
+    phase = os.path.join(judge_dir, f'pass{p}')
     manifest = load_manifest(phase)
     rows = {}
     problems = {}
@@ -89,10 +89,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--passes', type=int, default=3)
     ap.add_argument('--min-confirm', type=int, default=2)
+    # Overridable so the consolidation can be dry-run against the smoke-test directory before
+    # the real judging budget is spent. A bug found here after paying for judging is expensive.
+    ap.add_argument('--judge-dir', default=JUDGE)
     ap.add_argument('--out', default=os.path.join(V2, 'ruler', 'triplets-final.json'))
     args = ap.parse_args()
 
-    with open(os.path.join(JUDGE, 'truth.json'), encoding='utf-8') as fh:
+    with open(os.path.join(args.judge_dir, 'truth.json'), encoding='utf-8') as fh:
         truth = json.load(fh)
     # Which mining slot proposed each positive. `near` candidates come from keyword
     # similarity, which correlates with plot-surface similarity, so an index result that
@@ -106,7 +109,7 @@ def main():
 
     passes, problems, violations = [], {}, {}
     for p in range(1, args.passes + 1):
-        rows, probs, viol = load_pass(p)
+        rows, probs, viol = load_pass(p, args.judge_dir)
         passes.append(rows)
         problems[f'pass{p}'] = len(probs)
         violations[f'pass{p}'] = viol

@@ -52,17 +52,27 @@ def load_manifest(phase):
 
 def expected_ids(phase, index):
     """The ids batch `index` was given. Coverage is judged against these, not against
-    whatever the output happens to contain."""
+    whatever the output happens to contain.
+
+    Order matters here and got it wrong once. A JUDGING case carries both `id` and an
+    `anchor` — but its `anchor` is `{title, year, plot}` with no `key`, because the judge must
+    not see ids. A GENERATION case carries an `anchor` that *is* keyed. So `id` has to be
+    checked first; branching on `anchor` first raises KeyError on every judging batch.
+    """
     with open(batch_path(phase, 'in', index), encoding='utf-8') as fh:
         batch = json.load(fh)
     out = []
-    for item in batch:
-        if 'anchor' in item:
-            out.append(item['anchor']['key'])
-        elif 'triplet' in item:
-            out.append(item['triplet']['id'])
-        else:
+    for i, item in enumerate(batch):
+        if 'id' in item:                                    # judging case
+            out.append(item['id'])
+        elif isinstance(item.get('anchor'), dict) and 'key' in item['anchor']:
+            out.append(item['anchor']['key'])               # generation case
+        elif 'key' in item:                                 # tagging case
             out.append(item['key'])
+        else:
+            raise KeyError(
+                f'{batch_path(phase, "in", index)} item {i}: no id, anchor.key or key — '
+                'a batch whose ids cannot be named cannot have its coverage checked')
     return out
 
 
