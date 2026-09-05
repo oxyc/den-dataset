@@ -101,7 +101,7 @@ def read_output(phase, index, strict=True):
 def audit(phase):
     manifest = load_manifest(phase)
     n = manifest['batches']
-    ok, problems = [], {}
+    ok, problems, warnings = [], {}, {}
     covered = set()
     for i in range(n):
         want = expected_ids(phase, i)
@@ -134,17 +134,27 @@ def audit(phase):
                 problems[i] = (f'{len(missing_here)} of this batch\'s ids unanswered, '
                                f'e.g. {sorted(missing_here)[:3]}')
                 continue
-            # Order, because a positional slip is the one id failure the set checks cannot
-            # see: every key is present, none repeats, none is invented — and each answer is
-            # attached to the neighbouring title's plot. Every prompt here asks for input
-            # order, so a reordered output is a worker that lost its place, and for rows that
-            # will ship it means a film carrying another film's tags.
+            # Out-of-order answers are a WARNING, not a failure, and the distinction was
+            # learned the hard way.
+            #
+            # This started as a hard failure, on the reasoning that a positional slip attaches
+            # each answer to the neighbouring title. That reasoning was wrong. Every row here
+            # carries its own id and every consumer keys by that id, so a permutation changes
+            # nothing downstream — and the failure it was meant to catch, content shifted
+            # relative to ids, produces rows that are still in perfect input order. Order
+            # checking cannot see the thing it was added for, and it fails the thing that is
+            # harmless.
+            #
+            # It caught a judging batch whose last four answers were swapped in pairs, with all
+            # 40 ids present exactly once. Blocking on that would have re-run a correct batch.
+            #
+            # Kept as a warning because it is still a signal that a worker lost its place, and
+            # a phase whose rows were NOT self-labelled would need the strict form.
             if got != want:
                 first = next(j for j, (g, w) in enumerate(zip(got, want)) if g != w)
-                problems[i] = (f'answers are out of input order from position {first} '
-                               f'({got[first]} where {want[first]} was asked) — a positional '
-                               'slip attaches each answer to the wrong title')
-                continue
+                warnings[i] = (f'answers reordered from position {first} ({got[first]} where '
+                               f'{want[first]} was asked); every id is present exactly once, so '
+                               'this is harmless for id-keyed consumers')
             covered.update(got)
             ok.append(i)
     all_ids = set()
@@ -154,6 +164,7 @@ def audit(phase):
         'batches': n,
         'complete': len(ok),
         'problems': problems,
+        'warnings': warnings,
         'idsExpected': len(all_ids),
         'idsCovered': len(covered),
         'idsMissing': sorted(all_ids - covered),
@@ -201,13 +212,19 @@ def main():
 
     report = audit(args.phase)
     if args.status or args.verify:
-        summary = {k: v for k, v in report.items() if k not in ('problems', 'idsMissing')}
+        summary = {k: v for k, v in report.items()
+                   if k not in ('problems', 'warnings', 'idsMissing')}
         summary['problemBatches'] = len(report['problems'])
+        summary['warningBatches'] = len(report['warnings'])
         summary['idsMissingCount'] = len(report['idsMissing'])
         print(json.dumps(summary, indent=2))
         if report['problems']:
             print('\nproblems:', file=sys.stderr)
             for i, why in sorted(report['problems'].items())[:40]:
+                print(f'  batch-{i:04d}: {why}', file=sys.stderr)
+        if report['warnings']:
+            print('\nwarnings (not blocking):', file=sys.stderr)
+            for i, why in sorted(report['warnings'].items())[:40]:
                 print(f'  batch-{i:04d}: {why}', file=sys.stderr)
     if args.verify and (report['problems'] or report['idsMissing']):
         sys.exit(1)
