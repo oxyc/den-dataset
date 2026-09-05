@@ -52,12 +52,33 @@ def allowed_ids():
     return allowed, denied, plots
 
 
-def references(item):
-    """Every title a batch entry sends to a model. A generation entry carries an anchor plus
-    its candidates; a tagging or judging entry carries one title."""
-    if 'anchor' in item and isinstance(item['anchor'], dict) and 'key' in item['anchor']:
-        return [item['anchor']] + list(item.get('candidates') or [])
-    return [item]
+def references(item, truth=None):
+    """Every title key a batch entry sends to a model.
+
+    Three batch shapes, and the third nearly broke this check. A **generation** entry carries
+    a keyed anchor plus keyed candidates. A **tagging** entry carries one keyed title. A
+    **judging** entry carries no keys at all — deliberately, because a blind judge must not
+    see ids — so its titles can only be resolved through the phase's `truth.json`.
+
+    Without that lookup the checker reported 645 violations on the judging batches, every one
+    of them spurious: it was finding no key and treating "unnameable" as "not allowed". A
+    compliance check that cries wolf is worse than no check, because it teaches people to
+    ignore it.
+    """
+    if isinstance(item.get('anchor'), dict) and 'key' in item['anchor']:
+        return [e['key'] for e in [item['anchor']] + list(item.get('candidates') or [])]
+    if 'key' in item:
+        return [item['key']]
+    if 'id' in item:
+        if truth is None:
+            raise SystemExit(
+                'a judging batch was scanned without its truth.json — the ids are not in the '
+                'batch by design, so compliance cannot be established from the batch alone')
+        row = truth.get(item['id'])
+        if row is None:
+            raise SystemExit(f"judging case {item['id']!r} is absent from truth.json")
+        return [row['anchor'], row['positive'], row['negative']]
+    raise SystemExit(f'batch entry has no anchor, key or id: {sorted(item)}')
 
 
 def main():
@@ -76,6 +97,12 @@ def main():
     for root in roots:
         if not os.path.isdir(root):
             continue
+        # A judging phase keeps its id mapping one level up, beside the pass directories.
+        truth = None
+        truth_path = os.path.join(os.path.dirname(os.path.dirname(root)), 'truth.json')
+        if os.path.exists(truth_path):
+            with open(truth_path, encoding='utf-8') as fh:
+                truth = json.load(fh)
         for path in sorted(glob.glob(os.path.join(root, 'batch-*.json'))):
             files += 1
             if 'tags-v2' in root:
@@ -83,8 +110,7 @@ def main():
             with open(path, encoding='utf-8') as fh:
                 batch = json.load(fh)
             for item in batch:
-                for entry in references(item):
-                    key = entry.get('key')
+                for key in references(item, truth):
                     checked += 1
                     if key is None or key in denied or key not in allowed:
                         violations.append((path, key))
