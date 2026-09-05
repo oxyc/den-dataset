@@ -97,6 +97,9 @@ def main():
     ap.add_argument('--chunk', type=int, default=32)
     ap.add_argument('--label', required=True, help='names the output files')
     ap.add_argument('--out-dir', default=os.path.join(V2, 'vectors'))
+    ap.add_argument('--emit-jsonl', default=None,
+                    help='write the composed {key,text} documents here and stop, instead of '
+                         'embedding — for feeding embed_runner.py inside the den container')
     args = ap.parse_args()
 
     kinds = {k.strip() for k in args.kinds.split(',') if k.strip()}
@@ -127,6 +130,23 @@ def main():
         raise SystemExit('duplicate keys in the embed set')
     print(f'{args.label}: {len(texts)} documents, mean {sum(len(t) for t in texts) / len(texts):.0f} chars',
           flush=True)
+
+    # This machine cannot embed. The published den-embed image is amd64 and ONNX Runtime's
+    # prebuilt binaries need AVX2, which Apple Silicon emulation does not provide: /health
+    # answers (it runs no inference) and the process dies on the first real request, which
+    # reads as a connection failure rather than as the CPU mismatch it is. So the composition
+    # happens here — where the tag-selection knobs live and can be swept — and the embedding
+    # happens on the homelab box, with the JSONL as the seam between them. Keeping compose()
+    # on this side is the point: every arm's documents are built by the same code path.
+    if args.emit_jsonl:
+        with open(args.emit_jsonl, 'w', encoding='utf-8') as fh:
+            for key, text in items:
+                fh.write(json.dumps({'key': key, 'text': text}, ensure_ascii=False) + '\n')
+        print(json.dumps({'label': args.label, 'documents': len(items),
+                          'jsonl': args.emit_jsonl,
+                          'next': 'run embed_runner.py on this inside the den container, '
+                                  'then tsv_to_blob.py on the result'}, indent=2))
+        return
 
     vectors = embed_all(texts, args.url, args.chunk)
     dim = len(vectors[0])

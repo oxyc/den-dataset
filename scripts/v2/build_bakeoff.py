@@ -25,7 +25,18 @@ from split import half  # noqa: E402
 V2 = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'
 CORPUS = os.path.join(V2, 'corpus', 'wikiplot-corpus.jsonl')
 
-ARMS = {'haiku-n3': 3, 'sonnet-n3': 3, 'sonnet-n1': 1}
+# passes, and the batch size that model can actually finish.
+#
+# Batch size is a property of the MODEL, not of the task. 40 titles x ~15 tags fits inside
+# Haiku's 64,000-token output cap; Sonnet writes more per tag and overran the cap on its
+# first bake-off batch, which does not degrade gracefully — it produces an empty file, so the
+# arm looks unrun rather than over-asked. 25 leaves Sonnet the headroom. The sizes differ per
+# arm on purpose, and because batch size decides the id numbering, an arm's size must not be
+# changed once it has outputs on disk: use --arm to rebuild one arm without renumbering the
+# others out from under their completed work.
+ARMS = {'haiku-n3': {'passes': 3, 'perBatch': 40},
+        'sonnet-n3': {'passes': 3, 'perBatch': 25},
+        'sonnet-n1': {'passes': 1, 'perBatch': 25}}
 MAX_HEAD = 6000
 MAX_TAIL = 1200
 
@@ -40,7 +51,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--triplets', default=os.path.join(V2, 'ruler', 'triplets-final.json'))
     ap.add_argument('--cases', type=int, default=200, help='DEV triplets the bake-off is scored on')
-    ap.add_argument('--per-batch', type=int, default=40)
+    ap.add_argument('--arm', action='append', default=[], choices=sorted(ARMS),
+                    help='rebuild only these arms (default: all)')
     ap.add_argument('--out-dir', default=os.path.join(V2, 'bakeoff'))
     args = ap.parse_args()
 
@@ -75,18 +87,32 @@ def main():
     items = [{'key': k, 'title': corpus[k]['title'], 'year': corpus[k]['year'],
               'mediaType': corpus[k]['mediaType'], 'plot': clamp(corpus[k]['plot'])}
              for k in keys]
-    batches = [items[i:i + args.per_batch] for i in range(0, len(items), args.per_batch)]
-
-    manifest = {'titles': len(items), 'batches': len(batches), 'perBatch': args.per_batch,
-                'cases': len(chosen), 'half': 'dev',
-                'provenance': 'every record has hasWikiPlot == true; no TMDB overview prose',
-                'ids': keys}
-
-    for arm, passes in ARMS.items():
-        for p in range(1, passes + 1):
+    wanted = args.arm or sorted(ARMS)
+    built = {}
+    for arm in wanted:
+        spec = ARMS[arm]
+        per = spec['perBatch']
+        batches = [items[i:i + per] for i in range(0, len(items), per)]
+        manifest = {'titles': len(items), 'batches': len(batches), 'perBatch': per,
+                    'cases': len(chosen), 'half': 'dev', 'arm': arm,
+                    'provenance': 'every record has hasWikiPlot == true; no TMDB overview prose',
+                    'ids': keys}
+        for p in range(1, spec['passes'] + 1):
             pdir = os.path.join(args.out_dir, arm, f'pass{p}')
+            # Refuse to renumber a pass that already holds answers. Rewriting in/ at a
+            # different batch size leaves out/batch-0003.json describing different titles
+            # than in/batch-0003.json, and every coverage check then compares the wrong two
+            # files — silent corruption rather than a failure.
+            outdir = os.path.join(pdir, 'out')
+            if os.path.isdir(outdir) and os.listdir(outdir):
+                old = os.path.join(pdir, 'manifest.json')
+                if os.path.exists(old):
+                    with open(old, encoding='utf-8') as fh:
+                        if json.load(fh).get('perBatch') != per:
+                            sys.exit(f'{arm}/pass{p} already has outputs at a different batch '
+                                     f'size — move them aside before rebuilding at {per}')
             os.makedirs(os.path.join(pdir, 'in'), exist_ok=True)
-            os.makedirs(os.path.join(pdir, 'out'), exist_ok=True)
+            os.makedirs(outdir, exist_ok=True)
             for i, b in enumerate(batches):
                 with open(os.path.join(pdir, 'in', f'batch-{i:04d}.json'), 'w', encoding='utf-8') as fh:
                     # indent=1 so a batch fits one Read call; minified it exceeds the limit
@@ -94,13 +120,14 @@ def main():
                     json.dump(b, fh, ensure_ascii=False, indent=1)
             with open(os.path.join(pdir, 'manifest.json'), 'w', encoding='utf-8') as fh:
                 json.dump(manifest, fh)
+        built[arm] = {'batches': len(batches), 'perBatch': per, 'passes': spec['passes']}
 
     with open(os.path.join(args.out_dir, 'cases.json'), 'w', encoding='utf-8') as fh:
         json.dump({'cases': chosen}, fh)
 
-    print(json.dumps({'arms': list(ARMS), 'titles': len(items), 'batches': len(batches),
-                      'cases': len(chosen),
-                      'subagentCalls': sum(len(batches) * p for p in ARMS.values())}, indent=2))
+    print(json.dumps({'arms': built, 'titles': len(items), 'cases': len(chosen),
+                      'subagentCalls': sum(b['batches'] * b['passes'] for b in built.values())},
+                     indent=2))
 
 
 if __name__ == '__main__':
