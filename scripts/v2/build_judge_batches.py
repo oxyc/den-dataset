@@ -46,14 +46,25 @@ def main():
     # case is three head+tail excerpts against a generation batch's eleven, so the INPUT is
     # comfortable.
     #
-    # The output is not. Each case emits axes, verdict and reason for two slots, and at 40
-    # cases some batches exceed the 64,000-token output cap and die having written nothing
-    # (observed on batches 0006 and 0009). The input-side saving was real; the output side was
-    # not checked, which is the mistake. 25 completed reliably in the smoke test.
+    # The output is not. At 40 cases some batches exceed the 64,000-token output cap and die
+    # having written nothing (observed on 0006 and 0009, then again on 0004, 0006, 0007 and
+    # 0009 in pass 3). The input-side saving was real; the output side was not checked.
     #
-    # Mitigation in the prompt is to cap `reason` length. If batches keep hitting the ceiling,
-    # drop this to 25 and accept the extra passes — a batch that dies writes nothing at all,
-    # so the "saving" is negative.
+    # THE CAUSE IS NOT THE ANSWER LENGTH, and this comment said it was. A killed pass-3 agent
+    # reported `output_tokens: 64000` with `thinking_tokens: 63999` — it spent the entire
+    # budget deliberating and emitted almost no answer at all. Capping `reason` length, the
+    # mitigation this comment used to recommend, would have done nothing: there was no answer
+    # to shorten. The judge is weighing interpretations on a rubric that is meant to be
+    # mechanical, and 40 pairs of plots gives it 40 chances to do that.
+    #
+    # This failure is invisible to every check here. The file is never created, so it looks
+    # exactly like a batch that has not been run yet, and `--list-missing` will re-queue it
+    # forever. The only signal is wall-clock: a stalled batch runs past every completed one.
+    #
+    # Two fixes, and they compose. The prompt tells the worker to judge mechanically and not
+    # deliberate, which is what recovered these four. And 25 completed reliably in the smoke
+    # test — drop to 25 and accept the extra passes, because a batch that dies writes nothing
+    # and the "saving" is therefore negative.
     ap.add_argument('--per-batch', type=int, default=40)
     ap.add_argument('--passes', type=int, default=3)
     ap.add_argument('--out-dir', default=os.path.join(V2, 'ruler', 'judge'))
