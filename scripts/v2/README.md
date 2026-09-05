@@ -106,12 +106,18 @@ put the backgrounding in a script file inside the container instead.
 - **Throughput is chunk-independent** — 16/32/64 all measured 8.6–8.8 docs/s in a
   microbenchmark. `embed_many` maps `embed_one` serially, so batching removes round-trips,
   not inference; this is the same fact behind the ~4–5 h whole-plot corpus estimate.
-- **Budget the real rate, not the benchmark: ~5.0 docs/s.** The 8.7 figure came from a
-  microbenchmark whose 128 documents differed only by a short suffix. The sustained rate on
-  a real 37,314-document run is **5.0 docs/s**, ~40% lower — the service is also answering
-  atlas's live queries, and real tag documents tokenize less uniformly. So a full-corpus
-  premise embed is **~2 hours**, not 74 minutes. Take the number from `embed.log`'s own
-  running rate, which is what it prints for exactly this reason.
+- **A full 37,314-document premise embed takes 57 minutes** — measured end to end, ~10.8
+  docs/s, slightly *better* than the microbenchmark.
+
+  An intermediate reading of 5.0 docs/s during that run was an artefact worth recording,
+  because it is easy to repeat. A `&` and a redirect written inside
+  `ssh root@pve 'incus exec den -- … &'` bind to the **pve host shell**, so the backgrounding
+  fails there while `incus exec` still starts the process *inside* the container. A second
+  launch then leaves two clients competing for den-embed's single serial model lock, and each
+  sees roughly half throughput. Check `ps -eo pid,args | grep embed_runner` before trusting a
+  rate. (The doubled work was harmless: `tsv_to_blob.py` skips identical repeats, and the
+  2,976 documents embedded twice came back byte-identical, independently confirming the
+  service is deterministic run-to-run.)
 - **Responses are cached.** Re-sending 128 identical texts returns in 0.02 s against 14.7 s
   cold. Undocumented, and it makes the cutoff sweep nearly free: variants that share tag
   strings re-embed at cache speed after the first pass.
