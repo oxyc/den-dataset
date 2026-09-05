@@ -13,9 +13,9 @@ corpus and query vectors are comparable. The offline FNV embedder remains as a `
 
 ## What's in the shipped dataset
 
-Measured from `out-t02/` (taxonomy `t02`), the corpus currently published as `data-latest`. **The counts
-below are from the build that produced this table and no longer match `out-t02` on disk** (which holds
-56,138 enriched rows and 37,414 with a wiki plot) — re-measure before quoting them:
+Measured from `out-t02/` (taxonomy `t02`), the corpus currently published as `data-latest`. Re-verified
+2026-09-05 against the enriched batches on disk — **57,715 records, 38,460 with a wiki plot** — so this
+table is current:
 
 | | Movies | TV series | Total |
 |---|---:|---:|---:|
@@ -95,14 +95,14 @@ read this file. They are stated as measurements so they can be re-checked rather
 
 **Plots are RAW Wikipedia prose. Nothing has ever summarised them.** An LLM reads plots to produce
 *labels* (and, separately, the premise tags below) — it never rewrites the plot text. Measured over
-`out-t02`, `hasWikiPlot=true` overviews run **median 2,544 chars, p90 4,324, max 53,299**. A summariser
+`out-t02`, `hasWikiPlot=true` overviews run **median 2,537 chars, p90 4,327, max 53,299** (n = 38,460). A summariser
 would leave a tight band, not a 53k outlier. Titles with `hasWikiPlot=false` sit at median 238 chars —
 that is the **TMDB overview**, which is a different thing wearing the same field name.
 
 **`labels-t02.json` and `vectors-bge-m3.bin` cover the IDENTICAL set of ids.** Verified:
 `set(labels ids) == set(vectors ids)`, 37,533 each. So "has no vector" and "has no labels" are the same
 population, not two overlapping gaps — a title outside the index has *no local semantic signal at all*,
-only its TMDB overview. That is ~18.6k of the ~56k enriched rows.
+only its TMDB overview. That is **20,182 of the 57,715 enriched rows (35%)**.
 
 **`labels-premise.json` is a byte-for-byte copy of `labels-t02.json`.** The premise index's value is not
 in its labels file; it is **`vectors-premise.bin`**, a genuinely separate embedding space (measured mean
