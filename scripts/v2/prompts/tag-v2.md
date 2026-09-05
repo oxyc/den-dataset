@@ -94,6 +94,10 @@ them. Nothing else: no prose, no markdown fence, no commentary.
 Rules that make the output usable:
 - Every `key` copied **verbatim** from the input. Never invent or reformat one.
 - Emit an object for **every** title in the batch. A missing title fails the batch.
+- **Never emit `"tags": []`.** Every title in a batch has a real Wikipedia plot, so there is
+  always something to tag. An empty list is what truncation looks like, and it is counted as a
+  failure rather than a terse answer. If you are running low on output budget, shorten the
+  tags — do not stub the remaining titles.
 - `tag` matches `^[a-z0-9]+(-[a-z0-9]+){1,4}$` — lowercase, hyphens only, 2–5 words.
 - No duplicate tags within a title.
 - Sorted by descending `salience`.

@@ -102,6 +102,15 @@ def load_pass(phase_dir):
                     continue
                 seen.add(tag)
                 clean.append({'tag': tag, 'salience': sal, 'kind': kind, 'rank': len(clean)})
+            # An empty tag list is a FAILURE, not a result. A title in a batch has a
+            # non-empty Wikipedia plot by construction, so there is always something to tag;
+            # zero tags means the worker truncated and stubbed the remainder. Measured on the
+            # Haiku bake-off arm at 40 titles/batch: 23 of 120 titles came back with `"tags":
+            # []` while carrying 2,600-4,100 characters of plot. Counted separately and
+            # excluded, so a truncating model cannot look merely terse.
+            if not clean:
+                stats['empty_tag_lists'] += 1
+                continue
             stats['titles'] += 1
             stats['tags_kept'] += len(clean)
             rows[key] = clean
