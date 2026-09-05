@@ -13,7 +13,9 @@ corpus and query vectors are comparable. The offline FNV embedder remains as a `
 
 ## What's in the shipped dataset
 
-Measured from `out-t02/` (taxonomy `t02`), the corpus currently published as `data-latest`:
+Measured from `out-t02/` (taxonomy `t02`), the corpus currently published as `data-latest`. **The counts
+below are from the build that produced this table and no longer match `out-t02` on disk** (which holds
+56,138 enriched rows and 37,414 with a wiki plot) — re-measure before quoting them:
 
 | | Movies | TV series | Total |
 |---|---:|---:|---:|
@@ -86,6 +88,47 @@ aggregation + embeds + quantizes; `finalize` writes the shipped artifacts.
 `datasetVersion` = first 12 hex of `sha256(labelsSha256 + ":" + vectorsSha256)`.
 Quantization is `int8-symmetric-x127` (L2-normalized floats × 127, clamped to [-127, 127]).
 
+## What the data actually IS — read this first
+
+Every item here has been misunderstood at least once, usually more than once, by someone who had already
+read this file. They are stated as measurements so they can be re-checked rather than re-argued.
+
+**Plots are RAW Wikipedia prose. Nothing has ever summarised them.** An LLM reads plots to produce
+*labels* (and, separately, the premise tags below) — it never rewrites the plot text. Measured over
+`out-t02`, `hasWikiPlot=true` overviews run **median 2,544 chars, p90 4,324, max 53,299**. A summariser
+would leave a tight band, not a 53k outlier. Titles with `hasWikiPlot=false` sit at median 238 chars —
+that is the **TMDB overview**, which is a different thing wearing the same field name.
+
+**`labels-t02.json` and `vectors-bge-m3.bin` cover the IDENTICAL set of ids.** Verified:
+`set(labels ids) == set(vectors ids)`, 37,533 each. So "has no vector" and "has no labels" are the same
+population, not two overlapping gaps — a title outside the index has *no local semantic signal at all*,
+only its TMDB overview. That is ~18.6k of the ~56k enriched rows.
+
+**`labels-premise.json` is a byte-for-byte copy of `labels-t02.json`.** The premise index's value is not
+in its labels file; it is **`vectors-premise.bin`**, a genuinely separate embedding space (measured mean
+|cos| 0.43 against the plot vectors for the same titles). Reading only the labels file and concluding
+"premise adds nothing" is the specific mistake this paragraph exists to prevent.
+
+**The premise index is 219 rows short of the plot index** (37,314 vs 37,533) and those rows are NOT
+missing work — they are computed and unmerged, sitting in `out-t02/v2/vectors/vectors-coverage-fill.bin`
++ `keys-coverage-fill.json`. *The Dark Knight* is one of them. The live gap is derived from the index by
+`build_tag_batches.py --scope uncovered`, which must select 0 after a merge; **do not** trust
+`premise-tags-wip/missing.json`, which is stale DT-H-era state.
+
+**`maxTokens: 0` in `index/embedder.json` means "the service was too old to report it"** — NOT "there was
+no limit". `assertDocFits` returns early on it, so the guard is inert against the shipped store. What the
+shipped vectors were actually truncated at is unknown.
+
+**There are TWO den-embed instances and they differ.** The container answering *query* traffic runs
+`max_tokens 512`; `embed-corpus-run.sh` boots its **own** container at 1024 (lines 56, 86). Embedding the
+corpus against the query service is the failure mode to guard — see rule 2 below for what it costs.
+
+**`datasetVersion` is a content hash** (`sha256(labelsSha:vectorsSha)`), not a semantic version. It moves
+whenever content moves, which is what drives client re-sync.
+
+**`topCast` is only 4 names deep.** Any rule needing two shared cast members between titles returns
+essentially nothing outside a franchise.
+
 ## How retrieval actually works — and the four things that must stay true
 
 Read this before changing the pipeline. Each rule below is here because breaking it produced a bug that
@@ -119,8 +162,18 @@ shipped corpus was embedded by the **Python** service on ORT 1.22 and is queried
 
 ### 2. The token cap is most of what the vector sees
 Plot is **~87%** of the composed document by length (median 93%); facts and tags are ~204 chars. den-embed
-truncates at `max_tokens` **server-side, silently** — no error, no field in the response. Per title: at 512
-tokens ~61% of titles are cut, keeping ~73% of each plot; at **1024** only ~21% are, keeping ~97%.
+truncates at `max_tokens` **server-side, silently** — no error, no field in the response.
+
+Re-measured 2026-09-05 against the real plot lengths, which also pins down which metric these numbers use:
+
+| cap | titles truncated | plot kept, per-title mean | plot kept, **total corpus text** |
+|---|---|---|---|
+| 512 tokens | 64% | 68% | **50%** |
+| 1024 tokens | 29% | 95% | 90% |
+
+The per-title mean is the flattering view — short plots keep 100% and lift the average. For a retrieval
+index the total-text column is the honest one: at 512 the corpus loses **half its plot prose**, and what it
+loses is the long plots, where the detail that distinguishes two similar titles lives.
 
 `assertDocFits` refuses up front rather than letting the service quietly halve a document. Do not raise the
 plot cap without raising the service's token cap in the same change, and vice versa.
