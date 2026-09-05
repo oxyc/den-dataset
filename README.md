@@ -176,3 +176,11 @@ Measured: at ~150 triplets, one flipped case moves a rate by 0.66 pp, so a one-p
   them — the builder refuses.
 - **A subagent's output file is not readable until its completion notification arrives.** Reading a
   half-written file produced three wrong claims in one session, each of which had to be retracted.
+- **A batch can die of deliberation, and that failure is silent.** A judging worker spent its entire
+  64,000-token output budget on internal reasoning — 63,999 thinking tokens, no answer — and wrote nothing.
+  Because the file is simply absent it is indistinguishable from a batch nobody ran, so `--list-missing`
+  re-queues it forever and every coverage check agrees the phase is merely incomplete. **The only signal is
+  wall-clock**: a stalled batch outruns every completed one. Four batches of one phase went this way. When a
+  batch is well past its siblings' duration, check the agent rather than waiting; the prompts for
+  judgement-heavy tasks now carry an explicit "decide on the plain reading, do not deliberate" warning, and
+  that warning belongs in the prompt file rather than in a dispatch message so it survives the next run.
