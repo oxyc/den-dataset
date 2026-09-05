@@ -18,6 +18,15 @@ Metrics, and why each is here:
 
 Arms with no vector for a title skip that triplet, and the skip count is reported: an arm
 that quietly scores fewer cases is not comparable to one that scored all of them.
+
+Two of the four metrics are pool-dependent and two are not, which decides how arms of
+different sizes may be compared. `tripletAccuracy` and `margin` are pairwise — three fixed
+titles, no corpus — so a 600-title bake-off arm and the 37,314-title v1 index can sit side by
+side directly. `positivePercentile*` and `negativeLeak` rank the positive against everything
+else in the arm, so a small arm flatters itself: with 600 rows a positive has 599 competitors
+and reaches the top 1% far more easily than it would against 37k. `--restrict-to` intersects
+every arm down to one shared key set before scoring; without it, only the pairwise metrics
+mean anything when the arms differ in size.
 """
 import argparse
 import json
@@ -45,6 +54,17 @@ def load_extra(spec):
     if count != len(keys):
         raise SystemExit(f'{name}: blob has {count} rows, key file has {len(keys)}')
     return Index(keys, vectors, name)
+
+
+def restrict(index, keys):
+    """A copy of `index` holding only `keys`, so every arm ranks against the same pool.
+
+    Rebuilt through `Index` rather than by masking, because the percentile denominator is
+    `len(index.keys)`: masking would leave the denominator at full size while the competitors
+    were gone, which is exactly the flattering number this exists to prevent.
+    """
+    rows = [index.pos[k] for k in keys if k in index.pos]
+    return Index([index.keys[i] for i in rows], index.vectors[rows], index.name)
 
 
 def score(index, triplets):
@@ -92,6 +112,10 @@ def main():
     ap.add_argument('--half', choices=['dev', 'test', 'all'], default='dev')
     ap.add_argument('--arm', action='append', default=[],
                     help='name=vectors.bin:keys.json — adds an arm beside plot and premise-v1')
+    ap.add_argument('--restrict-to', default=None,
+                    help='intersect every arm to this key set (a JSON list, or an object with '
+                         '"keys"/"ids") so the pool-dependent metrics are comparable; '
+                         '"smallest" uses the smallest arm\'s own keys')
     ap.add_argument('--out', default=None)
     args = ap.parse_args()
 
@@ -107,6 +131,25 @@ def main():
     for spec in args.arm:
         idx = load_extra(spec)
         arms[idx.name] = idx
+
+    pool = None
+    if args.restrict_to == 'smallest':
+        pool = min(arms.values(), key=lambda i: len(i.keys)).keys
+    elif args.restrict_to:
+        with open(args.restrict_to, encoding='utf-8') as fh:
+            pool = json.load(fh)
+        if isinstance(pool, dict):
+            pool = pool.get('keys') or pool.get('ids')
+    if pool is not None:
+        shared = set(pool)
+        for name in arms:
+            shared &= set(arms[name].keys)
+        # Intersecting, not just applying the requested set: an arm missing some of those
+        # keys would otherwise rank against a smaller pool than its neighbours and the
+        # comparison would be back where it started.
+        arms = {name: restrict(index, [k for k in pool if k in shared])
+                for name, index in arms.items()}
+        print(f'restricted every arm to {len(shared)} shared keys', file=sys.stderr)
 
     results = {name: score(index, triplets) for name, index in arms.items()}
 
@@ -134,9 +177,14 @@ def main():
                                'arms': {n: score(i, subset) for n, i in arms.items()}}
 
     report = {'half': args.half, 'triplets': len(triplets),
+              'pool': len(next(iter(arms.values())).keys) if arms else 0,
+              'restrictedTo': args.restrict_to,
               'rulerAgreement': blob.get('meta', {}), 'arms': results,
               'byPositiveSource': by_source, 'byMedia': by_media}
-    out = args.out or os.path.join(V2, 'ruler', f'triplet-scores-{args.half}.json')
+    # Restricted and unrestricted runs never share a filename — the numbers are not
+    # interchangeable and one silently overwriting the other is how they get mixed up.
+    suffix = '-pooled' if args.restrict_to else ''
+    out = args.out or os.path.join(V2, 'ruler', f'triplet-scores-{args.half}{suffix}.json')
     with open(out, 'w', encoding='utf-8') as fh:
         json.dump(report, fh, indent=2)
     print(json.dumps(report, indent=2))
