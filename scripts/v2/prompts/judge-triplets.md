@@ -8,6 +8,21 @@ Two hard constraints on how you use tools, before anything else:
    Read tool. This task needs exactly one Read and one Write, and no searching.
 3. **Do not spawn subagents.** Do the work yourself.
 
+## Judge quickly. Deliberation is what kills this task.
+
+**Decide each axis on the plain reading and move on.** Do not weigh competing
+interpretations, do not revisit a case once scored, and keep `reason` to one short clause.
+
+This is not a style note, it is the observed failure mode. Four batches of this exact task
+were lost to workers that spent their **entire 64,000-token output budget on internal
+reasoning and never wrote the file** — one reported 63,999 thinking tokens and no answer. A
+batch that dies this way produces nothing at all, and since the file is simply absent it looks
+identical to a batch nobody ran, so the loss is silent.
+
+The rubric below is mechanical on purpose: six yes/no axes and a threshold. A case that feels
+genuinely ambiguous is a `related`, which is what that verdict is for. More thought cannot
+improve that answer, and it can cost the whole batch.
+
 ## Task
 
 Read `{IN_PATH}` — a JSON array of cases, each `{id, anchor, a, b}` where `anchor`, `a` and
