@@ -53,13 +53,20 @@ def main():
     ap.add_argument('--cases', type=int, default=200, help='DEV triplets the bake-off is scored on')
     ap.add_argument('--arm', action='append', default=[], choices=sorted(ARMS),
                     help='rebuild only these arms (default: all)')
+    # The bake-off itself is DEV-only — it picks a model, which is tuning. But confirming a
+    # DEV hypothesis on the sealed half needs the TEST triplets' titles tagged too, and a
+    # tagging run reads no verdicts and computes no metric: the batch files carry titles and
+    # plots, the same records that were always going to be tagged in Phase 2. What must stay
+    # sealed is the scoring, and that is enforced where the scoring lives — score_triplets
+    # announces a TEST run and sweep_arm_fusion refuses one outright.
+    ap.add_argument('--half', choices=['dev', 'test'], default='dev')
     ap.add_argument('--out-dir', default=os.path.join(V2, 'bakeoff'))
     args = ap.parse_args()
 
     with open(args.triplets, encoding='utf-8') as fh:
-        triplets = [t for t in json.load(fh)['triplets'] if half(t['anchor']) == 'dev']
+        triplets = [t for t in json.load(fh)['triplets'] if half(t['anchor']) == args.half]
     if not triplets:
-        sys.exit('no DEV triplets — run the ruler first')
+        sys.exit(f'no {args.half.upper()} triplets — run the ruler first')
     # Prefer unanimously-confirmed triplets: the bake-off is a model comparison, and a noisy
     # case set widens both arms' error bars rather than separating them.
     triplets.sort(key=lambda t: -t['confirms'])
@@ -94,7 +101,7 @@ def main():
         per = spec['perBatch']
         batches = [items[i:i + per] for i in range(0, len(items), per)]
         manifest = {'titles': len(items), 'batches': len(batches), 'perBatch': per,
-                    'cases': len(chosen), 'half': 'dev', 'arm': arm,
+                    'cases': len(chosen), 'half': args.half, 'arm': arm,
                     'provenance': 'every record has hasWikiPlot == true; no TMDB overview prose',
                     'ids': keys}
         for p in range(1, spec['passes'] + 1):
