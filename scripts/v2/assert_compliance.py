@@ -24,13 +24,23 @@ import sys
 ROOT = '/Users/cindy/Projects/Personal/den-dataset/out-t02'
 V2 = os.path.join(ROOT, 'v2')
 
-DEFAULT_ROOTS = [
-    os.path.join(V2, 'ruler', 'gen', 'in'),
-    os.path.join(V2, 'ruler', 'judge', 'pass1', 'in'),
-    os.path.join(V2, 'tags-v2', 'pass1', 'in'),
-    os.path.join(V2, 'tags-v2', 'pass2', 'in'),
-    os.path.join(V2, 'tags-v2', 'pass3', 'in'),
-]
+def default_roots():
+    """Every `*/in/` directory under v2, discovered rather than listed.
+
+    This was a hand-maintained list, and a hand-maintained list of things to check is a
+    list that silently stops covering what you add. Two whole phase trees — the bake-off
+    and the sealed-half confirmation, 24 batch files between them — were built, run and
+    never gated, while the checker went on reporting PASS over exactly the same 3,403 files
+    as before. The count not moving is what gave it away, and only because someone looked.
+
+    A phase is a directory with `in/batch-*.json`, so that is what is searched for. Adding a
+    phase now adds it to the gate by construction.
+    """
+    found = set()
+    for path in glob.glob(os.path.join(V2, '**', 'in'), recursive=True):
+        if os.path.isdir(path) and glob.glob(os.path.join(path, 'batch-*.json')):
+            found.add(path)
+    return sorted(found)
 
 
 def allowed_ids():
@@ -86,7 +96,8 @@ def main():
     ap.add_argument('--root', action='append', default=[])
     ap.add_argument('--spot-check', type=int, default=30, help='batch files to verify plot text in')
     args = ap.parse_args()
-    roots = args.root or DEFAULT_ROOTS
+    roots = args.root or default_roots()
+    print(f'phase directories discovered: {len(roots)}', flush=True)
 
     allowed, denied, plots = allowed_ids()
     print(f'enriched: {len(allowed)} hasWikiPlot=true, {len(denied)} false', flush=True)
