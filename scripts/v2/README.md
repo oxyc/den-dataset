@@ -17,8 +17,11 @@ The session ran out of model budget. What exists, what does not, and the exact n
 | premise triplets, frozen provisional | **done** — `v2/ruler/triplets-provisional.json`, 527+ triplets |
 | v1 re-embedded through the live runtime | **done** — `v2/vectors/vectors-premise-v1-realigned.bin` |
 | cutoff sweep top-5 / top-8 | top-5 **done**, top-8 running/queued |
-| **blind judging (3 passes)** | **NOT RUN** — this is the next step and the highest-value one |
-| bake-off, Phase 2 tagging, v1-vs-v2 gate | **NOT RUN** |
+| blind judging, pass 1 | **complete** — 17/17 batches, 645/645 cases, 0 problems |
+| blind judging, pass 2 | **complete or near** — see `--list-missing` |
+| blind judging, pass 3 | **NOT RUN** — two passes give unanimity, which is stricter than 2-of-3 but keeps fewer cases; a third would recover the middle ground |
+| confirmed triplet sets | `triplets-provisional.json`, `triplets-1pass.json`, `triplets-final.json` |
+| bake-off, Phase 2 tagging, v1-vs-v2 gate | **NOT RUN** — priced at 234–400 M tokens for the full corpus |
 
 **Resume, in order:**
 
@@ -47,9 +50,21 @@ $P scripts/v2/score_triplets.py --half dev
 Everything is idempotent: each batch writes only its own fixed path, coverage is checked
 against a manifest id-set, and `--list-missing` is the resume list.
 
-**Do not skip step 4's disagreement rate.** Six of the fourteen findings in
-`den/tickets/artifacts/2026-09-04-index-v2-rulers.md` are marked PROVISIONAL for exactly one
-reason: the triplets are currently the proposer grading itself.
+**Two things the judging run established that are worth knowing before you resume.**
+
+*The disagreement rate grew with every sample* — 17.5% at n=40, 20.0% at n=120, **25.2% at
+n=445**. Two blind judges disagree about whether a triplet is usable for a quarter of cases.
+Treat 25% as a floor, not a settled value: each earlier reading looked stable and each was
+superseded upward. It is why unanimity is expensive and why the unanimous sets are small.
+
+*The premise advantage over the plot index grows as the bar rises* — +9.0 pp on the
+proposer's own labels, +8.9 after one blind pass, **+11.4 pp under two-judge unanimity, χ² =
+4.00, p < 0.05**, and **+11.3 pp on the sealed TEST half** read once. That is the signature of
+confirmation removing noise rather than signal, and it is the result the whole ruler exists to
+produce.
+
+**The TEST half has now been spent once**, on the premise-vs-plot comparison. Nothing was
+tuned from it, so it remains valid for a v2-vs-v1 gate — but the count is one.
 
 ## Order of operations
 
