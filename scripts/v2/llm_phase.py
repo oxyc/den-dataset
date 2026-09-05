@@ -157,9 +157,18 @@ def main():
                 continue
             want = set(expected_ids(args.phase, i))
             got = {r.get('key') or r.get('anchor') or r.get('id') for r in rows}
-            # A batch that answered for fewer than 80% of its ids is treated as owed: a
-            # partial answer is usually a truncated write, not a considered "none".
-            if len(got & want) < 0.8 * len(want):
+            # EVERY id must be answered, not 80% of them.
+            #
+            # This was a 0.8 threshold, which was wrong and nearly cost real data. Every phase
+            # emits one row per input id — generation included, since "no twin here" is a row
+            # with nulls, not an omission. So a short output is always a truncated or
+            # miscounted write. At 0.8 a batch that answered 38 of 40 counted as complete and
+            # was never re-queued; `--verify` would have reported the gap afterwards, but the
+            # resume list is what actually drives re-runs, and it would have skipped it.
+            #
+            # Found because a judging agent miscounted a paginated input at 38 of 40 and only
+            # noticed the two it had skipped because a stale output file happened to list them.
+            if got & want != want:
                 missing.append(i)
         if args.limit:
             missing = missing[:args.limit]
