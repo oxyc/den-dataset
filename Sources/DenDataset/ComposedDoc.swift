@@ -7,7 +7,7 @@ import Foundation
 /// NEVER skipped for lack of a plot.
 ///
 /// Shape:
-///   "Title (Year). Directed by <d>. Starring <a, b, c>. Genres: <g1, g2>. Themes: <t1, t2>. Plot: <plot>"
+///   "Title (Year). Directed by <d>. Created by <c>. Starring <a, b, c>. Genres: <g1, g2>. Themes: <t1, t2>. Plot: <plot>"
 ///
 /// Each fact segment is omitted when its source is empty (no director → no "Directed by" clause), so the doc
 /// stays clean instead of carrying "Directed by ." Placeholders. The Plot clause is always present (possibly
@@ -23,6 +23,12 @@ public enum ComposedDoc {
         }
         if let director = title.director, !director.trimmingCharacters(in: .whitespaces).isEmpty {
             parts.append("Directed by \(director).")
+        }
+        // Series carry their showrunner here, since TMDB leaves `director` null for nearly all of them —
+        // without this a same-creator connection (a Wire/Treme/Corner cluster) is absent from the doc, and
+        // so from the embedding, which is why those series had no local signal to rank on.
+        if !title.createdBy.isEmpty {
+            parts.append("Created by \(title.createdBy.joined(separator: ", ")).")
         }
         if !title.topCast.isEmpty {
             parts.append("Starring \(title.topCast.joined(separator: ", ")).")

@@ -118,7 +118,8 @@ public final class TMDBClient: Sendable {
     }
 
     /// Single-request enrichment (DT-C) — detail + keywords + credits in ONE call via
-    /// `append_to_response=keywords,credits`. Credits feed the composed embedding doc (director + top cast).
+    /// `append_to_response=keywords,credits`. Credits feed the composed embedding doc (director, creators,
+    /// top cast).
     public func classificationRecord(_ identifier: MediaIdentifier) async throws -> EnrichedTitle {
         let data = try await get("/\(identifier.mediaType.pathSegment)/\(identifier.id.rawValue)",
                                  ["append_to_response": "keywords,credits"])
@@ -218,8 +219,10 @@ public final class TMDBClient: Sendable {
         let productionCountries: [Country]?       // movie
         let keywords: KeywordsBlock?
         let credits: CreditsBlock?
+        let createdBy: [Creator]?                 // tv
 
         struct GenreDTO: Decodable { let id: Int; let name: String }
+        struct Creator: Decodable { let name: String }
         struct Country: Decodable { let iso31661: String }
         struct KeywordDTO: Decodable { let id: Int; let name: String }
         struct KeywordsBlock: Decodable { let keywords: [KeywordDTO]?; let results: [KeywordDTO]? }
@@ -238,6 +241,13 @@ public final class TMDBClient: Sendable {
             let countries = originCountry ?? productionCountries?.map(\.iso31661) ?? []
             // Director = first crew member with job "Director"; top cast = the first ~4 billed names.
             let director = credits?.crew?.first { $0.job == "Director" }?.name
+            // Showrunners. `created_by` is a top-level TV field, so a series carries its creators even though
+            // `director` is null for nearly all of them — which is what made same-creator series invisible
+            // (a Wire/Treme/Corner connection cannot be seen through a director field that is never set).
+            // Films have no `created_by`; the crew "Creator" credit is the rare stand-in.
+            let creators = createdBy?.map(\.name)
+                ?? credits?.crew?.filter { $0.job == "Creator" }.map(\.name)
+                ?? []
             let billed = (credits?.cast ?? []).sorted { ($0.order ?? .max) < ($1.order ?? .max) }
             let topCast = Array(billed.prefix(4).map(\.name))
             return EnrichedTitle(
@@ -245,7 +255,7 @@ public final class TMDBClient: Sendable {
                 overview: overview ?? "", genreIDs: genres?.map(\.id) ?? [],
                 genreNames: genres?.map(\.name) ?? [], keywords: kw, originCountry: countries,
                 originalLanguage: originalLanguage, voteCount: voteCount ?? 0,
-                director: director, topCast: topCast)
+                director: director, topCast: topCast, createdBy: creators)
         }
     }
 }

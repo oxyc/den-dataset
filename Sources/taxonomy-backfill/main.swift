@@ -1408,6 +1408,9 @@ struct EnrichedDTO: Codable {
     // (re-grounded at enrich) so `assemble` composes the Plot clause only when a real plot was found.
     let director: String?
     let topCast: [String]
+    /// TV showrunners — the credit that links a series to its creator's other work, since `director` is
+    /// null for nearly all series.
+    let createdBy: [String]
     let hasWikiPlot: Bool
 
     init(_ t: EnrichedTitle) {
@@ -1415,7 +1418,8 @@ struct EnrichedDTO: Codable {
         overview = t.overview; genreIDs = t.genreIDs; genres = t.genreNames
         keywordIDs = t.keywords.map(\.id); keywords = t.keywords.map(\.name)
         originCountry = t.originCountry; originalLanguage = t.originalLanguage; voteCount = t.voteCount
-        director = t.director; topCast = t.topCast; hasWikiPlot = t.hasWikiPlot
+        director = t.director; topCast = t.topCast; createdBy = t.createdBy
+        hasWikiPlot = t.hasWikiPlot
     }
 
     // Tolerant decode: a scratch batch written before FP-2's fields existed (or a hand-authored fixture)
@@ -1436,6 +1440,7 @@ struct EnrichedDTO: Codable {
         voteCount = try c.decodeIfPresent(Int.self, forKey: .voteCount) ?? 0
         director = try c.decodeIfPresent(String.self, forKey: .director)
         topCast = try c.decodeIfPresent([String].self, forKey: .topCast) ?? []
+        createdBy = try c.decodeIfPresent([String].self, forKey: .createdBy) ?? []
         hasWikiPlot = try c.decodeIfPresent(Bool.self, forKey: .hasWikiPlot) ?? false
     }
 
@@ -1444,7 +1449,8 @@ struct EnrichedDTO: Codable {
                       overview: overview, genreIDs: genreIDs, genreNames: genres,
                       keywords: zip(keywordIDs, keywords).map { Keyword(id: $0, name: $1) },
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
-                      director: director, topCast: topCast, hasWikiPlot: hasWikiPlot)
+                      director: director, topCast: topCast, createdBy: createdBy,
+                      hasWikiPlot: hasWikiPlot)
     }
 }
 

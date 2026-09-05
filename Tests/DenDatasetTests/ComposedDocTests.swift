@@ -25,6 +25,33 @@ final class ComposedDocTests: XCTestCase {
             + "Plot: A thief who steals corporate secrets through dream-sharing pulls one last heist.")
     }
 
+    /// A series carries its showrunner. TMDB leaves `director` null for nearly all series, so without this
+    /// clause a same-creator connection never reaches the embedding — measured as the reason same-creator
+    /// series (The Wire / Treme / The Corner) had no local signal and lost to TMDB's own recommendations.
+    func testSeriesComposesCreatedByAfterDirector() {
+        let series = EnrichedTitle(
+            tmdbId: 1438, mediaType: .tv, title: "The Wire", year: 2002, overview: "",
+            genreIDs: [80, 18], genreNames: ["Crime", "Drama"], keywords: [], originCountry: ["US"],
+            originalLanguage: "en", voteCount: 2715, director: nil, topCast: ["Dominic West"],
+            createdBy: ["David Simon"])
+        let doc = ComposedDoc.build(title: series, tags: ["Police Procedural"], plot: nil)
+        XCTAssertEqual(doc, "The Wire (2002). Created by David Simon. Starring Dominic West. "
+            + "Genres: Crime, Drama. Themes: Police Procedural. Plot:")
+    }
+
+    /// Several showrunners join like the cast does, and a title with none gains no clause at all — so the
+    /// millions of films with no `created_by` compose exactly as they did before.
+    func testCreatedByJoinsAndIsOmittedWhenEmpty() {
+        let many = EnrichedTitle(
+            tmdbId: 66732, mediaType: .tv, title: "Stranger Things", year: 2016, overview: "",
+            genreIDs: [], genreNames: [], keywords: [], originCountry: ["US"],
+            originalLanguage: "en", voteCount: 1, director: nil, topCast: [],
+            createdBy: ["Matt Duffer", "Ross Duffer"])
+        XCTAssertTrue(ComposedDoc.build(title: many, tags: [], plot: nil)
+            .contains("Created by Matt Duffer, Ross Duffer."))
+        XCTAssertFalse(ComposedDoc.build(title: title(), tags: [], plot: nil).contains("Created by"))
+    }
+
     func testNoPlotComposesFactsAndTagsWithEmptyPlot() {
         let doc = ComposedDoc.build(title: title(), tags: ["Heist"], plot: nil)
         XCTAssertEqual(doc, "Inception (2010). Directed by Christopher Nolan. "
