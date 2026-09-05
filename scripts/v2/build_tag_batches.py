@@ -46,7 +46,7 @@ def main():
     # batch does not degrade — it produces an empty file.
     ap.add_argument('--per-batch', type=int, default=40)
     ap.add_argument('--passes', type=int, default=3)
-    ap.add_argument('--scope', choices=['all', 'shipped', 'ruler'], default='all')
+    ap.add_argument('--scope', choices=['all', 'shipped', 'ruler', 'uncovered'], default='all')
     ap.add_argument('--triplets', default=os.path.join(V2, 'ruler', 'triplets-final.json'))
     ap.add_argument('--out-dir', default=os.path.join(V2, 'tags-v2'))
     args = ap.parse_args()
@@ -59,8 +59,25 @@ def main():
     # It is NOT a shippable index — that still needs the full 38,460 — and the percentile
     # metrics must then be computed against a matched subset for both arms, since a smaller
     # distractor pool flatters every rank.
-    wanted = None
-    if args.scope == 'ruler':
+    # `uncovered` scope: the 219 shipped titles that have a Wikipedia plot but no premise row,
+    # so More Like This silently serves them the plot-only fallback. Among them are The Dark
+    # Knight, Fight Club and The Godfather — 3% of the top 100 by vote count, which is to say
+    # the gap is concentrated on exactly the titles people open.
+    #
+    # This is the one v2 tagging run the evidence supports. It is not a v1-vs-v2 comparison:
+    # these titles have nothing to compare against, and the alternative on screen today is the
+    # plot index, which both halves of the ruler put ~11 pp behind premise. Measured cost of
+    # the style mismatch: a title's v2 row sits at cosine 0.764 from its own v1 row, closer
+    # than the mean nearest within-v1 neighbour at 0.739, so a v2-style row lands in the right
+    # neighbourhood of a v1-style index — though for 24% of titles some other film's row is
+    # nearer than its own, so this improves coverage rather than being seamless.
+    wanted = None          # an explicit id-set every one of whose members must be tagged
+    already_covered = None  # keys to EXCLUDE, which is a filter rather than a required set
+    if args.scope == 'uncovered':
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from index_io import load_premise_v1_index
+        already_covered = set(load_premise_v1_index().keys)
+    elif args.scope == 'ruler':
         with open(args.triplets, encoding='utf-8') as fh:
             wanted = set()
             for t in json.load(fh)['triplets']:
@@ -70,7 +87,9 @@ def main():
     with open(CORPUS, encoding='utf-8') as fh:
         for line in fh:
             r = json.loads(line)
-            if args.scope == 'shipped' and not r['shipped']:
+            if args.scope in ('shipped', 'uncovered') and not r['shipped']:
+                continue
+            if already_covered is not None and r['key'] in already_covered:
                 continue
             if wanted is not None and r['key'] not in wanted:
                 continue
@@ -78,6 +97,8 @@ def main():
     if wanted is not None and len(rows) != len(wanted):
         sys.exit(f'{len(wanted) - len(rows)} ruler titles are not in the wiki-plot corpus — '
                  'a title without a wiki plot must never be tagged')
+    if not rows:
+        sys.exit(f'scope {args.scope!r} selected no titles')
     rows.sort(key=lambda r: (r['mediaType'], r['tmdbId']))
 
     clamped = 0
