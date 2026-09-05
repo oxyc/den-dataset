@@ -60,6 +60,24 @@ mining used keywords to *propose* candidates; letting the judge see them would g
 proposer. And no title-level popularity, so the ruler cannot learn "the famous one is the
 answer".
 
+## A measured limitation: the axis count is not a difficulty gradient
+
+It is tempting to read "6 axes true" as a stronger twin than "4 axes true" and to use the
+count as a confidence weight. Measured on 264 DEV triplets, the premise index's accuracy does
+**not** track it:
+
+| axes true on the positive | n | premise-v1 accuracy |
+|---:|---:|---:|
+| 4 | 59 | 0.678 |
+| 5 | 144 | 0.660 |
+| 6 | 61 | 0.705 |
+
+Flat, and not monotone. So the rubric's binary `twin` / `not` decision is doing real work —
+the twin set scores far above chance and above the plot index — but the 4/5/6 gradation
+carries no information about how detectable a pair is to an embedding. **Do not weight cases
+by axis count, and do not report a "strength" derived from it.** If a difficulty gradient is
+ever wanted, it has to come from something else, e.g. the margin the index itself assigns.
+
 ## Provenance rule
 
 Only titles with `hasWikiPlot == true` reach a judge. The batch builder asserts it per
