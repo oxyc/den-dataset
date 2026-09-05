@@ -42,7 +42,10 @@ def flip(case_id):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--per-batch', type=int, default=25)
+    # 40, not 25. A judging case is three head+tail excerpts (~1,900 chars each) against a
+    # generation batch's eleven, so 40 cases is comparable context to a 20-anchor generation
+    # batch — and it cuts the pass count, and therefore the token bill, by a third.
+    ap.add_argument('--per-batch', type=int, default=40)
     ap.add_argument('--passes', type=int, default=3)
     ap.add_argument('--out-dir', default=os.path.join(V2, 'ruler', 'judge'))
     args = ap.parse_args()
