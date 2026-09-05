@@ -56,6 +56,20 @@ def main():
     ap.add_argument('--k', type=int, default=10)
     ap.add_argument('--arm', action='append', default=[],
                     help='name=vectors.bin:keys.json — adds an arm beside plot and premise-v1')
+    # A partial index CANNOT be compared to a full one on this ruler without it.
+    #
+    # Every metric here is retrieval over a catalogue. A 457-row arm draws its ten
+    # recommendations from 457 candidates while premise-v1 draws from 37,314, so it scores
+    # nDCG 0.001 against 0.030 and coverage 0.010 against 0.506 — not because its vectors are
+    # worse but because the relevant titles are almost never in its index at all. Run without
+    # this flag, a bake-off arm looks catastrophically bad and the number means nothing.
+    #
+    # Restricting every arm to one shared key set makes the haystack identical, which is the
+    # only form in which the brief's "does not regress co-rating" is answerable before a
+    # full-corpus v2 exists.
+    ap.add_argument('--restrict-to', default=None,
+                    help='intersect every arm to one shared key set before retrieving; '
+                         '"smallest" uses the smallest arm\'s own keys')
     ap.add_argument('--out', default=None)
     args = ap.parse_args()
 
@@ -78,7 +92,38 @@ def main():
     per_arm_recs = {}
 
     extra = [load_extra(spec) for spec in args.arm]
-    for name, index in [('plot', plot), ('premise-v1', prem)] + [(i.name, i) for i in extra]:
+    all_arms = [('plot', plot), ('premise-v1', prem)] + [(i.name, i) for i in extra]
+
+    if args.restrict_to:
+        from score_triplets import restrict  # noqa: E402  (same helper, same reason)
+        if args.restrict_to == 'smallest':
+            pool = min((i for _, i in all_arms), key=lambda i: len(i.keys)).keys
+        else:
+            with open(args.restrict_to, encoding='utf-8') as fh:
+                pool = json.load(fh)
+            if isinstance(pool, dict):
+                pool = pool.get('keys') or pool.get('ids')
+        shared = set(pool)
+        for _, i in all_arms:
+            shared &= set(i.keys)
+        all_arms = [(n, restrict(i, [k for k in pool if k in shared])) for n, i in all_arms]
+        plot = dict(all_arms)['plot']
+        prem = dict(all_arms)['premise-v1']
+        # The catalogue shrinks with the arms, or coverage and novelty are computed against a
+        # universe no arm can reach.
+        judgeable &= shared
+        cases = [c for c in cases if c['seed'] in shared]
+        for c in cases:
+            c['relevant'] = [r for r in c['relevant'] if r in shared]
+        cases = [c for c in cases if c['relevant']]
+        seeds = [c['seed'] for c in cases]
+        print(f'restricted to {len(shared)} shared keys; {len(cases)} cases still have a '
+              f'reachable relevant title', file=sys.stderr)
+        if not cases:
+            sys.exit('no co-rating case survives the restriction — this ruler cannot judge '
+                     'a pool this small, which is itself the answer')
+
+    for name, index in all_arms:
         mask = np.array([k in judgeable for k in index.keys])
         present = [s for s in seeds if s in index.pos]
         recs = arm_recommendations(index, present, args.k, mask)
