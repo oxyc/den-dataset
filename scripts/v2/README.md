@@ -4,6 +4,53 @@ Everything here builds **new** artifacts. Nothing in this directory writes to th
 index, the t02 labels, or the v1 premise index; v2 ships as separate blobs and separate
 manifest keys, and is dropped by deleting them.
 
+## Where this stopped, and how to resume
+
+The session ran out of model budget. What exists, what does not, and the exact next command:
+
+| stage | state |
+|---|---|
+| corpus (38,460 wiki-plot titles) | **done** — `v2/corpus/` |
+| co-rating ruler (6,000 nPMI cases) | **done** — `v2/eval/reco-cases.json` |
+| v1 baseline on it, cross-checked vs DenKit `RecoEval` | **done** — `v2/eval/reco-baseline-dev*.json` |
+| premise-ruler generation | **68 of 150 in-scope batches** (`scope.json` says why it stopped) |
+| premise triplets, frozen provisional | **done** — `v2/ruler/triplets-provisional.json`, 527+ triplets |
+| v1 re-embedded through the live runtime | **done** — `v2/vectors/vectors-premise-v1-realigned.bin` |
+| cutoff sweep top-5 / top-8 | top-5 **done**, top-8 running/queued |
+| **blind judging (3 passes)** | **NOT RUN** — this is the next step and the highest-value one |
+| bake-off, Phase 2 tagging, v1-vs-v2 gate | **NOT RUN** |
+
+**Resume, in order:**
+
+```sh
+V=out-t02/v2
+P=out-t02/v2/.venv/bin/python
+
+# 1. anything the generation phase still owes (empty if complete)
+$P scripts/v2/llm_phase.py --phase $V/ruler/gen --list-missing
+
+# 2. build the three blind judging passes from whatever generation produced
+$P scripts/v2/build_judge_batches.py            # 40 cases/batch, a/b shuffled per case
+
+# 3. run pass1..pass3 as subagents against scripts/v2/prompts/judge-triplets.md,
+#    resuming each with --list-missing until clean
+$P scripts/v2/llm_phase.py --phase $V/ruler/judge/pass1 --verify
+
+# 4. un-blind, keep 2-of-3, report the disagreement rate
+$P scripts/v2/consolidate_triplets.py
+
+# 5. rescore every arm on the CONFIRMED ruler — this is what upgrades the
+#    provisional findings in the den artifact to verified
+$P scripts/v2/score_triplets.py --half dev
+```
+
+Everything is idempotent: each batch writes only its own fixed path, coverage is checked
+against a manifest id-set, and `--list-missing` is the resume list.
+
+**Do not skip step 4's disagreement rate.** Six of the fourteen findings in
+`den/tickets/artifacts/2026-09-04-index-v2-rulers.md` are marked PROVISIONAL for exactly one
+reason: the triplets are currently the proposer grading itself.
+
 ## Order of operations
 
 | step | script | output |
