@@ -42,9 +42,18 @@ def flip(case_id):
 
 def main():
     ap = argparse.ArgumentParser()
-    # 40, not 25. A judging case is three head+tail excerpts (~1,900 chars each) against a
-    # generation batch's eleven, so 40 cases is comparable context to a 20-anchor generation
-    # batch — and it cuts the pass count, and therefore the token bill, by a third.
+    # 40 was chosen to cut the pass count, and therefore the token bill, by a third: a judging
+    # case is three head+tail excerpts against a generation batch's eleven, so the INPUT is
+    # comfortable.
+    #
+    # The output is not. Each case emits axes, verdict and reason for two slots, and at 40
+    # cases some batches exceed the 64,000-token output cap and die having written nothing
+    # (observed on batches 0006 and 0009). The input-side saving was real; the output side was
+    # not checked, which is the mistake. 25 completed reliably in the smoke test.
+    #
+    # Mitigation in the prompt is to cap `reason` length. If batches keep hitting the ceiling,
+    # drop this to 25 and accept the extra passes — a batch that dies writes nothing at all,
+    # so the "saving" is negative.
     ap.add_argument('--per-batch', type=int, default=40)
     ap.add_argument('--passes', type=int, default=3)
     ap.add_argument('--out-dir', default=os.path.join(V2, 'ruler', 'judge'))

@@ -76,7 +76,10 @@ them. Nothing else: no prose, no markdown fence, no commentary.
 ]
 ```
 
-`reason` is one clause under 25 words naming the shared or absent story engine.
+`reason` is one clause **under 20 words** naming the shared or absent story engine. Keep to
+it: a 40-case batch emits 80 judgements, and verbose reasons have pushed batches past the
+64,000-token output ceiling, where the agent dies having written nothing at all. Write the
+output in a single Write call.
 
 Rules that make the output usable:
 - Every `id` copied **verbatim** from the input.
