@@ -147,7 +147,32 @@ tv 95 is Buffy the Vampire Slayer; movie 95 is Armageddon. Every per-title map m
 `ClassifyCheckpoint.key(media, id)` is the shared helper. If you add a map keyed by title, use it.
 
 ### How you would know any of this broke
-You would not, today. `RecoEval` exists but has **no held-out pairs** (`DT-G-eval-feedback.md`: *"the one
-thing still missing is DATA, not code"*), so no corpus or ranking change can currently be shown to help or
-hurt. Until that set exists, prefer the conservative option — and note DT-G's own rule: *a tie fails too,
-because replacing a working system carries its own risk.*
+Two rulers now answer that, built by `scripts/v2/` and described in
+`den/tickets/artifacts/2026-09-04-index-v2-rulers.md`. DT-G's *"the one thing still missing is DATA, not
+code"* is closed.
+
+- **Co-rating agreement** — MovieLens ml-32m nPMI pairs, joined to 86.5% of shipped movies and **0% of
+  series** (ml-32m carries no TV ids, permanently). Behavioural, eval-only, never bundled.
+- **Premise triplets** — anchor / positive / negative, blind-judged, kept only on judge unanimity.
+
+Both are split DEV/TEST by `scripts/v2/split.py`, a pure hash of the key so a title lands in the same half
+in either ruler. **TEST is for gate runs only.** Sweep on DEV, pre-register the setting in a commit, then
+read TEST once. `score_triplets.py` announces a TEST run and `sweep_arm_fusion.py` refuses one.
+
+DT-G's rule still stands and is now enforced in code rather than in prose: *a tie fails too, because
+replacing a working system carries its own risk.* Two independent accuracies cannot decide that — use
+`paired_triplets.py`, which discards the cases both arms agree on and tests only the discordant ones.
+Measured: at ~150 triplets, one flipped case moves a rate by 0.66 pp, so a one-point lead is noise.
+
+### Running an LLM phase
+- **Coverage is checked against the manifest id-set, never against `ls out/`.** A batch that wrote the
+  wrong ids must fail, not count.
+- **A correct row count proves nothing.** Models invent ids that look plausible and duplicate one key while
+  dropping another, both of which leave the count right. Measured on a bake-off arm: Haiku fabricated ids in
+  3 of 12 batches and duplicated a key in a 4th, reporting success every time.
+- **Batch size is a property of the model, not of the task.** 40 titles fits Haiku's 64,000-token output
+  cap; Sonnet overran it and wrote an *empty file*, which reads as unrun rather than over-asked. Sizes live
+  per-arm in `build_bakeoff.py`, and changing one after it has outputs renumbers the batches out from under
+  them — the builder refuses.
+- **A subagent's output file is not readable until its completion notification arrives.** Reading a
+  half-written file produced three wrong claims in one session, each of which had to be retracted.
