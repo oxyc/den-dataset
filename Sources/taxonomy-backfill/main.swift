@@ -425,7 +425,7 @@ enum Commands {
         // Small chunk by default: den-embed activation memory scales with the batch, so keep requests modest.
         // 15, not 16. den-embed's per-request budget is sum(min(actual_tokens, max_tokens)) <= 8192, and
         // 16 fits ONLY because the min() clips every doc to exactly 16x512 = 8192 and the test is `>`.
-        // Raise DEN_EMBED_MAX_TOKENS — which `assertDocFits` explicitly advises — and the clip stops
+        // Raise den-embed's MAX_TOKENS — which `assertDocFits` explicitly advises — and the clip stops
         // binding, a 16-doc request can exceed the budget, and it 413s. Transport treats 413 as definitive,
         // so the run dies on its first flush having written nothing: the same shape as the max_batch bug.
         let chunk = args.int("--chunk") ?? 15
@@ -518,7 +518,7 @@ enum Commands {
     /// Check the service against the store, and against what this run intends to send it, BEFORE writing
     /// anything down. Persisting the identity first meant a run that `assertDocFits` then refused had
     /// already recorded the current service against an empty store — so following the error's own advice
-    /// (raise DEN_EMBED_MAX_TOKENS and retry) hit the mismatch guard instead, on a store with zero rows,
+    /// (raise den-embed's MAX_TOKENS and retry) hit the mismatch guard instead, on a store with zero rows,
     /// and the operator had to know to delete index/embedder.json by hand.
     @discardableResult
     static func recordEmbedder(outDir: String, client: DenEmbedClient,
@@ -592,7 +592,7 @@ enum Commands {
             throw ToolError(message: "--plot-cap \(plotCap) composes documents of roughly "
                 + "\(plotCap + factsAndTags) chars, but \(embedder.label) truncates at \(embedder.maxTokens) "
                 + "tokens (~\(budget) chars) and would cut them silently. Lower --plot-cap to "
-                + "\(budget - factsAndTags) or below, or raise DEN_EMBED_MAX_TOKENS on the service — its "
+                + "\(budget - factsAndTags) or below, or raise MAX_TOKENS on the service — its "
                 + "ceiling is 1024, above which it exceeds the memory the container is given.")
         }
     }

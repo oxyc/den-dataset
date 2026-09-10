@@ -46,7 +46,7 @@ ENRICHED_DIR="${ENRICHED_DIR:-out/enriched}"
 # Docs per /embed/batch request. Bounded by den-embed's max_request_tokens (8192) against MAX_TOKENS per
 # doc: 8192/1024 = 8, and 7 leaves a margin.
 #
-# There is deliberately NO DEN_EMBED_MAX_BATCH here. It reads like a server-side micro-batch and is not one
+# There is deliberately NO MAX_BATCH passed to den-embed here. It reads like a server-side micro-batch and is not one
 # — den-embed's embed_many maps embed_one SERIALLY, so it bounds no memory whatsoever; it is purely a
 # rejection threshold, returning 413 when a request carries more texts than it allows. Setting it to 8 while
 # sending 15 docs meant every single request was rejected, and Transport treats 413 as definitive, so the
@@ -85,8 +85,7 @@ boot_embed() {
   stop_embed
   echo "booting fresh den-embed ($IMAGE, max_tokens=$MAX_TOKENS) …"
   "$RUNTIME" run -d --rm --name "$NAME" \
-    -e DEN_EMBED_MAX_TOKENS="$MAX_TOKENS" \
-    -e DEN_EMBED_HOST=0.0.0.0 \
+    -e MAX_TOKENS="$MAX_TOKENS" \
     -p "127.0.0.1:$PORT:8080" "$IMAGE" >/dev/null 2>>"$EMBED_LOG" || {
       echo "could not start $IMAGE (see $EMBED_LOG)"; return 1; }
   # Probe /embed, not /health: /health is a constant that answers ok while the model is missing and every

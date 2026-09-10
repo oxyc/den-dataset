@@ -31,7 +31,7 @@ queried through the current one — that is a real, known violation, and the onl
 
 Both TMDB and Wikipedia are hit live; `den-embed` must be running for step 5 (not for plot-finding).
 
-**Re-embed at `DEN_EMBED_MAX_TOKENS=1024` and `--plot-cap 3500`, not at the defaults.**
+**Re-embed at den-embed's `MAX_TOKENS=1024` and `--plot-cap 3500`, not at the defaults.**
 
 The shipped corpus was embedded from uncapped plots: its `builtAt` is 2026-07-05T07:22:47Z and the commit
 that introduced plot capping (8f93235) was authored four hours later, so the code that built it read
@@ -63,7 +63,7 @@ index (DT-H) is the primary "More Like This" signal, having beaten raw plot 12/8
 identically, and the premise tag strings are frozen on disk (`out-t02/premise-tags-wip/`) — zero LLM cost.
 
 **Deploy the env with the corpus.** `maxTokens` is part of the embedder identity, so the serving box must
-run `DEN_EMBED_MAX_TOKENS=1024` permanently or the manifest and the service will disagree.
+run den-embed with `MAX_TOKENS=1024` permanently or the manifest and the service will disagree.
 
 `embed-corpus` still refuses when a plot cap would not fit the service's token cap, because den-embed
 truncates server-side and says nothing. Its ceiling is 1024 tokens (peak RSS 1219 MB against a 1536 MB
@@ -73,7 +73,7 @@ limit), so a longer cap needs both settings raised together.
 # 0. Boot the embedding service. Run the PUBLISHED CONTAINER, not a local build — the model is pinned inside
 #    the image, so the corpus is embedded by exactly the runtime that serves queries. (The old `bash run.sh`
 #    here booted a Python service that was deleted in the Rust rewrite at 5cf9e72.)
-podman run -d --rm --name den-embed -p 127.0.0.1:8791:8080 -e DEN_EMBED_HOST=0.0.0.0 \
+podman run -d --rm --name den-embed -p 127.0.0.1:8791:8080 -e MAX_TOKENS=1024 \
     ghcr.io/oxyc/den-embed:latest     # -d: the remaining steps run in this same terminal
 #    Health is a CONSTANT — it answers ok while the model is missing and every /embed 500s. Probe the real
 #    thing instead:
