@@ -22,7 +22,7 @@ jobs:
     # Foundation APIs that differ on corelibs. Building elsewhere would test something else.
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - run: swift build --build-tests
       - run: swift test
 
@@ -33,7 +33,7 @@ jobs:
   scripts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Parse under dash
         run: |
           for f in scripts/*.sh scripts/lib/*.sh; do
