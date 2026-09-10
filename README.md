@@ -79,7 +79,8 @@ aggregation + embeds + quantizes; `finalize` writes the shipped artifacts.
 ## `finalize` outputs
 
 - `labels-<tax>.json` — the derived labels (no raw TMDB text; asserted).
-- `labels-<tax>.json.gz` — gzip of the labels blob (via `/usr/bin/gzip`).
+- `labels-<tax>.json.gz` — gzip of the labels blob. `scripts/publish-dataset.sh` regenerates it, and the
+  premise-labels and metadata variants, from the blobs on every publish (see its step 0).
 - `vectors-bge-m3.bin` — `[int32 count][int32 dim]` little-endian header + `count × dim` int8 rows (dim 1024
   for the bge-m3 build; `--embedding-version` overrides the label for an FNV run).
 - `dataset.meta.json` — the manifest the server reads (dataset version, hashes, byte counts, timestamps).

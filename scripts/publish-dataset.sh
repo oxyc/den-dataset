@@ -29,6 +29,35 @@ REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
 # dataset.meta.json is kept SEPARATE from the blobs on purpose (see the ordering below).
 shopt -s nullglob
 meta="$DIR/dataset.meta.json"
+
+# 0) GZIP VARIANTS — every declared JSON blob ships a precompressed copy, declared as `<key>GzFile`, which
+# den-atlas serves to any client sending `Accept-Encoding: gzip` (9-10 MB of labels JSON → ~0.5 MB). The
+# server never compresses anything itself, so a blob without one here goes out at full size.
+#
+# Regenerated from the blob on EVERY publish, never trusted from the meta. `finalize` merges unowned keys
+# forward, so a `premiseLabelsGzFile` or `metadataGzFile` from an earlier run can outlive the blob it was
+# made from — and atlas would then serve the old bytes under the new blob's `"<sha>-gzip"` ETag. A key whose
+# blob is no longer declared is dropped for the same reason. `mtime=0` and no stored filename keep the
+# output byte-identical across runs, so republishing an unchanged dataset uploads unchanged assets.
+python3 - "$meta" "$DIR" <<'PY'
+import gzip, json, os, sys
+meta_path, out_dir = sys.argv[1], sys.argv[2]
+with open(meta_path) as f:
+    meta = json.load(f)
+for key in ("labelsFile", "premiseLabelsFile", "metadataFile"):
+    gz_key = key[: -len("File")] + "GzFile"
+    name = meta.get(key)
+    if not name:
+        meta.pop(gz_key, None)
+        continue
+    with open(os.path.join(out_dir, name), "rb") as src, open(os.path.join(out_dir, name + ".gz"), "wb") as dst:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=dst, compresslevel=9, mtime=0) as gz:
+            gz.write(src.read())
+    meta[gz_key] = name + ".gz"
+with open(meta_path, "w") as f:
+    json.dump(meta, f, indent=1)
+    f.write("\n")
+PY
 # `labels-*.json.gz`, not a bare `*.gz`: that also swept up the TMDB daily-export dumps build-worklist.py
 # writes into the same out-dir (movie_ids.json.gz + tv_series_ids.json.gz, ~31 MB), publishing TMDB's
 # raw export data as release assets from a repo that otherwise refuses to ship raw TMDB text.
