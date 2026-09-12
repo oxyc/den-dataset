@@ -204,6 +204,12 @@ enum Commands {
         } else {
             checkpoint = EnrichCheckpoint()
         }
+        // An ABSENT checkpoint is not proof of a first run. `out-t02` has 153 enriched batches and no enrich
+        // checkpoint, so a delta into it started numbering at 1 and overwrote batch-1 and batch-2 — 640
+        // records replaced by 235, with the old votes/batch-1-pass1.json still on disk, which would have
+        // labelled the new titles with the OLD titles' votes. Trust the directory over the missing file.
+        let onDisk = EnrichedBatches.highestID(inDirectory: Layout.enrichedDir(outDir))
+        if checkpoint.nextBatch <= onDisk { checkpoint.nextBatch = onDisk + 1 }
         let pending = worklist.filter { !checkpoint.processed.contains(EnrichCheckpoint.key($0.media, $0.tmdbId)) }.prefix(limit)
         guard !pending.isEmpty else {
             print(JSON.line(["remaining": 0, "count": 0])); return
@@ -280,7 +286,15 @@ enum Commands {
         var survivors = grounded.map(EnrichedDTO.init)
 
         survivors.sort { $0.tmdbId < $1.tmdbId }
-        try JSON.writePretty(survivors, to: Layout.enrichedBatch(outDir, batchId))
+        // Never write over an existing batch: its vote passes belong to the titles it USED to hold, so a
+        // clobbered batch mislabels silently rather than failing.
+        let batchPath = Layout.enrichedBatch(outDir, batchId)
+        guard !FileManager.default.fileExists(atPath: batchPath) else {
+            throw ToolError(message: "refusing to overwrite \(batchPath): it already holds an enriched batch, "
+                + "and any vote passes for id \(batchId) belong to those titles. The enrich checkpoint's "
+                + "nextBatch is out of step with the batches on disk — fix it rather than clobbering.")
+        }
+        try JSON.writePretty(survivors, to: batchPath)
         // Checkpoint every pending id EXCEPT the deferred (transient) ones — those stay pending for a retry.
         for entry in pending where !deferred.contains(entry.tmdbId) {
             checkpoint.processed.insert(EnrichCheckpoint.key(entry.media, entry.tmdbId))
