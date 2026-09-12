@@ -160,6 +160,10 @@ A prior run had Haiku invent tmdbIds in 3 of 12 batches **with correct row count
 one title's labels to another; no count, checksum or schema check can see it. So a batch containing even one
 is refused **whole** rather than partially salvaged.
 
+`scripts/check-votes.py out-t02` runs all of the below; `--batch N` for one. It reads the vocabulary from
+the SHIPPED labels rather than a hardcoded copy, so it cannot drift from the taxonomy. Run it before
+`assemble`.
+
 ### The checks worth keeping, in order
 
 1. Count in == count out, same order.

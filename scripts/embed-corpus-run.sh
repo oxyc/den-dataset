@@ -41,8 +41,15 @@ cd "$(dirname "$0")/.." || exit 1
 . scripts/lib/den-env.sh
 
 LABELS="${1:?usage: embed-corpus-run.sh <existing labels-t02.json>}"
-OUT_DIR="${OUT_DIR:-out-vecnow}"
-ENRICHED_DIR="${ENRICHED_DIR:-out/enriched}"
+# NO default out-dir. It used to be `out-vecnow`, which is an abandoned partial store from the July OOM —
+# a bare re-run resumed into it and failed confusingly. Naming the destination is one word and removes a
+# whole class of "why did it write nothing".
+OUT_DIR="${OUT_DIR:?set OUT_DIR — a FRESH directory, e.g. OUT_DIR=out-t02-rebuild. Never out-t02: embed-corpus
+skips titles already in the target store BEFORE recomposing, so pointing it at the live corpus reports
+\"written: 0\" and finalizes, discarding the entire point of the run.}"
+# Derived from the labels file's own directory rather than defaulted to `out/enriched`, which is a t01-era
+# directory that has not been the live enrichment data for two taxonomy generations.
+ENRICHED_DIR="${ENRICHED_DIR:-$(dirname "$LABELS")/enriched}"
 # Docs per /embed/batch request. Bounded by den-embed's max_request_tokens (8192) against MAX_TOKENS per
 # doc: 8192/1024 = 8, and 7 leaves a margin.
 #
@@ -70,12 +77,24 @@ ERR_LOG="${ERR_LOG:-$OUT_DIR/embed-corpus.err}"
 export DEN_EMBED_URL="http://127.0.0.1:$PORT"
 
 [ -f "$LABELS" ] || { echo "missing labels file: $LABELS"; exit 1; }
+[ -d "$ENRICHED_DIR" ] || { echo "no enriched dir at $ENRICHED_DIR — set ENRICHED_DIR"; exit 1; }
 mkdir -p "$OUT_DIR"
 command -v "$RUNTIME" >/dev/null || { echo "no $RUNTIME on PATH — set DEN_EMBED_RUNTIME=docker"; exit 1; }
 # Checked UP FRONT, not when it is needed: the `metadata` step at the end calls TMDB, and a multi-hour
 # unattended re-embed that finalizes and then exits on a missing key has wasted the whole run's tail.
 # `|| exit 1` because this script runs without -e on purpose.
 den_load_env || exit 1
+
+# den_load_env sources den.env, which sets DEN_EMBED_URL — so it OVERWRITES the local container URL set
+# above. That is harmless only while den.env happens to point at localhost. Pointed at the deployed
+# den-embed it silently sends the whole corpus to the service answering query traffic, which runs a
+# different max_tokens: at 512 the corpus keeps roughly HALF its plot prose, truncated server-side with no
+# error and no field in the response. Re-assert ours, loudly.
+if [ "$DEN_EMBED_URL" != "http://127.0.0.1:$PORT" ]; then
+  echo "note: den.env set DEN_EMBED_URL=$DEN_EMBED_URL — overriding with this script's own container" >&2
+  echo "      (embedding the corpus against the live query service truncates plots silently)" >&2
+  export DEN_EMBED_URL="http://127.0.0.1:$PORT"
+fi
 
 # Kill by CONTAINER NAME, not by process pattern. The old `pkill -f "uvicorn server:app"` was a machine-wide
 # pattern kill wired to the EXIT trap, so it could take out an unrelated uvicorn the operator was running.
