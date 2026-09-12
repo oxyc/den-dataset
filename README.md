@@ -130,6 +130,54 @@ whenever content moves, which is what drives client re-sync.
 **`topCast` is only 4 names deep.** Any rule needing two shared cast members between titles returns
 essentially nothing outside a franchise.
 
+## Running the Haiku classification — and the two ways it silently fails
+
+`enrich` writes batches; nothing in this repo can classify them. Labels come from a Claude Code run over
+`DT-classification-prompt.md` (in the den repo), writing `out-t02/votes/batch-<id>-pass<n>.json`, which
+`assemble` then aggregates. Both failure modes below were hit in one session, and neither is visible to any
+check that was in place at the time.
+
+### Failure 1: a batch can be structurally perfect and still worthless
+
+A run of 999 titles produced, for 11 of 18 batches: valid JSON, exact record counts, real tmdbIds, every
+label in-vocabulary, zero fabrications — and **46-70% of titles with no subgenre at all**, one batch with no
+moods whatsoever. Density by batch ran 0.35-0.97 subgenres/title against a careful reference run's **1.77**.
+
+Nothing caught it. Counts matched, checksums matched, the JSON parsed. It surfaced only because one title
+(*Blake's 7*) appeared in both a validation slice and a production batch and came back
+`Science Fiction / Sci-Fi Action / Dystopian` in one and `Drama / nothing` in the other. *Star Trek* had
+likewise become plain `Drama`.
+
+So **density is a gate, not a statistic**. Refuse any batch below ~1.2 subgenres/title or above 25% empty.
+The fix that worked: smaller slices (20 titles, not 60) and a prompt section stating the expected density
+outright — that a reference run averages 1.77 subgenres and 2.09 moods, that repeated empty arrays mean the
+plots are being under-read, and that thin runs are rejected. The redo came back at **1.94 / 2.21 with 5%
+empty**.
+
+### Failure 2: fabricated ids are invisible to every count
+
+A prior run had Haiku invent tmdbIds in 3 of 12 batches **with correct row counts**. A fabricated id attaches
+one title's labels to another; no count, checksum or schema check can see it. So a batch containing even one
+is refused **whole** rather than partially salvaged.
+
+### The checks worth keeping, in order
+
+1. Count in == count out, same order.
+2. No tmdbId absent from the input batch (fabrication) and none missing.
+3. Every label in the vocabulary — and note the three lists are SEPARATE. Observed confusions: `Adventure`
+   and `Mystery` (primary genres) used as subgenres, `Dark Comedy` (a subgenre) filed under moods. Strip
+   them; an invalid label is unusable anyway.
+4. **Density** — the gate above.
+5. Spot-check titles you personally know. This is what caught Failure 1 and is not optional.
+
+### One batch id per batch, and never reuse one
+
+Vote passes are keyed by batch id, so writing a new batch over an existing id leaves the OLD votes on disk
+pointing at the new titles. Assembling that pairs each title with a stranger's labels, silently. `enrich`
+now takes the highest batch on disk as its floor and refuses to overwrite an existing batch file — see
+`EnrichedBatches` — but if you build batches by hand, keep one media type per batch too: vote records carry
+a bare `tmdbId`, and movie/TV ids overlap.
+
 ## How retrieval actually works — and the four things that must stay true
 
 Read this before changing the pipeline. Each rule below is here because breaking it produced a bug that
