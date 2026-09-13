@@ -44,7 +44,8 @@ import gzip, json, os, sys
 meta_path, out_dir = sys.argv[1], sys.argv[2]
 with open(meta_path) as f:
     meta = json.load(f)
-for key in ("labelsFile", "premiseLabelsFile", "metadataFile", "factsFile", "factsSlimFile"):
+for key in ("labelsFile", "premiseLabelsFile", "metadataFile", "factsFile", "factsSlimFile",
+            "cc0LabelsFile"):
     gz_key = key[: -len("File")] + "GzFile"
     name = meta.get(key)
     if not name:
@@ -67,6 +68,9 @@ PY
 # `facts-*.json` is listed here as well as in the manifest: the upload pass works from THIS array, so a blob
 # the manifest names but no glob matches is announced and never uploaded — atlas would then 404 on a file the
 # manifest promises.
+# `labels-*.json` and `vectors-*.bin` already match the cc0 experimental index (labels-cc0.json,
+# vectors-cc0.bin). That is deliberate: its vectors align to ITS OWN label order, not the shipped one, so the
+# two must travel together or every title pairs with a stranger's vector.
 blobs=("$DIR"/facets*.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json "$DIR"/facts-*.json "$DIR"/facts-*.json.gz)
 [ ${#blobs[@]} -ge 3 ] || { echo "error: expected labels/vectors/gz/metadata in $DIR, found: ${blobs[*]:-none}" >&2; exit 1; }
 
