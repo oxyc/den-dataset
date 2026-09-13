@@ -462,7 +462,15 @@ enum Commands {
         FileHandle.standardError.write(Data("  facts: \(total) titles, \(WikidataFacts.specs.count) properties\n".utf8))
 
         let source = WikipediaSource()
-        var fields: [String: [String: WikidataFacts.FieldValue]] = [:]
+        // RESUME. A full-corpus pass is ~9k SPARQL requests over hours, and writing only at the end means one
+        // dropped connection loses all of it. The raw per-title fields are checkpointed as they arrive, and a
+        // re-run skips ids already present.
+        let checkpoint = (outDir as NSString).appendingPathComponent("facts-fields.json")
+        var fields: [String: [String: WikidataFacts.FieldValue]] = (try? JSON.read(checkpoint)) ?? [:]
+        if !fields.isEmpty {
+            FileHandle.standardError.write(Data("  resuming from \(fields.count) checkpointed titles\n".utf8))
+            for (type, ids) in byType { byType[type] = ids.filter { fields["\(type):\($0)"] == nil } }
+        }
         var done = 0
         for (type, ids) in byType {
             let mediaType: MediaType = type == "tv" ? .tv : .movie
@@ -471,8 +479,15 @@ enum Commands {
                 for spec in WikidataFacts.specs where !(spec.tvOnly && mediaType != .tv) {
                     let got = try await source.facts(spec: spec, forTMDBIds: slice, mediaType: mediaType)
                     for (id, value) in got { fields["\(type):\(id)", default: [:]][spec.key] = value }
+                    // Pace the scrape. Firing 24 requests back-to-back per batch sustains ~3/s for hours,
+                    // which WDQS throttles: the run then fast-fails on intermittent 429s rather than timing
+                    // out, and a restart loop retries the same batch forever without advancing. Measured at
+                    // 0.36 s/request, this roughly halves throughput and is the difference between finishing
+                    // and stalling at 16,500.
+                    try await Task.sleep(nanoseconds: 300_000_000)
                 }
                 done += slice.count
+                try JSON.write(fields, to: checkpoint)
                 FileHandle.standardError.write(Data("  facts \(done)/\(total)…\n".utf8))
             }
         }
@@ -486,8 +501,20 @@ enum Commands {
                 if case .list(let items) = value { for i in items where i.hasPrefix("Q") { qids.insert(i) } }
             }
         }
-        FileHandle.standardError.write(Data("  resolving \(qids.count) entity names…\n".utf8))
-        let rawEntities = try await source.entityNames(Array(qids))
+        // Resolve ONLY names we do not already have, and persist them beside the fields. This pass ran over
+        // every Q-id in the whole accumulated checkpoint on every restart: at 16,500 titles that is 92,036
+        // entities, 307 sequential requests, minutes of work redone each attempt — so a resumed run spent its
+        // entire life here and never reached a new batch. The checkpoint froze at exactly the point where this
+        // pass outgrew the run, which looked like a WDQS timeout and was not.
+        let namesPath = (outDir as NSString).appendingPathComponent("facts-entities.json")
+        var rawEntities: [String: [String: String]] = (try? JSON.read(namesPath)) ?? [:]
+        let unresolved = qids.subtracting(rawEntities.keys)
+        FileHandle.standardError.write(Data(
+            "  entity names: \(rawEntities.count) cached, \(unresolved.count) to resolve\n".utf8))
+        if !unresolved.isEmpty {
+            for (qid, name) in try await source.entityNames(Array(unresolved)) { rawEntities[qid] = name }
+            try JSON.write(rawEntities, to: namesPath)
+        }
 
         // Genre names keep Wikidata's media suffix ("drama television series"), which is a poor display string
         // and would defeat the TMDB match. Strip it for genres only — a PERSON named "... film" is not a thing
@@ -614,6 +641,12 @@ enum Commands {
         // --doc-facts switches the doc to the CC0 shape (no title, no year, no cast; director + genre from
         // Wikidata). Absent, the doc is composed exactly as before, so this cannot change an existing run.
         struct DocFactsRow: Codable { let directors: [String]; let genres: [String] }
+        // Measured on the real corpus, not a synthetic probe: dropping cast/title/year made DIRECTOR the
+        // identity token cast used to be, because the surviving clauses are a larger share of a shorter doc.
+        // Kubrick's The Shining and Dr. Strangelove went 0.565 -> 0.684, closer than most genuine thematic
+        // pairs. Dropping the clause takes the same-director gap from +0.035 to +0.104 while costing the
+        // same-actor gap only 0.071 -> 0.056 — the only shape that beats the previous doc on BOTH controls.
+        let dropDirector = args.has("--doc-drop-director")
         let docFacts: [String: DocFactsRow]? = try args["--doc-facts"].map { path in
             let loaded: [String: DocFactsRow] = try JSON.read(path)
             FileHandle.standardError.write(Data("  doc-facts: \(loaded.count) rows (CC0 doc shape)\n".utf8))
@@ -699,7 +732,8 @@ enum Commands {
                     // CC0 shape: Wikidata's director + genre, our own tags, the Wikipedia plot. `createdBy` is
                     // already Wikidata (P170) on the enrichment, so nothing here is TMDB-sourced.
                     let f = docFacts["\(dto.mediaType):\(dto.tmdbId)"]
-                    doc = ComposedDoc.buildLean(directors: f?.directors ?? [], creators: title.createdBy,
+                    doc = ComposedDoc.buildLean(directors: dropDirector ? [] : (f?.directors ?? []),
+                                                creators: title.createdBy,
                                                 genres: f?.genres ?? [], tags: tags, plot: plot)
                 } else {
                     doc = ComposedDoc.build(title: title, tags: tags, plot: plot)
