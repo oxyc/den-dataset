@@ -82,6 +82,12 @@ def main():
                       "premise-ids.json order",
         # Named, not just counted: these rows came from the v2 tagger, so their tags were selected by kind
         # rather than produced under the v1 spec. A consumer comparing tag styles should know which is which.
+        # NOT the same as the published vector count. vectors-premise.bin holds 37,314 vectors; the
+        # `coverageFilled` titles have TAGS here and NO VECTOR in the published index, because that merge
+        # (DT-N) has never been run -- the vectors sit unmerged in v2/vectors/vectors-coverage-fill.bin.
+        # Anything joining these tags to that blob by position or assuming parity WILL be wrong.
+        "vectorsPublished": 37314,
+        "vectorsMissingFor": sorted(filled),
         "coverageFilled": sorted(filled),
         "tags": tags,
     }

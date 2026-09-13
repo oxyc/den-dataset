@@ -47,6 +47,19 @@ test half** (χ² = 4.00, p < 0.05 under two-judge unanimity).
 the later v2 tagger rather than the v1 spec. Only `premise` and `subject` kinds were taken from those —
 v2 also emits `tone-setting`, which is exactly the mood vocabulary v1 bans.
 
+**This file has 37,533 entries. `vectors-premise.bin` has 37,314 vectors.** Those same 219 titles have tags
+here and **no vector in the published index**: the DT-N merge has never actually been run, and their vectors
+sit unmerged in `out-t02/v2/vectors/vectors-coverage-fill.bin`. The file records this as `vectorsPublished`
+and `vectorsMissingFor` so it cannot be missed. Anything joining these tags to that blob by position, or
+assuming the two counts match, will be wrong.
+
+Two related traps, both of which have already caught someone:
+
+- **Do not trust `premise-tags-wip/missing.json`** — it is stale DT-H-era state. Derive the real gap with
+  `build_tag_batches.py --scope uncovered`, which must select 0 after a genuine merge.
+- An earlier note claimed the premise index had been "merged to 37,533 rows". That was an in-memory merge
+  done for verification only; nothing on disk changed. `vectors-premise.bin` is still dated 29 July.
+
 ## `eval/`
 
 The ruler the premise-vs-plot result was measured on, and the judged triplets behind it. Keep these: the
