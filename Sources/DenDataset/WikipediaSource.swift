@@ -76,7 +76,7 @@ public struct WikipediaSource: Sendable {
           OPTIONAL { ?film wdt:P2047 ?runtime . }
           OPTIONAL { ?film wdt:P170 ?creator . }
           OPTIONAL { ?article schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/> . }
-          SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+          SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul". }
         }
         ORDER BY ?tmdb ?article
         """
@@ -161,13 +161,18 @@ public struct WikipediaSource: Sendable {
         let property = mediaType == .tv ? "P4983" : "P4947"
         let values = unique.map { "\"\($0)\"" }.joined(separator: " ")
 
+        // The label language is "en,mul", NOT "en". Wikidata has moved proper names to the `mul`
+        // (multilingual) language code — Christopher Nolan (Q25191) has NO English rdfs:label, only `mul`
+        // plus the scripts that genuinely differ (ar/he/ja/ru). Asking for "en" alone makes the label service
+        // return the bare Q-id, which `parseLabelled` drops as an identifier, so the director vanishes with
+        // no error at all. Measured: that silently cost Inception, The Dark Knight and The Prestige theirs.
         func fetch(_ prop: String) async throws -> [Int: [String]] {
             let query = """
             SELECT ?tmdb ?vLabel WHERE {
               VALUES ?tmdb { \(values) }
               ?film wdt:\(property) ?tmdb .
               ?film wdt:\(prop) ?v .
-              SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+              SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul". }
             }
             ORDER BY ?tmdb ?vLabel
             """
