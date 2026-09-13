@@ -177,6 +177,28 @@ else
   [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
 fi
 
+# RECORD-COUNT GUARD. The blob-drop check below catches a whole FILE disappearing; it cannot see a file that
+# is still declared but has lost rows. That happened: a facts rebuild built its records from the scrape
+# checkpoint and silently dropped the 137 facts-only delta titles — exactly the records nothing else covers
+# (no labels, no vectors, no facets row), so the loss was invisible from every other artifact and the only
+# symptom was /recommend quietly losing library titles. Counting is the cheap check that catches it, and the
+# same guard covers every future JSON blob.
+#
+# `<key>Records` is written into the manifest below, so the NEXT publish has something to compare against.
+if [ "$have_published" -eq 1 ]; then
+  shrunk="$(python3 "$(dirname "$0")/manifest-counts.py" --compare "$published_meta" "$meta" "$DIR")"
+  if [ -n "$shrunk" ]; then
+    echo "error: a published blob would LOSE records:" >&2
+    echo "$shrunk" | sed 's/^/       /' >&2
+    echo "       A file can stay declared and still lose rows; this is the check for that." >&2
+    echo "       If the shrink is deliberate, set DEN_ALLOW_DROPPING_BLOBS=1." >&2
+    [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
+  fi
+fi
+
+# Stamp the counts for next time, whether or not there was anything to compare against.
+python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
+
 if [ "$have_published" -eq 1 ]; then
   dropped="$(python3 -c '
 import json, sys
