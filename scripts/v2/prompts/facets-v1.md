@@ -57,6 +57,12 @@ Never invent a value, never combine two with a slash.
   `earnest` · `comic` · `satirical` · `bleak` · `melancholy` · `pulpy` · `dreamlike` ·
   `clinical`
 
+**Do not put a tone word in `ending`.** `bleak` and `melancholy` are TONE values and belong
+nowhere else; a grim ending is `tragic`, `bittersweet` or `ambiguous` depending on how it
+resolves. Measured: three independent agents made exactly this slip on the same axis pair
+(Joker, Gone Girl, Wrath of Man, Annabelle: Creation), so it is the one boundary worth
+stating twice. `episodic` is likewise a `pacing` value and never a `structure` one.
+
 ## Confidence
 
 Each axis carries a `confidence` of `high`, `medium` or `low`. Use `low` when the plot text
