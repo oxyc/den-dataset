@@ -44,7 +44,7 @@ import gzip, json, os, sys
 meta_path, out_dir = sys.argv[1], sys.argv[2]
 with open(meta_path) as f:
     meta = json.load(f)
-for key in ("labelsFile", "premiseLabelsFile", "metadataFile"):
+for key in ("labelsFile", "premiseLabelsFile", "metadataFile", "factsFile", "factsSlimFile"):
     gz_key = key[: -len("File")] + "GzFile"
     name = meta.get(key)
     if not name:
@@ -64,7 +64,10 @@ PY
 # Every entry is a GLOB, including facets: a literal path is not subject to nullglob, so `"$DIR"/facets.bin`
 # stayed in the array when the file was absent and the uploader failed on it three times with a message
 # about an upload rather than a missing file.
-blobs=("$DIR"/facets*.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json)
+# `facts-*.json` is listed here as well as in the manifest: the upload pass works from THIS array, so a blob
+# the manifest names but no glob matches is announced and never uploaded — atlas would then 404 on a file the
+# manifest promises.
+blobs=("$DIR"/facets*.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json "$DIR"/facts-*.json "$DIR"/facts-*.json.gz)
 [ ${#blobs[@]} -ge 3 ] || { echo "error: expected labels/vectors/gz/metadata in $DIR, found: ${blobs[*]:-none}" >&2; exit 1; }
 
 # What actually publishes: the files the manifest names, plus whatever else the globs found that it does

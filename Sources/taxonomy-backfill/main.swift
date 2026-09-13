@@ -36,6 +36,7 @@ struct TaxonomyBackfill {
             case "assemble": try await Commands.assemble(args)
             case "embed-corpus": try await Commands.embedCorpus(args)
             case "doc-facts": try await Commands.docFacts(args)
+            case "facts": try await Commands.facts(args)
             case "finalize": try Commands.finalize(args)
             case "metadata": try await Commands.metadata(args)
             case "score":    try Commands.score(args)
@@ -429,6 +430,123 @@ enum Commands {
         try JSON.writePretty(needs, to: Layout.escalateBatch(outDir, batchId))
         print(JSON.line(["batchId": batchId, "escalate": needs.count, "total": enriched.count,
                          "file": Layout.escalateBatch(outDir, batchId)]))
+    }
+
+    // facts — the CC0 facts sidecar den-atlas /recommend ranks on. Takes an explicit id list (the DELTA: the
+    // titles atlas has never seen) or the shipped labels. Needs no plot, no classification and no embedding,
+    // which is what lets it cover brand-new releases the >=50-vote worklist floor cannot reach.
+    static func facts(_ args: Args) async throws {
+        let outDir = try args.require("--out-dir")
+        let batchSize = args.int("--batch") ?? 100
+        // Ids as "movie:123,tv:456" or a file of the same, one per line or whitespace-separated.
+        var keys: [String] = []
+        if let inline = args["--ids"] {
+            let text = FileManager.default.fileExists(atPath: inline)
+                ? try String(contentsOfFile: inline, encoding: .utf8) : inline
+            keys = text.split(whereSeparator: { ", \n\t".contains($0) }).map(String.init)
+        } else {
+            let labels: LabelsArtifact = try JSON.read(try args.require("--labels"))
+            keys = labels.records.map { "\($0.mediaType):\($0.tmdbId)" }
+        }
+        // hasVector is FALSE for delta records and true for corpus ones. /recommend must never let a
+        // vectorless record into an ANN path, so this is stated per record rather than inferred.
+        let hasVector = args.has("--has-vector")
+
+        var byType: [String: [Int]] = [:]
+        for key in keys {
+            let parts = key.split(separator: ":")
+            guard parts.count == 2, let id = Int(parts[1]) else { continue }
+            byType[String(parts[0]), default: []].append(id)
+        }
+        let total = byType.values.reduce(0) { $0 + $1.count }
+        FileHandle.standardError.write(Data("  facts: \(total) titles, \(WikidataFacts.specs.count) properties\n".utf8))
+
+        let source = WikipediaSource()
+        var fields: [String: [String: WikidataFacts.FieldValue]] = [:]
+        var done = 0
+        for (type, ids) in byType {
+            let mediaType: MediaType = type == "tv" ? .tv : .movie
+            for start in stride(from: 0, to: ids.count, by: batchSize) {
+                let slice = Array(ids[start..<min(start + batchSize, ids.count)])
+                for spec in WikidataFacts.specs where !(spec.tvOnly && mediaType != .tv) {
+                    let got = try await source.facts(spec: spec, forTMDBIds: slice, mediaType: mediaType)
+                    for (id, value) in got { fields["\(type):\(id)", default: [:]][spec.key] = value }
+                }
+                done += slice.count
+                FileHandle.standardError.write(Data("  facts \(done)/\(total)…\n".utf8))
+            }
+        }
+
+        // Resolve every Q-id that actually appears, once, into the shared `entities` map. Names come from the
+        // label service with "en,mul" — Wikidata has moved proper names to `mul`, and asking for "en" alone
+        // returns the bare Q-id, which is how Christopher Nolan went missing from the doc facts.
+        var qids = Set<String>()
+        for row in fields.values {
+            for (_, value) in row {
+                if case .list(let items) = value { for i in items where i.hasPrefix("Q") { qids.insert(i) } }
+            }
+        }
+        FileHandle.standardError.write(Data("  resolving \(qids.count) entity names…\n".utf8))
+        let rawEntities = try await source.entityNames(Array(qids))
+
+        // Genre names keep Wikidata's media suffix ("drama television series"), which is a poor display string
+        // and would defeat the TMDB match. Strip it for genres only — a PERSON named "... film" is not a thing
+        // we want to rewrite.
+        var entities = rawEntities
+        let genreQIDs = Set(fields.values.flatMap { row -> [String] in
+            if case .list(let items)? = row["genres"] { return items }
+            return []
+        })
+        for qid in genreQIDs {
+            if let name = entities[qid]?["en"] {
+                let stripped = WikipediaSource.strippedGenre(name)
+                if !stripped.isEmpty { entities[qid] = ["en": stripped] }
+            }
+        }
+        let genreMap = WikidataFacts.genreMap(entities: entities) { $0 }
+        FileHandle.standardError.write(Data("  genreMap: \(genreMap.count) of \(genreQIDs.count) genres map to TMDB ids\n".utf8))
+
+        struct Out: Encodable {
+            let schema: Int
+            let datasetVersion: String
+            let genreMap: [String: [String: Int]]
+            let entities: [String: [String: String]]
+            let records: [Rec]
+            struct Rec: Encodable {
+                let mediaType: String
+                let tmdbId: Int
+                let hasVector: Bool
+                let fields: [String: WikidataFacts.FieldValue]
+                func encode(to encoder: Encoder) throws {
+                    var c = encoder.container(keyedBy: Key.self)
+                    try c.encode(mediaType, forKey: Key("mediaType"))
+                    try c.encode(tmdbId, forKey: Key("tmdbId"))
+                    try c.encode(hasVector, forKey: Key("hasVector"))
+                    // Fields are inlined, not nested under "fields": atlas reads record.genres, not
+                    // record.fields.genres, and an absent key is how "unknown" is expressed.
+                    for (k, v) in fields { try c.encode(v, forKey: Key(k)) }
+                }
+                struct Key: CodingKey {
+                    let stringValue: String; var intValue: Int? { nil }
+                    init(_ s: String) { stringValue = s }
+                    init?(stringValue s: String) { stringValue = s }
+                    init?(intValue: Int) { nil }
+                }
+            }
+        }
+        let meta: DatasetMeta? = try? JSON.read(Layout.datasetMeta(outDir))
+        let records = fields.keys.sorted().compactMap { key -> Out.Rec? in
+            let parts = key.split(separator: ":")
+            guard parts.count == 2, let id = Int(parts[1]) else { return nil }
+            return Out.Rec(mediaType: String(parts[0]), tmdbId: id, hasVector: hasVector,
+                           fields: fields[key] ?? [:])
+        }
+        let version = meta?.datasetVersion ?? "unversioned"
+        let path = (outDir as NSString).appendingPathComponent("facts-\(version).json")
+        try JSON.write(Out(schema: 1, datasetVersion: version, genreMap: genreMap, entities: entities,
+                           records: records), to: path)
+        print(JSON.line(["facts": records.count, "entities": entities.count, "genreMap": genreMap.count, "path": path,
+                         "hasVector": hasVector ? 1 : 0]))
     }
 
     // doc-facts — scrape the two embedding-doc clauses that still came from TMDB (director, genre) from

@@ -223,7 +223,7 @@ public struct WikipediaSource: Sendable {
     /// `"science fiction film"` → `"science fiction"`. Wikidata appends the medium to genre labels where TMDB
     /// does not, and comparing the raw strings makes a vocabulary that largely DOES line up look like it
     /// shares nothing: mean overlap with TMDB measured 0.01 before this strip and 0.40 after.
-    static func strippedGenre(_ label: String) -> String {
+    public static func strippedGenre(_ label: String) -> String {
         let media = ["film", "movie", "television series", "tv series", "series", "anime"]
         var s = label.lowercased().trimmingCharacters(in: .whitespaces)
         var changed = true
@@ -238,6 +238,133 @@ public struct WikipediaSource: Sendable {
         // A value that is ONLY the medium says nothing — every film is a film. The caller drops empties, so
         // returning "" here is how "film" and "television series" stop reaching the doc as genres.
         return media.contains(s) ? "" : s
+    }
+
+    // MARK: - Facts sidecar
+
+    /// Run one `WikidataFacts.Spec` over a batch. One property per request: several multi-valued OPTIONALs in
+    /// a single query return their cross product, which times out at WDQS on a 100-id batch.
+    public func facts(spec: WikidataFacts.Spec, forTMDBIds ids: [Int],
+                      mediaType: MediaType) async throws -> [Int: WikidataFacts.FieldValue] {
+        let unique = Array(Set(ids)).sorted()
+        guard !unique.isEmpty else { return [:] }
+        let property = mediaType == .tv ? "P4983" : "P4947"
+        let values = unique.map { "\"\($0)\"" }.joined(separator: " ")
+
+        let select: String
+        let body: String
+        switch spec.kind {
+        case .entity:
+            select = "?tmdb ?v"
+            body = "?film wdt:\(spec.prop) ?v ."
+        case .iso:
+            // The ISO code lives on the VALUE, not the film: country Q30 carries "US" on P297.
+            select = "?tmdb ?code"
+            body = "?film wdt:\(spec.prop) ?v . ?v wdt:\(spec.isoVia ?? "P297") ?code ."
+        case .literal:
+            select = "?tmdb ?v"
+            body = "?film wdt:\(spec.prop) ?v ."
+        case .dateP:
+            select = "?tmdb ?v ?prec"
+            body = "?film p:\(spec.prop) ?st . ?st psv:\(spec.prop) ?node . "
+                 + "?node wikibase:timeValue ?v ; wikibase:timePrecision ?prec ."
+        }
+        let query = """
+        SELECT \(select) WHERE {
+          VALUES ?tmdb { \(values) }
+          ?film wdt:\(property) ?tmdb .
+          \(body)
+        }
+        """
+        var components = URLComponents(url: sparqlEndpoint, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "format", value: "json")]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/sparql-query", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
+        request.httpBody = Data(query.utf8)
+        return try Self.parseFacts(try await send(request), spec: spec)
+    }
+
+    static func parseFacts(_ data: Data,
+                           spec: WikidataFacts.Spec) throws -> [Int: WikidataFacts.FieldValue] {
+        let root: SPARQLResult
+        do {
+            root = try JSONDecoder().decode(SPARQLResult.self, from: data)
+        } catch {
+            throw WikidataError.unparseableResponse(String(decoding: data.prefix(200), as: UTF8.self))
+        }
+        var lists: [Int: [String]] = [:]
+        var dates: [Int: (String, String)] = [:]
+        for b in root.results.bindings {
+            guard let raw = b.tmdb?.value, let id = Int(raw) else { continue }
+            switch spec.kind {
+            case .dateP:
+                guard let v = b.v?.value, let precRaw = b.prec?.value, let prec = Int(precRaw),
+                      let name = WikidataFacts.precisionName(prec),
+                      let trimmed = WikidataFacts.trimDate(v, precision: name) else { continue }
+                // Several dates are normal (a festival premiere and a wide release). Keep the EARLIEST, and
+                // prefer the finer precision when they tie, so "newest first" has something real to sort on.
+                if let existing = dates[id], existing.0 <= trimmed { continue }
+                dates[id] = (trimmed, name)
+            case .iso:
+                if let code = b.code?.value.uppercased(), !(lists[id] ?? []).contains(code) {
+                    lists[id, default: []].append(code)
+                }
+            case .entity:
+                guard let v = b.v?.value else { continue }
+                let qid = String(v.split(separator: "/").last ?? "")
+                guard qid.hasPrefix("Q") else { continue }
+                if !(lists[id] ?? []).contains(qid) { lists[id, default: []].append(qid) }
+            case .literal:
+                guard let v = b.v?.value else { continue }
+                if !(lists[id] ?? []).contains(v) { lists[id, default: []].append(v) }
+            }
+        }
+        var out: [Int: WikidataFacts.FieldValue] = [:]
+        for (id, v) in lists where !v.isEmpty { out[id] = .list(v.sorted()) }
+        for (id, d) in dates { out[id] = .date(d.0, precision: d.1) }
+        return out
+    }
+
+    /// Q-id → `{"en": name}` for the entities a facts build actually references, resolved once rather than
+    /// inlined per title: a corpus of 38.5k titles references the same actors and genres over and over.
+    public func entityNames(_ qids: [String], batch: Int = 300) async throws -> [String: [String: String]] {
+        var out: [String: [String: String]] = [:]
+        for start in stride(from: 0, to: qids.count, by: batch) {
+            let slice = Array(qids[start..<min(start + batch, qids.count)])
+            let values = slice.map { "wd:\($0)" }.joined(separator: " ")
+            let query = """
+            SELECT ?item ?itemLabel WHERE {
+              VALUES ?item { \(values) }
+              SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul". }
+            }
+            """
+            var components = URLComponents(url: sparqlEndpoint, resolvingAgainstBaseURL: false)!
+            components.queryItems = [URLQueryItem(name: "format", value: "json")]
+            var request = URLRequest(url: components.url!)
+            request.httpMethod = "POST"
+            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+            request.setValue("application/sparql-query", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
+            request.httpBody = Data(query.utf8)
+            let root: SPARQLResult
+            do {
+                root = try JSONDecoder().decode(SPARQLResult.self, from: try await send(request))
+            } catch {
+                throw WikidataError.unparseableResponse("entityNames batch at \(start)")
+            }
+            for b in root.results.bindings {
+                guard let uri = b.item?.value, let name = b.itemLabel?.value else { continue }
+                let qid = String(uri.split(separator: "/").last ?? "")
+                // An unresolved label comes back as the Q-id itself. Recording "Q1234": "Q1234" would make
+                // every consumer render an identifier as a name, so leave it out and let them show nothing.
+                if name == qid { continue }
+                out[qid] = ["en": name]
+            }
+        }
+        return out
     }
 
     /// `https://en.wikipedia.org/wiki/Inception` → `Inception`; underscores → spaces, percent-decoded.
@@ -259,6 +386,11 @@ public struct WikipediaSource: Sendable {
             let runtime: Cell?
             let creatorLabel: Cell?
             let vLabel: Cell?
+            let item: Cell?
+            let itemLabel: Cell?
+            let v: Cell?
+            let code: Cell?
+            let prec: Cell?
         }
         struct Cell: Decodable { let value: String }
     }
