@@ -14,17 +14,28 @@ corpus and query vectors are comparable. The offline FNV embedder remains as a `
 ## The published artifacts, and which job each does
 
 `data-latest` is a **moving release**: every publish clobbers its assets, so there is exactly one live
-dataset and `dataset.meta.json` describes it. Current: **`5bcdd8460099`**, built by `den-embed/5.1.1` at
+dataset and `dataset.meta.json` describes it. Current: **`c85c707b0b18`**, built by `den-embed/5.1.1` at
 `max_tokens 1024`.
 
 | blob | what it is | job |
 |---|---|---|
 | `labels-t02.json` | 38,532 titles × primaryGenre + subgenres + moods + `animated` | filtering, taste, hide-lists |
-| `vectors-bge-m3.bin` | the **plot index** — embedded prose, names intact | semantic **search** |
+| `vectors-bge-m3.bin` | the **main index** — Wikidata facts + our tags + the Wikipedia plot | semantic **search**, neighbours, rows |
 | `vectors-premise.bin` | the **premise index** — embedded structural tags, no proper nouns | **similar / recommend** |
 | `facets.bin` | country / language / year facets | attribute search |
 | `metadata-<ver>.json` | tmdbId → title + posterPath + year | rendering a card with no TMDB call |
 | `facts-<ver>.json` | CC0 Wikidata facts per title | `/recommend` ranking; covers titles with no labels at all |
+
+**The main index carries no TMDB Content.** It was rebuilt in September 2026: the embedded document has no
+title, no year, no cast and no director, and its director/genre clauses come from Wikidata rather than TMDB.
+The filename is historical — `finalize` names the blob after the embedder, not after the doc shape.
+
+Removing the entity clauses did NOT cost search quality, which was the surprise. Measured over 12 queries
+against both shapes: the old names-intact doc mostly matched words in the TITLE — "grief" returned *Good
+Grief*, *Mourning Grave*, *The Grudge*; "heist gone wrong" returned films with "Heist" in the name. The
+current doc returns *Mass*, *The Days of Abandonment*, *Vortex* and *The Lavender Hill Mob*, *Quick Change*,
+*Takers*. Person queries ("tilda swinton") failed on BOTH — a 2-3 token name was never carried by an
+850-token document — and are answered by the title and person lanes, which is where they belong.
 
 **The premise index is not a lesser copy of the plot index.** It embeds LLM-generated structural tags
 (`heist-gone-wrong`, `messages-to-the-dead`) rather than prose, its generation spec forbade proper nouns and
@@ -204,6 +215,46 @@ now takes the highest batch on disk as its floor and refuses to overwrite an exi
 `EnrichedBatches` — but if you build batches by hand, keep one media type per batch too: vote records carry
 a bare `tmdbId`, and movie/TV ids overlap.
 
+## What this pipeline has taught, the hard way
+
+Each of these cost real time to learn and is cheap to re-learn wrongly.
+
+**Close the vocabulary.** The single highest-leverage finding in the project. Asking an LLM for
+open-vocabulary tags gives ~11% agreement between two runs of the same model on the same plot;
+asking it to pick from a closed list gives 97.5-100%, with 6 off-vocabulary values in 5,400.
+Voting cannot rescue an open vocabulary — a tag must be *named identically* twice to survive, so
+2-of-3 voting DELETED content (15.22 tags/title down to 6.34). With a closed list the vote picks
+a winner and never empties a slot.
+
+**A closed vocabulary is also what makes errors catchable.** Six independent agents typed a tone
+word (`bleak`) into the `ending` axis. Every one was caught, because `bleak` is not in `ending`'s
+list and a validator could say so. An open vocabulary would have shipped all six silently.
+
+**Say what to do, not what to avoid.** Listing forbidden words did not stop the `bleak` error.
+"Ask how it RESOLVED, not how it FELT" did.
+
+**A correct row count proves nothing.** Observed in this pipeline: fabricated TMDB ids with exact
+counts, a duplicated key silently dropping another title, a key-shift where one title carried its
+neighbour's tags, and one title dropped by two independent agents on two independent passes.
+Verify keys element-by-element against the input, never by length.
+
+**Batch size is a correctness parameter, not a tuning one.** A 100-id SPARQL batch that returns in
+~1 s from one client hung to a 60 s timeout from another; 25 advanced steadily.
+
+**Checkpoint what was paid for, and check what the resume actually skips.** A facts scrape froze at
+16,500 titles through 22 restarts. It was not rate limiting: an entity-resolution pass ran over the
+WHOLE accumulated checkpoint on every restart — 92,036 names, minutes of work redone — so a resumed
+run never reached a new batch. Resumability is not just "write as you go"; it is "do not redo what
+you already have".
+
+**An artifact whose source text is not committed will be described wrongly.** The premise index was
+called stale and TMDB-derived twice in one session, by someone reading file sizes, because its tags
+and spec lived in an uncommitted working directory. They are in [`data/`](data/README.md) now.
+
+**Measure before extrapolating from the first sample.** A rate read off the first minute of a run
+projected 50 hours for work that took 3; a token estimate from one agent was 40% under. Both were
+sampled during a cold start.
+
 ## The TMDB rule, in one place
 
 **Nothing TMDB-sourced ships except posters, ids and titles.** Everything else comes from Wikipedia (plot
@@ -225,9 +276,9 @@ which is why it is not committed.
 Read this before changing the pipeline. Each rule below is here because breaking it produced a bug that
 shipped and was not noticed for weeks, in most cases because the artifact still looked healthy.
 
-### There are TWO indexes, and the plot one is not the primary
-- **`vectors-bge-m3.bin`** — the whole Wikipedia plot, embedded. Whole-story surface similarity, and the
-  only index carrying proper nouns, so the only one that can answer a character or people query.
+### There are TWO indexes, and they answer different questions
+- **`vectors-bge-m3.bin`** — the Wikipedia plot plus Wikidata facts and our tags, embedded. Carries no
+  proper nouns of its own beyond what the plot prose names, since title/year/cast/director were removed.
 - **`vectors-premise.bin`** — DT-H. Open-vocab premise/trope tags (`reassigned-phone-number`,
   `wise-mentor-sacrifices-himself`) generated by an LLM from the plots, embedded with the same model. The
   tags themselves are committed at [`data/premise-tags-v1.json`](data/premise-tags-v1.json) and the prompt
