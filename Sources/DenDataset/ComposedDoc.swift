@@ -13,6 +13,30 @@ import Foundation
 /// stays clean instead of carrying "Directed by ." Placeholders. The Plot clause is always present (possibly
 /// empty) so the tags-only doc still reads as a document rather than a fragment.
 public enum ComposedDoc {
+    /// The CC0 doc shape: no title, no year, no cast, and every fact clause sourced from Wikidata rather than
+    /// TMDB. Takes bare arrays, not an `EnrichedTitle`, so nothing TMDB-shaped can reach it by accident.
+    ///
+    /// Dropping title/year/cast is a retrieval decision, not just a licensing one. Measured by ablating each
+    /// clause and scoring how much closer thematically-similar pairs sit than same-actor-opposite-tone pairs:
+    /// the full doc scores 0.018, this shape 0.091 — 5x the discrimination. Cast is most of that (0.061 on
+    /// its own): actor names make *Good Will Hunting* and *Jumanji* neighbours, which is an identity match,
+    /// not a similarity. Year alone measured flat (0.016 vs 0.018) and is dropped for the token budget and
+    /// because it belongs in metadata, not because it polluted the vector.
+    ///
+    /// Director and genre clauses are KEPT but unsettled: the wider probe scored `plot+tags only` higher
+    /// still (0.121), and the control set has no same-director pairs, so it cannot see director acting as an
+    /// identity token the way cast does. This is the A/B that settles it.
+    public static func buildLean(directors: [String], creators: [String], genres: [String],
+                                 tags: [String], plot: String?) -> String {
+        var parts: [String] = []
+        if !directors.isEmpty { parts.append("Directed by \(directors.joined(separator: ", ")).") }
+        if !creators.isEmpty { parts.append("Created by \(creators.joined(separator: ", ")).") }
+        if !genres.isEmpty { parts.append("Genres: \(genres.joined(separator: ", ")).") }
+        if !tags.isEmpty { parts.append("Themes: \(tags.joined(separator: ", ")).") }
+        parts.append("Plot: \((plot ?? "").trimmingCharacters(in: .whitespacesAndNewlines))")
+        return parts.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+    }
+
     public static func build(title: EnrichedTitle, tags: [String], plot: String?) -> String {
         var parts: [String] = []
 

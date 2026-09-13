@@ -132,6 +132,109 @@ public struct WikipediaSource: Sendable {
         return map
     }
 
+    // MARK: - CC0 doc facts (director + genre)
+
+    /// The two clauses of the embedding doc that still came from TMDB. Everything else in the CC0 shape is
+    /// already clean: the plot is Wikipedia, the themes are our own tags, and `Created by` is P170 on the
+    /// mapping hop above.
+    public struct DocFacts: Sendable, Equatable {
+        /// P57. Measured: films 97%, series 34-37% — and for a series a missing value is usually CORRECT,
+        /// since a series has no single director. TMDB is thinner still at 25% for series, so this is a gain
+        /// rather than a regression: a quarter of series get a director they do not have today.
+        public let directors: [String]
+        /// P136, media suffix stripped. NOT TMDB's 19-genre vocabulary — Wikidata is finer (sitcom,
+        /// telenovela, romantic comedy, biographical) and mean overlap with TMDB measured 0.40.
+        public let genres: [String]
+
+        public init(directors: [String] = [], genres: [String] = []) {
+            self.directors = directors
+            self.genres = genres
+        }
+    }
+
+    /// Director (P57) and genre (P136) for a batch, as TWO requests rather than two more OPTIONALs on the
+    /// mapping query. Both properties are multi-valued, and one query with several OPTIONALs returns their
+    /// CROSS PRODUCT — which times out at WDQS on a 100-id batch.
+    public func docFacts(forTMDBIds ids: [Int], mediaType: MediaType) async throws -> [Int: DocFacts] {
+        let unique = Array(Set(ids)).sorted()
+        guard !unique.isEmpty else { return [:] }
+        let property = mediaType == .tv ? "P4983" : "P4947"
+        let values = unique.map { "\"\($0)\"" }.joined(separator: " ")
+
+        func fetch(_ prop: String) async throws -> [Int: [String]] {
+            let query = """
+            SELECT ?tmdb ?vLabel WHERE {
+              VALUES ?tmdb { \(values) }
+              ?film wdt:\(property) ?tmdb .
+              ?film wdt:\(prop) ?v .
+              SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+            }
+            ORDER BY ?tmdb ?vLabel
+            """
+            var components = URLComponents(url: sparqlEndpoint, resolvingAgainstBaseURL: false)!
+            components.queryItems = [URLQueryItem(name: "format", value: "json")]
+            var request = URLRequest(url: components.url!)
+            request.httpMethod = "POST"
+            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+            request.setValue("application/sparql-query", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
+            request.httpBody = Data(query.utf8)
+            return try Self.parseLabelled(try await send(request))
+        }
+
+        let directors = try await fetch("P57")
+        let rawGenres = try await fetch("P136")
+        var out: [Int: DocFacts] = [:]
+        for id in unique {
+            let genres = Array(Set((rawGenres[id] ?? []).map(Self.strippedGenre).filter { !$0.isEmpty }))
+            let dirs = directors[id] ?? []
+            if dirs.isEmpty && genres.isEmpty { continue }   // absent, not empty — unknown is not "none"
+            out[id] = DocFacts(directors: dirs, genres: genres.sorted())
+        }
+        return out
+    }
+
+    /// `tmdbId → [label]` for a one-property query. Values accumulate per id rather than first-wins, since a
+    /// film binds once per value.
+    static func parseLabelled(_ data: Data) throws -> [Int: [String]] {
+        let root: SPARQLResult
+        do {
+            root = try JSONDecoder().decode(SPARQLResult.self, from: data)
+        } catch {
+            throw WikidataError.unparseableResponse(String(decoding: data.prefix(200), as: UTF8.self))
+        }
+        var map: [Int: [String]] = [:]
+        for binding in root.results.bindings {
+            guard let raw = binding.tmdb?.value, let id = Int(raw),
+                  let label = binding.vLabel?.value, !label.isEmpty else { continue }
+            // A label the SERVICE could not resolve comes back as the bare Q-id. That is an identifier, not a
+            // name, and embedding "Q1379241" as a director teaches the model nothing — drop it.
+            if label.hasPrefix("Q"), Int(label.dropFirst()) != nil { continue }
+            if !(map[id] ?? []).contains(label) { map[id, default: []].append(label) }
+        }
+        return map
+    }
+
+    /// `"science fiction film"` → `"science fiction"`. Wikidata appends the medium to genre labels where TMDB
+    /// does not, and comparing the raw strings makes a vocabulary that largely DOES line up look like it
+    /// shares nothing: mean overlap with TMDB measured 0.01 before this strip and 0.40 after.
+    static func strippedGenre(_ label: String) -> String {
+        let media = ["film", "movie", "television series", "tv series", "series", "anime"]
+        var s = label.lowercased().trimmingCharacters(in: .whitespaces)
+        var changed = true
+        while changed {
+            changed = false
+            for word in media where s.hasSuffix(" " + word) {
+                s.removeLast(word.count + 1)
+                s = s.trimmingCharacters(in: .whitespaces)
+                changed = true
+            }
+        }
+        // A value that is ONLY the medium says nothing — every film is a film. The caller drops empties, so
+        // returning "" here is how "film" and "television series" stop reaching the doc as genres.
+        return media.contains(s) ? "" : s
+    }
+
     /// `https://en.wikipedia.org/wiki/Inception` → `Inception`; underscores → spaces, percent-decoded.
     static func articleTitle(fromURL urlString: String) -> String? {
         guard let marker = urlString.range(of: "/wiki/") else { return nil }
@@ -150,6 +253,7 @@ public struct WikipediaSource: Sendable {
             let imdb: Cell?
             let runtime: Cell?
             let creatorLabel: Cell?
+            let vLabel: Cell?
         }
         struct Cell: Decodable { let value: String }
     }
