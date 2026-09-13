@@ -11,20 +11,41 @@ service (**bge-m3**, 1024-dim int8) — the single embedding path shared with th
 corpus and query vectors are comparable. The offline FNV embedder remains as a `--embedder fnv` fallback. See
 [`docs/OPERATE.md`](docs/OPERATE.md) for the full re-embed + incremental-top-up runbooks and the alignment rule.
 
-## What's in the shipped dataset
+## The published artifacts, and which job each does
 
-Measured from `out-t02/` (taxonomy `t02`), the corpus currently published as `data-latest`. Re-verified
-2026-09-05 against the enriched batches on disk — **57,715 records, 38,460 with a wiki plot** — so this
-table is current:
+`data-latest` is a **moving release**: every publish clobbers its assets, so there is exactly one live
+dataset and `dataset.meta.json` describes it. Current: **`5bcdd8460099`**, built by `den-embed/5.1.1` at
+`max_tokens 1024`.
+
+| blob | what it is | job |
+|---|---|---|
+| `labels-t02.json` | 38,532 titles × primaryGenre + subgenres + moods + `animated` | filtering, taste, hide-lists |
+| `vectors-bge-m3.bin` | the **plot index** — embedded prose, names intact | semantic **search** |
+| `vectors-premise.bin` | the **premise index** — embedded structural tags, no proper nouns | **similar / recommend** |
+| `facets.bin` | country / language / year facets | attribute search |
+| `metadata-<ver>.json` | tmdbId → title + posterPath + year | rendering a card with no TMDB call |
+| `facts-<ver>.json` | CC0 Wikidata facts per title | `/recommend` ranking; covers titles with no labels at all |
+
+**The premise index is not a lesser copy of the plot index.** It embeds LLM-generated structural tags
+(`heist-gone-wrong`, `messages-to-the-dead`) rather than prose, its generation spec forbade proper nouns and
+genre/mood words, and it **beats the plot index at recommendation by +11.3 pp on a sealed test half**
+(p < 0.05 under two-judge unanimity — `scripts/v2/README.md`). Mean |cos| between the two spaces is 0.43, so
+they encode genuinely different things. That same ban on proper nouns is why premise **cannot** serve
+character search. One index per job, rather than one index reused for both.
+
+The tags behind that index, the Wikipedia plots everything derives from, and the evaluation rulers are
+committed under [`data/`](data/README.md) — read that before re-deriving any of it.
+
+## What's in the shipped dataset
 
 | | Movies | TV series | Total |
 |---|---:|---:|---:|
-| **Shipped** (in `labels-t02.json`) | 33,641 | 3,892 | **37,533** |
+| **Shipped** (in `labels-t02.json`) | 34,066 | 4,466 | **38,532** |
 | Enriched (TMDB + Wikipedia fetched) | 49,883 | 7,832 | 57,715 |
 | — of those, with a Wikipedia plot | 34,018 (68.2%) | 4,442 (56.7%) | 38,460 (66.6%) |
 | — with no plot found | 15,865 | 3,390 | 19,255 |
 
-2,329 shipped titles are animated (a *format* flag, not a genre — see DT-C).
+2,469 shipped titles are animated (a *format* flag, not a genre — see DT-C).
 
 **Why 57,715 enriched becomes 37,533 shipped.** 19,255 of the 20,182 dropped titles have no Wikipedia
 plot. Those were classified from the TMDB overview *prose*, which TMDB's terms forbid us deriving from,
@@ -49,7 +70,8 @@ the other 421 would be dropped by the ToS rule regardless.
   `TaxonomyScorer` + `GoldenSet`, the `HashingEmbedder` + `Quantizer`, the format + producer model types, the
   baked `GroundingKeywords` map, and a thin `TMDBClient` (two endpoints only).
 - `Sources/taxonomy-backfill/` — the CLI that drives the resumable phases (`worklist`, `enrich`,
-  `enrich-ids`, `escalation`, `assemble`, `embed-corpus`, `finalize`, `metadata`, `score`, `recluster`).
+  `enrich-ids`, `escalation`, `assemble`, `embed-corpus`, `doc-facts`, `facts`, `finalize`, `metadata`,
+  `score`, `recluster`).
 - `Tests/DenDatasetTests/` — golden (embedder/quantizer determinism), conformance (artifact format), and a
   fixture-based end-to-end smoke test (no TMDB, no network).
 
@@ -182,15 +204,34 @@ now takes the highest batch on disk as its floor and refuses to overwrite an exi
 `EnrichedBatches` — but if you build batches by hand, keep one media type per batch too: vote records carry
 a bare `tmdbId`, and movie/TV ids overlap.
 
+## The TMDB rule, in one place
+
+**Nothing TMDB-sourced ships except posters, ids and titles.** Everything else comes from Wikipedia (plot
+text), an LLM over that text (labels, premise tags), or Wikidata (facts).
+
+That rule is easy to break by accident because TMDB fields travel inside files whose names suggest
+otherwise. Two that have already caught people:
+
+- `overview` in the enriched batches is the **Wikipedia plot** when `hasWikiPlot` is true and the **TMDB
+  overview** when it is false. Same field, two sources — which is why `assemble --require-wiki-plot` exists.
+- The v2 Wikipedia corpus carried `genres` and `voteCount`, both TMDB. They are stripped in the committed
+  copy under `data/`.
+
+`out-t02/enriched/` is TMDB Content and must never be published. It is also cheap to refetch with a key,
+which is why it is not committed.
+
 ## How retrieval actually works — and the four things that must stay true
 
 Read this before changing the pipeline. Each rule below is here because breaking it produced a bug that
 shipped and was not noticed for weeks, in most cases because the artifact still looked healthy.
 
 ### There are TWO indexes, and the plot one is not the primary
-- **`vectors-bge-m3.bin`** — the whole Wikipedia plot, embedded. Whole-story surface similarity.
+- **`vectors-bge-m3.bin`** — the whole Wikipedia plot, embedded. Whole-story surface similarity, and the
+  only index carrying proper nouns, so the only one that can answer a character or people query.
 - **`vectors-premise.bin`** — DT-H. Open-vocab premise/trope tags (`reassigned-phone-number`,
-  `wise-mentor-sacrifices-himself`) generated by Claude Sonnet from the plots, embedded with the same model.
+  `wise-mentor-sacrifices-himself`) generated by an LLM from the plots, embedded with the same model. The
+  tags themselves are committed at [`data/premise-tags-v1.json`](data/premise-tags-v1.json) and the prompt
+  that produced them at `data/premise-tags-v1.SPEC.md`.
 
 The app's "More Like This" uses the **premise index as the primary signal**, with the plot index as a
 plot-agreement bonus. That ordering was earned: on a 1,526-title bake-off, premise-tags scored **12/12** on
