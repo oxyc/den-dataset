@@ -323,7 +323,9 @@ public struct WikipediaSource: Sendable {
             }
         }
         var out: [Int: WikidataFacts.FieldValue] = [:]
-        for (id, v) in lists where !v.isEmpty { out[id] = .list(v.sorted()) }
+        for (id, v) in lists where !v.isEmpty {
+            out[id] = WikidataFacts.FieldValue.collapse(v.sorted(), spec: spec)
+        }
         for (id, d) in dates { out[id] = .date(d.0, precision: d.1) }
         return out
     }
@@ -376,7 +378,7 @@ public struct WikipediaSource: Sendable {
         return title.isEmpty ? nil : title
     }
 
-    private struct SPARQLResult: Decodable {
+    struct SPARQLResult: Decodable {
         let results: Results
         struct Results: Decodable { let bindings: [Binding] }
         struct Binding: Decodable {
@@ -391,6 +393,10 @@ public struct WikipediaSource: Sendable {
             let v: Cell?
             let code: Cell?
             let prec: Cell?
+            let alias: Cell?
+            let orig: Cell?
+            let label: Cell?
+            let pid: Cell?
         }
         struct Cell: Decodable { let value: String }
     }
@@ -621,5 +627,127 @@ public enum WikidataError: Error, CustomStringConvertible {
         case .unparseableResponse(let head):
             return "Wikidata returned a 200 that is not a SPARQL result (starts: \(head))"
         }
+    }
+}
+
+extension WikipediaSource {
+    /// Display and search strings per title: the enwiki ARTICLE title, `rdfs:label`, `P1476` and every English
+    /// alias. Search needs all of them — atlas's title index carries only TMDB's ORIGINAL title today, so
+    /// "parasite" and "spirited away" miss entirely while "Gisaengchung" and "Sen to Chihiro" hit.
+    ///
+    /// Aliases are fetched separately because `skos:altLabel` is multi-valued and multiplies every other row.
+    public struct TitleStrings: Sendable {
+        public var article: String?
+        public var label: String?
+        public var original: String?
+        public var aliases: [String] = []
+    }
+
+    public func titles(forTMDBIds ids: [Int], mediaType: MediaType) async throws -> [Int: TitleStrings] {
+        let unique = Array(Set(ids)).sorted()
+        guard !unique.isEmpty else { return [:] }
+        let property = mediaType == .tv ? "P4983" : "P4947"
+        let values = unique.map { "\"\($0)\"" }.joined(separator: " ")
+
+        func run(_ select: String, _ body: String) async throws -> [SPARQLResult.Binding] {
+            let query = """
+            SELECT ?tmdb \(select) WHERE {
+              VALUES ?tmdb { \(values) }
+              ?film wdt:\(property) ?tmdb .
+              \(body)
+            }
+            """
+            var c = URLComponents(url: sparqlEndpoint, resolvingAgainstBaseURL: false)!
+            c.queryItems = [URLQueryItem(name: "format", value: "json")]
+            var request = URLRequest(url: c.url!)
+            request.httpMethod = "POST"
+            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+            request.setValue("application/sparql-query", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
+            request.httpBody = Data(query.utf8)
+            let data = try await send(request)
+            guard let root = try? JSONDecoder().decode(SPARQLResult.self, from: data) else {
+                throw WikidataError.unparseableResponse(String(decoding: data.prefix(200), as: UTF8.self))
+            }
+            return root.results.bindings
+        }
+
+        var out: [Int: TitleStrings] = [:]
+        // "en,mul": Wikidata moved proper names to the `mul` language code, and a title is a proper name.
+        for b in try await run("?article ?label ?orig", """
+              OPTIONAL { ?article schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/> . }
+              OPTIONAL { ?film wdt:P1476 ?orig . }
+              OPTIONAL { ?film rdfs:label ?label . FILTER(LANG(?label) IN ('en','mul')) }
+            """) {
+            guard let raw = b.tmdb?.value, let id = Int(raw) else { continue }
+            var t = out[id] ?? TitleStrings()
+            if t.article == nil, let a = b.article?.value { t.article = Self.articleTitle(fromURL: a) }
+            if t.label == nil { t.label = b.label?.value }
+            if t.original == nil { t.original = b.orig?.value }
+            out[id] = t
+        }
+        for b in try await run("?alias", """
+              ?film skos:altLabel ?alias . FILTER(LANG(?alias) IN ('en','mul'))
+            """) {
+            guard let raw = b.tmdb?.value, let id = Int(raw), let a = b.alias?.value else { continue }
+            var t = out[id] ?? TitleStrings()
+            if !t.aliases.contains(a) { t.aliases.append(a) }
+            out[id] = t
+        }
+        return out
+    }
+
+    /// Q-id → name, English aliases, and TMDB person id (P4985). The aliases are what let a search answer
+    /// "tom hanks" from a record that stores only a Q-id, and P4985 lets a client open the person's page
+    /// without a name lookup.
+    public struct EntityInfo: Sendable {
+        public var name: String?
+        public var aliases: [String] = []
+        public var tmdbPersonId: String?
+    }
+
+    public func entityDetails(_ qids: [String], batch: Int = 200) async throws -> [String: EntityInfo] {
+        var out: [String: EntityInfo] = [:]
+        for start in stride(from: 0, to: qids.count, by: batch) {
+            let slice = Array(qids[start..<min(start + batch, qids.count)])
+            let values = slice.map { "wd:\($0)" }.joined(separator: " ")
+            func run(_ select: String, _ body: String) async throws -> [SPARQLResult.Binding] {
+                let query = "SELECT ?item \(select) WHERE { VALUES ?item { \(values) } \(body) }"
+                var c = URLComponents(url: sparqlEndpoint, resolvingAgainstBaseURL: false)!
+                c.queryItems = [URLQueryItem(name: "format", value: "json")]
+                var r = URLRequest(url: c.url!)
+                r.httpMethod = "POST"
+                r.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                r.setValue("application/sparql-query", forHTTPHeaderField: "Content-Type")
+                r.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
+                r.httpBody = Data(query.utf8)
+                let data = try await send(r)
+                guard let root = try? JSONDecoder().decode(SPARQLResult.self, from: data) else {
+                    throw WikidataError.unparseableResponse("entityDetails at \(start)")
+                }
+                return root.results.bindings
+            }
+            for b in try await run("?itemLabel ?pid", """
+                  SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul". }
+                  OPTIONAL { ?item wdt:P4985 ?pid . }
+                """) {
+                guard let uri = b.item?.value else { continue }
+                let qid = String(uri.split(separator: "/").last ?? "")
+                var e = out[qid] ?? EntityInfo()
+                if let n = b.itemLabel?.value, n != qid { e.name = n }
+                if e.tmdbPersonId == nil { e.tmdbPersonId = b.pid?.value }
+                out[qid] = e
+            }
+            for b in try await run("?alias", """
+                  ?item skos:altLabel ?alias . FILTER(LANG(?alias) IN ('en','mul'))
+                """) {
+                guard let uri = b.item?.value, let a = b.alias?.value else { continue }
+                let qid = String(uri.split(separator: "/").last ?? "")
+                var e = out[qid] ?? EntityInfo()
+                if !e.aliases.contains(a) { e.aliases.append(a) }
+                out[qid] = e
+            }
+        }
+        return out
     }
 }

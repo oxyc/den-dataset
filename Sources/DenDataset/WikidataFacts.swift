@@ -90,6 +90,7 @@ public enum WikidataFacts {
     /// same instant and makes "newest first" meaningless.
     public enum FieldValue: Codable, Sendable, Equatable {
         case list([String])
+        case object([String: FieldValue])
         case string(String)
         case number(Int)
         case date(String, precision: String)
@@ -98,6 +99,7 @@ public enum WikidataFacts {
             var c = encoder.singleValueContainer()
             switch self {
             case .list(let v): try c.encode(v)
+            case .object(let v): try c.encode(v)
             case .string(let v): try c.encode(v)
             case .number(let v): try c.encode(v)
             case .date(let d, let p): try c.encode(["date": d, "precision": p])
@@ -107,6 +109,7 @@ public enum WikidataFacts {
         public init(from decoder: Decoder) throws {
             let c = try decoder.singleValueContainer()
             if let v = try? c.decode([String].self) { self = .list(v); return }
+            if let v = try? c.decode([String: FieldValue].self) { self = .object(v); return }
             if let v = try? c.decode(Int.self) { self = .number(v); return }
             if let v = try? c.decode(String.self) { self = .string(v); return }
             let m = try c.decode([String: String].self)
@@ -171,6 +174,17 @@ public enum WikidataFacts {
             if !entry.isEmpty { out[qid] = entry }
         }
         return out
+    }
+
+    /// `"Solaris (1972 film)"` -> `"Solaris"`. The enwiki article title is the best English display string we
+    /// have (89% exact against TMDB, vs rdfs:label's 86%), but it carries a disambiguator that would render
+    /// verbatim on a poster card.
+    public static func strippedArticleSuffix(_ s: String) -> String {
+        guard let open = s.lastIndex(of: "("), s.hasSuffix(")") else { return s }
+        let inside = s[s.index(after: open)..<s.index(before: s.endIndex)].lowercased()
+        let markers = ["film", "tv series", "series", "miniseries", "season", "franchise", "novel", "manga", "anime"]
+        guard markers.contains(where: { inside.contains($0) }) else { return s }
+        return String(s[s.startIndex..<open]).trimmingCharacters(in: .whitespaces)
     }
 
     /// Wikidata's `wikibase:timePrecision` integer → the string the sidecar carries. 11 is a day, 10 a month,

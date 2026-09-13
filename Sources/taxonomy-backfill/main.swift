@@ -467,16 +467,25 @@ enum Commands {
         // re-run skips ids already present.
         let checkpoint = (outDir as NSString).appendingPathComponent("facts-fields.json")
         var fields: [String: [String: WikidataFacts.FieldValue]] = (try? JSON.read(checkpoint)) ?? [:]
+        // --titles-only backfills just the titles hop over records the checkpoint already holds. Without it
+        // the resume skips every finished id, so a field added after a completed scrape could never be filled
+        // without re-fetching all 24 properties.
+        let titlesOnly = args.has("--titles-only")
         if !fields.isEmpty {
             FileHandle.standardError.write(Data("  resuming from \(fields.count) checkpointed titles\n".utf8))
-            for (type, ids) in byType { byType[type] = ids.filter { fields["\(type):\($0)"] == nil } }
+            for (type, ids) in byType {
+                byType[type] = ids.filter {
+                    let r = fields["\(type):\($0)"]
+                    return titlesOnly ? (r?["titles"] == nil) : (r == nil)
+                }
+            }
         }
         var done = 0
         for (type, ids) in byType {
             let mediaType: MediaType = type == "tv" ? .tv : .movie
             for start in stride(from: 0, to: ids.count, by: batchSize) {
                 let slice = Array(ids[start..<min(start + batchSize, ids.count)])
-                for spec in WikidataFacts.specs where !(spec.tvOnly && mediaType != .tv) {
+                for spec in WikidataFacts.specs where !titlesOnly && !(spec.tvOnly && mediaType != .tv) {
                     let got = try await source.facts(spec: spec, forTMDBIds: slice, mediaType: mediaType)
                     for (id, value) in got { fields["\(type):\(id)", default: [:]][spec.key] = value }
                     // Pace the scrape. Firing 24 requests back-to-back per batch sustains ~3/s for hours,
@@ -485,6 +494,17 @@ enum Commands {
                     // 0.36 s/request, this roughly halves throughput and is the difference between finishing
                     // and stalling at 16,500.
                     try await Task.sleep(nanoseconds: 300_000_000)
+                }
+                // Titles are their own hop: search needs the enwiki article title, the label, P1476 and every
+                // alias, and atlas's title index carries only TMDB's ORIGINAL title today — so "parasite" and
+                // "spirited away" miss while "Gisaengchung" and "Sen to Chihiro" hit.
+                let t = try await source.titles(forTMDBIds: slice, mediaType: mediaType)
+                for (id, v) in t {
+                    var m: [String: WikidataFacts.FieldValue] = [:]
+                    if let a = v.article ?? v.label { m["en"] = .string(WikidataFacts.strippedArticleSuffix(a)) }
+                    if let o = v.original ?? v.label { m["orig"] = .string(o) }
+                    if !v.aliases.isEmpty { m["aliases"] = .list(v.aliases.sorted()) }
+                    if !m.isEmpty { fields["\(type):\(id)", default: [:]]["titles"] = .object(m) }
                 }
                 done += slice.count
                 try JSON.write(fields, to: checkpoint)
@@ -512,7 +532,15 @@ enum Commands {
         FileHandle.standardError.write(Data(
             "  entity names: \(rawEntities.count) cached, \(unresolved.count) to resolve\n".utf8))
         if !unresolved.isEmpty {
-            for (qid, name) in try await source.entityNames(Array(unresolved)) { rawEntities[qid] = name }
+            // entityDetails, not entityNames: search needs the ALIASES ("tom hanks" against a record holding
+            // only a Q-id) and P4985 lets a client open a person page without a name lookup.
+            for (qid, info) in try await source.entityDetails(Array(unresolved)) {
+                var e: [String: String] = [:]
+                if let n = info.name { e["en"] = n }
+                if let p = info.tmdbPersonId { e["tmdbPersonId"] = p }
+                if !info.aliases.isEmpty { e["aliases"] = info.aliases.sorted().joined(separator: "\u{1F}") }
+                if !e.isEmpty { rawEntities[qid] = e }
+            }
             try JSON.write(rawEntities, to: namesPath)
         }
 
