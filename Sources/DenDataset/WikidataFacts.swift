@@ -26,9 +26,18 @@ public enum WikidataFacts {
         public let kind: Kind
         public let isoVia: String?   // for .iso: the property on the VALUE holding the code
         public let tvOnly: Bool
+        /// Collapse to ONE value rather than a list. A title has one IMDb id and one episode count, and
+        /// shipping those as single-element arrays makes every consumer unwrap them — which is exactly the
+        /// mismatch atlas hit when `imdbId` arrived as `["tt14447458"]` against a spec that promised a string.
+        public let single: Bool
+        /// Emit as a JSON number rather than a string. Wikidata returns every literal as a string, so runtime
+        /// and episode counts arrive as "42" and would otherwise ship quoted.
+        public let numeric: Bool
 
-        public init(_ key: String, _ prop: String, _ kind: Kind, isoVia: String? = nil, tvOnly: Bool = false) {
-            self.key = key; self.prop = prop; self.kind = kind; self.isoVia = isoVia; self.tvOnly = tvOnly
+        public init(_ key: String, _ prop: String, _ kind: Kind, isoVia: String? = nil,
+                    tvOnly: Bool = false, single: Bool = false, numeric: Bool = false) {
+            self.key = key; self.prop = prop; self.kind = kind; self.isoVia = isoVia
+            self.tvOnly = tvOnly; self.single = single; self.numeric = numeric
         }
     }
 
@@ -37,7 +46,7 @@ public enum WikidataFacts {
     /// universe scored 0%, P155/P156 sequel order 8%, P166 awards 11%.
     public static let specs: [Spec] = [
         .init("instanceOf", "P31", .entity),                 // film / series / miniseries / documentary
-        .init("imdbId", "P345", .literal),                   // 100%
+        .init("imdbId", "P345", .literal, single: true),     // 100%
         .init("released", "P577", .dateP),                   // films: 71% day-precision
         .init("started", "P580", .dateP, tvOnly: true),      // series: 98% day-precision
         .init("ended", "P582", .dateP, tvOnly: true),
@@ -53,13 +62,13 @@ public enum WikidataFacts {
         .init("distributors", "P750", .entity),              // 81% — better covered than production company
         .init("composers", "P86", .entity),                  // 71% on films
         .init("cinematographers", "P344", .entity),          // 61% on films
-        .init("runtimeMinutes", "P2047", .literal),
-        .init("franchise", "P179", .entity),                 // sparse (41% top films, 5% tail) — tiebreak only
+        .init("runtimeMinutes", "P2047", .literal, single: true, numeric: true),
+        .init("franchise", "P179", .entity, single: true),                 // sparse (41% top films, 5% tail) — tiebreak only
         .init("mainSubjects", "P921", .entity),              // 29%
         .init("basedOn", "P144", .entity),                   // 18% — links adaptations of one source
         .init("narrativeLocations", "P840", .entity),        // 47%
-        .init("seasons", "P2437", .literal, tvOnly: true),
-        .init("episodes", "P1113", .literal, tvOnly: true),
+        .init("seasons", "P2437", .literal, tvOnly: true, single: true, numeric: true),
+        .init("episodes", "P1113", .literal, tvOnly: true, single: true, numeric: true),
     ]
 
     /// One record. Everything is optional: an ABSENT key means Wikidata states nothing, which is not the same
@@ -81,12 +90,16 @@ public enum WikidataFacts {
     /// same instant and makes "newest first" meaningless.
     public enum FieldValue: Codable, Sendable, Equatable {
         case list([String])
+        case string(String)
+        case number(Int)
         case date(String, precision: String)
 
         public func encode(to encoder: Encoder) throws {
             var c = encoder.singleValueContainer()
             switch self {
             case .list(let v): try c.encode(v)
+            case .string(let v): try c.encode(v)
+            case .number(let v): try c.encode(v)
             case .date(let d, let p): try c.encode(["date": d, "precision": p])
             }
         }
@@ -94,8 +107,24 @@ public enum WikidataFacts {
         public init(from decoder: Decoder) throws {
             let c = try decoder.singleValueContainer()
             if let v = try? c.decode([String].self) { self = .list(v); return }
+            if let v = try? c.decode(Int.self) { self = .number(v); return }
+            if let v = try? c.decode(String.self) { self = .string(v); return }
             let m = try c.decode([String: String].self)
             self = .date(m["date"] ?? "", precision: m["precision"] ?? "day")
+        }
+
+        /// Collapse a gathered list to what the spec promises. Wikidata can carry several values for things
+        /// that are logically single (two IMDb ids on a merged item), so this takes the first in sorted order
+        /// rather than asserting there is only one.
+        public static func collapse(_ values: [String], spec: Spec) -> FieldValue? {
+            guard let first = values.first else { return nil }
+            guard spec.single else { return .list(values) }
+            if spec.numeric {
+                // Wikidata returns "42" and sometimes "42.0"; both mean 42 minutes.
+                guard let n = Int(first) ?? Double(first).map({ Int($0.rounded()) }) else { return nil }
+                return .number(n)
+            }
+            return .string(first)
         }
     }
 
@@ -121,7 +150,21 @@ public enum WikidataFacts {
         var out: [String: [String: Int]] = [:]
         for (qid, names) in entities {
             guard let label = names["en"] else { continue }
-            guard let hit = tmdbGenres[strip(label)] else { continue }
+            let stripped = strip(label)
+            // Animation is the one family worth matching by shape rather than exact string, because it is the
+            // only genre with a USER-FACING HIDE RULE behind it — an unmapped animation genre means "hide
+            // animation" silently fails to hide the title. Wikidata spreads it across dozens of items
+            // (`animated`, `animated sitcom`, `adult animated`, `stop-motion animated`, `anime-influenced
+            // animation`, `comedy anime and manga`) and the suffix strip turns `animated film` into
+            // `animated`, which is not TMDB's word. Exact matching caught 7 titles; this catches ~400.
+            // Deliberately NOT matched: `live-action/animated` — a hybrid is not what someone hiding
+            // animation means, and hiding Roger Rabbit would be a worse error than showing it.
+            if stripped != "live-action/animated",
+               stripped == "animated" || stripped.hasPrefix("animated ") || stripped.contains("anime") {
+                out[qid] = ["movie": 16, "tv": 16]
+                continue
+            }
+            guard let hit = tmdbGenres[stripped] else { continue }
             var entry: [String: Int] = [:]
             if let m = hit.movie { entry["movie"] = m }
             if let t = hit.tv { entry["tv"] = t }
