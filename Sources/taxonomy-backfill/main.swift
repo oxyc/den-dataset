@@ -640,6 +640,44 @@ enum Commands {
             try JSON.write(rawEntities, to: namesPath)
         }
 
+        // WHAT EACH ADAPTATION IS ADAPTED FROM. `basedOn` is a bare Q-id, which links adaptations of one
+        // source to each other but cannot answer "films based on books" — nothing in it says whether the
+        // target is a novel, a manga or a video game. One P31 hop over the distinct targets does, and it is
+        // cheap: ~6k source works against 38.7k titles, resolved once and checkpointed like the names above.
+        //
+        // It earns a browse row (4,750 titles) and a ranking signal — someone who reliably picks adaptations
+        // should see more of them — so it belongs on the record rather than in a hardcoded catalogue.
+        let sourceTypesPath = (outDir as NSString).appendingPathComponent("facts-source-types.json")
+        var sourceTypes: [String: [String]] = (try? JSON.read(sourceTypesPath)) ?? [:]
+        let sourceQIDs = Set(fields.values.flatMap { row -> [String] in
+            if case .list(let items)? = row["basedOn"] { return items }
+            return []
+        })
+        let unresolvedSources = sourceQIDs.subtracting(sourceTypes.keys)
+        FileHandle.standardError.write(Data(
+            "  source kinds: \(sourceTypes.count) cached, \(unresolvedSources.count) to resolve\n".utf8))
+        if !unresolvedSources.isEmpty {
+            for (qid, types) in try await source.instanceOf(Array(unresolvedSources)) {
+                sourceTypes[qid] = types
+            }
+            // Remember the ones Wikidata states nothing for, or every run re-asks the same dead ends.
+            for qid in unresolvedSources where sourceTypes[qid] == nil { sourceTypes[qid] = [] }
+            try JSON.write(sourceTypes, to: sourceTypesPath)
+        }
+        var kindCounts: [String: Int] = [:]
+        for (key, row) in fields {
+            guard case .list(let targets)? = row["basedOn"] else { continue }
+            let kinds = Set(targets.compactMap { qid -> String? in
+                guard let types = sourceTypes[qid], !types.isEmpty else { return nil }
+                return WikidataFacts.sourceKind(forTypes: types)?.rawValue
+            })
+            guard !kinds.isEmpty else { continue }
+            fields[key]?["basedOnKind"] = .list(kinds.sorted())
+            for kind in kinds { kindCounts[kind, default: 0] += 1 }
+        }
+        FileHandle.standardError.write(Data(
+            "  basedOnKind: \(kindCounts.sorted { $0.value > $1.value }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))\n".utf8))
+
         // Genre names keep Wikidata's media suffix ("drama television series"), which is a poor display string
         // and would defeat the TMDB match. Strip it for genres only — a PERSON named "... film" is not a thing
         // we want to rewrite.
@@ -1259,8 +1297,12 @@ enum Commands {
         let taxonomyVersion = Taxonomy.current.version
         let labels = LabelsArtifact(taxonomyVersion: taxonomyVersion, records: records)
         let labelsBlob = try JSON.encodeSorted(labels)
-        if let s = String(data: labelsBlob, encoding: .utf8), s.contains("overview") {
-            throw ToolError(message: "REFUSING to ship: raw 'overview' text found in labels artifact")
+        let prose = ShipGuard.prohibited(in: labelsBlob)
+        guard prose.isEmpty else {
+            throw ToolError(message: "REFUSING to ship: the labels artifact carries prose field(s) "
+                + "\(prose.joined(separator: ", ")). A published artifact holds labels, ids and numbers — "
+                + "TMDB's terms bar shipping their text, and a CC0 plot belongs in the corpus and the "
+                + "embedding, not in an artifact served to devices.")
         }
         let labelsPath = Layout.labelsArtifact(outDir, taxonomyVersion)
         let vectorsPath = Layout.vectorsArtifact(outDir, embeddingVersion)

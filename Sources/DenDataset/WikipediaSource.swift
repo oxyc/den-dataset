@@ -440,6 +440,7 @@ public struct WikipediaSource: Sendable {
             let orig: Cell?
             let label: Cell?
             let pid: Cell?
+            let typeLabel: Cell?
         }
         struct Cell: Decodable { let value: String }
     }
@@ -876,6 +877,46 @@ extension WikipediaSource {
                 var e = out[qid] ?? EntityInfo()
                 if !e.aliases.contains(a) { e.aliases.append(a) }
                 out[qid] = e
+            }
+        }
+        return out
+    }
+
+    /// `Q-id → its P31 (instance of) English labels`. What a thing *is*.
+    ///
+    /// Used on the targets of P144 (based on): the facts sidecar records that a film adapts Q1234, which links
+    /// adaptations of one source to each other but cannot answer "show me films based on books" — nothing says
+    /// whether Q1234 is a novel, a manga or a video game.
+    public func instanceOf(_ qids: [String], batch: Int = 200) async throws -> [String: [String]] {
+        var out: [String: [String]] = [:]
+        for start in stride(from: 0, to: qids.count, by: batch) {
+            let slice = Array(qids[start..<min(start + batch, qids.count)])
+            let values = slice.map { "wd:\($0)" }.joined(separator: " ")
+            let query = """
+            SELECT ?item ?typeLabel WHERE {
+              VALUES ?item { \(values) }
+              ?item wdt:P31 ?type .
+              SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+            }
+            """
+            var c = URLComponents(url: sparqlEndpoint, resolvingAgainstBaseURL: false)!
+            c.queryItems = [URLQueryItem(name: "format", value: "json")]
+            var r = URLRequest(url: c.url!)
+            r.httpMethod = "POST"
+            r.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+            r.setValue("application/sparql-query", forHTTPHeaderField: "Content-Type")
+            r.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
+            r.httpBody = Data(query.utf8)
+            let data = try await send(r)
+            guard let root = try? JSONDecoder().decode(SPARQLResult.self, from: data) else {
+                throw WikidataError.unparseableResponse("instanceOf at \(start)")
+            }
+            for b in root.results.bindings {
+                guard let uri = b.item?.value, let label = b.typeLabel?.value else { continue }
+                let qid = String(uri.split(separator: "/").last ?? "")
+                // A label service miss returns the bare Q-id; that is not a type name.
+                guard label != qid else { continue }
+                out[qid, default: []].append(label)
             }
         }
         return out

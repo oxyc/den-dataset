@@ -176,6 +176,70 @@ public enum WikidataFacts {
         return out
     }
 
+    /// What a title was adapted FROM, as a closed vocabulary.
+    ///
+    /// `basedOn` (P144) records that a film adapts Q1234, which links adaptations of one source to each other
+    /// but cannot answer "show me films based on books" — nothing in it says whether Q1234 is a novel, a manga
+    /// or a video game. Resolving P31 on the target and folding it down to a handful of kinds does.
+    ///
+    /// Closed, for the reason the taxonomy work already settled: Wikidata's own types are far finer than a
+    /// browse row can use (`novel`, `novella`, `epistolary novel` and `roman à clef` are all "a book"), and an
+    /// open vocabulary cannot be rendered as a stable shelf. Measured over the corpus: 4,750 titles are
+    /// adapted from a book, 1,258 from another screen work, 329 from comics, 202 from a play, 92 from a game.
+    public enum SourceKind: String, Sendable, CaseIterable {
+        case book, comic, play, game, screen, music, franchise, character, other
+
+        /// Strongest signal first: a work is often several things at once ("literary work" AND "novel"), and a
+        /// real kind beats `other`, while a text beats a character.
+        static let priority: [SourceKind] = [.book, .comic, .play, .game, .screen, .music, .franchise,
+                                             .character, .other]
+    }
+
+    static let sourceKindByType: [String: SourceKind] = [
+        "literary work": .book, "written work": .book, "novel": .book, "novella": .book,
+        "short story": .book, "book": .book, "non-fiction book": .book, "autobiography": .book,
+        "memoir": .book, "biography": .book, "fairy tale": .book, "poem": .book, "anthology": .book,
+        "short story collection": .book, "children's literature": .book, "fable": .book, "light novel": .book,
+        "comic book series": .comic, "manga series": .comic, "graphic novel": .comic, "manga": .comic,
+        "comic strip": .comic, "comic book": .comic, "webtoon": .comic,
+        "dramatic work": .play, "play": .play, "musical": .play, "dramatico-musical work": .play,
+        "opera": .play, "theatrical production": .play,
+        "video game": .game, "video game series": .game,
+        "film": .screen, "television series": .screen, "animated television series": .screen,
+        "film series": .screen, "limited series": .screen, "anime television series": .screen,
+        "television film": .screen, "short film": .screen, "animated film": .screen,
+        "media franchise": .franchise, "brand": .franchise,
+        "song": .music, "single": .music, "album": .music,
+    ]
+
+    /// A source that is a PERSON or a CHARACTER is not an adaptation of a text. "Based on Batman" is a
+    /// different claim from "based on a novel", and folding them together would fill a books row with
+    /// superhero films.
+    static let characterMarkers = ["character", "fictional human", "superhero team", "human", "mutate",
+                                   "fictional"]
+
+    /// One Wikidata P31 label → our vocabulary.
+    public static func sourceKind(forType label: String) -> SourceKind {
+        let low = label.trimmingCharacters(in: .whitespaces).lowercased()
+        if let exact = sourceKindByType[low] { return exact }
+        if characterMarkers.contains(where: { low.contains($0) }) { return .character }
+        // Suffix rules catch the tail Wikidata keeps inventing: "serial novel", "mystery novel".
+        for (suffix, kind) in [("novel", SourceKind.book), ("literature", .book), ("manga", .comic),
+                               ("comics", .comic), ("video game", .game), ("play", .play)]
+        where low.hasSuffix(suffix) {
+            return kind
+        }
+        return .other
+    }
+
+    /// The strongest kind among a source work's types.
+    public static func sourceKind(forTypes labels: [String]) -> SourceKind? {
+        labels.map(sourceKind(forType:))
+            .min { a, b in
+                (SourceKind.priority.firstIndex(of: a) ?? .max) < (SourceKind.priority.firstIndex(of: b) ?? .max)
+            }
+    }
+
     /// `"Solaris (1972 film)"` -> `"Solaris"`. The enwiki article title is the best English display string we
     /// have (89% exact against TMDB, vs rdfs:label's 86%), but it carries a disambiguator that would render
     /// verbatim on a poster card.
