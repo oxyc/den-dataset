@@ -142,6 +142,42 @@ final class WikipediaSourceTests: XCTestCase {
         XCTAssertNil(WikipediaSource.plotSectionIndex(Data(json.utf8)))
     }
 
+    /// "Plot and background" / "Plot segments" — a qualified Plot heading is still the plot. Matching the
+    /// bare word alone left these articles looking plotless (The Tinder Swindler, Coffee and Cigarettes).
+    func testPlotSectionIndexAcceptsQualifiedPlotHeadings() {
+        let json = """
+        {"parse":{"sections":[
+          {"line":"Cast","index":"1"},
+          {"line":"Plot and background","index":"2"}]}}
+        """
+        XCTAssertEqual(WikipediaSource.plotSectionIndex(Data(json.utf8)), "2")
+    }
+
+    /// Anthologies and documentaries head their story section "Segments" / "Content" (Fantasia 2000,
+    /// Jodorowsky's Dune) — accepted, but only when the article offers nothing better.
+    func testPlotSectionIndexFallsBackToAnthologyHeadings() {
+        let anthology = #"{"parse":{"sections":[{"line":"Cast","index":"1"},{"line":"Segments","index":"2"}]}}"#
+        XCTAssertEqual(WikipediaSource.plotSectionIndex(Data(anthology.utf8)), "2")
+
+        let both = """
+        {"parse":{"sections":[
+          {"line":"Content","index":"1"},
+          {"line":"Plot","index":"2"}]}}
+        """
+        XCTAssertEqual(WikipediaSource.plotSectionIndex(Data(both.utf8)), "2", "a real Plot outranks Content")
+    }
+
+    /// The filter trimmed whitespace and the sort did not, so a padded heading ranked last and lost to a
+    /// weaker one further down the article.
+    func testPlotSectionIndexRanksPaddedHeadings() {
+        let json = """
+        {"parse":{"sections":[
+          {"line":"Summary","index":"1"},
+          {"line":" Plot ","index":"2"}]}}
+        """
+        XCTAssertEqual(WikipediaSource.plotSectionIndex(Data(json.utf8)), "2")
+    }
+
     func testDecodeWikitextPullsTheString() {
         let json = #"{"parse":{"wikitext":"'''Foo''' bar."}}"#
         XCTAssertEqual(WikipediaSource.decodeWikitext(Data(json.utf8)), "'''Foo''' bar.")

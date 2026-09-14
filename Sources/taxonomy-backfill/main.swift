@@ -224,6 +224,9 @@ enum Commands {
         let tmdb = try TMDB.client()
         let batchId = checkpoint.nextBatch
         var titles: [EnrichedTitle] = []
+        // Opt-IN now, not opt-out: excluding anime silently cost the corpus 1,498 titles including the entire
+        // Ghibli catalogue, and a default that loses well-known titles should have to be asked for.
+        let excludeAnime = args.has("--exclude-anime")
         var belowFloor = 0, anime = 0, failures = 0, noOverview = 0
         // Ids whose failure was TRANSIENT (429/5xx/timeout, retries already exhausted in transport). These are
         // NOT checkpointed, so the next run retries them — rather than permanently dropping a title on a blip.
@@ -235,7 +238,7 @@ enum Commands {
                     do {
                         let title = try await tmdb.classificationRecord(MediaIdentifier(entry.tmdbId, entry.media))
                         if title.voteCount < floor { return .belowFloor(entry.tmdbId) }
-                        if isAnime(title) { return .anime(entry.tmdbId) }
+                        if excludeAnime, isAnime(title) { return .anime(entry.tmdbId) }
                         // Can't classify a stub — drop titles with no / very-short overview (DT-C region-aware floor).
                         if title.overview.trimmingCharacters(in: .whitespacesAndNewlines).count < 20 {
                             return .noOverview(entry.tmdbId)
@@ -351,10 +354,25 @@ enum Commands {
                         let facts = mapping[title.tmdbId]
                         let title = title.mergingWikidata(runtimeMinutes: facts?.runtimeMinutes,
                                                           creators: facts?.creators ?? [])
-                        guard let article = facts?.article else { return .noPlot(title) }
+                        // The title's OWN article first; the source work only if that yields no plot. An
+                        // adaptation's article is often production-and-episodes with no story in it at all —
+                        // "Attack on Titan (TV series)" is Series overview / Seasons / Cast, while the plot
+                        // lives on the franchise page. Measured: this recovers 87% of plotless anime series,
+                        // 21% of general TV, 5% of films.
+                        //
+                        // The source article describes the BOOK or franchise, not this adaptation, so it can
+                        // cover unadapted material or diverge. Accepted for premise and thematic similarity,
+                        // where the story engine is what matters; it would be wrong for anything claiming to
+                        // describe this cut specifically.
+                        let candidates = [facts?.article, facts?.sourceArticle].compactMap { $0 }
+                        guard !candidates.isEmpty else { return .noPlot(title) }
                         do {
-                            guard let plot = try await wiki.plot(articleTitle: article),
-                                  plot.count >= wikiPlotFloor else { return .noPlot(title) }
+                            var found: String?
+                            for candidate in candidates {
+                                if let plot = try await wiki.plot(articleTitle: candidate),
+                                   plot.count >= wikiPlotFloor { found = plot; break }
+                            }
+                            guard let plot = found else { return .noPlot(title) }
                             return .grounded(title.groundedOnWikiPlot(plot))
                         } catch {
                             if Transport.isRetryable(error) {
@@ -1569,6 +1587,16 @@ enum Commands {
 // MARK: - Anime filter (single authority; both worklist modes funnel through enrich)
 
 /// TMDB keyword 210024 = "anime"; Japanese-language Animation is the catch-all. DT-taxonomy.md: **no anime**.
+/// Anime, by TMDB's `anime` keyword or by "animated AND originally Japanese".
+///
+/// `enrich` used to DROP everything this matched, which is why the corpus held 595 Japanese films and 2,469
+/// animated titles and precisely ZERO in the intersection — Spirited Away, Totoro, Akira and 1,495 others were
+/// never fetched at all. Nothing recorded why. The likely reason is that t02's subgenres are built for Western
+/// film and TV and fit anime badly, which is true but is an argument for better labels, not for the titles
+/// being absent from search, similarity, facets and facts as well.
+///
+/// The predicate is kept because the flag is still worth carrying: `enrich --exclude-anime` restores the old
+/// behaviour, and a caller that wants an anime-only pass can invert it.
 func isAnime(_ title: EnrichedTitle) -> Bool {
     if title.keywords.contains(where: { $0.id == 210024 }) { return true }
     if title.genreIDs.contains(16) && title.originalLanguage == "ja" { return true }
