@@ -36,6 +36,9 @@ KEEP = (
     # What a title was adapted from: the Q-ids link adaptations of one source to each other, the kinds are
     # what "based on a book" needs. 7,279 records carry the first, 7,271 the second.
     "basedOn", "basedOnKind",
+    # Minutes (P2047) — 85% overall, 91% of films. Answers "something short tonight", which nothing could.
+    # A SERIES' value is per episode, so the two media types are not comparable and atlas judges only films.
+    "runtimeMinutes",
 )
 
 
