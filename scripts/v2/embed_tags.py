@@ -107,7 +107,15 @@ def main():
 
     if args.source == 'v1':
         with open(os.path.join(ROOT, 'labels-premise.json'), encoding='utf-8') as fh:
-            media_of = {r['tmdbId']: r['mediaType'] for r in json.load(fh)['records']}
+            records = json.load(fh)['records']
+        # v1's tags carry a BARE tmdb id, so the media type is recovered here — and TMDB's movie and series
+        # id spaces overlap. The shipped 37.5k happen to contain no colliding bare id, which is the only
+        # reason keying by id alone works at all; one new collision would silently file a title's vector
+        # under the other media type. index_io.py recovers the same way and refuses on a collision — this
+        # reads the same file and must refuse too, rather than quietly picking whichever record came last.
+        media_of = {r['tmdbId']: r['mediaType'] for r in records}
+        if len(media_of) != len(records):
+            raise SystemExit('labels-premise.json has colliding bare tmdb ids — cannot key v1 by id alone')
         with open(os.path.join(ROOT, 'premise-tags-wip', 'tags-raw.json'), encoding='utf-8') as fh:
             raw = json.load(fh)
         items = []

@@ -427,6 +427,16 @@ enum Commands {
             }
             for try await dto in group { if let dto { out.append(dto) } }
         }
+        // Each fetch above is a `try?`, so an expired TMDB_API_KEY or a rate-limit storm returns nils and
+        // this would write a nearly-empty batch and exit 0 — and the batch file is the source of truth for
+        // the ids it covers, so the missing titles simply cease to exist downstream. `metadata` already
+        // refuses a partial result for exactly this reason; the same floor belongs here.
+        let coverage = ids.isEmpty ? 1.0 : Double(out.count) / Double(ids.count)
+        guard coverage >= Self.metadataCoverageFloor else {
+            throw ToolError(message: "only \(out.count) of \(ids.count) ids returned a TMDB record "
+                + "(\(Int(coverage * 100))%, floor \(Int(Self.metadataCoverageFloor * 100))%) — that is TMDB "
+                + "failing, not dead ids. Nothing written; re-run to retry this batch.")
+        }
         out.sort { $0.tmdbId < $1.tmdbId }
         try JSON.writePretty(out, to: Layout.enrichedBatch(outDir, batchId))
         print(JSON.line(["batchId": batchId, "requested": ids.count, "enriched": out.count]))
