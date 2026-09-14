@@ -423,10 +423,25 @@ public struct WikipediaSource: Sendable {
 
     // MARK: - Plot
 
+    /// A plot and the article revision it was read from. The revision is what makes an incremental refresh
+    /// possible: with it stored, a later pass asks Wikipedia for current revids in batches of 50 and re-fetches
+    /// ONLY the articles that moved, instead of re-reading all ~40k plots to discover that ~60% are unchanged.
+    public struct PlotFetch: Sendable, Equatable {
+        public let text: String
+        /// nil when the source could not report one (the Enterprise path) — an unknown revision must be
+        /// treated as "changed", since the alternative is silently pinning a stale plot forever.
+        public let revId: Int?
+
+        public init(text: String, revId: Int?) {
+            self.text = text
+            self.revId = revId
+        }
+    }
+
     /// The article's Plot/Synopsis section as plain prose, or nil if the article has no such section.
-    public func plot(articleTitle: String) async throws -> String? {
+    public func plot(articleTitle: String) async throws -> PlotFetch? {
         if enterpriseToken != nil, let plot = try? await enterprisePlot(articleTitle: articleTitle) {
-            return plot
+            return PlotFetch(text: plot, revId: nil)
         }
         return try await actionAPIPlot(articleTitle: articleTitle)
     }
@@ -462,10 +477,11 @@ public struct WikipediaSource: Sendable {
         plotRank(line) != nil
     }
 
-    private func actionAPIPlot(articleTitle: String) async throws -> String? {
-        // 1. Section list → find the Plot section's index.
+    private func actionAPIPlot(articleTitle: String) async throws -> PlotFetch? {
+        // 1. Section list → find the Plot section's index. The same response carries the article's current
+        //    revid, so recording what we read costs no extra request.
         let sectionsData = try await get(actionAPI, [
-            "action": "parse", "page": articleTitle, "prop": "sections",
+            "action": "parse", "page": articleTitle, "prop": "sections|revid",
             "format": "json", "formatversion": "2", "redirects": "1",
         ])
         guard let index = Self.plotSectionIndex(sectionsData) else { return nil }
@@ -477,7 +493,12 @@ public struct WikipediaSource: Sendable {
         ])
         guard let wikitext = Self.decodeWikitext(wikitextData) else { return nil }
         let prose = Self.cleanWikitext(wikitext)
-        return prose.isEmpty ? nil : prose
+        return prose.isEmpty ? nil : PlotFetch(text: prose, revId: Self.revId(sectionsData))
+    }
+
+    /// The article revision a `prop=…|revid` response was rendered from.
+    static func revId(_ data: Data) -> Int? {
+        (try? JSONDecoder().decode(SectionsResult.self, from: data))?.parse.revid
     }
 
     /// Parse a `prop=sections` response (formatversion=2) and return the Plot section's `index` string.
@@ -497,7 +518,7 @@ public struct WikipediaSource: Sendable {
 
     private struct SectionsResult: Decodable {
         let parse: Parse
-        struct Parse: Decodable { let sections: [Section] }
+        struct Parse: Decodable { let sections: [Section]; let revid: Int? }
         struct Section: Decodable { let line: String; let index: String }
     }
     private struct WikitextResult: Decodable {

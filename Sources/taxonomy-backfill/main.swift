@@ -367,13 +367,17 @@ enum Commands {
                         let candidates = [facts?.article, facts?.sourceArticle].compactMap { $0 }
                         guard !candidates.isEmpty else { return .noPlot(title) }
                         do {
-                            var found: String?
+                            var found: (article: String, plot: WikipediaSource.PlotFetch)?
                             for candidate in candidates {
                                 if let plot = try await wiki.plot(articleTitle: candidate),
-                                   plot.count >= wikiPlotFloor { found = plot; break }
+                                   plot.text.count >= wikiPlotFloor { found = (candidate, plot); break }
                             }
-                            guard let plot = found else { return .noPlot(title) }
-                            return .grounded(title.groundedOnWikiPlot(plot))
+                            guard let hit = found else { return .noPlot(title) }
+                            // Which article won and at which revision — recorded so a refresh can ask for
+                            // current revids in bulk and re-read only the articles that moved.
+                            return .grounded(title.groundedOnWikiPlot(hit.plot.text,
+                                                                      article: hit.article,
+                                                                      revId: hit.plot.revId))
                         } catch {
                             if Transport.isRetryable(error) {
                                 Log.append(log, "plot-deferred id=\(title.tmdbId) (transient: \(error))")
@@ -1717,6 +1721,10 @@ struct EnrichedDTO: Codable {
     /// Minutes, from Wikidata — the enriched record has no other runtime source.
     let runtimeMinutes: Int?
     let hasWikiPlot: Bool
+    /// The enwiki article the plot came from and the revision it was read at — the two facts a refresh needs
+    /// to ask "did this move?" in bulk instead of re-reading every plot to find out.
+    let plotArticle: String?
+    let plotRevId: Int?
 
     init(_ t: EnrichedTitle) {
         tmdbId = t.tmdbId; mediaType = t.mediaType.rawValue; title = t.title; year = t.year
@@ -1726,6 +1734,7 @@ struct EnrichedDTO: Codable {
         director = t.director; topCast = t.topCast; createdBy = t.createdBy
         runtimeMinutes = t.runtimeMinutes
         hasWikiPlot = t.hasWikiPlot
+        plotArticle = t.plotArticle; plotRevId = t.plotRevId
     }
 
     // Tolerant decode: a scratch batch written before FP-2's fields existed (or a hand-authored fixture)
@@ -1749,6 +1758,10 @@ struct EnrichedDTO: Codable {
         createdBy = try c.decodeIfPresent([String].self, forKey: .createdBy) ?? []
         runtimeMinutes = try c.decodeIfPresent(Int.self, forKey: .runtimeMinutes)
         hasWikiPlot = try c.decodeIfPresent(Bool.self, forKey: .hasWikiPlot) ?? false
+        // Absent on every batch written before the refresh fields existed. Nil reads as "revision unknown",
+        // which a refresh must treat as changed — re-reading a plot is cheap, pinning a stale one is not.
+        plotArticle = try c.decodeIfPresent(String.self, forKey: .plotArticle)
+        plotRevId = try c.decodeIfPresent(Int.self, forKey: .plotRevId)
     }
 
     func toEnrichedTitle() -> EnrichedTitle {
@@ -1757,7 +1770,8 @@ struct EnrichedDTO: Codable {
                       keywords: zip(keywordIDs, keywords).map { Keyword(id: $0, name: $1) },
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast, createdBy: createdBy,
-                      runtimeMinutes: runtimeMinutes, hasWikiPlot: hasWikiPlot)
+                      runtimeMinutes: runtimeMinutes, hasWikiPlot: hasWikiPlot,
+                      plotArticle: plotArticle, plotRevId: plotRevId)
     }
 }
 

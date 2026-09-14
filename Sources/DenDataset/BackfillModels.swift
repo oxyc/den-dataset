@@ -45,12 +45,22 @@ public struct EnrichedTitle: Sendable, Equatable {
     /// True once `overview` holds a live Wikipedia plot (vs the TMDB overview fallback). The composed doc uses
     /// the plot only when this is set; a no-plot title composes on facts + tags with an empty Plot.
     public let hasWikiPlot: Bool
+    /// The enwiki article the plot was read from, and the revision it was read at. Together they are what
+    /// makes a refresh incremental: a later pass asks for current revids 50 articles at a time and re-fetches
+    /// only what moved. Without them every refresh must re-read all ~40k plots to learn that most are
+    /// unchanged — a ~7h pass to find the ~4% that actually shifted.
+    ///
+    /// `plotArticle` may be the article of the SOURCE work rather than this title's own (see the P144/P179
+    /// fallback in the enrich pass), which is exactly why it is recorded rather than re-derived.
+    public let plotArticle: String?
+    public let plotRevId: Int?
 
     public init(tmdbId: Int, mediaType: MediaType, title: String, year: Int?, overview: String,
                 genreIDs: [Int], genreNames: [String], keywords: [Keyword], originCountry: [String],
                 originalLanguage: String?, voteCount: Int,
                 director: String? = nil, topCast: [String] = [], createdBy: [String] = [],
-                runtimeMinutes: Int? = nil, hasWikiPlot: Bool = false) {
+                runtimeMinutes: Int? = nil, hasWikiPlot: Bool = false,
+                plotArticle: String? = nil, plotRevId: Int? = nil) {
         self.tmdbId = tmdbId; self.mediaType = mediaType; self.title = title; self.year = year
         self.overview = overview; self.genreIDs = genreIDs; self.genreNames = genreNames
         self.keywords = keywords; self.originCountry = originCountry
@@ -58,15 +68,17 @@ public struct EnrichedTitle: Sendable, Equatable {
         self.director = director; self.topCast = topCast; self.createdBy = createdBy
         self.runtimeMinutes = runtimeMinutes
         self.hasWikiPlot = hasWikiPlot
+        self.plotArticle = plotArticle; self.plotRevId = plotRevId
     }
 
     /// Return a copy with the Wikipedia plot grounded in (`overview` ← plot, `hasWikiPlot` = true).
-    public func groundedOnWikiPlot(_ plot: String) -> EnrichedTitle {
+    public func groundedOnWikiPlot(_ plot: String, article: String? = nil, revId: Int? = nil) -> EnrichedTitle {
         EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: plot,
                       genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast, createdBy: createdBy,
-                      runtimeMinutes: runtimeMinutes, hasWikiPlot: true)
+                      runtimeMinutes: runtimeMinutes, hasWikiPlot: true,
+                      plotArticle: article, plotRevId: revId)
     }
 
     /// Fold in the facts that ride along on the Wikidata hop.
@@ -81,7 +93,8 @@ public struct EnrichedTitle: Sendable, Equatable {
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast,
                       createdBy: creators.isEmpty ? createdBy : creators,
-                      runtimeMinutes: wikiRuntime ?? runtimeMinutes, hasWikiPlot: hasWikiPlot)
+                      runtimeMinutes: wikiRuntime ?? runtimeMinutes, hasWikiPlot: hasWikiPlot,
+                      plotArticle: plotArticle, plotRevId: plotRevId)
     }
 }
 
