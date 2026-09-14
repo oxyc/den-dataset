@@ -230,40 +230,51 @@ enum Commands {
         var belowFloor = 0, anime = 0, failures = 0, noOverview = 0
         // Ids whose failure was TRANSIENT (429/5xx/timeout, retries already exhausted in transport). These are
         // NOT checkpointed, so the next run retries them — rather than permanently dropping a title on a blip.
-        var deferred = Set<Int>()
+        var deferred = Set<MediaKey>()
+        // Nor are titles rejected for being BELOW THE VOTE FLOOR. A vote count is the one input here that
+        // moves on its own, and it only ever moves up — so "below the floor" is a verdict about today, not
+        // about the title. Checkpointing it made the rejection permanent: a title at 40 votes when it was
+        // first seen would never be reconsidered at 62, and a detail response served from cache (up to its
+        // TTL old) widened that window to weeks. They stay pending and are re-judged next run, which the
+        // response cache makes nearly free.
+        var belowFloorKeys = Set<MediaKey>()
 
         try await withThrowingTaskGroup(of: EnrichOutcome.self) { group in
             for entry in pending {
                 group.addTask {
                     do {
+                        let key = MediaKey(entry.media, entry.tmdbId)
                         let title = try await tmdb.classificationRecord(MediaIdentifier(entry.tmdbId, entry.media))
-                        if title.voteCount < floor { return .belowFloor(entry.tmdbId) }
-                        if excludeAnime, isAnime(title) { return .anime(entry.tmdbId) }
+                        if title.voteCount < floor { return .belowFloor(key) }
+                        if excludeAnime, isAnime(title) { return .anime(key) }
                         // Can't classify a stub — drop titles with no / very-short overview (DT-C region-aware floor).
                         if title.overview.trimmingCharacters(in: .whitespacesAndNewlines).count < 20 {
-                            return .noOverview(entry.tmdbId)
+                            return .noOverview(key)
                         }
                         return .ok(title)
                     } catch {
                         // Transient → defer (retry next run); definitive (404/decoding) → a real dead id, drop.
+                        let key = MediaKey(entry.media, entry.tmdbId)
                         return Transport.isRetryable(error)
-                            ? .transientFailure(entry.tmdbId, "\(error)")
-                            : .failure(entry.tmdbId, "\(error)")
+                            ? .transientFailure(key, "\(error)")
+                            : .failure(key, "\(error)")
                     }
                 }
             }
             for try await outcome in group {
                 switch outcome {
                 case .ok(let title): titles.append(title)
-                case .belowFloor: belowFloor += 1
+                case .belowFloor(let key):
+                    belowFloor += 1
+                    belowFloorKeys.insert(key)
                 case .anime: anime += 1
                 case .noOverview: noOverview += 1
-                case .failure(let id, let reason):
+                case .failure(let key, let reason):
                     failures += 1
-                    Log.append(Layout.enrichLog(outDir), "fetch-failure id=\(id) \(reason)")
-                case .transientFailure(let id, let reason):
-                    deferred.insert(id)
-                    Log.append(Layout.enrichLog(outDir), "fetch-deferred id=\(id) (transient: \(reason))")
+                    Log.append(Layout.enrichLog(outDir), "fetch-failure id=\(key.logLabel) \(reason)")
+                case .transientFailure(let key, let reason):
+                    deferred.insert(key)
+                    Log.append(Layout.enrichLog(outDir), "fetch-deferred id=\(key.logLabel) (transient: \(reason))")
                 }
             }
         }
@@ -312,8 +323,12 @@ enum Commands {
                 + "nextBatch is out of step with the batches on disk — fix it rather than clobbering.")
         }
         try JSON.writePretty(survivors, to: batchPath)
-        // Checkpoint every pending id EXCEPT the deferred (transient) ones — those stay pending for a retry.
-        for entry in pending where !deferred.contains(entry.tmdbId) {
+        // Checkpoint every pending id EXCEPT those still owed another look: transient failures (a blip must
+        // not drop a title) and below-floor rejections (a vote count only climbs, so today's verdict is not
+        // the title's).
+        for entry in pending {
+            let key = MediaKey(entry.media, entry.tmdbId)
+            guard !deferred.contains(key), !belowFloorKeys.contains(key) else { continue }
             checkpoint.processed.insert(EnrichCheckpoint.key(entry.media, entry.tmdbId))
         }
         checkpoint.nextBatch += 1
@@ -335,7 +350,8 @@ enum Commands {
     enum PlotOutcome {
         case grounded(EnrichedTitle)
         case noPlot(EnrichedTitle)
-        case deferred(Int)
+        /// MediaKey, not a bare id: deferring "95" would hold back a movie and a series together.
+        case deferred(MediaKey)
     }
 
     /// Minimum plot length to re-ground on (chars). Below this, a "Plot" section is a bare one-line logline that
@@ -383,16 +399,21 @@ enum Commands {
                             guard let hit = found else { return .noPlot(title) }
                             // Which article won and at which revision — recorded so a refresh can ask for
                             // current revids in bulk and re-read only the articles that moved.
-                            return .grounded(title.groundedOnWikiPlot(hit.plot.text,
-                                                                      article: hit.article,
-                                                                      revId: hit.plot.revId))
+                            // The RESOLVED article, not the one asked for: a redirect returns the target's
+                            // content and revid, so storing the redirect's name would make the refresh
+                            // compare revisions of two different pages.
+                            return .grounded(title.groundedOnWikiPlot(
+                                hit.plot.text,
+                                article: hit.plot.resolvedArticle ?? hit.article,
+                                revId: hit.plot.revId))
                         } catch {
+                            let key = MediaKey(title.mediaType, title.tmdbId)
                             if Transport.isRetryable(error) {
-                                Log.append(log, "plot-deferred id=\(title.tmdbId) (transient: \(error))")
-                                return .deferred(title.tmdbId)
+                                Log.append(log, "plot-deferred id=\(key.logLabel) (transient: \(error))")
+                                return .deferred(key)
                             }
                             // Definitive (e.g. 404 on a stale sitelink) — keep the title on its TMDB overview.
-                            Log.append(log, "plot-miss id=\(title.tmdbId) (\(error))")
+                            Log.append(log, "plot-miss id=\(key.logLabel) (\(error))")
                             return .noPlot(title)
                         }
                     }
@@ -419,23 +440,45 @@ enum Commands {
         let ids = rows.map(\.tmdbId)
         let tmdb = try TMDB.client()
         var out: [EnrichedDTO] = []
-        try await withThrowingTaskGroup(of: EnrichedDTO?.self) { group in
+        var misses: [String] = []
+        try await withThrowingTaskGroup(of: Result<EnrichedDTO, Error>.self) { group in
             for id in ids {
                 group.addTask {
-                    (try? await tmdb.classificationRecord(MediaIdentifier(id, mediaType))).map(EnrichedDTO.init)
+                    do { return .success(EnrichedDTO(try await tmdb.classificationRecord(
+                        MediaIdentifier(id, mediaType)))) }
+                    catch { return .failure(EnrichIDError(id: id, mediaType: mediaType, underlying: error)) }
                 }
             }
-            for try await dto in group { if let dto { out.append(dto) } }
+            // Keep the reason, don't swallow it. The floor below asserts "that is TMDB failing, not dead ids";
+            // a bare `try?` threw away the only evidence for that claim, leaving the operator to guess which
+            // of the two it was. `metadata` logs each miss for exactly this reason.
+            for try await result in group {
+                switch result {
+                case .success(let dto): out.append(dto)
+                case .failure(let error):
+                    misses.append("\(error)")
+                    Log.append(Layout.enrichLog(outDir), "enrich-ids-miss \(error)")
+                }
+            }
         }
-        // Each fetch above is a `try?`, so an expired TMDB_API_KEY or a rate-limit storm returns nils and
-        // this would write a nearly-empty batch and exit 0 — and the batch file is the source of truth for
-        // the ids it covers, so the missing titles simply cease to exist downstream. `metadata` already
-        // refuses a partial result for exactly this reason; the same floor belongs here.
-        let coverage = ids.isEmpty ? 1.0 : Double(out.count) / Double(ids.count)
-        guard coverage >= Self.metadataCoverageFloor else {
-            throw ToolError(message: "only \(out.count) of \(ids.count) ids returned a TMDB record "
-                + "(\(Int(coverage * 100))%, floor \(Int(Self.metadataCoverageFloor * 100))%) — that is TMDB "
-                + "failing, not dead ids. Nothing written; re-run to retry this batch.")
+        // A near-empty batch must not be written and called success: the batch file is the source of truth
+        // for the ids it covers, so whatever is missing ceases to exist downstream.
+        //
+        // The floor is on RETRYABLE failures only. Judging it on total coverage let a genuinely dead id
+        // block a batch for good — on a 5-id targeted re-pass one 404 is 80%, under the 90% floor, and no
+        // amount of re-running fixes a deleted TMDB record. A 404 is an answer; a 429 is not.
+        let retryable = misses.filter { $0.contains("retryable") }.count
+        let retryableShare = ids.isEmpty ? 0 : Double(retryable) / Double(ids.count)
+        guard retryableShare <= 1 - Self.metadataCoverageFloor else {
+            throw ToolError(message: "\(retryable) of \(ids.count) ids failed transiently "
+                + "(\(Int(retryableShare * 100))%, tolerance \(Int((1 - Self.metadataCoverageFloor) * 100))%) "
+                + "— that is TMDB failing, not dead ids. Nothing written; re-run to retry this batch. "
+                + "First few: \(misses.prefix(3).joined(separator: "; "))")
+        }
+        if !misses.isEmpty {
+            let note = "  enrich-ids: \(misses.count) of \(ids.count) ids returned no record "
+                + "(see \(Layout.enrichLog(outDir)))\n"
+            FileHandle.standardError.write(Data(note.utf8))
         }
         out.sort { $0.tmdbId < $1.tmdbId }
         try JSON.writePretty(out, to: Layout.enrichedBatch(outDir, batchId))
@@ -1719,6 +1762,19 @@ struct WLEntry: Codable {
 
 /// The scratch enriched record (holds raw TMDB text → never shipped; gitignored). Captures the full
 /// EnrichedTitle so `assemble` can rebuild it for grounding, plus the human-readable fields Haiku reads.
+/// One `enrich-ids` fetch that failed, carrying enough to tell a dead id from a failing TMDB. Its description
+/// names whether the cause was retryable, which is what the coverage gate keys on.
+struct EnrichIDError: Error, CustomStringConvertible {
+    let id: Int
+    let mediaType: MediaType
+    let underlying: Error
+
+    var description: String {
+        let kind = Transport.isRetryable(underlying) ? "retryable" : "definitive"
+        return "\(mediaType.rawValue):\(id) \(kind) (\(underlying))"
+    }
+}
+
 /// A TMDB id together with its media type — the only safe key for anything holding both. The two id spaces
 /// overlap, so a bare `Int` silently conflates movie 95 (Armageddon) with series 95 (Buffy).
 struct MediaKey: Hashable {
@@ -1729,6 +1785,10 @@ struct MediaKey: Hashable {
         self.mediaType = mediaType
         self.tmdbId = tmdbId
     }
+
+    /// `"movie:95"` — log lines printed a bare id, which is ambiguous in exactly the way this type exists to
+    /// prevent: "id=95" could be Armageddon or Buffy.
+    var logLabel: String { "\(mediaType.rawValue):\(tmdbId)" }
 }
 
 struct EnrichedDTO: Codable {
@@ -1842,13 +1902,15 @@ struct HaikuVote: Codable {
 }
 
 
+/// Ids here are `MediaKey`, never a bare Int: a batch can hold both media types, and TMDB's id spaces
+/// overlap, so deferring "95" would otherwise defer a movie and a series together.
 enum EnrichOutcome {
     case ok(EnrichedTitle)
-    case belowFloor(Int)
-    case anime(Int)
-    case noOverview(Int)
-    case failure(Int, String)          // definitive (404/decoding) — a dead id, checkpointed
-    case transientFailure(Int, String) // 429/5xx/timeout after retries — deferred, NOT checkpointed
+    case belowFloor(MediaKey)
+    case anime(MediaKey)
+    case noOverview(MediaKey)
+    case failure(MediaKey, String)          // definitive (404/decoding) — a dead id, checkpointed
+    case transientFailure(MediaKey, String) // 429/5xx/timeout after retries — deferred, NOT checkpointed
 }
 
 struct EnrichCheckpoint: Codable {

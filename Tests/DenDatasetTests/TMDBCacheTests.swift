@@ -63,6 +63,25 @@ final class TMDBCacheTests: XCTestCase {
         XCTAssertNil(cache.read(key), "an empty body is not a hit")
     }
 
+    /// Decoding proves nothing — every ClassificationWire field is Optional, so `{}` and TMDB's own error
+    /// envelope both decode cleanly and would then be served for the whole TTL.
+    func testOnlyRealTitleRecordsAreWorthCaching() {
+        func ok(_ s: String, appended: Bool = false) -> Bool {
+            TMDBClient.isCacheableBody(Data(s.utf8), expectingAppendedResources: appended)
+        }
+        XCTAssertFalse(ok("{}"))
+        XCTAssertFalse(ok(#"{"success":false,"status_code":34,"status_message":"Not found."}"#))
+        XCTAssertFalse(ok(#"{"id":278,"title":"   "}"#), "a blank name is not a record")
+        XCTAssertFalse(ok("not json at all"))
+        XCTAssertTrue(ok(#"{"id":278,"title":"The Shawshank Redemption"}"#))
+        XCTAssertTrue(ok(#"{"id":1396,"name":"Breaking Bad"}"#), "series carry `name`, not `title`")
+
+        // A 200 that silently dropped the appended sub-resources yields a title with no keywords, no
+        // director and no cast — indistinguishable downstream from a title that genuinely has none.
+        XCTAssertFalse(ok(#"{"id":278,"title":"X"}"#, appended: true))
+        XCTAssertTrue(ok(#"{"id":278,"title":"X","keywords":{},"credits":{}}"#, appended: true))
+    }
+
     func testEnvironmentSwitchesCachingOff() {
         XCTAssertNil(TMDBCache.fromEnvironment(["TMDB_CACHE": "0"]))
         XCTAssertNotNil(TMDBCache.fromEnvironment([:]))

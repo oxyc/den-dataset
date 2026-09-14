@@ -431,10 +431,17 @@ public struct WikipediaSource: Sendable {
         /// nil when the source could not report one (the Enterprise path) — an unknown revision must be
         /// treated as "changed", since the alternative is silently pinning a stale plot forever.
         public let revId: Int?
+        /// The article the text actually came from, AFTER redirect resolution. The requested title is not
+        /// good enough: we send `redirects=1`, so asking for a redirect returns the target's content and the
+        /// target's revid. Storing the redirect's name beside the target's revid would make the bulk-revid
+        /// refresh compare against a redirect page — which effectively never changes — and pin the stale
+        /// plot forever, the exact failure the revision is recorded to prevent.
+        public let resolvedArticle: String?
 
-        public init(text: String, revId: Int?) {
+        public init(text: String, revId: Int?, resolvedArticle: String? = nil) {
             self.text = text
             self.revId = revId
+            self.resolvedArticle = resolvedArticle
         }
     }
 
@@ -474,14 +481,19 @@ public struct WikipediaSource: Sendable {
     /// the filter AND the sort: they used to normalise differently — the filter trimmed whitespace and the
     /// sort did not — so a heading with a stray space passed the filter and then sorted last, letting an
     /// article's "Summary" win over its "Plot".
+    /// Ranks are spaced so the two derived classes can slot BETWEEN the exact names rather than after all of
+    /// them. Appending them instead put "Plot and background" below "Summary" — reintroducing, for qualified
+    /// headings, the very defect this function exists to prevent.
     static func plotRank(_ line: String) -> Int? {
         let normalized = strippedHeading(line)
-        if let exact = plotSectionNames.firstIndex(of: normalized) { return exact }
-        // "Plot and background", "Plot segments" — a qualified Plot heading is still the plot, and matching
-        // the bare word alone missed them.
-        if normalized.hasPrefix("plot ") { return plotSectionNames.count }
+        if let exact = plotSectionNames.firstIndex(of: normalized) { return exact * 10 }
+        // "Plot and background", "Plot segments" — a qualified Plot heading is still the plot, and is better
+        // evidence than "Synopsis" or "Summary", so it ranks just under the two exact Plot spellings.
+        if normalized.hasPrefix("plot ") { return 15 }
+        // Anthology/documentary headings are the weakest evidence: ranked below every real name, so an
+        // article carrying both still yields its actual plot.
         if let fallback = plotSectionFallbackNames.firstIndex(of: normalized) {
-            return plotSectionNames.count + 1 + fallback
+            return plotSectionNames.count * 10 + fallback
         }
         return nil
     }
@@ -507,7 +519,10 @@ public struct WikipediaSource: Sendable {
         ])
         guard let wikitext = Self.decodeWikitext(wikitextData) else { return nil }
         let prose = Self.cleanWikitext(wikitext)
-        return prose.isEmpty ? nil : PlotFetch(text: prose, revId: Self.revId(sectionsData))
+        guard !prose.isEmpty else { return nil }
+        let parsed = try? JSONDecoder().decode(SectionsResult.self, from: sectionsData)
+        return PlotFetch(text: prose, revId: parsed?.parse.revid,
+                         resolvedArticle: parsed?.parse.title ?? articleTitle)
     }
 
     /// The article revision a `prop=…|revid` response was rendered from.
@@ -532,7 +547,8 @@ public struct WikipediaSource: Sendable {
 
     private struct SectionsResult: Decodable {
         let parse: Parse
-        struct Parse: Decodable { let sections: [Section]; let revid: Int? }
+        // `title` is the page AFTER redirect resolution, which is what must be stored alongside `revid`.
+        struct Parse: Decodable { let sections: [Section]; let revid: Int?; let title: String? }
         struct Section: Decodable { let line: String; let index: String }
     }
     private struct WikitextResult: Decodable {

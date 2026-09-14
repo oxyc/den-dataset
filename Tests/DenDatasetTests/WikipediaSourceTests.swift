@@ -167,6 +167,21 @@ final class WikipediaSourceTests: XCTestCase {
         XCTAssertEqual(WikipediaSource.plotSectionIndex(Data(both.utf8)), "2", "a real Plot outranks Content")
     }
 
+    /// A qualified Plot heading is better evidence than "Synopsis" or "Summary". Ranking it after every exact
+    /// name put it below "Summary" — the same "weaker heading wins" defect plotRank exists to prevent.
+    func testQualifiedPlotHeadingOutranksSummaryAndSynopsis() {
+        let json = """
+        {"parse":{"sections":[
+          {"line":"Summary","index":"1"},
+          {"line":"Synopsis","index":"2"},
+          {"line":"Plot and background","index":"3"}]}}
+        """
+        XCTAssertEqual(WikipediaSource.plotSectionIndex(Data(json.utf8)), "3")
+        XCTAssertLessThan(WikipediaSource.plotRank("Plot segments")!, WikipediaSource.plotRank("Summary")!)
+        XCTAssertLessThan(WikipediaSource.plotRank("Plot")!, WikipediaSource.plotRank("Plot segments")!)
+        XCTAssertLessThan(WikipediaSource.plotRank("Plot segments")!, WikipediaSource.plotRank("Segments")!)
+    }
+
     /// MediaWiki wraps a heading in markup when the page needs directionality handling — Face/Off's plot
     /// section arrives as `<span dir="ltr">Plot</span>`, which matched nothing and cost the article its plot.
     func testPlotSectionIndexStripsMarkupFromHeadings() {

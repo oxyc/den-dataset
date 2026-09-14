@@ -176,12 +176,33 @@ public final class TMDBClient: Sendable {
             }
             return data
         }
-        // Only a body that decodes is worth keeping. An error page or a truncated response cached here would
-        // be served for the whole TTL, turning one bad minute into a month of wrong answers.
-        if let cacheKey, (try? Self.decoder.decode(ClassificationWire.self, from: data)) != nil {
+        // Only a body that is actually a title record is worth keeping: anything cached here is served for
+        // the whole TTL, so one bad minute becomes weeks of wrong answers. Decoding alone proves nothing —
+        // every field of ClassificationWire is Optional, so `{}` and TMDB's own
+        // `{"success":false,"status_code":34}` both decode cleanly. Require the fields a real record always
+        // has, and — for a detail call that asked for sub-resources — that they actually came back, since a
+        // response missing them yields a title with no keywords, no director and no cast, which is
+        // indistinguishable downstream from a title that genuinely has none.
+        if let cacheKey, Self.isCacheableBody(data, expectingAppendedResources: query["append_to_response"] != nil) {
             cache?.write(cacheKey, data)
         }
         return data
+    }
+
+    /// True when a body looks like a real TMDB title record and is therefore safe to persist.
+    ///
+    /// Deliberately structural rather than a decode: it checks the JSON for a numeric `id`, a non-empty
+    /// `title`/`name`, and — when the request appended sub-resources — their presence. A partial 200 under
+    /// load is the realistic failure, and it is the one a decode cannot see.
+    static func isCacheableBody(_ data: Data, expectingAppendedResources: Bool) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["id"] is Int else { return false }
+        let name = (object["title"] as? String) ?? (object["name"] as? String) ?? ""
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        if expectingAppendedResources {
+            guard object["keywords"] != nil, object["credits"] != nil else { return false }
+        }
+        return true
     }
 
     /// snake_case JSON → the camelCase wire structs below.
