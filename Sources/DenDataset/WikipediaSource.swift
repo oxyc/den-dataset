@@ -52,15 +52,19 @@ public struct WikipediaSource: Sendable {
     private let sparqlEndpoint: URL
     private let actionAPI: URL
     private let enterpriseToken: String?
+    /// Article and mapping responses served from disk when present — see `WikiCachePolicy`. nil disables.
+    private let cache: ResponseCache?
 
     public init(session: URLSession = .shared,
                 sparqlEndpoint: URL = URL(string: "https://query.wikidata.org/sparql")!,
                 actionAPI: URL = URL(string: "https://en.wikipedia.org/w/api.php")!,
-                enterpriseToken: String? = ProcessInfo.processInfo.environment["WIKIMEDIA_ENTERPRISE_TOKEN"]) {
+                enterpriseToken: String? = ProcessInfo.processInfo.environment["WIKIMEDIA_ENTERPRISE_TOKEN"],
+                cache: ResponseCache? = WikiCachePolicy.cache()) {
         self.session = session
         self.sparqlEndpoint = sparqlEndpoint
         self.actionAPI = actionAPI
         self.enterpriseToken = (enterpriseToken?.isEmpty == false) ? enterpriseToken : nil
+        self.cache = cache
     }
 
     // MARK: - Wikidata mapping
@@ -100,6 +104,17 @@ public struct WikipediaSource: Sendable {
         ORDER BY ?tmdb ?article
         """
 
+        // Keyed on the QUERY TEXT, so it survives a re-run and changes the moment the query does. This is the
+        // most valuable entry in the cache: WDQS is the pipeline's flakiest dependency — it was throttling to
+        // one request a minute during this work — and a mapping is stable, since a title's article and IMDb
+        // id rarely move. A cached mapping lets a re-run proceed through a WDQS outage entirely.
+        let cacheKey = cache?.key(path: "sparql", query: ["q": query])
+        if let cacheKey, let hit = cache?.read(cacheKey) {
+            // Parse failures fall through to a live fetch rather than throwing: a cached body that no longer
+            // decodes must not be able to fail a run.
+            if let mapping = try? Self.parseWikidata(hit) { return mapping }
+        }
+
         var components = URLComponents(url: sparqlEndpoint, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "format", value: "json")]
         var request = URLRequest(url: components.url!)
@@ -109,7 +124,12 @@ public struct WikipediaSource: Sendable {
         request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
         request.httpBody = Data(query.utf8)
 
-        return try Self.parseWikidata(try await send(request))
+        let data = try await send(request)
+        let mapping = try Self.parseWikidata(data)
+        // Written only after parsing succeeded — an HTML maintenance page from WDQS decodes as nothing and
+        // must never be stored, or the outage outlives itself.
+        if let cacheKey { cache?.write(cacheKey, data) }
+        return mapping
     }
 
     /// Decode a SPARQL JSON result into `tmdbId → Mapping`. Pure + testable (fixture JSON → mapping).
@@ -680,6 +700,10 @@ public struct WikipediaSource: Sendable {
     // MARK: - Transport
 
     private func get(_ base: URL, _ query: [String: String]) async throws -> Data {
+        // Two `action=parse` calls per title, ~80k per full pass, nearly all re-reading unchanged articles.
+        // Cached on the full query, so the section list and the section's wikitext occupy separate entries.
+        let cacheKey = cache?.key(path: base.path, query: query)
+        if let cacheKey, let hit = cache?.read(cacheKey) { return hit }
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         // `URLQueryItem` leaves "+" alone, and a receiving server reads it as a SPACE — so every article whose
@@ -691,7 +715,18 @@ public struct WikipediaSource: Sendable {
         var request = URLRequest(url: components.url!)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        return try await send(request)
+        let data = try await send(request)
+        // Only a real answer is worth keeping. The action API reports a missing page or a bad parameter as a
+        // 200 carrying `{"error":{…}}`, so caching on status alone would pin "missingtitle" for the whole TTL
+        // and make a transient outage look like a permanently plotless title.
+        if let cacheKey, Self.isCacheableBody(data) { cache?.write(cacheKey, data) }
+        return data
+    }
+
+    /// True when an action-API body is a successful `parse` result rather than an error envelope.
+    static func isCacheableBody(_ data: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return object["error"] == nil && object["parse"] != nil
     }
 
     /// One HTTP round-trip with transient-failure retry (429/5xx/timeout) + a non-2xx → `WikipediaError.http`.

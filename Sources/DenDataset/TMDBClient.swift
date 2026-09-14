@@ -92,14 +92,14 @@ public final class TMDBClient: Sendable {
     private let baseURL: URL
     private let session: URLSession
     private let gate: AsyncSemaphore
-    /// Detail responses served from disk when present — see `TMDBCache`. nil disables caching entirely.
-    private let cache: TMDBCache?
+    /// Detail responses served from disk when present — see `TMDBCachePolicy`. nil disables caching.
+    private let cache: ResponseCache?
 
     public init(apiKey: String,
                 baseURL: URL = URL(string: "https://api.themoviedb.org/3")!,
                 maxConcurrent: Int = 8,
                 session: URLSession = .shared,
-                cache: TMDBCache? = nil) {
+                cache: ResponseCache? = nil) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.session = session
@@ -150,7 +150,8 @@ public final class TMDBClient: Sendable {
         // A title fetched once should not be fetched again: a full re-enrich is ~60k detail calls, nearly all
         // of them re-reading records that have not changed. Only detail endpoints are cacheable — `/discover`
         // exists to surface what is new, so serving it from disk would hide exactly what it is asked for.
-        let cacheKey = TMDBCache.isCacheable(path: path) ? TMDBCache.key(path: path, query: query) : nil
+        let cacheKey = TMDBCachePolicy.isCacheable(path: path)
+            ? cache?.key(path: path, query: query) : nil
         if let cacheKey, let hit = cache?.read(cacheKey) { return hit }
         guard var components = URLComponents(url: baseURL.appendingPathComponent(path),
                                              resolvingAgainstBaseURL: false) else {

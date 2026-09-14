@@ -2008,9 +2008,9 @@ enum TMDB {
         guard let key = ProcessInfo.processInfo.environment["TMDB_API_KEY"], !key.isEmpty else {
             throw ToolError(message: "set TMDB_API_KEY (enrichment requires it)")
         }
-        // Detail responses are served from disk when already fetched (TMDB_CACHE=0 disables,
-        // TMDB_CACHE_DIR / TMDB_CACHE_TTL_DAYS tune it).
-        return TMDBClient(apiKey: key, maxConcurrent: 8, cache: TMDBCache.fromEnvironment())
+        // Detail responses are served from disk when already fetched (DEN_CACHE=0 or TMDB_CACHE=0
+        // disables, DEN_CACHE_DIR / TMDB_CACHE_TTL_DAYS tune it).
+        return TMDBClient(apiKey: key, maxConcurrent: 8, cache: TMDBCachePolicy.cache())
     }
 }
 
