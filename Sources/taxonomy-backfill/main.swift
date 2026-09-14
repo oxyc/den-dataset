@@ -699,8 +699,27 @@ enum Commands {
             let schema: Int
             let datasetVersion: String
             let genreMap: [String: [String: Int]]
-            let entities: [String: [String: String]]
+            let entities: [String: Entity]
             let records: [Rec]
+            /// One entity as it SHIPS. The scrape checkpoints aliases as a 0x1F-joined string because its
+            /// store is `[String: String]`, but that is an internal encoding: consumers read `aliases` as a
+            /// LIST, and atlas's `RawEntity.aliases` is typed `Vec<String>`. Emitting the joined string
+            /// instead made a 27 MB facts file unparseable at its first entity — atlas dropped the whole
+            /// file and ran `facts_unusable`, losing people search, imdbId, countries and /recommend, from
+            /// one character in one field. The split belongs here, once, at the boundary.
+            struct Entity: Encodable {
+                let en: String?
+                let tmdbPersonId: String?
+                let aliases: [String]?
+
+                init(_ fields: [String: String]) {
+                    en = fields["en"]
+                    tmdbPersonId = fields["tmdbPersonId"]
+                    let joined = fields["aliases"] ?? ""
+                    let parts = joined.split(separator: "\u{1F}").map(String.init)
+                    aliases = parts.isEmpty ? nil : parts
+                }
+            }
             struct Rec: Encodable {
                 let mediaType: String
                 let tmdbId: Int
@@ -732,8 +751,8 @@ enum Commands {
         }
         let version = meta?.datasetVersion ?? "unversioned"
         let path = (outDir as NSString).appendingPathComponent("facts-\(version).json")
-        try JSON.write(Out(schema: 1, datasetVersion: version, genreMap: genreMap, entities: entities,
-                           records: records), to: path)
+        try JSON.write(Out(schema: 1, datasetVersion: version, genreMap: genreMap,
+                           entities: entities.mapValues(Out.Entity.init), records: records), to: path)
         print(JSON.line(["facts": records.count, "entities": entities.count, "genreMap": genreMap.count, "path": path,
                          "hasVector": hasVector ? 1 : 0]))
     }
