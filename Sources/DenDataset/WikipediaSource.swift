@@ -22,8 +22,9 @@ public struct WikipediaSource: Sendable {
     /// facts that ride along on the same query for free.
     public struct Mapping: Sendable, Equatable {
         public let article: String?
-        /// The article of the work this was ADAPTED FROM (P144), else the franchise it belongs to (P179).
-        /// Used only when `article` yields no plot section — see the query comment.
+        /// The article of the work this was ADAPTED FROM (P144) — a novel, memoir or manga that tells the
+        /// same story. Used only when `article` yields no plot section; see the query comment for why the
+        /// franchise a title merely belongs to (P179) is NOT an acceptable substitute.
         public let sourceArticle: String?
         public let imdb: String?
         /// Minutes (P2047). Measured coverage: ~93% of films, ~37% of series — and a series' value is
@@ -74,7 +75,7 @@ public struct WikipediaSource: Sendable {
         // CC0, so neither fact carries TMDB's terms with it. Both are OPTIONAL: a title missing them still
         // returns its article, which is what this call exists for.
         let query = """
-        SELECT ?tmdb ?article ?sourceArticle ?seriesArticle ?imdb ?runtime ?creatorLabel WHERE {
+        SELECT ?tmdb ?article ?sourceArticle ?imdb ?runtime ?creatorLabel WHERE {
           VALUES ?tmdb { \(values) }
           ?film wdt:\(property) ?tmdb .
           OPTIONAL { ?film wdt:P345 ?imdb . }
@@ -83,13 +84,17 @@ public struct WikipediaSource: Sendable {
           OPTIONAL { ?article schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/> . }
           # SOURCE-WORK FALLBACK. An adaptation's own article is often production-and-episodes with no plot:
           # "Attack on Titan (TV series)" is Series overview / Season 1-4 / Cast, while the STORY lives on the
-          # franchise article. P144 (based on) is preferred over P179 (part of the series) because a franchise
-          # page summarises several works at once, so attaching it to one title is a worse answer than a book.
-          # Measured: 87% of plotless anime series have one, vs 21% of general TV and 5% of films.
+          # article for the work it adapts. P144 (based on) names that work, and it tells the same story, so
+          # its plot describes this title: 13 Reasons Why reads its plot off the novel, The Pacific off the
+          # memoir, Shooter off Point of Impact.
+          #
+          # P179 (part of the series) was tried here too and REMOVED. A franchise sibling is not the same
+          # story, so it produced confidently wrong plots — Angel grounded on Buffy, Torchwood on Doctor Who,
+          # Xena on Hercules, Bates Motel on Psycho. Measured over the titles this fallback newly grounded:
+          # 322 came from a P144 source work, against 66 reachable only through P179. Dropping those 66 costs
+          # 0.16% of the grounded corpus and removes every such attribution.
           OPTIONAL { ?film wdt:P144 ?basedOn .
                      ?sourceArticle schema:about ?basedOn ; schema:isPartOf <https://en.wikipedia.org/> . }
-          OPTIONAL { ?film wdt:P179 ?partOf .
-                     ?seriesArticle schema:about ?partOf ; schema:isPartOf <https://en.wikipedia.org/> . }
           SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul". }
         }
         ORDER BY ?tmdb ?article
@@ -126,9 +131,8 @@ public struct WikipediaSource: Sendable {
         for binding in root.results.bindings {
             guard let tmdbRaw = binding.tmdb?.value, let tmdbId = Int(tmdbRaw) else { continue }
             let article = (binding.article?.value).flatMap { Self.articleTitle(fromURL: $0) }
-            // P144 first: a source WORK's plot is this story, where a P179 franchise page summarises several.
-            let source = (binding.sourceArticle?.value ?? binding.seriesArticle?.value)
-                .flatMap { Self.articleTitle(fromURL: $0) }
+            // The work this ADAPTS (P144) — its plot is this story. A franchise sibling's is not.
+            let source = (binding.sourceArticle?.value).flatMap { Self.articleTitle(fromURL: $0) }
             let imdb = binding.imdb?.value
             // Wikidata stores runtime as a decimal ("96" / "96.0"); a series may carry several (a 50- and a
             // 70-minute cut). The SMALLEST is the useful one for "have I got time for this".
@@ -403,7 +407,6 @@ public struct WikipediaSource: Sendable {
             let tmdb: Cell?
             let article: Cell?
             let sourceArticle: Cell?
-            let seriesArticle: Cell?
             let imdb: Cell?
             let runtime: Cell?
             let creatorLabel: Cell?

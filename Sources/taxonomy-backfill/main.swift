@@ -220,6 +220,19 @@ enum Commands {
         guard !pending.isEmpty else {
             print(JSON.line(["remaining": 0, "count": 0])); return
         }
+        // A BATCH HOLDS ONE MEDIA TYPE. Enrichment itself handles both (its Wikidata mapping is keyed by
+        // MediaKey), but everything downstream of the batch file is not: `HaikuVote` carries no media type,
+        // so `loadVotePasses`, `escalation` and `assemble` all key a title by a bare TMDB id. The corpus
+        // holds 1,756 ids that exist as BOTH a movie and a series, so a mixed batch would hand Armageddon
+        // and Buffy the same labels, with nothing in the output to show it. Worklists are written per media,
+        // so this only fires on a hand-assembled one — where failing is far better than labelling silently.
+        let mediaTypes = Set(pending.map(\.media))
+        guard mediaTypes.count == 1 else {
+            throw ToolError(message: "worklist mixes \(mediaTypes.map(\.rawValue).sorted().joined(separator: " + ")) "
+                + "in one batch. The vote files written from it carry no media type, so a TMDB id present as "
+                + "both a movie and a series would be labelled once and applied to both. Split the worklist "
+                + "by media and enrich each separately.")
+        }
 
         let tmdb = try TMDB.client()
         let batchId = checkpoint.nextBatch
