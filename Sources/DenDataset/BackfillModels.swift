@@ -23,8 +23,8 @@ public struct EnrichedTitle: Sendable, Equatable {
     public let mediaType: MediaType
     public let title: String
     public let year: Int?
-    /// The prose the classifier is grounded on. FP-2 re-grounds this to the WIKIPEDIA plot where one exists
-    /// (ToS-clean); it falls back to the TMDB overview only where no Wikipedia plot was found.
+    /// The prose the classifier is grounded on — a **Wikipedia** plot (CC0) or empty. TMDB's overview is
+    /// never carried here; see `overviewChars`.
     public let overview: String
     public let genreIDs: [Int]
     public let genreNames: [String]
@@ -42,9 +42,17 @@ public struct EnrichedTitle: Sendable, Equatable {
     /// Runtime in minutes, from Wikidata (P2047) — ~93% of films carry it, and the enriched record has no
     /// other source for it. Series values are per-episode and much sparser (~37%), so this is a film fact.
     public let runtimeMinutes: Int?
-    /// True once `overview` holds a live Wikipedia plot (vs the TMDB overview fallback). The composed doc uses
-    /// the plot only when this is set; a no-plot title composes on facts + tags with an empty Plot.
+    /// True once `overview` holds a live Wikipedia plot. The composed doc uses the plot only when this is
+    /// set; a no-plot title composes on facts + tags with an empty Plot.
     public let hasWikiPlot: Bool
+    /// How long TMDB's own overview was — the LENGTH, never the text.
+    ///
+    /// TMDB's terms (§1.C) speak directly to using their content with a machine-learning application, so the
+    /// overview may not be embedded, sent to a classifier, or kept in a dataset. The only thing the pipeline
+    /// ever needed from it is whether a title is a stub (a one-line placeholder cannot be classified), and a
+    /// character count answers that without retaining a word. `overview` therefore holds a Wikipedia plot or
+    /// nothing at all, which makes the rule structural rather than a flag someone has to remember.
+    public let overviewChars: Int
     /// The enwiki article the plot was read from, and the revision it was read at. Together they are what
     /// makes a refresh incremental: a later pass asks for current revids 50 articles at a time and re-fetches
     /// only what moved. Without them every refresh must re-read all ~40k plots to learn that most are
@@ -60,7 +68,7 @@ public struct EnrichedTitle: Sendable, Equatable {
                 originalLanguage: String?, voteCount: Int,
                 director: String? = nil, topCast: [String] = [], createdBy: [String] = [],
                 runtimeMinutes: Int? = nil, hasWikiPlot: Bool = false,
-                plotArticle: String? = nil, plotRevId: Int? = nil) {
+                plotArticle: String? = nil, plotRevId: Int? = nil, overviewChars: Int = 0) {
         self.tmdbId = tmdbId; self.mediaType = mediaType; self.title = title; self.year = year
         self.overview = overview; self.genreIDs = genreIDs; self.genreNames = genreNames
         self.keywords = keywords; self.originCountry = originCountry
@@ -69,6 +77,7 @@ public struct EnrichedTitle: Sendable, Equatable {
         self.runtimeMinutes = runtimeMinutes
         self.hasWikiPlot = hasWikiPlot
         self.plotArticle = plotArticle; self.plotRevId = plotRevId
+        self.overviewChars = overviewChars
     }
 
     /// Return a copy with the Wikipedia plot grounded in (`overview` ← plot, `hasWikiPlot` = true).
@@ -78,7 +87,7 @@ public struct EnrichedTitle: Sendable, Equatable {
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: true,
-                      plotArticle: article, plotRevId: revId)
+                      plotArticle: article, plotRevId: revId, overviewChars: overviewChars)
     }
 
     /// Fold in the facts that ride along on the Wikidata hop.
@@ -94,7 +103,7 @@ public struct EnrichedTitle: Sendable, Equatable {
                       director: director, topCast: topCast,
                       createdBy: creators.isEmpty ? createdBy : creators,
                       runtimeMinutes: wikiRuntime ?? runtimeMinutes, hasWikiPlot: hasWikiPlot,
-                      plotArticle: plotArticle, plotRevId: plotRevId)
+                      plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars)
     }
 }
 

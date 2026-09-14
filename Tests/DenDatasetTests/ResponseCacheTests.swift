@@ -126,4 +126,20 @@ final class ResponseCacheTests: XCTestCase {
         XCTAssertFalse(ok("{}"), "no parse result is not an answer")
         XCTAssertTrue(ok(#"{"parse":{"title":"Face/Off","revid":1,"sections":[]}}"#))
     }
+
+    /// TMDB's overview must not reach the classifier or the embedder (their §1.C). The client boundary drops
+    /// the text and keeps only its length, so no downstream path can leak it by forgetting a flag.
+    func testTMDBOverviewNeverLeavesTheClient() throws {
+        let body = #"{"id":278,"title":"X","overview":"A banker is sentenced to life in Shawshank.","vote_count":9,"keywords":{},"credits":{}}"#
+        let title = try TMDBClient.enrichedTitleForTesting(Data(body.utf8), id: 278, mediaType: .movie)
+        XCTAssertEqual(title.overview, "", "the TMDB overview is dropped, not carried")
+        XCTAssertEqual(title.overviewChars, 43, "its LENGTH survives, for the stub check")
+        XCTAssertFalse(title.overview.contains("Shawshank"))
+
+        // And the one place prose leaves for a model sends nothing until a Wikipedia plot grounds it.
+        XCTAssertEqual(TaxonomyClassifier.groundingPlot(title), "")
+        let grounded = title.groundedOnWikiPlot("Andy Dufresne is convicted of murder.")
+        XCTAssertEqual(TaxonomyClassifier.groundingPlot(grounded), "Andy Dufresne is convicted of murder.")
+        XCTAssertEqual(grounded.overviewChars, 43, "the stub verdict is preserved across grounding")
+    }
 }

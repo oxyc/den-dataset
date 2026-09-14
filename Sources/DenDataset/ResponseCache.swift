@@ -100,14 +100,14 @@ public struct ResponseCache: Sendable {
 /// Which TMDB paths are worth keeping, and for how long.
 public enum TMDBCachePolicy {
     public static let namespace = "tmdb"
-    /// A year. The TTL is a BACKSTOP against an entry living forever unnoticed, not the freshness mechanism —
-    /// see the note on `WikiCachePolicy.defaultTTLDays`.
+    /// 180 days. TMDB's terms allow caching their responses for a limited period, not indefinitely, so this
+    /// one is a COMPLIANCE boundary rather than a staleness estimate — do not raise it without checking them.
+    /// It is also why the cached body may hold TMDB prose while the datasets built from it may not.
     ///
-    /// Almost nothing in a detail record changes: title, year, genres, keywords, credits and runtime are
-    /// settled once a title has shipped. `voteCount` drifts, and the vote floor reads it — but a below-floor
-    /// title is no longer checkpointed, so it is re-judged on every run rather than dropped for good, which
-    /// was the only reason a short expiry mattered here.
-    public static let defaultTTLDays: Double = 365
+    /// Staleness is not the constraint: almost nothing in a detail record changes, and `voteCount` — the one
+    /// field that drifts and gates the vote floor — self-corrects now that below-floor titles are re-judged
+    /// each run rather than checkpointed away.
+    public static let defaultTTLDays: Double = 180
 
     public static func cache(_ env: [String: String] = ProcessInfo.processInfo.environment)
         -> ResponseCache? {
@@ -131,7 +131,8 @@ public enum TMDBCachePolicy {
 /// Which Wikipedia/Wikidata responses are worth keeping, and for how long.
 public enum WikiCachePolicy {
     public static let namespace = "wiki"
-    /// A year, deliberately — not a staleness estimate.
+    /// 180 days, deliberately — not a staleness estimate. Matched to TMDB's window so both caches age out
+    /// together and there is one number to reason about.
     ///
     /// A short expiry looks prudent and is not: it re-fetches EVERYTHING on a schedule nobody chose, to catch
     /// the few percent that moved. Measured over ten weeks, 38% of plots differed in some way but only ~4%
@@ -144,7 +145,7 @@ public enum WikiCachePolicy {
     /// (den-dataset#5). Both beat "it has been a week".
     ///
     /// The TTL that remains is a backstop, so an entry cannot outlive the schema that wrote it unnoticed.
-    public static let defaultTTLDays: Double = 365
+    public static let defaultTTLDays: Double = 180
 
     public static func cache(_ env: [String: String] = ProcessInfo.processInfo.environment)
         -> ResponseCache? {

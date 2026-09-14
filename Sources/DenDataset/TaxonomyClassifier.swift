@@ -114,6 +114,16 @@ public struct TaxonomyClassifier: Sendable {
         """
     }
 
+    /// The grounding prose sent to the model — a Wikipedia plot, or nothing.
+    ///
+    /// Belt and braces over the client boundary, which already keeps TMDB's overview out of `overview`:
+    /// this is the one place a title's prose leaves for a model, and TMDB's terms (§1.C) speak directly to
+    /// that use. A title with no plot is classified on its facts and tags, which is what `--require-wiki-plot`
+    /// was asking a flag to guarantee.
+    static func groundingPlot(_ title: EnrichedTitle) -> String {
+        title.hasWikiPlot ? title.overview : ""
+    }
+
     func request(for title: EnrichedTitle) -> LLMRequest {
         let user = """
         VOCABULARY:
@@ -125,7 +135,7 @@ public struct TaxonomyClassifier: Sendable {
         TMDB_GENRES: \(title.genreNames.joined(separator: ", "))
         KEYWORDS: \(title.keywords.map(\.name).joined(separator: ", "))
         ORIGIN: \(title.originCountry.joined(separator: "/")) / \(title.originalLanguage ?? "?")
-        OVERVIEW: \(title.overview)
+        PLOT: \(Self.groundingPlot(title))
 
         Return JSON:
         { "primary_genre": "<one>",

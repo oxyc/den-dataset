@@ -190,6 +190,12 @@ public final class TMDBClient: Sendable {
         return data
     }
 
+    /// Decode a detail body into an EnrichedTitle the way `classificationRecord` does, without the network.
+    /// Exists so a test can prove TMDB's overview does not survive the boundary — a rule worth pinning.
+    static func enrichedTitleForTesting(_ data: Data, id: Int, mediaType: MediaType) throws -> EnrichedTitle {
+        try decoder.decode(ClassificationWire.self, from: data).toEnrichedTitle(id: id, mediaType: mediaType)
+    }
+
     /// True when a body looks like a real TMDB title record and is therefore safe to persist.
     ///
     /// Deliberately structural rather than a decode: it checks the JSON for a numeric `id`, a non-empty
@@ -287,12 +293,20 @@ public final class TMDBClient: Sendable {
                 ?? []
             let billed = (credits?.cast ?? []).sorted { ($0.order ?? .max) < ($1.order ?? .max) }
             let topCast = Array(billed.prefix(4).map(\.name))
+            // THE OVERVIEW STOPS HERE — its LENGTH crosses, its text does not.
+            //
+            // TMDB's terms (§1.C) speak directly to using their content with a machine-learning application,
+            // and this record feeds both a classifier and an embedder. The pipeline only ever needed the
+            // overview to decide whether a title is a stub too thin to classify, which a character count
+            // answers. Dropping the text at the boundary makes that structural: `overview` downstream holds
+            // a Wikipedia plot or nothing, so no later code path can leak it by forgetting a flag.
             return EnrichedTitle(
                 tmdbId: id, mediaType: mediaType, title: title ?? name ?? "", year: year,
-                overview: overview ?? "", genreIDs: genres?.map(\.id) ?? [],
+                overview: "", genreIDs: genres?.map(\.id) ?? [],
                 genreNames: genres?.map(\.name) ?? [], keywords: kw, originCountry: countries,
                 originalLanguage: originalLanguage, voteCount: voteCount ?? 0,
-                director: director, topCast: topCast, createdBy: creators)
+                director: director, topCast: topCast, createdBy: creators,
+                overviewChars: (overview ?? "").trimmingCharacters(in: .whitespacesAndNewlines).count)
         }
     }
 }

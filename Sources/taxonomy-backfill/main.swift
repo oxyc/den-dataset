@@ -260,10 +260,10 @@ enum Commands {
                         let title = try await tmdb.classificationRecord(MediaIdentifier(entry.tmdbId, entry.media))
                         if title.voteCount < floor { return .belowFloor(key) }
                         if excludeAnime, isAnime(title) { return .anime(key) }
-                        // Can't classify a stub — drop titles with no / very-short overview (DT-C region-aware floor).
-                        if title.overview.trimmingCharacters(in: .whitespacesAndNewlines).count < 20 {
-                            return .noOverview(key)
-                        }
+                        // Can't classify a stub — drop titles with no / very-short overview (DT-C region-aware
+                        // floor). Judged on the LENGTH of TMDB's overview, the only part of it that crosses
+                        // the client boundary; `title.overview` is empty until a Wikipedia plot fills it.
+                        if title.overviewChars < 20 { return .noOverview(key) }
                         return .ok(title)
                     } catch {
                         // Transient → defer (retry next run); definitive (404/decoding) → a real dead id, drop.
@@ -1831,6 +1831,8 @@ struct EnrichedDTO: Codable {
     /// to ask "did this move?" in bulk instead of re-reading every plot to find out.
     let plotArticle: String?
     let plotRevId: Int?
+    /// The LENGTH of TMDB's overview, never its text — the stub check's only input. See `EnrichedTitle`.
+    let overviewChars: Int
 
     init(_ t: EnrichedTitle) {
         tmdbId = t.tmdbId; mediaType = t.mediaType.rawValue; title = t.title; year = t.year
@@ -1841,6 +1843,7 @@ struct EnrichedDTO: Codable {
         runtimeMinutes = t.runtimeMinutes
         hasWikiPlot = t.hasWikiPlot
         plotArticle = t.plotArticle; plotRevId = t.plotRevId
+        overviewChars = t.overviewChars
     }
 
     // Tolerant decode: a scratch batch written before FP-2's fields existed (or a hand-authored fixture)
@@ -1868,6 +1871,10 @@ struct EnrichedDTO: Codable {
         // which a refresh must treat as changed — re-reading a plot is cheap, pinning a stale one is not.
         plotArticle = try c.decodeIfPresent(String.self, forKey: .plotArticle)
         plotRevId = try c.decodeIfPresent(Int.self, forKey: .plotRevId)
+        // Batches written before the overview was dropped at the client boundary still carry its text. Fall
+        // back to its length so a re-read of those keeps the same stub verdict — the text itself is ignored.
+        overviewChars = try c.decodeIfPresent(Int.self, forKey: .overviewChars)
+            ?? overview.trimmingCharacters(in: .whitespacesAndNewlines).count
     }
 
     func toEnrichedTitle() -> EnrichedTitle {
@@ -1877,7 +1884,7 @@ struct EnrichedDTO: Codable {
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: hasWikiPlot,
-                      plotArticle: plotArticle, plotRevId: plotRevId)
+                      plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars)
     }
 }
 
