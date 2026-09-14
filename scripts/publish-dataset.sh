@@ -206,6 +206,17 @@ python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
 # elsewhere, and carried forward by every publish since.
 python3 "$(dirname "$0")/check-producers.py" "$meta" "$DIR"
 
+# SHAPE GUARD. A producer can exist, be committed, be run correctly — and still emit a shape its consumer
+# cannot read. One entity carrying `"aliases": "Adrian Anthony Lester"` where atlas types Vec<String> made a
+# 27 MB facts file unparseable at its first entity; atlas does not partially load one, so it dropped the
+# whole file and ran facts_unusable, losing people search, imdbId, countries and /recommend. Record counts,
+# shas, gzip and the ownership guard all passed. Nothing read it the way atlas does.
+for facts_key in factsFile factsSlimFile; do
+  facts_name="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]) or "")' "$meta" "$facts_key")"
+  [ -n "$facts_name" ] || continue
+  python3 "$(dirname "$0")/check-facts-schema.py" "$DIR/$facts_name"
+done
+
 if [ "$have_published" -eq 1 ]; then
   dropped="$(python3 -c '
 import json, sys
