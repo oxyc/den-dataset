@@ -199,6 +199,13 @@ fi
 # Stamp the counts for next time, whether or not there was anything to compare against.
 python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
 
+# OWNERSHIP GUARD. Every published artifact must have a producer committed in this repo. The record-count
+# guard above catches a blob that LOSES rows; it cannot see one that was never rebuilt at all, because its
+# count simply never moves. That is the failure that has now happened twice: facets.bin fell 999 titles behind
+# the corpus, and facts-slim kept shipping the field set atlas parsed years ago — both generated once,
+# elsewhere, and carried forward by every publish since.
+python3 "$(dirname "$0")/check-producers.py" "$meta" "$DIR"
+
 if [ "$have_published" -eq 1 ]; then
   dropped="$(python3 -c '
 import json, sys
