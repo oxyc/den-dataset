@@ -92,15 +92,19 @@ public final class TMDBClient: Sendable {
     private let baseURL: URL
     private let session: URLSession
     private let gate: AsyncSemaphore
+    /// Detail responses served from disk when present — see `TMDBCache`. nil disables caching entirely.
+    private let cache: TMDBCache?
 
     public init(apiKey: String,
                 baseURL: URL = URL(string: "https://api.themoviedb.org/3")!,
                 maxConcurrent: Int = 8,
-                session: URLSession = .shared) {
+                session: URLSession = .shared,
+                cache: TMDBCache? = nil) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.session = session
         self.gate = AsyncSemaphore(maxConcurrent)
+        self.cache = cache
     }
 
     /// `/discover/{movie,tv}` from a typed `DiscoverQuery` (DT-A).
@@ -143,6 +147,11 @@ public final class TMDBClient: Sendable {
 
     private func get(_ path: String, _ query: [String: String]) async throws -> Data {
         guard !apiKey.isEmpty else { throw TMDBError.missingAPIKey }
+        // A title fetched once should not be fetched again: a full re-enrich is ~60k detail calls, nearly all
+        // of them re-reading records that have not changed. Only detail endpoints are cacheable — `/discover`
+        // exists to surface what is new, so serving it from disk would hide exactly what it is asked for.
+        let cacheKey = TMDBCache.isCacheable(path: path) ? TMDBCache.key(path: path, query: query) : nil
+        if let cacheKey, let hit = cache?.read(cacheKey) { return hit }
         guard var components = URLComponents(url: baseURL.appendingPathComponent(path),
                                              resolvingAgainstBaseURL: false) else {
             throw TMDBError.transport("invalid base URL for \(path)")
@@ -160,13 +169,19 @@ public final class TMDBClient: Sendable {
         defer { Task { await gate.release() } }
         // Retry transient 429/5xx/timeouts (the semaphore permit is held across backoff, which also throttles
         // the fan-out under rate-limit pressure); a 404/decoding error throws straight through.
-        return try await Transport.retrying {
+        let data = try await Transport.retrying {
             let (data, response) = try await session.data(for: request)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 throw TMDBError.http(http.statusCode)
             }
             return data
         }
+        // Only a body that decodes is worth keeping. An error page or a truncated response cached here would
+        // be served for the whole TTL, turning one bad minute into a month of wrong answers.
+        if let cacheKey, (try? Self.decoder.decode(ClassificationWire.self, from: data)) != nil {
+            cache?.write(cacheKey, data)
+        }
+        return data
     }
 
     /// snake_case JSON → the camelCase wire structs below.

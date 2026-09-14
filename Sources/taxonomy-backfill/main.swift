@@ -1492,18 +1492,21 @@ enum Commands {
 
         // Key by (mediaType, tmdbId): TMDB reuses ids across film/TV, so a bare-id key collides on a
         // mixed-media golden (movie 1781 ≠ tv 1781).
-        func key(_ media: String, _ id: Int) -> Int { (media == "tv" ? 10_000_000_000 : 0) + id }
-        let byID = Dictionary(records.map { (key($0.mediaType, $0.tmdbId), $0) }, uniquingKeysWith: { a, _ in a })
-        let covered = golden.titles.filter { byID[key($0.mediaType, $0.tmdbId)] != nil }
+        // `"<mediaType>:<tmdbId>"` throughout — the same key the rest of the pipeline uses for a title. This
+        // was an id offset by 10 billion for TV, which worked but re-invented, in one function, a distinction
+        // the codebase already had a shape for.
+        let byKey = Dictionary(records.map { ("\($0.mediaType):\($0.tmdbId)", $0) }, uniquingKeysWith: { a, _ in a })
+        let covered = golden.titles.filter { byKey[$0.key] != nil }
         guard !covered.isEmpty else { throw ToolError(message: "no golden titles present in \(labelsPath) — nothing to score") }
 
-        let goldenLabels = Dictionary(covered.map { (key($0.mediaType, $0.tmdbId), $0.labels) }, uniquingKeysWith: { a, _ in a })
-        let predictedLabels = Dictionary(covered.map { g -> (Int, Set<String>) in
-            let r = byID[key(g.mediaType, g.tmdbId)]!
-            return (key(g.mediaType, g.tmdbId), Set(r.subgenres.map(\.label) + r.moods.map(\.label)))
+        let goldenLabels = Dictionary(covered.map { ($0.key, $0.labels) }, uniquingKeysWith: { a, _ in a })
+        let predictedLabels = Dictionary(covered.map { g -> (String, Set<String>) in
+            let r = byKey[g.key]!
+            return (g.key, Set(r.subgenres.map(\.label) + r.moods.map(\.label)))
         }, uniquingKeysWith: { a, _ in a })
-        let goldenPrimary = Dictionary(covered.map { (key($0.mediaType, $0.tmdbId), $0.primaryGenre) }, uniquingKeysWith: { a, _ in a })
-        let predictedPrimary = Dictionary(covered.map { (key($0.mediaType, $0.tmdbId), byID[key($0.mediaType, $0.tmdbId)]!.primaryGenre) }, uniquingKeysWith: { a, _ in a })
+        let goldenPrimary = Dictionary(covered.map { ($0.key, $0.primaryGenre) }, uniquingKeysWith: { a, _ in a })
+        let predictedPrimary = Dictionary(covered.map { ($0.key, byKey[$0.key]!.primaryGenre) },
+                                          uniquingKeysWith: { a, _ in a })
 
         let f1 = TaxonomyScorer.score(golden: goldenLabels, predicted: predictedLabels)
         let primaryAcc = TaxonomyScorer.primaryGenreAccuracy(golden: goldenPrimary, predicted: predictedPrimary)
@@ -1930,7 +1933,9 @@ enum TMDB {
         guard let key = ProcessInfo.processInfo.environment["TMDB_API_KEY"], !key.isEmpty else {
             throw ToolError(message: "set TMDB_API_KEY (enrichment requires it)")
         }
-        return TMDBClient(apiKey: key, maxConcurrent: 8)
+        // Detail responses are served from disk when already fetched (TMDB_CACHE=0 disables,
+        // TMDB_CACHE_DIR / TMDB_CACHE_TTL_DAYS tune it).
+        return TMDBClient(apiKey: key, maxConcurrent: 8, cache: TMDBCache.fromEnvironment())
     }
 }
 

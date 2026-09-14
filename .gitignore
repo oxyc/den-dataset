@@ -7,3 +7,6 @@ out/
 out-vecnow*/
 out-*/
 __pycache__/
+
+# TMDB detail-response cache (TMDBCache) — large, machine-local, regenerable.
+.cache/

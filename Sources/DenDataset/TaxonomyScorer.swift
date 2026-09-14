@@ -13,6 +13,10 @@ public struct GoldenTitle: Codable, Sendable, Equatable {
 
     /// The multi-label set (subgenres + themes + moods) scored by F1; primary genre is scored separately.
     public var labels: Set<String> { Set(subgenres + themes + moods) }
+
+    /// `"movie:278"` — the only safe identity for a title. TMDB's movie and series id spaces overlap, so a
+    /// bare id conflates movie 95 (Armageddon) with series 95 (Buffy).
+    public var key: String { "\(mediaType):\(tmdbId)" }
 }
 
 /// The versioned golden set (`Tests/.../Fixtures/taxonomy/golden.json`).
@@ -20,8 +24,16 @@ public struct GoldenSet: Codable, Sendable {
     public let taxonomyVersion: String
     public let titles: [GoldenTitle]
 
-    public var labelsByID: [Int: Set<String>] { Dictionary(uniqueKeysWithValues: titles.map { ($0.tmdbId, $0.labels) }) }
-    public var primaryByID: [Int: String] { Dictionary(uniqueKeysWithValues: titles.map { ($0.tmdbId, $0.primaryGenre) }) }
+    /// Keyed `"<mediaType>:<tmdbId>"`, not by a bare id. Keying by id alone both conflated a movie with the
+    /// series sharing its number AND trapped at runtime, because `Dictionary(uniqueKeysWithValues:)` has a
+    /// precondition on duplicates — so one colliding golden row would crash the scorer rather than mis-score.
+    public var labelsByKey: [String: Set<String>] {
+        Dictionary(titles.map { ($0.key, $0.labels) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    public var primaryByKey: [String: String] {
+        Dictionary(titles.map { ($0.key, $0.primaryGenre) }, uniquingKeysWith: { first, _ in first })
+    }
 }
 
 /// Per-label confusion counts → precision / recall / F1.
@@ -53,7 +65,10 @@ public struct F1Report: Sendable {
 /// Computes label F1 of a prediction against the golden set (DT-B AC2; reused by DT-C calibration + DT-G).
 /// Multi-label: each (title, label) is a TP/FP/FN. Macro = unweighted mean of per-label F1; micro = global.
 public enum TaxonomyScorer {
-    public static func score(golden: [Int: Set<String>], predicted: [Int: Set<String>]) -> F1Report {
+    /// Keys are `"<mediaType>:<tmdbId>"`. They were bare TMDB ids, which forced every caller to invent its own
+    /// way of keeping a movie apart from the series with the same number — the scoring path did it by adding
+    /// 10 billion to TV ids. One shared string key removes the need for that trick.
+    public static func score(golden: [String: Set<String>], predicted: [String: Set<String>]) -> F1Report {
         var labels = Set<String>()
         golden.values.forEach { labels.formUnion($0) }
         predicted.values.forEach { labels.formUnion($0) }
@@ -85,7 +100,7 @@ public enum TaxonomyScorer {
     }
 
     /// Single-label primary-genre accuracy (scored apart from the multi-label F1).
-    public static func primaryGenreAccuracy(golden: [Int: String], predicted: [Int: String]) -> Double {
+    public static func primaryGenreAccuracy(golden: [String: String], predicted: [String: String]) -> Double {
         guard !golden.isEmpty else { return 0 }
         let correct = golden.keys.filter { golden[$0] == predicted[$0] }.count
         return Double(correct) / Double(golden.count)
