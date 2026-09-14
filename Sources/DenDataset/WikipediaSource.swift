@@ -456,12 +456,26 @@ public struct WikipediaSource: Sendable {
     /// Ranked below every name above, so an article carrying both still yields its real plot.
     static let plotSectionFallbackNames = ["segments", "content"]
 
+    /// A section heading reduced to comparable text: markup removed, entities resolved, trimmed, lowercased.
+    ///
+    /// A `sections` response does not promise plain text — MediaWiki wraps the heading in markup whenever the
+    /// page needs directionality handling, so Face/Off's plot section arrives as `<span dir="ltr">Plot</span>`
+    /// and matched nothing. Comparing the raw string silently dropped those articles.
+    static func strippedHeading(_ line: String) -> String {
+        var s = line.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        for (entity, char) in [("&amp;", "&"), ("&quot;", "\""), ("&#039;", "'"), ("&apos;", "'"),
+                               ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " ")] {
+            s = s.replacingOccurrences(of: entity, with: char)
+        }
+        return s.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+
     /// Rank of a heading in preference order, or nil when it is not a plot heading. One source of truth for
     /// the filter AND the sort: they used to normalise differently — the filter trimmed whitespace and the
     /// sort did not — so a heading with a stray space passed the filter and then sorted last, letting an
     /// article's "Summary" win over its "Plot".
     static func plotRank(_ line: String) -> Int? {
-        let normalized = line.trimmingCharacters(in: .whitespaces).lowercased()
+        let normalized = strippedHeading(line)
         if let exact = plotSectionNames.firstIndex(of: normalized) { return exact }
         // "Plot and background", "Plot segments" — a qualified Plot heading is still the plot, and matching
         // the bare word alone missed them.
@@ -649,6 +663,12 @@ public struct WikipediaSource: Sendable {
     private func get(_ base: URL, _ query: [String: String]) async throws -> Data {
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        // `URLQueryItem` leaves "+" alone, and a receiving server reads it as a SPACE — so every article whose
+        // title contains one ("Knife+Heart", "X+Y", "Survive Style 5+") resolved to a title with a space and
+        // came back `missingtitle`. Percent-encoding it after the fact is the narrowest fix: the character is
+        // legal in a query, it is only its form-decoding that is wrong.
+        components.percentEncodedQuery = components.percentEncodedQuery?
+            .replacingOccurrences(of: "+", with: "%2B")
         var request = URLRequest(url: components.url!)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")

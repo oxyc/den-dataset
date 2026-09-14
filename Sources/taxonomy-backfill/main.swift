@@ -271,13 +271,21 @@ enum Commands {
         // FP-2 — re-ground on Wikipedia: ONE Wikidata SPARQL maps the surviving ids to their enwiki articles,
         // then each title's plot is fetched live. Where a plot exists it REPLACES the TMDB overview (ToS-clean
         // grounding for the Haiku classifier); titles keep the TMDB overview only where Wikipedia has no plot.
-        let media: MediaType = pending.first?.media ?? .movie
-        // A transient-exhausted Wikidata failure aborts the batch (nothing written/checkpointed) so the whole
-        // batch retries — far better than silently marking all its titles tags-only. A *successful* SPARQL with
-        // an id simply absent from the results is a definitive no-article (that title stays tags-only).
-        let mapping: [Int: WikipediaSource.Mapping]
+        // ONE query PER MEDIA TYPE, and the result keyed by both. TMDB's movie and series id spaces overlap
+        // (movie 95 is Armageddon, series 95 is Buffy), so a batch holding both cannot share a lookup: taking
+        // the whole batch's media from its first entry looked series 91545 up as a MOVIE and grounded Young
+        // Wallander on the plot of "Sunday Drive (film)" — a confident, completely wrong plot, with nothing in
+        // the output to mark it as such. Worklists are normally per-media, which is why this stayed hidden.
+        let mapping: [MediaKey: WikipediaSource.Mapping]
         do {
-            mapping = try await WikipediaSource().wikidata(forTMDBIds: titles.map(\.tmdbId), mediaType: media)
+            var merged: [MediaKey: WikipediaSource.Mapping] = [:]
+            for media in Set(titles.map(\.mediaType)) {
+                let ids = titles.filter { $0.mediaType == media }.map(\.tmdbId)
+                for (id, value) in try await WikipediaSource().wikidata(forTMDBIds: ids, mediaType: media) {
+                    merged[MediaKey(media, id)] = value
+                }
+            }
+            mapping = merged
         } catch {
             throw ToolError(message: "Wikidata mapping failed for batch \(batchId) after retries (\(error)); "
                 + "nothing written — re-run to retry this batch")
@@ -337,7 +345,7 @@ enum Commands {
     /// Fetch each title's live Wikipedia plot (bounded concurrency) and classify the outcome. A missing mapping
     /// or a plot section that is absent / below the floor is a definitive `noPlot`; a transient fetch failure
     /// (429/5xx/timeout, retries exhausted) is `deferred` so the id is retried on the next run.
-    static func regroundOnWikipedia(_ titles: [EnrichedTitle], mapping: [Int: WikipediaSource.Mapping],
+    static func regroundOnWikipedia(_ titles: [EnrichedTitle], mapping: [MediaKey: WikipediaSource.Mapping],
                                     log: String) async throws -> [PlotOutcome] {
         let wiki = WikipediaSource()
         let gate = 4   // gentle on the public Wikipedia API
@@ -351,7 +359,7 @@ enum Commands {
                         // Runtime + creators come from the SAME hop that resolved the article, so they are
                         // folded in for EVERY title — including the ones with no plot, which keep no other
                         // trace of this call.
-                        let facts = mapping[title.tmdbId]
+                        let facts = mapping[MediaKey(title.mediaType, title.tmdbId)]
                         let title = title.mergingWikidata(runtimeMinutes: facts?.runtimeMinutes,
                                                           creators: facts?.creators ?? [])
                         // The title's OWN article first; the source work only if that yields no plot. An
@@ -1698,6 +1706,18 @@ struct WLEntry: Codable {
 
 /// The scratch enriched record (holds raw TMDB text → never shipped; gitignored). Captures the full
 /// EnrichedTitle so `assemble` can rebuild it for grounding, plus the human-readable fields Haiku reads.
+/// A TMDB id together with its media type — the only safe key for anything holding both. The two id spaces
+/// overlap, so a bare `Int` silently conflates movie 95 (Armageddon) with series 95 (Buffy).
+struct MediaKey: Hashable {
+    let mediaType: MediaType
+    let tmdbId: Int
+
+    init(_ mediaType: MediaType, _ tmdbId: Int) {
+        self.mediaType = mediaType
+        self.tmdbId = tmdbId
+    }
+}
+
 struct EnrichedDTO: Codable {
     let tmdbId: Int
     let mediaType: String

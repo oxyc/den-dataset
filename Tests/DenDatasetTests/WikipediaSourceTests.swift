@@ -167,6 +167,19 @@ final class WikipediaSourceTests: XCTestCase {
         XCTAssertEqual(WikipediaSource.plotSectionIndex(Data(both.utf8)), "2", "a real Plot outranks Content")
     }
 
+    /// MediaWiki wraps a heading in markup when the page needs directionality handling — Face/Off's plot
+    /// section arrives as `<span dir="ltr">Plot</span>`, which matched nothing and cost the article its plot.
+    func testPlotSectionIndexStripsMarkupFromHeadings() {
+        let json = """
+        {"parse":{"sections":[
+          {"line":"Cast","index":"1"},
+          {"line":"<span dir=\\"ltr\\">Plot</span>","index":"2"}]}}
+        """
+        XCTAssertEqual(WikipediaSource.plotSectionIndex(Data(json.utf8)), "2")
+        XCTAssertEqual(WikipediaSource.strippedHeading("<i>Plot</i>"), "plot")
+        XCTAssertEqual(WikipediaSource.strippedHeading("Plot &amp; themes"), "plot & themes")
+    }
+
     /// The filter trimmed whitespace and the sort did not, so a padded heading ranked last and lost to a
     /// weaker one further down the article.
     func testPlotSectionIndexRanksPaddedHeadings() {
