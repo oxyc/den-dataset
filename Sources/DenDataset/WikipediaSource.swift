@@ -538,7 +538,11 @@ public struct WikipediaSource: Sendable {
     /// Section titles (case-insensitive) that carry the plot, in preference order. "Premise"/"Storyline" are
     /// the headings most TV-series articles use (film articles favour "Plot"), so including them materially
     /// lifts the TV hit-rate; "Summary" is last as the loosest match.
-    static let plotSectionNames = ["plot", "plot summary", "synopsis", "storyline", "premise", "story", "summary"]
+    ///
+    /// "Brief summary" is here from a film spot check (Very Happy Alexander) — unambiguously a plot heading
+    /// that the `"plot "` prefix rule cannot reach.
+    static let plotSectionNames = ["plot", "plot summary", "synopsis", "storyline", "premise", "story",
+                                   "summary", "brief summary"]
 
     /// Headings an ANTHOLOGY or DOCUMENTARY uses where a narrative film says "Plot" — Fantasia 2000 and
     /// New York, I Love You head their story sections "Segments"; Jodorowsky's Dune and Baraka use "Content".
