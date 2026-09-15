@@ -1,0 +1,22 @@
+{
+  "_": [
+    "Judgements on aliases that are also some other title's canonical name. See",
+    "scripts/check-alias-collisions.py, which fails a publish on any such alias with no decision here.",
+    "",
+    "'drop' means the film was never released or known under that name and the Wikidata altLabel is wrong;",
+    "the alias is removed from the shipped facts. 'keep' means it is a real alternate title and stays, even",
+    "though it collides — that is what lets 'parasite' find 기생충 and '96 hours' find Taken.",
+    "",
+    "Matching ignores punctuation, accents, leading articles and format suffixes, so one entry covers every",
+    "spelling of the same name. 'why' is the evidence, not a restatement of the verdict."
+  ],
+  "drop": [
+    {
+      "mediaType": "movie",
+      "tmdbId": 103,
+      "alias": "Alien",
+      "why": "Taxi Driver has never carried this title in any market. Wikidata Q47221 (confirmed as Taxi Driver by P4947 103 and P345 tt0075314) holds it as an en skos:altLabel; TMDB lists no such alternative title. It put Taxi Driver SECOND for q=alien, above Aliens, Alien3 and Alienoid."
+    }
+  ],
+  "keep": []
+}
