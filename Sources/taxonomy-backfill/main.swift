@@ -896,8 +896,12 @@ enum Commands {
         }
 
         // Stream the enriched batch files one at a time — only ONE batch of plots is in memory at once.
-        let files = ((try? FileManager.default.contentsOfDirectory(atPath: enrichedDir)) ?? [])
-            .filter { $0.hasPrefix("batch-") && $0.hasSuffix(".json") }.sorted()
+        //
+        // BATCH-NUMBER order, not `sorted()`: a key can appear in several batches and 505 of them disagree
+        // about `hasWikiPlot`, so the order decides whether a title embeds with its plot or with "". The
+        // `done` set below makes this first-wins, so oldest-first would keep the stale answer; reading newest
+        // last and letting it overwrite is what `finalize` already does when it de-dups.
+        let files = EnrichedBatches.orderedNames(inDirectory: enrichedDir).reversed()
         outer: for file in files {
             let dtos: [EnrichedDTO] = try JSON.read((enrichedDir as NSString).appendingPathComponent(file))
             for dto in dtos {

@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """Assemble the wiki-plot corpus that every v2 LLM phase draws from.
 
+STALE — exits non-zero on the current enriched tree, two independent ways, and has since the corpus grew
+past the run it was written for. Rebaseline it or retire it; do not assume a green run.
+
+  1. `EXPECTED_ENRICHED = 57715` below, against 61,078 records today (:73 exits on the mismatch).
+  2. The duplicate guard at :58. A key may legitimately appear in more than one batch — 1,855 do, and 999
+     carry `hasWikiPlot: true` in at least two — and any one trips that exit before (1) is reached.
+
+Both are the same underlying fact: batches are appended over time and a key can be re-covered. The live
+readers now resolve it by reading in BATCH-NUMBER order with the last occurrence winning, matching
+`finalize` (see `EnrichedBatches.orderedNames`). This script refuses instead, which was reasonable when
+duplicates were unexpected and is now simply wrong.
+
 Only titles with hasWikiPlot==true belong here. The other enriched rows carry TMDB
 prose in `overview`, and feeding that to an LLM is barred by TMDb §1.C, so the flag is
 asserted per record on the way in rather than trusted downstream.

@@ -31,13 +31,17 @@ def load_enriched(enriched_dir):
     """key -> (language, country, year, voteCount). These are TMDB facts (not expression): the ISO codes, the
     year and a vote count. Wikidata supplies all but the vote count if this ever needs to be TMDB-free."""
     out = {}
-    for name in sorted(os.listdir(enriched_dir)):
-        if not (name.startswith("batch-") and name.endswith(".json")):
-            continue
+    # BATCH-NUMBER order, oldest first, LAST occurrence winning — matching `finalize`'s own de-dup and
+    # `EnrichedBatches.orderedNames`. This was `sorted()` with first-wins, which is lexicographic:
+    # `batch-99.json` sorts after `batch-177.json`, so the winner depended on how many digits a batch id
+    # happened to have. 1,855 of 59,218 keys appear in more than one batch and 505 disagree about
+    # `hasWikiPlot`; for the facets tuple specifically the flip moves 97 keys, all voteCount, all upward.
+    for name in sorted(
+        (n for n in os.listdir(enriched_dir) if n.startswith("batch-") and n.endswith(".json")),
+        key=lambda n: int(n[len("batch-"):-len(".json")]),
+    ):
         for d in json.load(open(os.path.join(enriched_dir, name))):
             key = f"{d['mediaType']}:{d['tmdbId']}"
-            if key in out:
-                continue
             countries = d.get("originCountry") or []
             out[key] = ((d.get("originalLanguage") or "")[:2],
                         (countries[0] if countries else "")[:2],

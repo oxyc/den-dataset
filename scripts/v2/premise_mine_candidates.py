@@ -84,10 +84,14 @@ def main():
 
     # Keywords come from the enriched records; they are TMDB *ids*, never TMDB prose, so
     # nothing derived from `overview` on a no-plot title can leak in here.
+    # BATCH-NUMBER order, oldest first, last occurrence winning — the same rule as `finalize` and
+    # `EnrichedBatches.orderedNames`. `sorted()` is lexicographic (`batch-99` after `batch-177`), which for
+    # the 505 keys that disagree about `hasWikiPlot` decided the answer by digit count.
     keywords = {}
-    for name in sorted(os.listdir(ENRICHED)):
-        if not (name.startswith('batch-') and name.endswith('.json')):
-            continue
+    for name in sorted(
+        (n for n in os.listdir(ENRICHED) if n.startswith('batch-') and n.endswith('.json')),
+        key=lambda n: int(n[len('batch-'):-len('.json')]),
+    ):
         with open(os.path.join(ENRICHED, name), encoding='utf-8') as fh:
             for rec in json.load(fh):
                 if rec.get('hasWikiPlot') is not True:

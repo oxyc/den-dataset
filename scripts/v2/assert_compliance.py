@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """Prove, from the batch files on disk, that no TMDB prose reached an LLM.
 
+STALE — reports false violations on the current enriched tree. `allowed` and `denied` (:46-62) are SETS
+filled by iterating every batch, so a key whose `hasWikiPlot` differs between batches lands in BOTH, and the
+test at :126 (`key in denied or key not in allowed`) then flags it. 505 keys disagree that way today, so a
+compliance failure here is currently evidence about batch bookkeeping, not about what reached an LLM.
+
+Fix by resolving each key ONCE before the check, in batch-number order with the last occurrence winning —
+the rule `finalize` and the live readers use (`EnrichedBatches.orderedNames`). Until then, do not read a
+failure from this script as a §1.C breach without checking whether the key is simply duplicated.
+
 The rule: only titles with `hasWikiPlot == true` may be sent to an AI application. The other
 19,255 enriched rows carry TMDB overview prose in the same `overview` field, and sending that
 is barred by TMDb §1.C. Every batch builder draws from the wiki-plot corpus, so the rule holds

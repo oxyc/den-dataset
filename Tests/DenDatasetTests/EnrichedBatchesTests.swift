@@ -23,6 +23,25 @@ final class EnrichedBatchesTests: XCTestCase {
         XCTAssertEqual(EnrichedBatches.highestID(inFileNames: names), 4)
     }
 
+    /// A key may appear in more than one batch — 1,855 of 59,218 do, and 505 disagree about `hasWikiPlot` —
+    /// so the order batches are read in decides whether those titles get their plot or an empty string.
+    /// `sorted()` is lexicographic and put `batch-99` after `batch-177`, which made the winner depend on how
+    /// many digits an id happened to have. Nothing pinned the order before this test.
+    func testBatchesOrderNumericallyNotLexically() {
+        let names = ["batch-99.json", "batch-177.json", "batch-18.json", "batch-2.json", "batch-102.json"]
+        XCTAssertEqual(EnrichedBatches.orderedNames(inFileNames: names),
+                       ["batch-2.json", "batch-18.json", "batch-99.json",
+                        "batch-102.json", "batch-177.json"])
+        XCTAssertEqual(names.sorted().first, "batch-102.json",
+                       "the lexical order this replaces — batch-102 first, batch-99 last")
+    }
+
+    /// The same non-batch files that must not raise the floor must not appear in the reading order either.
+    func testOrderingIgnoresFilesThatAreNotBatches() {
+        let names = ["enrich-checkpoint.json", "batch-abc.json", "batch-9.json.bak", "batch-3.json"]
+        XCTAssertEqual(EnrichedBatches.orderedNames(inFileNames: names), ["batch-3.json"])
+    }
+
     /// The real directory path, since that is what `enrich` calls.
     func testReadsARealDirectory() throws {
         let dir = NSTemporaryDirectory() + "eb-\(UUID().uuidString)"
