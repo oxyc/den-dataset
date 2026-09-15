@@ -30,6 +30,20 @@ final class MultiLangTests: XCTestCase {
                        "English is the primary path, not a fallback")
     }
 
+    /// Every Wikipedia serves `/w/api.php`, so a cache key built from path+query alone collides across
+    /// languages: the Italian "Iago (film)" and the English one are the same key. The English body was
+    /// served for the Italian request, the fallback saw no plot section and gave up, and Iago's 6,728-char
+    /// `Trama` was lost. A collision can return another language's article wholesale, and nothing
+    /// downstream can tell — the text it yields is perfectly well-formed.
+    func testCacheKeysDifferByHost() {
+        let cache = ResponseCache(namespace: "test",
+                                  directory: URL(fileURLWithPath: NSTemporaryDirectory()), ttl: 60)
+        let query = ["action": "parse", "page": "Iago (film)", "prop": "wikitext"]
+        let en = cache.key(path: "en.wikipedia.org/w/api.php", query: query)
+        let it = cache.key(path: "it.wikipedia.org/w/api.php", query: query)
+        XCTAssertNotEqual(en, it, "same path and query on two wikis must not share a cache entry")
+    }
+
     func testLanguageCodeFromSite() {
         XCTAssertEqual(WikipediaSource.languageCode(fromSite: "https://de.wikipedia.org/"), "de")
         XCTAssertNil(WikipediaSource.languageCode(fromSite: "https://en.wikipedia.org/"),

@@ -1085,7 +1085,14 @@ public struct WikipediaSource: Sendable {
     private func get(_ base: URL, _ query: [String: String]) async throws -> Data {
         // Two `action=parse` calls per title, ~80k per full pass, nearly all re-reading unchanged articles.
         // Cached on the full query, so the section list and the section's wikitext occupy separate entries.
-        let cacheKey = cache?.key(path: base.path, query: query)
+        //
+        // The HOST is part of the key. Leaving it out was a silent correctness bug, not a missed hit: every
+        // Wikipedia serves `/w/api.php`, so a request for the ITALIAN "Iago (film)" had the same path and
+        // the same query as the English one and was handed the ENGLISH body from cache. The multilingual
+        // fallback then saw an article with no plot section and gave up — the Italian `Trama` is 6,728
+        // characters. A collision can return another language's article wholesale, which nothing downstream
+        // could detect, because the text it yields is perfectly well-formed.
+        let cacheKey = cache?.key(path: "\(base.host ?? "")\(base.path)", query: query)
         if let cacheKey, let hit = cache?.read(cacheKey) { return hit }
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         components.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }

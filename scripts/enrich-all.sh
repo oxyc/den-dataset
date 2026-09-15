@@ -59,8 +59,19 @@ while true; do
   # whole batch as fast as the upstream could refuse it, indefinitely.
   if [ "$remaining" = "$last_remaining" ]; then
     stalls=$((stalls + 1))
+    # A batch where EVERY title was rejected by the vote floor also makes no progress, and it is not an
+    # outage — below-floor ids are deliberately not checkpointed ("a vote count only climbs"), so a worklist
+    # containing them can never drain at this floor. That reported "upstream is refusing" for two and a half
+    # hours while Wikipedia was answering perfectly well; say which it is.
+    below=$(printf '%s' "$line" | sed -n 's/.*"belowFloor":\([0-9]*\).*/\1/p')
+    count=$(printf '%s' "$line" | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
+    if [ -n "$below" ] && [ "${below:-0}" -gt 0 ] && [ "${count:-1}" -eq 0 ]; then
+      echo "every title in this batch is below the vote floor — the worklist cannot drain at this floor." \
+           "Re-run with VOTE_FLOOR=0 to include the low-vote tail, or filter the worklist." | tee -a "$LOG"
+      exit 1
+    fi
     echo "no progress ($remaining still pending) — attempt $stalls, backing off" | tee -a "$LOG"
-    [ $stalls -ge 6 ] && { echo "6 batches with no progress — upstream is refusing; stopping" | tee -a "$LOG"; exit 1; }
+    [ $stalls -ge 6 ] && { echo "6 batches with no progress and titles still being attempted — upstream is refusing; stopping" | tee -a "$LOG"; exit 1; }
     sleep $((stalls * 60))
   else
     stalls=0
