@@ -972,7 +972,9 @@ enum Commands {
                      + "\(now.vectorEpoch) to that file."
                    : "Either restore the previous service, or start a fresh --out-dir and re-embed."))
         case .unknownProvenance:
-            // The shipped store is exactly this case: 37.5k rows from the Python/ORT-1.22 service.
+            // This WAS the shipped store's case — 37.5k rows from the Python/ORT-1.22 service, with no
+            // identity file. It no longer is: the 2026-09-13 re-embed records den-embed/5.1.1 in
+            // `out-t02-cc0b/index/embedder.json`, so the path below is for a store from before that.
             throw ToolError(message: "\(outDir) holds an existing store but no \(path), so what embedded it "
                 + "is unknown and appending \(now.label) may mix two embedders. Write that file with the "
                 + "identity that built it — a corpus from before the Rust rewrite is "
@@ -995,10 +997,17 @@ enum Commands {
     /// no error, no field in the response. So a producer that composes documents longer than the service
     /// will embed loses their tails silently, across the whole corpus.
     ///
-    /// What the SHIPPED corpus actually used, established from timestamps rather than current defaults
-    /// (three earlier versions of this comment got it wrong in every direction): `dataset.meta.json` records
-    /// builtAt 2026-07-05T07:22:47Z, and 8f93235 — the commit that introduced plot capping at all — was
-    /// authored 11:40:55Z, four hours LATER. At its parent, BOTH producers read
+    /// The corpus shipping TODAY was re-embedded 2026-09-13 (`builtAt 2026-09-13T19:22:39Z`,
+    /// `embedderRuntime den-embed/5.1.1`, `maxTokens 1024`). Its plot cap is NOT recorded anywhere —
+    /// `out-t02-cc0b/embed.log` names the doc shape and row count but no cap, `embed-corpus`'s own default
+    /// is 1500 and `scripts/embed-corpus-run.sh` defaults 3500. `EmbedderGate` cannot see the cap any more
+    /// than it can see the doc shape, so appending to that store risks docs truncated differently from the
+    /// 38,532 already in it. Establish the cap before any top-up.
+    ///
+    /// The PREVIOUS corpus used no cap at all, established from timestamps rather than current defaults
+    /// (three earlier versions of this comment got it wrong in every direction): its `dataset.meta.json`
+    /// recorded builtAt 2026-07-05T07:22:47Z, and 8f93235 — the commit that introduced plot capping at all —
+    /// was authored 11:40:55Z, four hours LATER. At its parent, BOTH producers read
     /// `let plot = title.hasWikiPlot ? title.overview : ""`. It ran against the Python service, five weeks
     /// before the Rust rewrite, and that service had no token cap whatsoever.
     ///

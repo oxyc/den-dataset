@@ -2,9 +2,14 @@
 """Merge the corpus facts pass with the delta pass into the file that ships.
 
 The facts scrape runs twice and cannot run once. Corpus titles have a vector and are written with
-`--has-vector`; delta titles — new arrivals the >=50-vote worklist cannot reach yet — have no vector, no
-labels and no facets row, and are written without it. `hasVector` is stated per record because /recommend
-must never let a vectorless record into an ANN path, so the two passes cannot be collapsed into one.
+`--has-vector`; delta titles have no vector, no labels and no facets row, and are written without it.
+`hasVector` is stated per record because /recommend must never let a vectorless record into an ANN path, so
+the two passes cannot be collapsed into one.
+
+Note `hasVector` is a PASS-level flag, not a fact about a title: `--has-vector` is read once per run and
+stamped on every record of that pass. And the delta set is not only "new arrivals the >=50-vote worklist
+cannot reach yet", which this comment used to claim — it holds The Wire (2,715 votes), Lost (5,115) and
+Black Mirror (6,265), which are there because they have no plot and so no labels, not because they are new.
 
 Nothing in this repo performed the merge. The published `facts-<version>.json` was assembled by hand, which
 is how a rebuild once **dropped the 137 delta records** — exactly the titles nothing else covers, so the loss

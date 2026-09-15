@@ -24,8 +24,10 @@ every generation of den-embed reports `bge-m3` and `1024`, including the two tha
 for the same text (ORT 1.22 → 1.28 moved int8 output, and the Rust rewrite added a 512-token truncation the
 Python service never had). So the manifest also carries `embedderRuntime` + `embedderMaxTokens`, taken from
 the service's own `/health` at build time, and the corpus build refuses to append to a store that a
-different embedder created. **The corpus shipping today was built by the Python/ORT-1.22 generation** and is
-queried through the current one — that is a real, known violation, and the only remedy is a full re-embed.
+different embedder created. **That violation is resolved**: the corpus was re-embedded on 2026-09-13 by
+`den-embed/5.1.1` at `dims 1024` / `maxTokens 1024` / `vectorEpoch 1`, and the serving box runs the same
+build, so the manifest and the service agree. The paragraph below describes how it was done, not something
+still owed.
 
 ## Full re-embed (MacBook) — the shipped 37.5k-title corpus
 
@@ -33,7 +35,11 @@ Both TMDB and Wikipedia are hit live; `den-embed` must be running for step 5 (no
 
 **Re-embed at den-embed's `MAX_TOKENS=1024` and `--plot-cap 3500`, not at the defaults.**
 
-The shipped corpus was embedded from uncapped plots: its `builtAt` is 2026-07-05T07:22:47Z and the commit
+This section is the record of the re-embed that has since happened, kept because the constraints still bind
+any future one. The corpus shipping today has `builtAt 2026-09-13T19:22:39Z` and `embedderRuntime
+den-embed/5.1.1`; what follows describes the run that produced it.
+
+An EARLIER corpus was embedded from uncapped plots: its `builtAt` was 2026-07-05T07:22:47Z and the commit
 that introduced plot capping (8f93235) was authored four hours later, so the code that built it read
 `plot = title.hasWikiPlot ? title.overview : ""`. It ran against the PYTHON service, five weeks before the
 Rust rewrite, and that service had no token cap at all — only `MAX_CHARS`, ~0.8% of titles at its 8000
@@ -60,7 +66,10 @@ already covered twice over — the `Themes:` clause precedes `Plot:` and is neve
 index (DT-H) is the primary "More Like This" signal, having beaten raw plot 12/8 on premise discrimination.
 
 **Re-embed `vectors-premise.bin` in the same pass.** It is bge-m3 too, so the epoch change applies to it
-identically, and the premise tag strings are frozen on disk (`out-t02/premise-tags-wip/`) — zero LLM cost.
+identically, and the premise tag strings are frozen on disk — zero LLM cost. They are in TWO places:
+`out-t02/premise-tags-wip/` holds 37,314, and the 999 that closed the corpus gap live only in
+`out-premise-999/tags.json`, which is gitignored. Committed `data/premise-tags-v1.json` (37,533 rows) is
+therefore behind the shipped index; a re-embed on a fresh checkout would come up 999 short.
 
 **Deploy the env with the corpus.** `maxTokens` is part of the embedder identity, so the serving box must
 run den-embed with `MAX_TOKENS=1024` permanently or the manifest and the service will disagree.

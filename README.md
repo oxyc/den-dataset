@@ -291,7 +291,9 @@ premise discrimination against raw plot's 8/12, and abstracting to the t02 contr
 was run and lost. The two indexes are complements.
 
 The Sonnet tag strings are frozen at `out-t02/premise-tags-wip/tags-raw.json` (37,314 titles), so the premise
-index can be re-embedded any time for zero LLM cost.
+index can be re-embedded any time for zero LLM cost — **on this machine**. The 999 tags that closed the gap
+to the 38,532-title corpus live only in gitignored `out-premise-999/tags.json`, and committed
+`data/premise-tags-v1.json` holds 37,533. A re-embed from a fresh checkout comes up 999 short.
 
 ### 1. Corpus and query vectors must come from the same embedder
 int8 dot products are only meaningful between vectors from the same model *and the same runtime*. den-embed
@@ -301,9 +303,15 @@ a pooling change) — deliberately not its crate version, or a log-line fix woul
 refuses to append a different embedder to an existing store.
 
 `embeddingModel` + `dims` are NOT sufficient: every generation reports `bge-m3` and `1024`, including the two
-that return different vectors for the same text. That is exactly how the current violation went unseen — the
-shipped corpus was embedded by the **Python** service on ORT 1.22 and is queried through the Rust one on 1.28
-(see `tickets/FP-5` in the den repo).
+that return different vectors for the same text. That is how the original violation went unseen — a corpus
+embedded by the **Python** service on ORT 1.22, queried through the Rust one on 1.28 (`tickets/FP-5` in the
+den repo). **Resolved**: the corpus was re-embedded 2026-09-13 by `den-embed/5.1.1`, and the box serves the
+same build.
+
+What the gate still cannot see is the **doc shape** and the **plot cap**. The shipped index is the CC0 lean
+shape (`embed-corpus --doc-facts`), and its cap is recorded nowhere. Both differ silently from what a plain
+`assemble` or a default `embed-corpus` would compose, so neither is safe to append without establishing them
+first.
 
 ### 2. The token cap is most of what the vector sees
 Plot is **~87%** of the composed document by length (median 93%); facts and tags are ~204 chars. den-embed
