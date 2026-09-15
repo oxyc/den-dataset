@@ -34,15 +34,52 @@ public struct WikipediaSource: Sendable {
         /// famous shows are near-complete, the long tail is not. So this complements TMDB's `created_by`
         /// rather than replacing it: free where present, TMDB fills the rest.
         public let creators: [String]
+        /// Articles on OTHER Wikipedias, by language code — the only thing that reaches a title with no
+        /// English article at all, which is two thirds of the no-plot films.
+        ///
+        /// Sampled: of 30 such titles, 15 have an article somewhere and 12 of those carry a real plot under
+        /// the local heading. Chess Story's German `Handlung` is 4,812 characters of narrative. bge-m3 is
+        /// multilingual, so the prose embeds directly — no translation step.
+        public let articlesByLang: [String: String]
 
         public init(article: String?, imdb: String?, runtimeMinutes: Int? = nil, creators: [String] = [],
-                    sourceArticle: String? = nil) {
+                    sourceArticle: String? = nil, articlesByLang: [String: String] = [:]) {
             self.article = article
             self.sourceArticle = sourceArticle
             self.imdb = imdb
             self.runtimeMinutes = runtimeMinutes
             self.creators = creators
+            self.articlesByLang = articlesByLang
         }
+    }
+
+    /// Plot headings per language, for the Wikipedias a title with no English article falls back to.
+    ///
+    /// Six languages cover essentially all of it in a 70-title sample — de, it, es, fr, nl, ru. Each list is
+    /// that Wikipedia's own house style rather than a translation of "Plot": de uses `Handlung`, it `Trama`,
+    /// es `Argumento`/`Sinopsis`, ru `Сюжет`.
+    ///
+    /// Welsh (`cy`) is deliberately ABSENT despite appearing more often than Italian or French in the
+    /// sample. That frequency is implausible for real coverage of world cinema and is the signature of
+    /// bot-generated stubs; including it would add articles with no prose and a lot of false confidence.
+    public static let plotHeadingsByLanguage: [String: [String]] = [
+        "de": ["handlung", "inhalt"],
+        "it": ["trama"],
+        "es": ["argumento", "sinopsis", "trama"],
+        "fr": ["synopsis", "résumé", "intrigue"],
+        "nl": ["verhaal", "plot"],
+        "ru": ["сюжет"],
+        "pt": ["sinopse", "enredo"],
+        "ja": ["あらすじ", "ストーリー"],
+        "ko": ["줄거리", "시놉시스"],
+        "sv": ["handling"],
+        "pl": ["fabuła"],
+        "da": ["handling"],
+    ]
+
+    /// The `VALUES` clause listing those wikis, for the sitelink query.
+    static var supportedWikis: String {
+        plotHeadingsByLanguage.keys.sorted().map { "<https://\($0).wikipedia.org/>" }.joined(separator: " ")
     }
 
     /// A polite, identifying User-Agent is REQUIRED by the Wikimedia APIs (unidentified traffic is throttled).
@@ -79,7 +116,7 @@ public struct WikipediaSource: Sendable {
         // CC0, so neither fact carries TMDB's terms with it. Both are OPTIONAL: a title missing them still
         // returns its article, which is what this call exists for.
         let query = """
-        SELECT ?tmdb ?article ?sourceArticle ?imdb ?runtime ?creatorLabel WHERE {
+        SELECT ?tmdb ?article ?sourceArticle ?imdb ?runtime ?creatorLabel ?anyArticle ?anySite WHERE {
           VALUES ?tmdb { \(values) }
           ?film wdt:\(property) ?tmdb .
           OPTIONAL { ?film wdt:P345 ?imdb . }
@@ -99,6 +136,12 @@ public struct WikipediaSource: Sendable {
           # 0.16% of the grounded corpus and removes every such attribution.
           OPTIONAL { ?film wdt:P144 ?basedOn .
                      ?sourceArticle schema:about ?basedOn ; schema:isPartOf <https://en.wikipedia.org/> . }
+          # OTHER-LANGUAGE ARTICLES. Two thirds of the films with no plot have no English article at all, so
+          # no heading rule can reach them — but half of those have one in another language, and bge-m3
+          # embeds that prose directly. Restricted to the wikis we have plot-heading lists for; an
+          # unrestricted sitelink query returns a row per language and multiplies the whole result set.
+          OPTIONAL { ?anyArticle schema:about ?film ; schema:isPartOf ?anySite .
+                     VALUES ?anySite { \(Self.supportedWikis) } }
           SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul". }
         }
         ORDER BY ?tmdb ?article
@@ -160,6 +203,13 @@ public struct WikipediaSource: Sendable {
             // A film binds once PER creator (and per IMDb id), so creators accumulate across rows rather than
             // first-wins — taking only the first would silently drop the second Duffer brother.
             let existing = map[tmdbId]
+            // One row per (creator x language), so these accumulate rather than first-wins.
+            var byLang = existing?.articlesByLang ?? [:]
+            if let site = binding.anySite?.value, let anyArticle = binding.anyArticle?.value,
+               let lang = Self.languageCode(fromSite: site),
+               let title = Self.articleTitle(fromURL: anyArticle) {
+                byLang[lang] = title
+            }
             var creators = existing?.creators ?? []
             if let creator = binding.creatorLabel?.value, !creator.isEmpty, !creators.contains(creator) {
                 creators.append(creator)
@@ -169,9 +219,17 @@ public struct WikipediaSource: Sendable {
                 imdb: existing?.imdb ?? imdb,
                 runtimeMinutes: [existing?.runtimeMinutes, runtime].compactMap { $0 }.min(),
                 creators: creators.sorted(),
-                sourceArticle: existing?.sourceArticle ?? source)
+                sourceArticle: existing?.sourceArticle ?? source,
+                articlesByLang: byLang)
         }
         return map
+    }
+
+    /// "https://de.wikipedia.org/" -> "de".
+    static func languageCode(fromSite site: String) -> String? {
+        guard let host = URL(string: site)?.host, host.hasSuffix(".wikipedia.org") else { return nil }
+        let code = host.replacingOccurrences(of: ".wikipedia.org", with: "")
+        return code.isEmpty || code == "en" ? nil : code
     }
 
     // MARK: - CC0 doc facts (director + genre)
@@ -427,6 +485,9 @@ public struct WikipediaSource: Sendable {
             let tmdb: Cell?
             let article: Cell?
             let sourceArticle: Cell?
+            /// A sitelink on a non-English Wikipedia, and which one it is.
+            let anyArticle: Cell?
+            let anySite: Cell?
             let imdb: Cell?
             let runtime: Cell?
             let creatorLabel: Cell?
@@ -467,16 +528,51 @@ public struct WikipediaSource: Sendable {
         /// its themes — so "where did this come from?" has no single answer, and a later change to the
         /// heading rules can target the articles it actually affects instead of the whole corpus.
         public let sections: [String]
+        /// Which Wikipedia this came from. "en" unless the title had no English article and the fallback
+        /// found one elsewhere — worth recording, because a non-English plot is a different claim about the
+        /// title and someone reviewing it needs to know which language to read.
+        public let language: String
 
-        public init(text: String, revId: Int?, resolvedArticle: String? = nil, sections: [String] = []) {
+        public init(text: String, revId: Int?, resolvedArticle: String? = nil, sections: [String] = [],
+                    language: String = "en") {
             self.text = text
             self.revId = revId
             self.resolvedArticle = resolvedArticle
             self.sections = sections
+            self.language = language
         }
     }
 
     /// The article's Plot/Synopsis section as plain prose, or nil if the article has no such section.
+    /// The same extraction on another language's Wikipedia.
+    ///
+    /// Only the heading names differ — the section classifier, the concatenation and the cleaning are
+    /// identical, because a German article is laid out like an English one. Returns nil for a language with
+    /// no heading list rather than guessing, since a wrong heading list yields production prose that reads
+    /// like a plot to anyone who cannot check it.
+    public func plot(articleTitle: String, language: String) async throws -> PlotFetch? {
+        guard language != "en" else { return try await plot(articleTitle: articleTitle) }
+        guard let headings = Self.plotHeadingsByLanguage[language],
+              let api = URL(string: "https://\(language).wikipedia.org/w/api.php") else { return nil }
+        let data = try await get(api, [
+            "action": "parse", "page": articleTitle, "prop": "wikitext|revid",
+            "format": "json", "formatversion": "2", "redirects": "1",
+        ])
+        guard let wikitext = Self.decodeWikitext(data) else { return nil }
+        var kept: [(String, String)] = []
+        for (heading, _, body) in Self.splitSections(wikitext) {
+            let name = Self.strippedHeading(heading)
+            guard headings.contains(where: { name == $0 || name.hasPrefix($0 + " ") }) else { continue }
+            let prose = Self.cleanWikitext(body)
+            if !prose.isEmpty { kept.append((Self.displayHeading(heading), prose)) }
+        }
+        guard !kept.isEmpty else { return nil }
+        let parsed = try? JSONDecoder().decode(WikitextResult.self, from: data)
+        return PlotFetch(text: kept.map(\.1).joined(separator: "\n\n"), revId: parsed?.parse.revid,
+                         resolvedArticle: parsed?.parse.title ?? articleTitle,
+                         sections: kept.map(\.0), language: language)
+    }
+
     public func plot(articleTitle: String) async throws -> PlotFetch? {
         if enterpriseToken != nil, let found = try? await enterpriseProse(articleTitle: articleTitle) {
             return PlotFetch(text: found.text, revId: nil, resolvedArticle: articleTitle,

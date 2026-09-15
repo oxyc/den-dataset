@@ -68,6 +68,9 @@ public struct EnrichedTitle: Sendable, Equatable {
     /// "where did this come from?" has no single answer, and a later change to the heading rules can target
     /// the articles it actually affects instead of re-scraping the corpus to find out.
     public let plotSections: [String]
+    /// Which Wikipedia the plot came from — "en" unless the title had no English article. A non-English
+    /// plot is a different claim about the title, and a reviewer needs to know which language to read.
+    public let plotLanguage: String?
     /// WHY there is no plot, when there is none: `noArticle`, `noSection`, `belowFloor`, `fetchFailed`.
     ///
     /// `hasWikiPlot: false` alone is what makes every improvement cost a full re-scrape. The four causes
@@ -82,7 +85,8 @@ public struct EnrichedTitle: Sendable, Equatable {
                 director: String? = nil, topCast: [String] = [], createdBy: [String] = [],
                 runtimeMinutes: Int? = nil, hasWikiPlot: Bool = false,
                 plotArticle: String? = nil, plotRevId: Int? = nil, overviewChars: Int = 0,
-                noPlotReason: String? = nil, plotSections: [String] = []) {
+                noPlotReason: String? = nil, plotSections: [String] = [],
+                plotLanguage: String? = nil) {
         self.tmdbId = tmdbId; self.mediaType = mediaType; self.title = title; self.year = year
         self.overview = overview; self.genreIDs = genreIDs; self.genreNames = genreNames
         self.keywords = keywords; self.originCountry = originCountry
@@ -94,18 +98,19 @@ public struct EnrichedTitle: Sendable, Equatable {
         self.overviewChars = overviewChars
         self.noPlotReason = noPlotReason
         self.plotSections = plotSections
+        self.plotLanguage = plotLanguage
     }
 
     /// Return a copy with the Wikipedia plot grounded in (`overview` ← plot, `hasWikiPlot` = true).
     public func groundedOnWikiPlot(_ plot: String, article: String? = nil, revId: Int? = nil,
-                                   sections: [String] = []) -> EnrichedTitle {
+                                   sections: [String] = [], language: String? = nil) -> EnrichedTitle {
         EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: plot,
                       genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: true,
                       plotArticle: article, plotRevId: revId, overviewChars: overviewChars,
-                      noPlotReason: nil, plotSections: sections)
+                      noPlotReason: nil, plotSections: sections, plotLanguage: language)
     }
 
     /// Return a copy recording WHY no plot was found, so a later pass can re-run only the subset a given
@@ -117,7 +122,7 @@ public struct EnrichedTitle: Sendable, Equatable {
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: false,
                       plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
-                      noPlotReason: reason, plotSections: plotSections)
+                      noPlotReason: reason, plotSections: plotSections, plotLanguage: plotLanguage)
     }
 
     /// Fold in the facts that ride along on the Wikidata hop.
@@ -134,7 +139,8 @@ public struct EnrichedTitle: Sendable, Equatable {
                       createdBy: creators.isEmpty ? createdBy : creators,
                       runtimeMinutes: wikiRuntime ?? runtimeMinutes, hasWikiPlot: hasWikiPlot,
                       plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
-                      noPlotReason: noPlotReason, plotSections: plotSections)
+                      noPlotReason: noPlotReason, plotSections: plotSections,
+                      plotLanguage: plotLanguage)
     }
 }
 

@@ -497,6 +497,30 @@ enum Commands {
                                 // covered adaptation does not pay for a second fetch it cannot use.
                                 if plot.text.count >= ownArticleSufficient { break }
                             }
+                            // NO ENGLISH ARTICLE, or a thin one. Two thirds of the films with no plot have
+                            // no enwiki article at all, and half of THOSE have one in another language —
+                            // 12 of 30 sampled carried a real plot under the local heading. bge-m3 is
+                            // multilingual, so the prose embeds directly with no translation step.
+                            //
+                            // The title's own language first, as the likeliest to have it, then the rest.
+                            // Measured, that first guess is right 8 times in 15 — good but not sufficient,
+                            // and the misses are the interesting half: four were ENGLISH-language films
+                            // with no English article, covered by the German or Italian Wikipedia instead.
+                            if (found?.plot.text.count ?? 0) < ownArticleSufficient,
+                               let byLang = facts?.articlesByLang, !byLang.isEmpty {
+                                let preferred = [title.originalLanguage].compactMap { $0 }
+                                let order = preferred + byLang.keys.sorted().filter { !preferred.contains($0) }
+                                for lang in order {
+                                    guard let article = byLang[lang],
+                                          let plot = try await wiki.plot(articleTitle: article,
+                                                                         language: lang) else { continue }
+                                    sawSection = true
+                                    if plot.text.count > (found?.plot.text.count ?? 0) {
+                                        found = (article, plot)
+                                    }
+                                    if plot.text.count >= ownArticleSufficient { break }
+                                }
+                            }
                             guard let hit = found, hit.plot.text.count >= wikiPlotFloor else {
                                 return .noPlot(title, sawSection ? .belowFloor : .noSection)
                             }
@@ -509,7 +533,8 @@ enum Commands {
                                 hit.plot.text,
                                 article: hit.plot.resolvedArticle ?? hit.article,
                                 revId: hit.plot.revId,
-                                sections: hit.plot.sections))
+                                sections: hit.plot.sections,
+                                language: hit.plot.language))
                         } catch {
                             let key = MediaKey(title.mediaType, title.tmdbId)
                             if Transport.isRetryable(error) {
@@ -2073,6 +2098,8 @@ struct EnrichedDTO: Codable {
     /// Which headings the plot came from. The text is a concatenation, so one article name no longer says
     /// where it came from, and a heading-rule change can target the articles it affects.
     let plotSections: [String]
+    /// Which Wikipedia the plot came from; "en" unless the fallback found it elsewhere.
+    let plotLanguage: String?
     /// The LENGTH of TMDB's overview, never its text — the stub check's only input. See `EnrichedTitle`.
     let overviewChars: Int
 
@@ -2085,7 +2112,7 @@ struct EnrichedDTO: Codable {
         runtimeMinutes = t.runtimeMinutes
         hasWikiPlot = t.hasWikiPlot
         plotArticle = t.plotArticle; plotRevId = t.plotRevId; noPlotReason = t.noPlotReason
-        plotSections = t.plotSections
+        plotSections = t.plotSections; plotLanguage = t.plotLanguage
         overviewChars = t.overviewChars
     }
 
@@ -2116,6 +2143,7 @@ struct EnrichedDTO: Codable {
         plotRevId = try c.decodeIfPresent(Int.self, forKey: .plotRevId)
         noPlotReason = try c.decodeIfPresent(String.self, forKey: .noPlotReason)
         plotSections = try c.decodeIfPresent([String].self, forKey: .plotSections) ?? []
+        plotLanguage = try c.decodeIfPresent(String.self, forKey: .plotLanguage)
         // Batches written before the overview was dropped at the client boundary still carry its text. Fall
         // back to its length so a re-read of those keeps the same stub verdict — the text itself is ignored.
         overviewChars = try c.decodeIfPresent(Int.self, forKey: .overviewChars)
@@ -2130,7 +2158,8 @@ struct EnrichedDTO: Codable {
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: hasWikiPlot,
                       plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
-                      noPlotReason: noPlotReason, plotSections: plotSections)
+                      noPlotReason: noPlotReason, plotSections: plotSections,
+                      plotLanguage: plotLanguage)
     }
 }
 
