@@ -623,13 +623,34 @@ public struct WikipediaSource: Sendable {
 
     /// Headings about the MAKING or the RECEIVING of a work. Never prose about the work itself, and the
     /// reason a broader sweep cannot simply take everything that is not a plot heading.
-    static let excludedSectionPrefixes = [
-        "production", "development", "filming", "casting", "cast", "crew", "music", "soundtrack",
-        "reception", "critical", "review", "awards", "accolades", "ratings", "viewership", "broadcast",
-        "release", "home media", "marketing", "merchandis", "legacy", "in popular culture", "controversy",
-        "distribution", "box office", "references", "external links", "see also", "further reading",
-        "notes", "bibliography", "sources", "cite", "adaptations", "sequel", "prequel", "spin-off",
+    /// Headings whose subtree is NEVER the work, whatever a child is called.
+    ///
+    /// The distinction matters because a story leaf outranks an excluded parent — the rule that lets The
+    /// Wire's `Season 1 (2002)` escape `Cast and characters`. Harry & Meghan shows the cost of applying that
+    /// everywhere: its article has FOUR `Volume I`/`Volume II` headings, two under `Critical response` and
+    /// two under `Veracity of claims`, and all four matched `volume` as a serial instalment. 18,141
+    /// characters of reviews and fact-checking went in as plot.
+    ///
+    /// Reception, responses and legal analysis are ABOUT the work from outside it. Nothing nested in them is
+    /// the story, so they beat any leaf.
+    static let hardExcludedPrefixes = [
+        "reception", "critical", "review", "awards", "accolades", "ratings", "viewership", "audience",
+        "response", "responses", "veracity", "controversy", "criticism", "analysis of", "legal",
+        "box office", "broadcast", "release", "home media", "marketing", "merchandis", "legacy",
+        "in popular culture", "references", "external links", "see also", "further reading", "notes",
+        "bibliography", "sources", "cite", "impact", "public opinion",
     ]
+
+    /// Headings that are usually not the work, but are ORGANISATIONAL — a plot section can legitimately sit
+    /// inside one. `Cast and characters` is the case that forced this: The Wire files its five season
+    /// summaries under it, 22,892 characters of plot behind a heading that reads like a cast list.
+    static let softExcludedPrefixes = [
+        "production", "development", "filming", "casting", "cast", "crew", "music", "soundtrack",
+        "distribution", "adaptations", "sequel", "prequel", "spin-off", "history",
+    ]
+
+    /// Both lists, for a leaf-level exclusion where the distinction does not apply.
+    static let excludedSectionPrefixes = hardExcludedPrefixes + softExcludedPrefixes
 
     /// Section titles (case-insensitive) that carry the plot, in preference order. "Premise"/"Storyline" are
     /// the headings most TV-series articles use (film articles favour "Plot"), so including them materially
@@ -717,7 +738,12 @@ public struct WikipediaSource: Sendable {
     ///     So an unrecognised leaf under an unrecognised parent stays excluded.
     public static func sectionKind(_ line: String, parent: String? = nil) -> SectionKind {
         let heading = strippedHeading(line)
-        // 1. An explicit story heading wins outright, whatever encloses it.
+        // 0. A hard-excluded ancestor beats everything. Reception and legal analysis are about the work
+        //    from outside it, so a `Volume I` nested in either is reviews, not story.
+        if let parent, hardExcludedPrefixes.contains(where: {
+            strippedHeading(parent) == $0 || strippedHeading(parent).hasPrefix($0)
+        }) { return .excluded }
+        // 1. Then an explicit story heading wins, whatever ORGANISATIONAL heading encloses it.
         if plotRank(line) != nil { return .story }
         if isSerialHeading(heading) { return .story }
         // 2. Then an explicit exclusion on the leaf itself.

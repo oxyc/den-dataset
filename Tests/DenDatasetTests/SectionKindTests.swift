@@ -18,6 +18,22 @@ final class SectionKindTests: XCTestCase {
         XCTAssertEqual(WikipediaSource.sectionKind("Plot", parent: "Production"), .story)
     }
 
+    /// Not every excluded parent is equal, and treating them alike cost 18,141 characters of contamination.
+    /// Harry & Meghan's article has FOUR `Volume I`/`Volume II` headings — two under `Critical response`,
+    /// two under `Veracity of claims` — and `volume` matches as a serial instalment, so the leaf-wins rule
+    /// that rescues The Wire let reviews and fact-checking in as plot.
+    ///
+    /// Reception and legal analysis are about the work FROM OUTSIDE it: nothing nested in them is story.
+    /// `Cast and characters` is organisational and can legitimately hold a plot.
+    func testAHardExcludedParentBeatsEvenAStoryLeaf() {
+        XCTAssertEqual(WikipediaSource.sectionKind("Volume I", parent: "Critical response"), .excluded)
+        XCTAssertEqual(WikipediaSource.sectionKind("Volume II", parent: "Veracity of claims"), .excluded)
+        XCTAssertEqual(WikipediaSource.sectionKind("Season 1", parent: "Reception"), .excluded)
+        // …while the soft ones still yield to a story leaf, which is what The Wire needs.
+        XCTAssertEqual(WikipediaSource.sectionKind("Season 1 (2002)", parent: "Cast and characters"), .story)
+        XCTAssertEqual(WikipediaSource.sectionKind("Volume I: Fantine", parent: "Plot"), .story)
+    }
+
     /// `Institutional dysfunction` and `Surveillance` say nothing thematic in their own names; only their
     /// parent does. Without inheritance The Wire loses its themes as well as its plot.
     func testAThemeParentIsInheritedByChildren() {
