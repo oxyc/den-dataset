@@ -219,7 +219,7 @@ final class WikipediaSourceTests: XCTestCase {
           {"name":"Abstract","value":"An intro."},
           {"name":"Plot","value":"A hero saves the day."}]}]
         """
-        XCTAssertEqual(WikipediaSource.enterprisePlot(Data(json.utf8)), "A hero saves the day.")
+        XCTAssertEqual(WikipediaSource.enterpriseProse(Data(json.utf8))?.text, "A hero saves the day.")
     }
 
     /// The real Enterprise schema nests the plot prose in the section's `has_parts` paragraphs (the section's
@@ -232,17 +232,49 @@ final class WikipediaSourceTests: XCTestCase {
             {"type":"paragraph","value":"First paragraph."},
             {"type":"paragraph","value":"Second paragraph."}]}]}]
         """
-        XCTAssertEqual(WikipediaSource.enterprisePlot(Data(json.utf8)), "First paragraph.\nSecond paragraph.")
+        XCTAssertEqual(WikipediaSource.enterpriseProse(Data(json.utf8))?.text,
+                       "First paragraph.\nSecond paragraph.")
     }
 
-    /// A plot split into sub-sections (each a nested section with its own paragraphs) flattens recursively.
+    /// A plot split into sub-sections keeps all of it. "Act II" names nothing the classifier recognises, so
+    /// it survives only by inheriting from its parent — without that, every film whose plot is broken into
+    /// acts loses everything after the first one. Sections join with a blank line, paragraphs within one
+    /// with a single newline, so the seam between headings stays visible in the composed document.
     func testEnterprisePlotFlattensNestedSubsections() {
         let json = """
         [{"sections":[{"name":"Plot","has_parts":[
           {"type":"paragraph","value":"Setup."},
           {"type":"section","name":"Act II","has_parts":[{"type":"paragraph","value":"Rising action."}]}]}]}]
         """
-        XCTAssertEqual(WikipediaSource.enterprisePlot(Data(json.utf8)), "Setup.\nRising action.")
+        let found = WikipediaSource.enterpriseProse(Data(json.utf8))
+        XCTAssertEqual(found?.text, "Setup.\n\nRising action.")
+        XCTAssertEqual(found?.sections, ["Plot", "Act II"])
+    }
+
+    /// The Enterprise path is tried FIRST whenever a token is present, so it taking only the first
+    /// Plot-named section would have silently undone the broader extraction for every title — The Wire would
+    /// still yield nothing on the fast path. Same classifier, same parent rules, nesting supplying the parent.
+    func testEnterpriseTakesEverySectionDescribingTheWork() {
+        let json = """
+        [{"sections":[
+          {"name":"Production","has_parts":[{"type":"paragraph","value":"Filmed in Baltimore."}]},
+          {"name":"Cast and characters","has_parts":[
+            {"type":"section","name":"Season 1 (2002)","has_parts":[
+              {"type":"paragraph","value":"McNulty meets the judge."}]},
+            {"type":"section","name":"Season 2 (2003)","has_parts":[
+              {"type":"paragraph","value":"The docks."}]}]},
+          {"name":"Themes","has_parts":[
+            {"type":"section","name":"Institutional dysfunction","has_parts":[
+              {"type":"paragraph","value":"The institutions fail."}]}]},
+          {"name":"Reception","has_parts":[{"type":"paragraph","value":"Widely acclaimed."}]}]}]
+        """
+        let found = WikipediaSource.enterpriseProse(Data(json.utf8))
+        XCTAssertEqual(found?.sections,
+                       ["Season 1 (2002)", "Season 2 (2003)", "Institutional dysfunction"])
+        XCTAssertTrue(found?.text.contains("McNulty") ?? false)
+        XCTAssertTrue(found?.text.contains("docks") ?? false)
+        XCTAssertFalse(found?.text.contains("Filmed") ?? true, "production is not the work")
+        XCTAssertFalse(found?.text.contains("acclaimed") ?? true, "reception is not the work")
     }
 
     /// An empty result set and an undecodable body mean opposite things to the enrich checkpoint: the first

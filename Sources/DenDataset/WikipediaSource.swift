@@ -478,8 +478,9 @@ public struct WikipediaSource: Sendable {
 
     /// The article's Plot/Synopsis section as plain prose, or nil if the article has no such section.
     public func plot(articleTitle: String) async throws -> PlotFetch? {
-        if enterpriseToken != nil, let plot = try? await enterprisePlot(articleTitle: articleTitle) {
-            return PlotFetch(text: plot, revId: nil)
+        if enterpriseToken != nil, let found = try? await enterpriseProse(articleTitle: articleTitle) {
+            return PlotFetch(text: found.text, revId: nil, resolvedArticle: articleTitle,
+                             sections: found.sections)
         }
         return try await actionAPIPlot(articleTitle: articleTitle)
     }
@@ -592,9 +593,13 @@ public struct WikipediaSource: Sendable {
         if isSerialHeading(heading) { return .story }
         // 2. Then an explicit exclusion on the leaf itself.
         if isExcludedHeading(heading) { return .excluded }
-        // 3. Then inheritance: a child of Themes is thematic even when its own name is a topic.
+        // 3. Then inheritance, in both directions. A child of Themes is thematic even when its own name is
+        //    just a topic ("Institutional dysfunction"), and a child of Plot is plot even when its own name
+        //    is a structural label ("Act II", "Prologue") — dropping those loses the back half of any film
+        //    whose plot is broken into acts.
         if let parent {
             let up = strippedHeading(parent)
+            if plotRank(parent) != nil || isSerialHeading(up) { return .story }
             if themeSectionNames.contains(up) { return .theme }
             if isExcludedHeading(up) { return .excluded }
         }
@@ -805,7 +810,7 @@ public struct WikipediaSource: Sendable {
 
     /// The pre-sectioned plot from the Wikimedia Enterprise structured-contents endpoint. Best-effort: any
     /// failure (or a missing plot section) returns nil so the caller falls back to the action API.
-    private func enterprisePlot(articleTitle: String) async throws -> String? {
+    private func enterpriseProse(articleTitle: String) async throws -> (text: String, sections: [String])? {
         guard let token = enterpriseToken else { return nil }
         guard let encoded = articleTitle.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "https://api.enterprise.wikimedia.com/v2/structured-contents/\(encoded)") else {
@@ -818,22 +823,66 @@ public struct WikipediaSource: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data(#"{"filters":[{"field":"is_part_of.identifier","value":"enwiki"}],"limit":1}"#.utf8)
 
-        return Self.enterprisePlot(try await send(request))
+        return Self.enterpriseProse(try await send(request))
     }
 
-    /// Parse an Enterprise structured-contents payload (an array of articles, each with `sections`) and pull
-    /// the first Plot/Synopsis section's prose. The plot text lives in the section's `has_parts` paragraphs
-    /// (each `{type:"paragraph", value:"…"}`), not the section's own `value`; sub-sections nest further, so we
-    /// flatten recursively. Pure + testable.
-    static func enterprisePlot(_ data: Data) -> String? {
+    /// Parse an Enterprise structured-contents payload and pull EVERY section describing the work.
+    ///
+    /// This took the first Plot/Synopsis section and stopped, exactly as the action-API path did — and since
+    /// Enterprise is tried first whenever a token is present, leaving it that way would have silently undone
+    /// the broader extraction for every title. The Wire would still yield nothing on the fast path.
+    ///
+    /// Enterprise nests sub-sections in `has_parts`, so the enclosing heading is simply the recursion's
+    /// parent — which `sectionKind` needs in both directions: The Wire's seasons hang under
+    /// `Cast and characters`, and its themes are named for their topic rather than for being themes.
+    static func enterpriseProse(_ data: Data) -> (text: String, sections: [String])? {
         guard let articles = try? JSONDecoder().decode([EnterpriseArticle].self, from: data) else { return nil }
+        var story: [(String, String)] = []
+        var theme: [(String, String)] = []
+
+        // A section contributes only its OWN paragraphs and always recurses, so prose is attributed to the
+        // heading it actually sits under. Taking a qualifying parent wholesale instead would credit The
+        // Wire's themes to "Themes" rather than to "Institutional dysfunction", and would disagree with the
+        // wikitext path, which classifies every heading independently.
+        func walk(_ section: EnterpriseSection, parent: String?) {
+            let name = section.name ?? ""
+            if !name.isEmpty {
+                let own = ownParagraphs(of: section)
+                if !own.isEmpty {
+                    switch sectionKind(name, parent: parent) {
+                    case .story: story.append((name, own))
+                    case .theme: theme.append((name, own))
+                    case .excluded: break
+                    }
+                }
+            }
+            for child in section.hasParts ?? [] { walk(child, parent: name.isEmpty ? parent : name) }
+        }
+
         for article in articles {
-            for section in article.sections ?? [] where isPlotSection(section.name ?? "") {
-                let text = paragraphProse(of: section)
-                if !text.isEmpty { return text }
+            for section in article.sections ?? [] { walk(section, parent: nil) }
+        }
+        let kept = story + theme
+        guard !kept.isEmpty else { return nil }
+        return (kept.map(\.1).joined(separator: "\n\n"), kept.map(\.0))
+    }
+
+    /// A section's OWN prose: its `value` plus its direct paragraph parts, never a nested section's.
+    ///
+    /// The recursion belongs to the caller, which needs each heading's text kept separately so it can be
+    /// classified and attributed. Flattening the subtree here instead credited a whole `Themes` branch to
+    /// "Themes" and hid whatever was excluded inside it.
+    private static func ownParagraphs(of section: EnterpriseSection) -> String {
+        var parts: [String] = []
+        if let value = section.value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+            parts.append(value)
+        }
+        for child in section.hasParts ?? [] where (child.name ?? "").isEmpty {
+            if let value = child.value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+                parts.append(value)
             }
         }
-        return nil
+        return parts.joined(separator: "\n")
     }
 
     /// Recursively gather prose under a section: a paragraph part carries its text in `value`; a nested
