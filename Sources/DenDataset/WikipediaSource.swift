@@ -503,8 +503,17 @@ public struct WikipediaSource: Sendable {
     /// Deliberately NARROW. "Style" is not here: The Wire's `Style > Realism` is 2,618 characters about the
     /// writers' research process, which is production, not premise. A heading only qualifies when the
     /// heading itself names the work's subject.
+    ///
+    /// "Overview" earns its place on measurement rather than instinct: of ten sampled series that still
+    /// yielded nothing after the broader extraction, FIVE led with it — Stranger Things (128,007 characters),
+    /// The Flintstones, Hawaii Five-O, Batman: The Brave and the Bold, The Most Hated Man on the Internet.
+    /// It is the house style for a series article that summarises rather than serialises.
+    ///
+    /// "Characters" is here for the sketch-show shape, where the premise IS the recurring characters — Da Ali
+    /// G Show's article is `Characters > Ali G / Borat Sagdiyev / Brüno` and nothing else describes it.
     static let themeSectionNames = ["themes", "setting", "concept", "premise and production",
-                                    "characters and setting", "social commentary"]
+                                    "characters and setting", "social commentary", "overview",
+                                    "characters", "series overview"]
 
     /// Headings about the MAKING or the RECEIVING of a work. Never prose about the work itself, and the
     /// reason a broader sweep cannot simply take everything that is not a plot heading.
@@ -619,6 +628,11 @@ public struct WikipediaSource: Sendable {
     /// number.
     static func isSerialHeading(_ heading: String) -> Bool {
         var words = heading.split(separator: " ").map(String.init)
+        // A leading article is noise: The Storyteller heads its anthology "The episodes", and without this
+        // its seven stories — the entire content of the article — inherit nothing and are dropped.
+        if let first = words.first, ["the", "a", "an"].contains(first), words.count > 1 {
+            words.removeFirst()
+        }
         // Both spellings: "Seasons" de-pluralises to "season", but "Series" must NOT become "serie" —
         // stripping the s unconditionally silently dropped every British series article, 16,679 characters
         // of Misfits among them.
