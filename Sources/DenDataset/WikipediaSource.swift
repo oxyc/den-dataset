@@ -541,12 +541,22 @@ public struct WikipediaSource: Sendable {
     /// page needs directionality handling, so Face/Off's plot section arrives as `<span dir="ltr">Plot</span>`
     /// and matched nothing. Comparing the raw string silently dropped those articles.
     static func strippedHeading(_ line: String) -> String {
+        displayHeading(line).lowercased()
+    }
+
+    /// The same heading with its markup gone but its CASE intact — what gets recorded as provenance.
+    ///
+    /// `strippedHeading` lowercases because it exists to compare. A recorded section name is read by a
+    /// person and matched against a later rule change, and "season 1 (2002)" is worse at both than
+    /// "Season 1 (2002)". The Rifleman's heading arrives as two `<span class="anchor">` elements followed by
+    /// the word, so storing the raw line is not an option either.
+    static func displayHeading(_ line: String) -> String {
         var s = line.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         for (entity, char) in [("&amp;", "&"), ("&quot;", "\""), ("&#039;", "'"), ("&apos;", "'"),
                                ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " ")] {
             s = s.replacingOccurrences(of: entity, with: char)
         }
-        return s.trimmingCharacters(in: .whitespaces).lowercased()
+        return s.trimmingCharacters(in: .whitespaces)
     }
 
     /// Rank of a heading in preference order, or nil when it is not a plot heading. One source of truth for
@@ -698,9 +708,14 @@ public struct WikipediaSource: Sendable {
             let parent = (2..<level).reversed().compactMap { parentByLevel[$0] }.first
             let prose = cleanWikitext(body)
             guard !prose.isEmpty else { continue }
+            // The CLEANED heading is what gets recorded. MediaWiki wraps a heading in markup whenever the
+            // page needs anchors — The Rifleman's Overview arrives as two <span class="anchor"> elements
+            // followed by the word — and storing that raw would make the provenance unreadable and
+            // unmatchable against any later rule change.
+            let name = displayHeading(heading)
             switch sectionKind(heading, parent: parent) {
-            case .story: story.append((heading, prose))
-            case .theme: theme.append((heading, prose))
+            case .story: story.append((name, prose))
+            case .theme: theme.append((name, prose))
             case .excluded: continue
             }
         }
@@ -863,9 +878,10 @@ public struct WikipediaSource: Sendable {
             if !name.isEmpty {
                 let own = ownParagraphs(of: section)
                 if !own.isEmpty {
+                    let clean = displayHeading(name)
                     switch sectionKind(name, parent: parent) {
-                    case .story: story.append((name, own))
-                    case .theme: theme.append((name, own))
+                    case .story: story.append((clean, own))
+                    case .theme: theme.append((clean, own))
                     case .excluded: break
                     }
                 }
