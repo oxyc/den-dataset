@@ -62,9 +62,17 @@ ENRICHED_DIR="${ENRICHED_DIR:-$(dirname "$LABELS")/enriched}"
 CHUNK="${CHUNK:-7}"
 MAX_TOKENS="${MAX_TOKENS:-1024}"
 # The plot cap must fit MAX_TOKENS or den-embed truncates the document server-side and says nothing — see
-# `assertDocFits`, which refuses rather than letting that happen. 1500 also matches what `assemble` composes,
-# which matters because both append to the same store.
+# `assertDocFits`, which refuses rather than letting that happen.
 PLOT_CAP="${PLOT_CAP:-3500}"
+# The document SHAPE, which is as much a part of the store's identity as the embedder is. The shipped index
+# is the CC0 lean shape with the director clause dropped; `index/composition.json` records it and both
+# `embed-corpus` and `assemble` now refuse a run that differs. Defaulted rather than optional, because the
+# previous default composed the FULL shape — which nothing ships, so this script was the one thing
+# guaranteed not to reproduce the index it exists to build.
+DOC_FACTS="${DOC_FACTS:-out-t02-cc0/doc-facts.json}"
+# Any non-empty value means DROP. `DROP_DIRECTOR=0` would too, so the off switch is an EMPTY string.
+DROP_DIRECTOR="${DROP_DIRECTOR:-1}"
+[ "$DROP_DIRECTOR" = "0" ] && DROP_DIRECTOR=""
 SEGMENT="${SEGMENT:-5000}"            # titles per den-embed lifetime, then restart it fresh
 IMAGE="${DEN_EMBED_IMAGE:-ghcr.io/oxyc/den-embed:latest}"
 RUNTIME="${DEN_EMBED_RUNTIME:-podman}"
@@ -78,6 +86,10 @@ export DEN_EMBED_URL="http://127.0.0.1:$PORT"
 
 [ -f "$LABELS" ] || { echo "missing labels file: $LABELS"; exit 1; }
 [ -d "$ENRICHED_DIR" ] || { echo "no enriched dir at $ENRICHED_DIR — set ENRICHED_DIR"; exit 1; }
+# Up front, like the others: a missing doc-facts surfaces as a JSON read failure inside the retry loop
+# below, which would boot the 555 MB model once per attempt to reach the same answer.
+[ -z "$DOC_FACTS" ] || [ -f "$DOC_FACTS" ] \
+    || { echo "missing doc-facts file: $DOC_FACTS — set DOC_FACTS, or DOC_FACTS= for the full doc shape"; exit 1; }
 mkdir -p "$OUT_DIR"
 command -v "$RUNTIME" >/dev/null || { echo "no $RUNTIME on PATH — set DEN_EMBED_RUNTIME=docker"; exit 1; }
 # Checked UP FRONT, not when it is needed: the `metadata` step at the end calls TMDB, and a multi-hour
@@ -141,7 +153,13 @@ for attempt in $(seq 1 200); do
     continue
   fi
   # One segment: embed up to SEGMENT new titles, then exit so den-embed can be recycled.
+  # DOC_FACTS and DROP_DIRECTOR are part of the shipped store's identity, not options. Without them this
+  # composed the FULL document shape — title, year and cast included — while the shipped index is the CC0
+  # lean shape with the director clause dropped, so running this script was the one thing guaranteed NOT to
+  # reproduce it. The two settings were unrecorded and had to be recovered by re-embedding probe titles and
+  # comparing bytes (12/12 exact at these; 10/12 with the director clause, 2/12 at cap 1500).
   out=$("$BIN" embed-corpus --labels "$LABELS" --enriched-dir "$ENRICHED_DIR" --out-dir "$OUT_DIR" \
+        ${DOC_FACTS:+--doc-facts "$DOC_FACTS"} ${DROP_DIRECTOR:+--doc-drop-director} \
         --chunk "$CHUNK" --plot-cap "$PLOT_CAP" --limit "$SEGMENT" 2>>"$ERR_LOG") || {
     # Not every failure is a dead container. A refusal from embed-corpus itself — a mixed embedder, a plot
     # cap the service would truncate, a missing binary — is DETERMINISTIC, and retrying it 200 times boots

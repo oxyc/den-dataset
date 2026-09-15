@@ -861,6 +861,18 @@ enum Commands {
         let denEmbed = DenEmbedClient()
         let embedder = try await recordEmbedder(outDir: outDir, client: denEmbed, plotCap: plotCap)
         FileHandle.standardError.write(Data("  embedder: \(embedder.label)\n".utf8))
+        // The embedder identity cannot see how the document was composed, and two runs of the same service
+        // over the same corpus differ entirely on one clause. Refuse a shape change the same way.
+        // `dropDirector` only means anything in the lean path — `ComposedDoc.build` always emits the
+        // director clause and never consults the flag. Recording it on a full-shape run would refuse two
+        // runs that compose byte-identical documents, so normalise it rather than store a value that does
+        // not describe the output.
+        let composition = EmbedderGate.Composition(docShape: docFacts != nil ? "lean" : "full",
+                                                   dropDirector: docFacts != nil && dropDirector,
+                                                   plotCap: plotCap)
+        try recordComposition(outDir: outDir, docShape: composition.docShape,
+                              dropDirector: composition.dropDirector, plotCap: composition.plotCap)
+        FileHandle.standardError.write(Data("  composition: \(composition.label)\n".utf8))
 
         // RESUME: append to an existing store, skipping titles already embedded. A crash (e.g. den-embed OOM)
         // loses at most the current chunk — re-running continues from where it stopped. First reconcile the two
@@ -995,6 +1007,56 @@ enum Commands {
         }
     }
 
+    /// The same guard for how the document is composed, which `recordEmbedder` cannot see.
+    ///
+    /// Recovered by experiment rather than found written down: the shipped store is the lean shape with the
+    /// director clause dropped at a 3500-char cap, established by re-embedding probe titles and comparing
+    /// bytes to the shipped rows (12/12 exact at those settings; 10/12 with the director clause kept — the
+    /// two failures being the only director-carrying probes; 2/12 at cap 1500 — the two matches being
+    /// short-plot titles no cap can affect).
+    ///
+    /// The DROP-DIRECTOR flag is pinned exactly. The CAP is not: `cappedPlot` snaps back to the last ". ",
+    /// so each probe is insensitive across an interval, and intersecting the ten gives [3479..3534] — every
+    /// value in that window reproduces the shipped bytes. 3500 is the value because it is the only round one
+    /// in the window and `docs/OPERATE.md` already prescribed it, not because the bytes single it out.
+    static func recordComposition(outDir: String, docShape: String,
+                                  dropDirector: Bool, plotCap: Int) throws {
+        let path = Layout.compositionIdentity(outDir)
+        let now = EmbedderGate.Composition(docShape: docShape, dropDirector: dropDirector, plotCap: plotCap)
+        let previous: EmbedderGate.Composition? = try? JSON.read(path)
+        var hasRows = false
+        if FileManager.default.fileExists(atPath: Layout.labelsStore(outDir)) {
+            hasRows = !(try FileIO.readLines(Layout.labelsStore(outDir))).isEmpty
+        }
+        switch EmbedderGate.decideComposition(previous: previous, now: now, storeHasRows: hasRows) {
+        case .mismatch(let was, let isNow):
+            throw ToolError(message: "this store's documents were composed as \(was) but this run composes "
+                + "\(isNow) — appending would put two document shapes in one vector space, which no "
+                + "similarity score can separate afterwards. Match the recorded settings, or start a fresh "
+                + "--out-dir.")
+        case .unknownProvenance:
+            // Deliberately not adopting the current settings: that would write a guess down as a fact, and
+            // the guard would then pass forever on the store that actually has the problem.
+            //
+            // The suggested values are `out-t02-cc0b`'s and NOBODY ELSE'S. Several other stores have rows
+            // and no record — out-t02, out-t02-cc0, out-t02-rebuild, out-vecnow* — and they were composed
+            // differently. An operator who pastes these into one of those does exactly what this branch
+            // exists to prevent, so the message has to say whose values they are.
+            throw ToolError(message: "\(outDir) holds rows but no \(path), so how its documents were "
+                + "composed is unknown and appending \(now.label) may mix two shapes. If this store is "
+                + #"out-t02-cc0b (the shipped one) its composition is {"docShape":"lean","#
+                + #""dropDirector":true,"plotCap":3500} — write that file. For any OTHER store these "#
+                + "values are wrong: recover them by re-embedding a few long-plot titles and comparing "
+                + "bytes against its own rows (docs/OPERATE.md, \"Recovering a store's composition\"), or "
+                + "start a fresh --out-dir.")
+        case .matches:
+            return
+        case .firstUse:
+            try FileIO.ensureParent(path)
+            try JSON.writePretty(now, to: path)
+        }
+    }
+
     /// Refuse to compose documents the service will silently cut in half.
     ///
     /// den-embed truncates at `max_tokens` server-side, returns a normal-looking vector, and says nothing —
@@ -1116,6 +1178,15 @@ enum Commands {
         if embedderKind != "fnv" {
             try await recordEmbedder(outDir: outDir, client: denEmbed, plotCap: plotCap)
         }
+        // And the same guard on the DOCUMENT, which is where this actually differs from `embed-corpus`:
+        // that composes the CC0 lean shape when given `--doc-facts`, while this always composes the full one
+        // (title, year and cast) at its own default cap. So appending here to a lean store mixes two
+        // document shapes in one vector space — the near-miss that motivated the composition record, and it
+        // was still open in exactly this function while the comment above claimed parity.
+        //
+        // NOT gated on `--embedder fnv`: the document is composed the same way whoever embeds it, so a wrong
+        // shape is wrong regardless of which embedder turns it into numbers.
+        try recordComposition(outDir: outDir, docShape: "full", dropDirector: false, plotCap: plotCap)
 
         let enriched: [EnrichedDTO] = try JSON.read(Layout.enrichedBatch(outDir, batchId))
         let passes = try loadVotePasses(outDir: outDir, batchId: batchId)
@@ -2071,6 +2142,7 @@ enum Layout {
     static func enrichedBatch(_ dir: String, _ id: Int) -> String { join(dir, "enriched/batch-\(id).json") }
     static func escalateBatch(_ dir: String, _ id: Int) -> String { join(dir, "escalate/batch-\(id).json") }
     static func embedderIdentity(_ dir: String) -> String { join(dir, "index/embedder.json") }
+    static func compositionIdentity(_ dir: String) -> String { join(dir, "index/composition.json") }
     static func votesDir(_ dir: String) -> String { join(dir, "votes") }
     static func votePass(_ dir: String, _ id: Int, _ pass: Int) -> String { join(dir, "votes/batch-\(id)-pass\(pass).json") }
     static func labelsStore(_ dir: String) -> String { join(dir, "index/labels.jsonl") }

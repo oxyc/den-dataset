@@ -117,6 +117,9 @@ $BIN assemble --batch-id <id> --out-dir out    # per batch (default embedder = d
 #    First run in a fresh out-dir records the service's identity to out/index/embedder.json; later runs
 #    refuse if the service no longer matches it. An out-dir with a store but no embedder.json also refuses —
 #    what built it is unknown, and guessing is how the corpus/query drift went unnoticed in the first place.
+#    The same now holds for out/index/composition.json, which records how the DOCUMENT was composed —
+#    docShape, dropDirector, plotCap. The embedder identity cannot see any of those, and they change the
+#    vector completely: `assemble` composes the FULL shape, `embed-corpus --doc-facts` the CC0 lean one.
 
 # 6. Finalize — index store -> labels-t02.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
 $BIN finalize --out-dir out
@@ -135,6 +138,34 @@ scripts/publish-dataset.sh out
 
 `assemble --embedder fnv` falls back to the offline FNV embedder (float → local int8) for a network-free run;
 `finalize --embedding-version <v>` overrides the artifact label. The default path is the bge-m3 build above.
+
+## Recovering a store's composition
+
+A store with rows and no `index/composition.json` refuses a top-up, because how its documents were composed
+cannot be known — and guessing writes the guess down as a fact. Recover it instead; it takes minutes.
+
+The shipped store's values are already established: **`{"docShape":"lean","dropDirector":true,"plotCap":3500}`**
+for `out-t02-cc0b`. They apply to that store and no other. For any other store:
+
+1. **Pick probes.** ~10 titles whose plot is far longer than any candidate cap, that carry **no** Wikidata
+   director (so the director flag cannot confound the cap), and that appear in exactly one batch. Plus 2
+   short-plot titles that **do** carry a director — the cap cannot touch those, so they isolate the flag and
+   double as a rig control.
+2. **Target them with a subset `--labels` file.** `--limit` is a counter, not a selector; it takes the first
+   N in read order. A `LabelsArtifact` holding only the probe records works — every other title is skipped
+   as `missingLabel`.
+3. **Settle the shape first**, at any cap, on the short-plot director titles: run with and without
+   `--doc-drop-director`. Exactly one matches.
+4. **Then sweep the cap** on the long titles, holding the shape fixed. `assertDocFits` caps it at 3596, so
+   the answer is an integer in (0, 3596].
+5. **Compare exact bytes**, from the store's own `index/vectors.jsonl` against the shipped
+   `vectors-bge-m3.bin` (8-byte header, then row-major int8, row *i* = `labels-t02.json.records[i]`). Judge
+   on byte equality only: adjacent caps sit at cosine 0.95–0.98, which reads as "about right" and is wrong
+   in every byte.
+
+`cappedPlot` snaps to the last `". "`, so one probe pins an interval rather than a value; intersect across
+probes. For cc0b that window was [3479..3534], and 3500 is the value because it is the only round number in
+it and this document already prescribed it.
 
 ## Incremental top-up (OptiPlex)
 

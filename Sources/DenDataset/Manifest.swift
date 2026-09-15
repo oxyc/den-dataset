@@ -195,4 +195,49 @@ public enum EmbedderGate {
         // and the guard would then pass forever on the one corpus that actually has the problem.
         return storeHasRows ? .unknownProvenance : .firstUse
     }
+
+    /// The same decision for how the DOCUMENT was composed, which the embedder identity cannot express.
+    ///
+    /// `Identity` describes the service — model, dims, runtime, maxTokens, epoch. It says nothing about what
+    /// was handed to it, and two runs of the same service over the same corpus can produce entirely
+    /// different vectors. Both of these were unrecorded, and both had to be recovered by re-embedding probe
+    /// titles and comparing bytes against the shipped rows:
+    ///
+    ///   * `--doc-drop-director`. `out-t02-cc0` and `out-t02-cc0b` are both CC0-shape runs of the same
+    ///     corpus through the same service, and they differ on exactly the 35,050 titles that carry a
+    ///     Wikidata director — the whole difference is one clause.
+    ///   * `--plot-cap`. Plot is most of the document; at 1500 rather than 3500 the shipped probes come back
+    ///     at cosine 0.92-0.95 — close enough to read as "about right" and wrong in every byte.
+    ///
+    /// Neither is recoverable from the artifacts: `embed.log` records the row count and the shape name, the
+    /// manifest records neither. So a top-up composed differently passes the embedder gate and lands vectors
+    /// in a different space, silently. That nearly happened — a plan to add six titles proposed `assemble`,
+    /// which composes the FULL shape, into this lean-shape store.
+    public static func decideComposition(previous: Composition?, now: Composition,
+                                         storeHasRows: Bool) -> Decision {
+        if let previous {
+            return previous == now ? .matches : .mismatch(previous: previous.label, now: now.label)
+        }
+        return storeHasRows ? .unknownProvenance : .firstUse
+    }
+
+    /// How a store's documents were composed. Written beside the embedder identity, compared the same way.
+    public struct Composition: Codable, Equatable {
+        /// `lean` for the CC0 shape (`--doc-facts`), `full` for title/year/cast.
+        public let docShape: String
+        /// Whether the `Directed by` clause was dropped (`--doc-drop-director`).
+        public let dropDirector: Bool
+        /// `--plot-cap`, in characters.
+        public let plotCap: Int
+
+        public init(docShape: String, dropDirector: Bool, plotCap: Int) {
+            self.docShape = docShape
+            self.dropDirector = dropDirector
+            self.plotCap = plotCap
+        }
+
+        public var label: String {
+            "\(docShape) doc, \(dropDirector ? "no director" : "director") clause, plot cap \(plotCap)"
+        }
+    }
 }

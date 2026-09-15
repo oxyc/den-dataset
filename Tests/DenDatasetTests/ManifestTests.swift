@@ -203,6 +203,39 @@ final class EmbedderGateTests: XCTestCase {
                        .matches)
     }
 
+    private func composition(dropDirector: Bool = true, cap: Int = 3500) -> EmbedderGate.Composition {
+        EmbedderGate.Composition(docShape: "lean", dropDirector: dropDirector, plotCap: cap)
+    }
+
+    /// The identity gate passes on all of these, because the SERVICE is the same in every one. What differs
+    /// is the document handed to it, and that difference is total: `out-t02-cc0` and `out-t02-cc0b` are two
+    /// runs of one corpus through one service that disagree on 35,050 of 38,532 rows — the whole gap being
+    /// whether the `Directed by` clause was dropped.
+    func testADifferentDocumentShapeIsRefusedEvenWhenTheEmbedderMatches() {
+        let full = EmbedderGate.Composition(docShape: "full", dropDirector: false, plotCap: 1500)
+        for (previous, now) in [(composition(), composition(dropDirector: false)),
+                                (composition(), composition(cap: 1500)),
+                                // The case `assemble` actually produces: the full shape at its own default
+                                // cap, appended to the lean store. This is the one that was live.
+                                (composition(), full)] {
+            let decision = EmbedderGate.decideComposition(previous: previous, now: now, storeHasRows: true)
+            guard case .mismatch = decision else {
+                return XCTFail("expected a mismatch for \(previous.label) vs \(now.label), got \(decision)")
+            }
+        }
+        XCTAssertEqual(EmbedderGate.decideComposition(previous: composition(), now: composition(),
+                                                      storeHasRows: true), .matches)
+    }
+
+    /// Same rule as the embedder identity: rows with nothing recorded must not adopt the current settings,
+    /// or the guess becomes a fact and the store that has the problem is the one that never reports it.
+    func testRowsWithNoRecordedCompositionAreRefusedRatherThanAdopted() {
+        XCTAssertEqual(EmbedderGate.decideComposition(previous: nil, now: composition(), storeHasRows: true),
+                       .unknownProvenance)
+        XCTAssertEqual(EmbedderGate.decideComposition(previous: nil, now: composition(), storeHasRows: false),
+                       .firstUse)
+    }
+
     /// The failure this whole mechanism exists for: two generations of vectors in one corpus, with every
     /// field either side used to compare (bge-m3, 1024) identical.
     func testADifferentEmbedderIsRefused() {
