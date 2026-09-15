@@ -511,9 +511,19 @@ public struct WikipediaSource: Sendable {
     ///
     /// "Characters" is here for the sketch-show shape, where the premise IS the recurring characters — Da Ali
     /// G Show's article is `Characters > Ali G / Borat Sagdiyev / Brüno` and nothing else describes it.
+    /// "Format" is the premise of an unscripted show. So You Think You Can Dance's `Show format` is 535
+    /// characters of exactly that — a selection process, expert judges, then a competition phase — and the
+    /// same heading carries Project Runway, MasterChef, Big Brother and Alone. Matched as a prefix so
+    /// "Format and rules" qualifies.
+    ///
+    /// Two headings were considered and REJECTED on inspection, which is why they are listed here rather
+    /// than quietly absent. "History" reads like premise and is not: The Smurfs' is 2,849 characters
+    /// beginning "In 1976, Stuart R. Ross ... acquiring North American merchandising rights" — business
+    /// history. And "Episodes"/"Episode list" are wikitables, which `cleanWikitext` strips, so they measure
+    /// 0 characters of prose whatever the classifier says about them.
     static let themeSectionNames = ["themes", "setting", "concept", "premise and production",
                                     "characters and setting", "social commentary", "overview",
-                                    "characters", "series overview"]
+                                    "characters", "series overview", "format", "show format"]
 
     /// Headings about the MAKING or the RECEIVING of a work. Never prose about the work itself, and the
     /// reason a broader sweep cannot simply take everything that is not a plot heading.
@@ -619,11 +629,16 @@ public struct WikipediaSource: Sendable {
         if let parent {
             let up = strippedHeading(parent)
             if plotRank(parent) != nil || isSerialHeading(up) { return .story }
-            if themeSectionNames.contains(up) { return .theme }
+            if isThemeHeading(up) { return .theme }
             if isExcludedHeading(up) { return .excluded }
         }
-        if themeSectionNames.contains(heading) { return .theme }
+        if isThemeHeading(heading) { return .theme }
         return .excluded
+    }
+
+    /// Prefix match, so "Format and rules" counts as "format" — the same shape `isExcludedHeading` uses.
+    private static func isThemeHeading(_ heading: String) -> Bool {
+        themeSectionNames.contains { heading == $0 || heading.hasPrefix($0 + " ") }
     }
 
     private static func isExcludedHeading(_ heading: String) -> Bool {
