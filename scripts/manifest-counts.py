@@ -46,6 +46,33 @@ def count(meta, key, base):
     return None
 
 
+def highest_batch_id(base):
+    """The highest enriched batch id the publish dir can see, or None.
+
+    Stamped so a later check can say WHICH enriched records a published dataset was built from. There is no
+    other record of it: `out-t02-cc0b/enriched` is a SYMLINK to `../out-t02/enriched`, so a publish reads a
+    live directory that keeps growing, and after the fact nothing distinguishes "this batch was included"
+    from "this batch was written later". Any invariant relating enriched records to shipped labels needs
+    that boundary or it reports every normal enrich-after-embed run as a violation.
+
+    Deliberately stamped HERE and not added to `DatasetMeta`. That struct's `namingSidecar` enumerates every
+    field by hand while `ownedKeys` comes from `CodingKeys`, so a new field with a default compiles, is
+    treated as owned, and is then dropped on the next `metadata` run — the exact trap `Manifest.swift`
+    documents. Unowned keys stamped here are carried forward by `ManifestMerge` instead.
+    """
+    enriched = os.path.join(base, "enriched")
+    if not os.path.isdir(enriched):
+        return None
+    ids = []
+    for name in os.listdir(enriched):
+        if name.startswith("batch-") and name.endswith(".json"):
+            try:
+                ids.append(int(name[len("batch-"):-len(".json")]))
+            except ValueError:
+                continue
+    return max(ids) if ids else None
+
+
 def main():
     mode = sys.argv[1]
     if mode == "--stamp":
@@ -55,6 +82,9 @@ def main():
             n = count(meta, key, base)
             if n is not None:
                 meta[key[: -len("File")] + "Records"] = n
+        highest = highest_batch_id(base)
+        if highest:
+            meta["maxBatchId"] = highest
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=1)
             f.write("\n")
