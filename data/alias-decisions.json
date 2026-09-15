@@ -3549,6 +3549,12 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 216390,
+      "alias": "Secret Woman",
+      "why": "the English rendering of the Korean title"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 219063,
       "alias": "La primera vez",
       "why": "a Wikidata rdfs:label for this item in some language"
@@ -3582,6 +3588,12 @@
       "tmdbId": 303143,
       "alias": "Brave New World",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 331033,
+      "alias": "Collision",
+      "why": "the English rendering of Colisión"
     }
   ]
 }
