@@ -62,6 +62,12 @@ public struct EnrichedTitle: Sendable, Equatable {
     /// fallback in the enrich pass), which is exactly why it is recorded rather than re-derived.
     public let plotArticle: String?
     public let plotRevId: Int?
+    /// Which headings the plot was taken from, in order.
+    ///
+    /// The text is now a CONCATENATION — The Wire's is five `Season N` sections plus its themes — so
+    /// "where did this come from?" has no single answer, and a later change to the heading rules can target
+    /// the articles it actually affects instead of re-scraping the corpus to find out.
+    public let plotSections: [String]
     /// WHY there is no plot, when there is none: `noArticle`, `noSection`, `belowFloor`, `fetchFailed`.
     ///
     /// `hasWikiPlot: false` alone is what makes every improvement cost a full re-scrape. The four causes
@@ -76,7 +82,7 @@ public struct EnrichedTitle: Sendable, Equatable {
                 director: String? = nil, topCast: [String] = [], createdBy: [String] = [],
                 runtimeMinutes: Int? = nil, hasWikiPlot: Bool = false,
                 plotArticle: String? = nil, plotRevId: Int? = nil, overviewChars: Int = 0,
-                noPlotReason: String? = nil) {
+                noPlotReason: String? = nil, plotSections: [String] = []) {
         self.tmdbId = tmdbId; self.mediaType = mediaType; self.title = title; self.year = year
         self.overview = overview; self.genreIDs = genreIDs; self.genreNames = genreNames
         self.keywords = keywords; self.originCountry = originCountry
@@ -87,17 +93,19 @@ public struct EnrichedTitle: Sendable, Equatable {
         self.plotArticle = plotArticle; self.plotRevId = plotRevId
         self.overviewChars = overviewChars
         self.noPlotReason = noPlotReason
+        self.plotSections = plotSections
     }
 
     /// Return a copy with the Wikipedia plot grounded in (`overview` ← plot, `hasWikiPlot` = true).
-    public func groundedOnWikiPlot(_ plot: String, article: String? = nil, revId: Int? = nil) -> EnrichedTitle {
+    public func groundedOnWikiPlot(_ plot: String, article: String? = nil, revId: Int? = nil,
+                                   sections: [String] = []) -> EnrichedTitle {
         EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: plot,
                       genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: true,
                       plotArticle: article, plotRevId: revId, overviewChars: overviewChars,
-                      noPlotReason: nil)
+                      noPlotReason: nil, plotSections: sections)
     }
 
     /// Return a copy recording WHY no plot was found, so a later pass can re-run only the subset a given
@@ -109,7 +117,7 @@ public struct EnrichedTitle: Sendable, Equatable {
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: false,
                       plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
-                      noPlotReason: reason)
+                      noPlotReason: reason, plotSections: plotSections)
     }
 
     /// Fold in the facts that ride along on the Wikidata hop.
@@ -126,7 +134,7 @@ public struct EnrichedTitle: Sendable, Equatable {
                       createdBy: creators.isEmpty ? createdBy : creators,
                       runtimeMinutes: wikiRuntime ?? runtimeMinutes, hasWikiPlot: hasWikiPlot,
                       plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
-                      noPlotReason: noPlotReason)
+                      noPlotReason: noPlotReason, plotSections: plotSections)
     }
 }
 

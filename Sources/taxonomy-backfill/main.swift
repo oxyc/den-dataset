@@ -337,6 +337,35 @@ enum Commands {
                 + "and any vote passes for id \(batchId) belong to those titles. The enrich checkpoint's "
                 + "nextBatch is out of step with the batches on disk — fix it rather than clobbering.")
         }
+        // And never let a NEW batch silently re-cover a key an existing batch already holds. The guard above
+        // protects the batch FILE; nothing protected the keys inside it, so 1,855 of 59,218 keys ended up in
+        // more than one batch and 505 of those disagree with themselves about `hasWikiPlot`. Which record
+        // wins then depends on the reader's traversal order — the defect `EnrichedBatches.orderedNames`
+        // exists to make deterministic, and better not to create at all.
+        //
+        // A warning rather than a refusal: re-covering is legitimate when a title is deliberately
+        // re-enriched, and failing here would block exactly the pass that fixes a stale record. But silence
+        // is how 505 of them accumulated.
+        var seen: [String: Int] = [:]
+        let enrichedDir = Layout.enrichedDir(outDir)
+        for name in EnrichedBatches.orderedNames(inDirectory: enrichedDir) {
+            guard let id = Int(name.dropFirst("batch-".count).dropLast(".json".count)), id != batchId,
+                  let existing: [EnrichedDTO] = try? JSON.read(
+                      (enrichedDir as NSString).appendingPathComponent(name)) else { continue }
+            for dto in existing { seen["\(dto.mediaType):\(dto.tmdbId)"] = id }
+        }
+        let recovered = survivors.compactMap { dto -> String? in
+            seen["\(dto.mediaType):\(dto.tmdbId)"].map { "\(dto.mediaType):\(dto.tmdbId) (batch \($0))" }
+        }
+        if !recovered.isEmpty {
+            let sample: String = recovered.prefix(5).joined(separator: ", ")
+                + (recovered.count > 5 ? " …" : "")
+            Log.append(Layout.enrichLog(outDir),
+                       "re-covered \(recovered.count) key(s) already in earlier batches: \(sample)")
+            let warning = "  warning: \(recovered.count) key(s) here already exist in earlier batches — "
+                + "the newest wins on read, but the older records remain. \(sample)\n"
+            FileHandle.standardError.write(Data(warning.utf8))
+        }
         try JSON.writePretty(survivors, to: batchPath)
         // Checkpoint every pending id EXCEPT those still owed another look: transient failures (a blip must
         // not drop a title) and below-floor rejections (a vote count only climbs, so today's verdict is not
@@ -388,9 +417,34 @@ enum Commands {
         case fetchFailed
     }
 
-    /// Minimum plot length to re-ground on (chars). Below this, a "Plot" section is a bare one-line logline that
-    /// adds little grounding over the TMDB overview it would replace — keep the title tags-only instead.
-    static let wikiPlotFloor = 200
+    /// Minimum plot length to re-ground on (chars).
+    ///
+    /// Was 200, justified as "a bare one-line logline adds little grounding over the TMDB overview it would
+    /// replace". That comparison no longer exists: `overview` holds a Wikipedia plot or NOTHING — TMDB's
+    /// text was removed from the record entirely on ToS grounds — so the trade is not "this versus the
+    /// overview" but "this versus nothing", and 200 was rejecting real premises:
+    ///
+    ///   165  Would You Marry Me?  a romantic comedy about a 90-day fake marriage between a man and a woman
+    ///                             trying to win the grand prize of a luxury home for newlyweds
+    ///   179  Disclaimer           Catherine Ravenscroft, a documentary-journalist, discovers she is a
+    ///                             character in a novel that purports to reveal a secret she has hidden
+    ///   189  Silo                 a dystopian future where a community exists in a giant silo extending
+    ///                             144 levels underground
+    ///
+    /// Each names genre, premise and stakes, which is what the vector wants. 120 admits those and still
+    /// rejects the actual loglines: "The film explores the life and career of John le Carré" (55) and its
+    /// 93- and 101-character neighbours.
+    static let wikiPlotFloor = 120
+
+    /// Long enough that a title's OWN article is clearly its best source, so the P144 source work is not
+    /// worth a second fetch.
+    ///
+    /// The floor cannot also do this job. It used to be both the accept threshold AND the fall-through
+    /// trigger — first candidate over the line wins — so lowering it would have stopped Silo, Dark Matter
+    /// and Defending Jacob falling through to the novels that carry their real plots, trading 12,415
+    /// characters for 189. Separating them means a thin own-article still tries the source work, and the
+    /// longer answer wins.
+    static let ownArticleSufficient = 1000
 
     /// Fetch each title's live Wikipedia plot (bounded concurrency) and classify the outcome. A missing mapping
     /// or a plot section that is absent / below the floor is a definitive `noPlot`; a transient fetch failure
@@ -433,9 +487,17 @@ enum Commands {
                             for candidate in candidates {
                                 guard let plot = try await wiki.plot(articleTitle: candidate) else { continue }
                                 sawSection = true
-                                if plot.text.count >= wikiPlotFloor { found = (candidate, plot); break }
+                                // Keep the LONGEST, rather than the first over the line. The own article is
+                                // tried first, so a thin one no longer blocks the source work: Silo's own
+                                // article gives 189 characters of premise and the novel gives 12,415.
+                                if plot.text.count > (found?.plot.text.count ?? 0) {
+                                    found = (candidate, plot)
+                                }
+                                // …but stop once the title's own article is clearly enough, so a well
+                                // covered adaptation does not pay for a second fetch it cannot use.
+                                if plot.text.count >= ownArticleSufficient { break }
                             }
-                            guard let hit = found else {
+                            guard let hit = found, hit.plot.text.count >= wikiPlotFloor else {
                                 return .noPlot(title, sawSection ? .belowFloor : .noSection)
                             }
                             // Which article won and at which revision — recorded so a refresh can ask for
@@ -446,7 +508,8 @@ enum Commands {
                             return .grounded(title.groundedOnWikiPlot(
                                 hit.plot.text,
                                 article: hit.plot.resolvedArticle ?? hit.article,
-                                revId: hit.plot.revId))
+                                revId: hit.plot.revId,
+                                sections: hit.plot.sections))
                         } catch {
                             let key = MediaKey(title.mediaType, title.tmdbId)
                             if Transport.isRetryable(error) {
@@ -2007,6 +2070,9 @@ struct EnrichedDTO: Codable {
     /// Why there is no plot, when there is none — `noArticle`, `noSection`, `belowFloor`, `fetchFailed`.
     /// Written so a later pass re-runs the subset a fix reaches, not the whole corpus.
     let noPlotReason: String?
+    /// Which headings the plot came from. The text is a concatenation, so one article name no longer says
+    /// where it came from, and a heading-rule change can target the articles it affects.
+    let plotSections: [String]
     /// The LENGTH of TMDB's overview, never its text — the stub check's only input. See `EnrichedTitle`.
     let overviewChars: Int
 
@@ -2019,6 +2085,7 @@ struct EnrichedDTO: Codable {
         runtimeMinutes = t.runtimeMinutes
         hasWikiPlot = t.hasWikiPlot
         plotArticle = t.plotArticle; plotRevId = t.plotRevId; noPlotReason = t.noPlotReason
+        plotSections = t.plotSections
         overviewChars = t.overviewChars
     }
 
@@ -2048,6 +2115,7 @@ struct EnrichedDTO: Codable {
         plotArticle = try c.decodeIfPresent(String.self, forKey: .plotArticle)
         plotRevId = try c.decodeIfPresent(Int.self, forKey: .plotRevId)
         noPlotReason = try c.decodeIfPresent(String.self, forKey: .noPlotReason)
+        plotSections = try c.decodeIfPresent([String].self, forKey: .plotSections) ?? []
         // Batches written before the overview was dropped at the client boundary still carry its text. Fall
         // back to its length so a re-read of those keeps the same stub verdict — the text itself is ignored.
         overviewChars = try c.decodeIfPresent(Int.self, forKey: .overviewChars)
@@ -2062,7 +2130,7 @@ struct EnrichedDTO: Codable {
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: hasWikiPlot,
                       plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
-                      noPlotReason: noPlotReason)
+                      noPlotReason: noPlotReason, plotSections: plotSections)
     }
 }
 
