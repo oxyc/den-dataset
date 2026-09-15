@@ -320,7 +320,9 @@ enum Commands {
         for outcome in try await regroundOnWikipedia(titles, mapping: mapping, log: Layout.enrichLog(outDir)) {
             switch outcome {
             case .grounded(let title): grounded.append(title); withPlot += 1
-            case .noPlot(let title): grounded.append(title)
+            // The reason rides along on the record. A later pass re-runs the subset a fix reaches —
+            // `noSection` for a heading rule, `noArticle` for a non-English sitelink — instead of the corpus.
+            case .noPlot(let title, let reason): grounded.append(title.notingNoPlot(reason.rawValue))
             case .deferred(let id): deferred.insert(id)   // transient plot fetch — retry next run, don't checkpoint
             }
         }
@@ -362,9 +364,28 @@ enum Commands {
     /// the TMDB overview), or deferred because the fetch failed transiently (retry next run — don't checkpoint).
     enum PlotOutcome {
         case grounded(EnrichedTitle)
-        case noPlot(EnrichedTitle)
+        case noPlot(EnrichedTitle, NoPlotReason)
         /// MediaKey, not a bare id: deferring "95" would hold back a movie and a series together.
         case deferred(MediaKey)
+    }
+
+    /// WHY a title has no plot — recorded per title, because `hasWikiPlot: false` on its own is the thing
+    /// that forces a full re-scrape every time anything improves.
+    ///
+    /// The four causes want four different fixes and are not interchangeable: `noArticle` needs a
+    /// non-English sitelink or nothing at all, `noSection` is who a heading-rule change or a lead fallback
+    /// would reach, `belowFloor` is a threshold decision, and `fetchFailed` is simply worth retrying. Folded
+    /// into one boolean, the only safe answer to "who should I re-run?" is "all 19,542", which is how this
+    /// corpus came to be re-scraped repeatedly.
+    enum NoPlotReason: String {
+        /// No English Wikipedia article to read — the Wikidata item has no enwiki sitelink.
+        case noArticle
+        /// The article exists and carries no section `plotRank` recognises.
+        case noSection
+        /// A plot section exists but its prose is under `wikiPlotFloor`.
+        case belowFloor
+        /// A definitive fetch failure, e.g. a 404 on a stale sitelink. Transient failures defer instead.
+        case fetchFailed
     }
 
     /// Minimum plot length to re-ground on (chars). Below this, a "Plot" section is a bare one-line logline that
@@ -402,14 +423,21 @@ enum Commands {
                         // where the story engine is what matters; it would be wrong for anything claiming to
                         // describe this cut specifically.
                         let candidates = [facts?.article, facts?.sourceArticle].compactMap { $0 }
-                        guard !candidates.isEmpty else { return .noPlot(title) }
+                        guard !candidates.isEmpty else { return .noPlot(title, .noArticle) }
                         do {
                             var found: (article: String, plot: WikipediaSource.PlotFetch)?
+                            // Whether ANY candidate had a plot-ranked section at all, even a short one. That
+                            // is the difference between "a heading rule would reach this" and "the floor
+                            // rejected it", and without it both look the same afterwards.
+                            var sawSection = false
                             for candidate in candidates {
-                                if let plot = try await wiki.plot(articleTitle: candidate),
-                                   plot.text.count >= wikiPlotFloor { found = (candidate, plot); break }
+                                guard let plot = try await wiki.plot(articleTitle: candidate) else { continue }
+                                sawSection = true
+                                if plot.text.count >= wikiPlotFloor { found = (candidate, plot); break }
                             }
-                            guard let hit = found else { return .noPlot(title) }
+                            guard let hit = found else {
+                                return .noPlot(title, sawSection ? .belowFloor : .noSection)
+                            }
                             // Which article won and at which revision — recorded so a refresh can ask for
                             // current revids in bulk and re-read only the articles that moved.
                             // The RESOLVED article, not the one asked for: a redirect returns the target's
@@ -427,7 +455,7 @@ enum Commands {
                             }
                             // Definitive (e.g. 404 on a stale sitelink) — keep the title on its TMDB overview.
                             Log.append(log, "plot-miss id=\(key.logLabel) (\(error))")
-                            return .noPlot(title)
+                            return .noPlot(title, .fetchFailed)
                         }
                     }
                 }
@@ -1976,6 +2004,9 @@ struct EnrichedDTO: Codable {
     /// to ask "did this move?" in bulk instead of re-reading every plot to find out.
     let plotArticle: String?
     let plotRevId: Int?
+    /// Why there is no plot, when there is none — `noArticle`, `noSection`, `belowFloor`, `fetchFailed`.
+    /// Written so a later pass re-runs the subset a fix reaches, not the whole corpus.
+    let noPlotReason: String?
     /// The LENGTH of TMDB's overview, never its text — the stub check's only input. See `EnrichedTitle`.
     let overviewChars: Int
 
@@ -1987,7 +2018,7 @@ struct EnrichedDTO: Codable {
         director = t.director; topCast = t.topCast; createdBy = t.createdBy
         runtimeMinutes = t.runtimeMinutes
         hasWikiPlot = t.hasWikiPlot
-        plotArticle = t.plotArticle; plotRevId = t.plotRevId
+        plotArticle = t.plotArticle; plotRevId = t.plotRevId; noPlotReason = t.noPlotReason
         overviewChars = t.overviewChars
     }
 
@@ -2016,6 +2047,7 @@ struct EnrichedDTO: Codable {
         // which a refresh must treat as changed — re-reading a plot is cheap, pinning a stale one is not.
         plotArticle = try c.decodeIfPresent(String.self, forKey: .plotArticle)
         plotRevId = try c.decodeIfPresent(Int.self, forKey: .plotRevId)
+        noPlotReason = try c.decodeIfPresent(String.self, forKey: .noPlotReason)
         // Batches written before the overview was dropped at the client boundary still carry its text. Fall
         // back to its length so a re-read of those keeps the same stub verdict — the text itself is ignored.
         overviewChars = try c.decodeIfPresent(Int.self, forKey: .overviewChars)
@@ -2029,7 +2061,8 @@ struct EnrichedDTO: Codable {
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: hasWikiPlot,
-                      plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars)
+                      plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
+                      noPlotReason: noPlotReason)
     }
 }
 

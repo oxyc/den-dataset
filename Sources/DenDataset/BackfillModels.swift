@@ -62,13 +62,21 @@ public struct EnrichedTitle: Sendable, Equatable {
     /// fallback in the enrich pass), which is exactly why it is recorded rather than re-derived.
     public let plotArticle: String?
     public let plotRevId: Int?
+    /// WHY there is no plot, when there is none: `noArticle`, `noSection`, `belowFloor`, `fetchFailed`.
+    ///
+    /// `hasWikiPlot: false` alone is what makes every improvement cost a full re-scrape. The four causes
+    /// want four different fixes — a non-English sitelink, a heading rule or lead fallback, a threshold
+    /// decision, a retry — and collapsed into one boolean the only safe answer to "who should I re-run?" is
+    /// "all of them". 19,542 titles currently carry that boolean and nothing else.
+    public let noPlotReason: String?
 
     public init(tmdbId: Int, mediaType: MediaType, title: String, year: Int?, overview: String,
                 genreIDs: [Int], genreNames: [String], keywords: [Keyword], originCountry: [String],
                 originalLanguage: String?, voteCount: Int,
                 director: String? = nil, topCast: [String] = [], createdBy: [String] = [],
                 runtimeMinutes: Int? = nil, hasWikiPlot: Bool = false,
-                plotArticle: String? = nil, plotRevId: Int? = nil, overviewChars: Int = 0) {
+                plotArticle: String? = nil, plotRevId: Int? = nil, overviewChars: Int = 0,
+                noPlotReason: String? = nil) {
         self.tmdbId = tmdbId; self.mediaType = mediaType; self.title = title; self.year = year
         self.overview = overview; self.genreIDs = genreIDs; self.genreNames = genreNames
         self.keywords = keywords; self.originCountry = originCountry
@@ -78,6 +86,7 @@ public struct EnrichedTitle: Sendable, Equatable {
         self.hasWikiPlot = hasWikiPlot
         self.plotArticle = plotArticle; self.plotRevId = plotRevId
         self.overviewChars = overviewChars
+        self.noPlotReason = noPlotReason
     }
 
     /// Return a copy with the Wikipedia plot grounded in (`overview` ← plot, `hasWikiPlot` = true).
@@ -87,7 +96,20 @@ public struct EnrichedTitle: Sendable, Equatable {
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: true,
-                      plotArticle: article, plotRevId: revId, overviewChars: overviewChars)
+                      plotArticle: article, plotRevId: revId, overviewChars: overviewChars,
+                      noPlotReason: nil)
+    }
+
+    /// Return a copy recording WHY no plot was found, so a later pass can re-run only the subset a given
+    /// fix reaches rather than the whole corpus.
+    public func notingNoPlot(_ reason: String) -> EnrichedTitle {
+        EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: overview,
+                      genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
+                      originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
+                      director: director, topCast: topCast, createdBy: createdBy,
+                      runtimeMinutes: runtimeMinutes, hasWikiPlot: false,
+                      plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
+                      noPlotReason: reason)
     }
 
     /// Fold in the facts that ride along on the Wikidata hop.
@@ -103,7 +125,8 @@ public struct EnrichedTitle: Sendable, Equatable {
                       director: director, topCast: topCast,
                       createdBy: creators.isEmpty ? createdBy : creators,
                       runtimeMinutes: wikiRuntime ?? runtimeMinutes, hasWikiPlot: hasWikiPlot,
-                      plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars)
+                      plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
+                      noPlotReason: noPlotReason)
     }
 }
 

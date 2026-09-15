@@ -461,11 +461,18 @@ public struct WikipediaSource: Sendable {
         /// refresh compare against a redirect page — which effectively never changes — and pin the stale
         /// plot forever, the exact failure the revision is recorded to prevent.
         public let resolvedArticle: String?
+        /// Which headings the text came from, in the order they were taken.
+        ///
+        /// Recorded because the text is now a CONCATENATION — The Wire's is five `Season N` sections plus
+        /// its themes — so "where did this come from?" has no single answer, and a later change to the
+        /// heading rules can target the articles it actually affects instead of the whole corpus.
+        public let sections: [String]
 
-        public init(text: String, revId: Int?, resolvedArticle: String? = nil) {
+        public init(text: String, revId: Int?, resolvedArticle: String? = nil, sections: [String] = []) {
             self.text = text
             self.revId = revId
             self.resolvedArticle = resolvedArticle
+            self.sections = sections
         }
     }
 
@@ -476,6 +483,37 @@ public struct WikipediaSource: Sendable {
         }
         return try await actionAPIPlot(articleTitle: articleTitle)
     }
+
+    /// Headings whose prose is the STORY but which no single-section search would ever find.
+    ///
+    /// A long-running series does not have a "Plot" section. The Wire's article is 66,190 characters and
+    /// carries none of `plotSectionNames` — its plot is 22,892 characters spread over `Season 1 (2002)` …
+    /// `Season 5 (2008)`, nested under `Episodes`. Taking the first matching section and stopping returned
+    /// NOTHING for it, and for the rest of serial television: of 33 sampled no-plot TV titles with >=50
+    /// votes, the old rule grounded 0 and this one grounds 15.
+    ///
+    /// Matched as a PREFIX on the heading's first word, so "Season 1 (2002)", "Series 2" and "Part One"
+    /// all qualify while "Seasonal marketing" does not (the word boundary is required).
+    static let serialSectionPrefixes = ["season", "series", "part", "volume", "arc", "chapter", "episode"]
+
+    /// Headings that describe what the work is ABOUT rather than what happens in it. Weaker evidence than a
+    /// plot, and kept separate so the two can be weighted — or the second dropped — independently.
+    ///
+    /// Deliberately NARROW. "Style" is not here: The Wire's `Style > Realism` is 2,618 characters about the
+    /// writers' research process, which is production, not premise. A heading only qualifies when the
+    /// heading itself names the work's subject.
+    static let themeSectionNames = ["themes", "setting", "concept", "premise and production",
+                                    "characters and setting", "social commentary"]
+
+    /// Headings about the MAKING or the RECEIVING of a work. Never prose about the work itself, and the
+    /// reason a broader sweep cannot simply take everything that is not a plot heading.
+    static let excludedSectionPrefixes = [
+        "production", "development", "filming", "casting", "cast", "crew", "music", "soundtrack",
+        "reception", "critical", "review", "awards", "accolades", "ratings", "viewership", "broadcast",
+        "release", "home media", "marketing", "merchandis", "legacy", "in popular culture", "controversy",
+        "distribution", "box office", "references", "external links", "see also", "further reading",
+        "notes", "bibliography", "sources", "cite", "adaptations", "sequel", "prequel", "spin-off",
+    ]
 
     /// Section titles (case-insensitive) that carry the plot, in preference order. "Premise"/"Storyline" are
     /// the headings most TV-series articles use (film articles favour "Plot"), so including them materially
@@ -527,26 +565,148 @@ public struct WikipediaSource: Sendable {
         plotRank(line) != nil
     }
 
-    private func actionAPIPlot(articleTitle: String) async throws -> PlotFetch? {
-        // 1. Section list → find the Plot section's index. The same response carries the article's current
-        //    revid, so recording what we read costs no extra request.
-        let sectionsData = try await get(actionAPI, [
-            "action": "parse", "page": articleTitle, "prop": "sections|revid",
-            "format": "json", "formatversion": "2", "redirects": "1",
-        ])
-        guard let index = Self.plotSectionIndex(sectionsData) else { return nil }
+    /// What a section's prose is about.
+    public enum SectionKind: Equatable {
+        /// The story: a plot heading, or a serial instalment.
+        case story
+        /// What the work is about, rather than what happens in it.
+        case theme
+        /// Its making or its reception. Never included.
+        case excluded
+    }
 
-        // 2. That section's wikitext → strip to prose.
-        let wikitextData = try await get(actionAPI, [
-            "action": "parse", "page": articleTitle, "section": index, "prop": "wikitext",
+    /// Classify a heading, given its enclosing heading. The leaf alone is not enough, and neither is the
+    /// parent — both directions matter, and The Wire's article demonstrates each:
+    ///
+    ///   * `Season 1 (2002)` … `Season 5 (2008)` are nested under **`Cast and characters`**, not under
+    ///     `Episodes`. 22,892 characters of plot under a parent that reads as a cast list. So an explicitly
+    ///     story leaf has to OUTRANK an excluded parent.
+    ///   * `Institutional dysfunction` and `Surveillance` sit under `Themes` and say nothing thematic in
+    ///     their own names. So a theme parent has to be INHERITED by its children.
+    ///   * `Realism` sits under `Style` and is 2,618 characters about the writers' research — production.
+    ///     So an unrecognised leaf under an unrecognised parent stays excluded.
+    public static func sectionKind(_ line: String, parent: String? = nil) -> SectionKind {
+        let heading = strippedHeading(line)
+        // 1. An explicit story heading wins outright, whatever encloses it.
+        if plotRank(line) != nil { return .story }
+        if isSerialHeading(heading) { return .story }
+        // 2. Then an explicit exclusion on the leaf itself.
+        if isExcludedHeading(heading) { return .excluded }
+        // 3. Then inheritance: a child of Themes is thematic even when its own name is a topic.
+        if let parent {
+            let up = strippedHeading(parent)
+            if themeSectionNames.contains(up) { return .theme }
+            if isExcludedHeading(up) { return .excluded }
+        }
+        if themeSectionNames.contains(heading) { return .theme }
+        return .excluded
+    }
+
+    private static func isExcludedHeading(_ heading: String) -> Bool {
+        excludedSectionPrefixes.contains { heading == $0 || heading.hasPrefix($0) }
+    }
+
+    /// A heading naming an INSTALMENT of a serial — "Season 1 (2002)", "Series 2", "Part One", "Episodes".
+    ///
+    /// The serial word alone is not enough. "Episode structure" begins with one and is 1,622 characters of
+    /// production prose under The Wire's `Production`; matching on the first word swept it in. So the word
+    /// must either stand alone (possibly pluralised) or be followed by something that reads as an instalment
+    /// number.
+    static func isSerialHeading(_ heading: String) -> Bool {
+        var words = heading.split(separator: " ").map(String.init)
+        // Both spellings: "Seasons" de-pluralises to "season", but "Series" must NOT become "serie" —
+        // stripping the s unconditionally silently dropped every British series article, 16,679 characters
+        // of Misfits among them.
+        guard let raw = words.first else { return false }
+        let singular = raw.hasSuffix("s") ? String(raw.dropLast()) : raw
+        guard serialSectionPrefixes.contains(raw) || serialSectionPrefixes.contains(singular) else {
+            return false
+        }
+        words.removeFirst()
+        guard let next = words.first else { return true }   // bare "Episodes", "Seasons"
+        if next.first?.isNumber == true { return true }     // "Season 1", "Series 2 (2010)"
+        let ordinals = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+                        "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x",
+                        "first", "second", "third", "fourth", "fifth"]
+        return ordinals.contains(next.trimmingCharacters(in: CharacterSet(charactersIn: ":(),.")))
+    }
+
+    /// Split raw article wikitext into `(heading, level, body)`, lead first.
+    ///
+    /// Splitting the whole article locally replaces one request per section. The Wire needs six sections;
+    /// fetching them individually is six round trips against an API that rate-limits, for an article that
+    /// comes down in one.
+    public static func splitSections(_ wikitext: String) -> [(heading: String, level: Int, body: String)] {
+        let pattern = #"(?m)^(={2,6})\s*(.+?)\s*\1\s*$"#
+        guard let re = try? NSRegularExpression(pattern: pattern) else {
+            return [("", 1, wikitext)]
+        }
+        let whole = NSRange(wikitext.startIndex..., in: wikitext)
+        let matches = re.matches(in: wikitext, range: whole)
+        guard !matches.isEmpty else { return [("", 1, wikitext)] }
+
+        var out: [(String, Int, String)] = []
+        if let first = Range(matches[0].range, in: wikitext) {
+            out.append(("", 1, String(wikitext[wikitext.startIndex..<first.lowerBound])))
+        }
+        for (n, match) in matches.enumerated() {
+            guard let equalsRange = Range(match.range(at: 1), in: wikitext),
+                  let titleRange = Range(match.range(at: 2), in: wikitext),
+                  let full = Range(match.range, in: wikitext) else { continue }
+            let end = n + 1 < matches.count
+                ? Range(matches[n + 1].range, in: wikitext)?.lowerBound ?? wikitext.endIndex
+                : wikitext.endIndex
+            out.append((String(wikitext[titleRange]),
+                        wikitext[equalsRange].count,
+                        String(wikitext[full.upperBound..<end])))
+        }
+        return out
+    }
+
+    /// Every section of an article that describes the work, in article order, with its heading kept.
+    ///
+    /// Story sections first and theme sections after, so a caller that wants to trim to a budget drops the
+    /// weaker evidence rather than the end of the plot.
+    public static func describingProse(_ wikitext: String) -> (text: String, sections: [String]) {
+        let sections = splitSections(wikitext)
+        var parentByLevel: [Int: String] = [:]
+        var story: [(String, String)] = []
+        var theme: [(String, String)] = []
+        for (heading, level, body) in sections {
+            guard !heading.isEmpty else { continue }
+            parentByLevel[level] = heading
+            // The nearest enclosing heading ABOVE this one.
+            let parent = (2..<level).reversed().compactMap { parentByLevel[$0] }.first
+            let prose = cleanWikitext(body)
+            guard !prose.isEmpty else { continue }
+            switch sectionKind(heading, parent: parent) {
+            case .story: story.append((heading, prose))
+            case .theme: theme.append((heading, prose))
+            case .excluded: continue
+            }
+        }
+        let kept = story + theme
+        return (kept.map(\.1).joined(separator: "\n\n"), kept.map(\.0))
+    }
+
+    private func actionAPIPlot(articleTitle: String) async throws -> PlotFetch? {
+        // ONE request for the whole article: wikitext, revid and resolved title together.
+        //
+        // This used to be two — a section list to find the Plot index, then that one section's wikitext —
+        // which is why a series whose plot is spread over five `Season N` headings yielded nothing at all.
+        // Fetching per section instead would be one round trip each against a rate-limited API; the whole
+        // article comes down in one, and splitting it locally costs nothing.
+        let data = try await get(actionAPI, [
+            "action": "parse", "page": articleTitle, "prop": "wikitext|revid",
             "format": "json", "formatversion": "2", "redirects": "1",
         ])
-        guard let wikitext = Self.decodeWikitext(wikitextData) else { return nil }
-        let prose = Self.cleanWikitext(wikitext)
-        guard !prose.isEmpty else { return nil }
-        let parsed = try? JSONDecoder().decode(SectionsResult.self, from: sectionsData)
-        return PlotFetch(text: prose, revId: parsed?.parse.revid,
-                         resolvedArticle: parsed?.parse.title ?? articleTitle)
+        guard let wikitext = Self.decodeWikitext(data) else { return nil }
+        let found = Self.describingProse(wikitext)
+        guard !found.text.isEmpty else { return nil }
+        let parsed = try? JSONDecoder().decode(WikitextResult.self, from: data)
+        return PlotFetch(text: found.text, revId: parsed?.parse.revid,
+                         resolvedArticle: parsed?.parse.title ?? articleTitle,
+                         sections: found.sections)
     }
 
     /// The article revision a `prop=…|revid` response was rendered from.
@@ -577,7 +737,9 @@ public struct WikipediaSource: Sendable {
     }
     private struct WikitextResult: Decodable {
         let parse: Parse
-        struct Parse: Decodable { let wikitext: String }
+        /// `revid` and `title` ride on the same response as the wikitext — one request carries all three,
+        /// and `title` is the page AFTER redirect resolution, which is what must be stored beside `revid`.
+        struct Parse: Decodable { let wikitext: String; let revid: Int?; let title: String? }
     }
 
     // MARK: - Wikitext cleaning
