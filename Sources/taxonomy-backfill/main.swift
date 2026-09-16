@@ -60,9 +60,11 @@ struct TaxonomyBackfill {
           escalation --batch-id <n> --out-dir <dir>   (after pass 1: emit titles needing n=3)
           assemble --batch-id <n> --out-dir <dir>
           embed-corpus --labels <existing labels-t02.json> --out-dir <dir> [--enriched-dir <dir>]
-                       [--chunk 15] [--plot-cap 1500] [--limit N]
+                       [--chunk 15] [--plot-cap 1500] [--limit N] [--pause-ms 0]
                        (--chunk is bounded by den-embed's per-request token budget: 8192 / --plot-cap's
-                        token cost. Above it every request is a 413, which is not retried.)
+                        token cost. Above it every request is a 413, which is not retried.
+                        --pause-ms idles between requests so a long run can share a busy machine;
+                        with --chunk 15 each 1000ms costs ~45min over a full corpus.)
           doc-facts --labels <labels-t02.json> --out-dir <dir> [--batch 100]
                     (scrape Wikidata P57 director + P136 genre for the shipped corpus into
                      doc-facts.json — the two clauses of the embedding doc that still came from TMDB.
@@ -957,6 +959,12 @@ enum Commands {
         // so the run dies on its first flush having written nothing: the same shape as the max_batch bug.
         let chunk = args.int("--chunk") ?? 15
         let limit = args.int("--limit")                          // optional cap (testing)
+        // Idle between requests, so a long run can share a laptop. den-embed is already nice 20, but nice only
+        // orders CPU contention — it does not stop bge-m3 from holding its activations resident, and a machine
+        // deep in swap feels slow no matter how politely the work is scheduled. A pause leaves real gaps the
+        // rest of the system can reclaim memory in. Cost is linear and predictable: chunk 15 over ~38k titles
+        // is ~2,600 flushes, so each 1000ms of pause adds ~45 minutes.
+        let pauseMS = args.int("--pause-ms") ?? 0
         // Cap the PLOT portion (facts + tags are always kept). 4000 chars keeps the median plot whole and every
         // mid-plot genre pivot the length audit found, dropping only low-value end-of-plot twist tails — the
         // knee between similarity quality and bge-m3's O(seq^2) embedding cost.
@@ -1021,6 +1029,7 @@ enum Commands {
             }
             buffer.removeAll(keepingCapacity: true)
             if written % 2000 == 0 { FileHandle.standardError.write(Data("  embedded \(written) (skipped \(skipped))…\n".utf8)) }
+            if pauseMS > 0 { try await Task.sleep(nanoseconds: UInt64(pauseMS) * 1_000_000) }
         }
 
         // Stream the enriched batch files one at a time — only ONE batch of plots is in memory at once.
