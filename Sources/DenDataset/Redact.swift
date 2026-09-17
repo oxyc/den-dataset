@@ -18,6 +18,7 @@ public enum Redact {
     /// Environment variables whose value is a secret wherever it appears verbatim.
     private static let secretVars = [
         "TMDB_API_KEY", "WIKIMEDIA_ENTERPRISE_PASSWORD", "WIKIMEDIA_ENTERPRISE_TOKEN",
+        "TYPESAFE_API_KEY",
     ]
 
     public static func secrets(_ text: String) -> String {

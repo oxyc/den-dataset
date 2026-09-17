@@ -35,6 +35,7 @@ struct TaxonomyBackfill {
             case "escalation": try Commands.escalation(args)
             case "assemble": try await Commands.assemble(args)
             case "embed-corpus": try await Commands.embedCorpus(args)
+            case "dump-articles": try await Commands.dumpArticles(args)
             case "doc-facts": try await Commands.docFacts(args)
             case "facts": try await Commands.facts(args)
             case "finalize": try Commands.finalize(args)
@@ -933,6 +934,95 @@ enum Commands {
     // vectors) into a dedicated out-dir. This is the "semantic vectors now" path: it upgrades the app's ANN
     // from lexical FNV to bge-m3 immediately, reusing the labels we already ship, while the fresh plot-grounded
     // reclassification (which improves the LABELS) is run later. `finalize --out-dir <same>` emits the artifact.
+    /// Write each grounded title's WHOLE Wikipedia article as prose, one JSON object per line.
+    ///
+    /// The classifier reads the article; the embedder reads the extracted plot. Two consumers with genuinely
+    /// different needs — see `WikipediaSource.articleProse` — and this is what feeds the first. Keeping them
+    /// apart also means a future extractor bug degrades similarity without silently corrupting labels.
+    ///
+    /// Every article was already fetched once to find its plot, and `plotArticle` + `plotLanguage` were
+    /// recorded per title, so this re-requests the same URL and the response cache answers nearly all of it.
+    /// That is why it goes through `WikipediaSource` rather than reading the cache directly: the cache is
+    /// keyed by a hash of the request, so reconstructing keys by hand would be a second implementation of
+    /// something that already works, and wrong the first time a parameter moves.
+    ///
+    /// Resumable by re-reading its own output — a kill costs at most the titles in flight.
+    static func dumpArticles(_ args: Args) async throws {
+        let outPath = try args.require("--out")
+        let enrichedDir = try args.require("--enriched-dir")
+        let limit = args.int("--limit")
+
+        var done: Set<String> = []
+        if FileManager.default.fileExists(atPath: outPath) {
+            for line in try FileIO.readLines(outPath) {
+                struct Row: Decodable { let mediaType: String; let tmdbId: Int }
+                if let r: Row = try? JSON.decode(line) { done.insert("\(r.mediaType):\(r.tmdbId)") }
+            }
+            FileHandle.standardError.write(Data("  resuming: \(done.count) already dumped\n".utf8))
+        }
+
+        // Newest batch wins, matching how every other reader folds this directory.
+        var wanted: [(key: String, dto: EnrichedDTO)] = []
+        var seen: Set<String> = []
+        for file in EnrichedBatches.orderedNames(inDirectory: enrichedDir).reversed() {
+            let dtos: [EnrichedDTO] = try JSON.read((enrichedDir as NSString).appendingPathComponent(file))
+            for dto in dtos {
+                let key = "\(dto.mediaType):\(dto.tmdbId)"
+                guard !seen.contains(key) else { continue }
+                seen.insert(key)
+                // ToS: only a title with a Wikipedia plot may reach an LLM, and only such a title has a
+                // recorded article to fetch.
+                guard dto.hasWikiPlot, let article = dto.plotArticle, !article.isEmpty else { continue }
+                guard !done.contains(key) else { continue }
+                wanted.append((key, dto))
+            }
+        }
+        if let limit { wanted = Array(wanted.prefix(limit)) }
+        FileHandle.standardError.write(Data("  \(wanted.count) articles to fetch\n".utf8))
+
+        let wiki = WikipediaSource()
+        let handle = try FileIO.appender(outPath)
+        defer { try? handle.close() }
+        struct ArticleRow: Encodable {
+            let mediaType: String, tmdbId: Int, title: String?, article: String, language: String
+            let resolvedArticle: String?, revId: Int?, sections: [String], chars: Int, text: String
+        }
+
+        let gate = 4   // gentle on the public Wikipedia API, same as the plot pass
+        var written = 0, missing = 0
+        var index = 0
+        while index < wanted.count {
+            let slice = Array(wanted[index..<min(index + gate, wanted.count)])
+            let rows = try await withThrowingTaskGroup(of: ArticleRow?.self) { group -> [ArticleRow] in
+                for item in slice {
+                    group.addTask {
+                        let lang = item.dto.plotLanguage ?? "en"
+                        guard let article = item.dto.plotArticle,
+                              let found = try? await wiki.articleProse(articleTitle: article, language: lang)
+                        else { return nil }
+                        return ArticleRow(
+                            mediaType: item.dto.mediaType, tmdbId: item.dto.tmdbId, title: item.dto.title,
+                            article: article, language: lang, resolvedArticle: found.resolvedArticle,
+                            revId: found.revId, sections: found.sections, chars: found.text.count,
+                            text: found.text)
+                    }
+                }
+                var out: [ArticleRow] = []
+                for try await row in group { if let row { out.append(row) } else { missing += 1 } }
+                return out
+            }
+            for row in rows {
+                try handle.writeLine(JSON.encodeLine(row))
+                written += 1
+            }
+            index += gate
+            if written % 500 == 0 && !rows.isEmpty {
+                FileHandle.standardError.write(Data("  dumped \(written) (no article \(missing))…\n".utf8))
+            }
+        }
+        print(JSON.line(["written": written, "noArticle": missing, "out": outPath]))
+    }
+
     static func embedCorpus(_ args: Args) async throws {
         let outDir = try args.require("--out-dir")
         let labelsPath = try args.require("--labels")            // the existing labels-t02.json (its tags per title)
