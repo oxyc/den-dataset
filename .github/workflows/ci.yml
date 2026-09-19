@@ -51,8 +51,10 @@ jobs:
         run: python3 -m py_compile scripts/build-worklist.py
       - name: Jev facet contracts
         run: |
-          python3 -m py_compile scripts/v2/build_facet_adversarial.py scripts/v2/run_facets.py scripts/v2/run_combined.py
-          python3 -m unittest scripts/v2/test_facets.py scripts/v2/test_combined.py
+          python3 -m py_compile scripts/v2/build_facet_adversarial.py scripts/v2/run_facets.py scripts/v2/run_combined.py scripts/v2/audit_combined.py
+          # The auditor is included deliberately: it is the only thing standing between a corrupted bundle
+          # and a published dataset, and the pass it audits cost $20.47 and will not be run again.
+          python3 -m unittest scripts/v2/test_facets.py scripts/v2/test_combined.py scripts/v2/test_audit_combined.py
 
   ci-ok:
     # One required status check. `always()` so a skipped job does not fail branch protection.
