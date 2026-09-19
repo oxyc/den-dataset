@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The nine facet axes, as typed Choice questions, read from `prompts/facets-v1.md`.
+"""Plot facet axes as typed Choice questions, read from a versioned prompt.
 
 The vocabularies are PARSED from the prompt rather than restated here. They already exist in one place, in
 the file a human reads, and a second copy is where drift starts — an axis gains a value in the prompt, the
@@ -21,6 +21,7 @@ Run this file directly to print the questions it would send.
 import json
 import os
 import re
+import sys
 
 PROMPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "facets-v1.md")
 
@@ -30,11 +31,14 @@ _AXIS = re.compile(r"^- \*\*`(?P<axis>[a-z]+)`\*\*\s*[—-]\s*(?P<desc>.+?):\s*$
 _VALUE = re.compile(r"`(?P<value>[a-z0-9][a-z0-9-]*)`(?:\s*\((?P<gloss>[^)]*)\))?")
 
 NO_FIT = "does-not-apply"
+EVIDENCE_RULE = ("Answer from the supplied article only; do not guess from outside knowledge. "
+                 "Pick the dominant answer. ")
 
 
 def parse_axes(path=PROMPT):
     """{axis: (description, {value: gloss or None})} in the order the prompt lists them."""
-    text = open(path, encoding="utf-8").read()
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
     starts = [(m.group("axis"), m.group("desc").strip(), m.end()) for m in _AXIS.finditer(text)]
     if not starts:
         raise SystemExit(f"parsed no axes from {path} — the prompt's format changed, fix this parser")
@@ -55,14 +59,15 @@ def questions(path=PROMPT):
     out = {}
     for axis, (desc, values) in parse_axes(path).items():
         criteria = {v: gloss for v, gloss in values.items()}
-        criteria[NO_FIT] = ("Nothing in this list fits, or the plot does not say. Prefer a real value "
-                            "whenever one genuinely applies.")
-        out[axis] = {"type": "choice", "instructions": desc, "criteria": criteria}
+        criteria.setdefault(NO_FIT, ("Nothing in this list fits, or the article does not say. Prefer a real "
+                                     "value whenever one genuinely applies."))
+        out[axis] = {"type": "choice", "instructions": EVIDENCE_RULE + desc, "criteria": criteria}
     return out
 
 
 if __name__ == "__main__":
-    qs = questions()
+    path = sys.argv[1] if len(sys.argv) > 1 else PROMPT
+    qs = questions(path)
     for axis, q in qs.items():
         opts = [k for k in q["criteria"] if k != NO_FIT]
         print(f"{axis:<10} {len(opts):>2} options   {q['instructions'][:60]}")

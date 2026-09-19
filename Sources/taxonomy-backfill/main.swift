@@ -984,8 +984,10 @@ enum Commands {
         let handle = try FileIO.appender(outPath)
         defer { try? handle.close() }
         struct ArticleRow: Encodable {
-            let mediaType: String, tmdbId: Int, title: String?, article: String, language: String
-            let resolvedArticle: String?, revId: Int?, sections: [String], chars: Int, text: String
+            let mediaType: String, tmdbId: Int, title: String?, year: Int?, article: String, language: String
+            let resolvedArticle: String?, revId: Int?, extractorArticleRevId: Int?
+            let sections: [String], plotSections: [String]
+            let chars: Int, text: String
         }
 
         let gate = 4   // gentle on the public Wikipedia API, same as the plot pass
@@ -1002,8 +1004,11 @@ enum Commands {
                         else { return nil }
                         return ArticleRow(
                             mediaType: item.dto.mediaType, tmdbId: item.dto.tmdbId, title: item.dto.title,
+                            year: item.dto.year,
                             article: article, language: lang, resolvedArticle: found.resolvedArticle,
-                            revId: found.revId, sections: found.sections, chars: found.text.count,
+                            revId: found.revId, extractorArticleRevId: item.dto.plotRevId,
+                            sections: found.sections,
+                            plotSections: item.dto.plotSections, chars: found.text.count,
                             text: found.text)
                     }
                 }

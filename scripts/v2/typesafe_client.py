@@ -20,6 +20,7 @@ import json
 import os
 import random
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -69,12 +70,22 @@ class TypeSafe:
         self.input_tokens = 0          # what we are billed for
         self.output_tokens = 0         # free, tracked only to see what the questions returned
         self.calls = 0
+        self._usage_lock = threading.Lock()
 
     def ask(self, state, questions):
         """One state, every question you need, one call.
 
         `questions` is {name: {"type": …, "instructions": …, "criteria": …}} and the answers come back under
         the same names. Returns the `answers` map; usage is accumulated on the client.
+        """
+        return self.ask_with_metadata(state, questions)[0]
+
+    def ask_with_metadata(self, state, questions):
+        """Return ``(answers, metadata)`` while retaining the small ``ask`` compatibility surface.
+
+        A resumable corpus run must record the model identifier returned by the provider, not merely the
+        identifier requested by the caller.  Keeping that value local to this request also avoids a race when
+        one client is shared by worker threads.
         """
         body = json.dumps({"state": state, "model": self.model, "questions": questions}).encode()
         req = urllib.request.Request(
@@ -99,13 +110,21 @@ class TypeSafe:
                 time.sleep(random.uniform(0, min(30, 2 ** attempt)))
 
         usage = payload.get("usage") or {}
-        self.input_tokens += usage.get("input_tokens") or 0
-        self.output_tokens += usage.get("output_tokens") or 0
-        self.calls += 1
+        with self._usage_lock:
+            self.input_tokens += usage.get("input_tokens") or 0
+            self.output_tokens += usage.get("output_tokens") or 0
+            self.calls += 1
         answers = payload.get("answers")
         if not isinstance(answers, dict):
             raise TypeSafeError(f"no answers in response: {json.dumps(payload)[:300]}")
-        return answers
+        metadata = {
+            "model": payload.get("model"),
+            "usage": {
+                "input_tokens": usage.get("input_tokens") or 0,
+                "output_tokens": usage.get("output_tokens") or 0,
+            },
+        }
+        return answers, metadata
 
     # $0.042 per million input tokens, output free. Stated on the models page; if it moves, this is the
     # one place to change it.
