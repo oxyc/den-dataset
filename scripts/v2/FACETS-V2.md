@@ -156,6 +156,73 @@ Store full distributions and identify the versioned question set on every row. C
 review validity flags rather than blanket-suppressing them; and retain rare structural matches as strongly
 weighted signals instead of treating the dominant `linear` value as equally informative.
 
+### Launch implementation and measured plan
+
+`run_combined.py` implements that contract separately from the deliberately Choice-only facet runner. Its
+default is the immutable `jev-1.13.0`; a mutable `*-latest` alias is rejected unless explicitly allowed. The
+sidecar manifest stores and hashes the exact global questions, section-question template, and label mapping;
+it also hashes the article artifact, enriched evidence, facet prompt, live Swift taxonomy, requested model,
+state planner, and the runner/planner/question/client source files. Each result records the
+model returned by the provider and per-call state/question hashes and token usage. Resume refuses a changed
+manifest, malformed/duplicate rows, or output keys not present in the input.
+Any exhausted API retry, typed-response violation, or pinned-model mismatch opens a shared circuit breaker:
+no worker begins another paid call, and the process exits nonzero after at most the calls already in flight.
+The paid path also holds a nonblocking kernel lock for the output's lifetime, so a second agent cannot read the
+same resume set and duplicate the calls or append duplicate rows.
+
+The current call has 94 global decisions: 12 facets, target-aware validity, narrative applicability, primary
+genre, 75 independent Nouls for the current 19 subgenres + 40 themes + 16 moods, and four Scores. The 13
+regional labels stay metadata-derived. Each lead/heading adds one four-way Choice whose full distribution is
+over story/premise, theme/subject, work context, and irrelevant production/reception/navigation prose.
+
+The frozen article dump predates two fields needed by this audit: target year and the extractor's
+`plotSections`. The runner therefore requires `--enriched-dir out-repass/enriched` for that dump, folds batches
+newest-first exactly like the Swift readers, and hashes the effective evidence. Future `dump-articles` rows
+write `year`, `plotSections`, and `extractorArticleRevId` directly. The whole-article revision differs from the
+extractor revision for 17,101 rows, and 321 rows name at least one old extractor heading absent from the newer
+article. Results record both revision ids, `sectionAuditSameRevision`, and missing headings; those rows may be
+measured but cannot drive automatic section repair as if the diff were same-revision.
+
+The no-network full-corpus plan is:
+
+```
+47,529 titles             47,535 calls
+94 global questions       404,291 section decisions (mean 8.51, max 90)
+3 oversized titles        Blueberry + two David Copperfield mappings
+```
+
+At the documented ~150k-English-character state envelope, the runner uses a conservative 110,000 serialized
+characters. Ordinary titles send the whole article and all questions once. Each oversized title needs two
+complete-section audit groups followed by one global call over role-selected evidence; selection preserves
+source order and every omitted section id is recorded. A section that cannot fit alone is a hard error rather
+than silent paragraph truncation.
+
+The final exact-manifest mixed-primitive smoke classified 3/3 titles with zero failures and a closed circuit;
+the provider returned `jev-1.13.0`, and 23,524 input tokens cost $0.0010. The preceding identical-question
+throughput sample classified 23/23 with zero failures; 228,511 tokens cost $0.0096 (median 8,947/title), and
+its timed 20-title continuation took 7.5 seconds at eight workers, about 160 titles/minute over this small
+sample. The full-plan character estimate is 492.8M input tokens / $20.70; extrapolating the smoke with the
+corpus's longer mean article puts the likely total around $21–24. Throughput therefore suggests roughly 3–5
+hours, but both figures remain planning ranges until the sustained run settles.
+
+The corpus's largest ordinary request has 184 questions (94 global + 90 lead/section roles). A targeted live
+capacity smoke on that exact record succeeded with the pinned model in one call: 43,019 input tokens, $0.0018,
+zero failures, and no circuit break. This confirms that the provider accepts the maximum request shape rather
+than discovering an undocumented count ceiling after the first 1,800 titles.
+
+Exact dry run (no key, network, output, or manifest mutation):
+
+```sh
+python3 scripts/v2/run_combined.py \
+  --articles out-repass/articles.jsonl \
+  --enriched-dir out-repass/enriched \
+  --out out-repass/combined-v1.jsonl \
+  --plan
+```
+
+The paid command is the same without `--plan`. Do not launch it until the code, questions, plan, tests, and
+smoke artifact have passed the final independent audit.
+
 ## Publication gates
 
 The pilots support collection, not unconditional argmax publication.
