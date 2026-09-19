@@ -57,10 +57,41 @@ vectors when it fails. Measured that way on 2026-09-19:
 So the July premise blob and the coverage-fill blob come from a different embedder and cannot be extended;
 the realigned blob can, and is what premise-v2 builds on. **Whether `vectors-bge-m3.bin` (the 2026-09-13
 corpus) still matches the box is UNVERIFIED** — every probe above was on a premise blob. It needs the same
-byte test before anyone trusts live search relevance, because a corpus embedded on 5.1.1 answering queries
-embedded on 5.1.2 is the precise misalignment this section exists to prevent.
+byte test before anyone trusts live search relevance.
 
-## Full re-embed (MacBook) — the shipped 37.5k-title corpus
+### Embed where you serve — not on the laptop
+
+The version numbers are a red herring, and so is `MAX_TOKENS`. Both were ruled out by measurement
+(oxyc/den-dataset#21): 512 vs 1024 differ by **0 dims** because CLS pooling is padding-invariant, `ort` is
+pinned to `=2.0.0-rc.13`, and the model is pinned by `HF_REV` + sha256 since 2026-09-04. The one commit
+between 5.1.1 and 5.1.2 only skips a model load for cached batches.
+
+What is left is *where the embed ran*:
+
+| blob | built | vs the box's service |
+|---|---|---|
+| `vectors-premise-v1-realigned.bin` | 2026-09-05 | 0 dims differ |
+| `vectors-premise.bin` (live) | 2026-09-13 | 462–567 dims differ |
+
+The older blob matches and the newer one does not, with model and runtime pinned throughout. Versions
+cannot produce that ordering; the build host can. **This machine is `arm64` and the box is `x86_64`**, and
+ONNX Runtime picks architecture-specific kernels — int8 output is exactly what differs between them. That
+is a hypothesis, not yet a byte test, but it fits every observation and explains why this keeps recurring.
+
+So: **run the embed against the same `den-embed` instance that answers live queries**, which is the one on
+the box, reached from a container on its `den` network:
+
+```
+ssh root@pve 'incus exec den -- podman run --rm --network den -v /opt/den/embed:/w:z \
+    docker.io/library/python:3.12-slim python3 /w/embed_premise_v2.py … --url http://den-embed:8080'
+```
+
+`scripts/v2/embed_premise_v2.py` re-embeds a sample of whatever blob it intends to reuse and refuses unless
+the bytes come back identical. Any future embed path should do the same — a version string is not evidence.
+
+## Full re-embed — the shipped 37.5k-title corpus
+<!-- Was "(MacBook)". Keep the steps; ignore the host. See "Embed where you serve" above. -->
+
 
 Both TMDB and Wikipedia are hit live; `den-embed` must be running for step 5 (not for plot-finding).
 
