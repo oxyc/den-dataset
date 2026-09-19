@@ -48,8 +48,10 @@ FOREIGN_HINT = re.compile(
     r"(?:^|-)(?:der|das|und|mit|eine[nrsm]?|von|zum|zur|auf|für|nach|über|durch"
     r"|les|une|dans|pour|avec|sur|une"
     # `como` is gone for the same reason `con` is: Lake Como is a place, and `lake-como-seduction` is a
-    # correct English tag. A hint that fires on a real word is worse than a missing hint.
-    r"|las|una|del|por|para"
+    # correct English tag. A hint that fires on a real word is worse than a missing hint. `las` went the
+    # same way: across 346,130 tags its only hits were `las-vegas-underworld` and `las-vegas-showdown`
+    # — a place name carried into English, 3 false rejections and no true ones.
+    r"|una|del|por|para"
     r"|gli|dei|nel|della|degli"
     r"|het|een|voor|naar)(?:-|$)")
 
