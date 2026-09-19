@@ -53,9 +53,27 @@ retrieval sees:
 | 512 tokens (default) | ~61% | ~73% (median 72%) |
 | **1024 tokens** | **~21%** | **~97% (median 100%)** |
 
-At 1024 tokens 79% of plots survive uncut, memory peaks ~1219 MB against the 1536 MB limit, and the only
-real cost is wall-clock: `max_request_tokens` is 8192, so `CHUNK` drops from 15 to ~7 and the run takes
-roughly 2-3x as long. That is the right trade.
+Those two rows were measured on the PRE-re-ground corpus and no longer describe this one. The 2026-09
+Wikipedia re-ground reads whole per-season plots, which moved the tail hard — p99 7,240 → 10,962 chars,
+max 53,299 → 86,443 — while the median barely moved (2,526 → 2,565). Re-measured on `out-repass`
+(47,529 grounded titles), against the char cap actually passed rather than the token budget:
+
+| `--plot-cap` | titles truncated | of all plot text, kept |
+|---|---:|---:|
+| 1500 | 68.1% | 46.3% |
+| **3500** (what shipped) | **32.0%** | **82.8%** |
+| 7200 (head+tail, the facets clamp) | 2.9% | 95.6% |
+
+So at 1024 tokens **68% of plots now survive uncut, not 79%**. Memory still peaks ~1219 MB against the
+1536 MB limit, and the real cost is still wall-clock: `max_request_tokens` is 8192, so `CHUNK` drops from
+15 to ~7 and the run takes roughly 2-3x as long. That is still the right trade — and 3500 is close to the
+ceiling regardless, since `MAX_TOKENS` is hard-clamped at 1024 (~4,096 chars), so no cap above ~4,000 can
+reach the embedder.
+
+One asymmetry worth knowing before changing either: `cappedPlot` keeps the HEAD only, so for the 15,189
+truncated titles no ending is embedded — while the facets prompt deliberately keeps a tail because the
+`ending` axis depends on it. Defensible for similarity, where setup discriminates more than resolution,
+but it is two stages evolving apart rather than a decision anyone made.
 
 Do NOT summarise the plots to fit a smaller budget. It was considered and rejected: a ~1,200-char summary
 compresses harder than a 1,844-char truncation (30% of plots are already shorter than the summary target,
