@@ -28,6 +28,12 @@ Rules:
   anything remains when you take the genre word out: `religious-horror` leaves nothing, so prefer
   `exorcism-in-a-convent`; `doomed-romance` leaves `doomed`, which is the premise.
 - Base tags ONLY on the plot text provided. Do not invent events not in the plot.
+- **Never tag the data instead of the story.** `placeholder-content`, `missing-plot`, `insufficient-data`,
+  `unknown-series`, `unprocessed-work` and anything like them are not tags — they describe your job, and
+  they poison the index, because a hundred unrelated films all "match" each other on them. Every work you
+  are sent HAS a plot; some are only a few hundred characters, and a short plot still yields real premise
+  tags. Read it and tag what it says. If you truly cannot, leave that work out rather than inventing
+  filler: a missing work is recoverable, a fabricated one is not.
 
 You will be given a batch: a JSON array of `{key, mediaType, tmdbId, plot}`. For EVERY work, output one
 object `{"key": "<the key you were given>", "tags": ["most-defining", "...", ...]}`. Echo the key back
