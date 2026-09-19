@@ -102,6 +102,21 @@ class QuestionTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "legend differs"):
             run_combined.validate_answers(answers, questions)
 
+    def test_score_accepts_provider_display_rounding_but_not_real_disagreement(self):
+        question = {
+            "rate": {"type": "score", "instructions": "rate",
+                     "criteria": ["zero", "one", "two", "three", "four"]},
+        }
+        answer = answer_for(question["rate"])
+        answer.update({
+            "score": 3.89, "confidence": 0.8,
+            "probabilities": {"0": 0.0, "1": 0.0, "2": 0.0, "3": 0.08, "4": 0.92},
+        })
+        run_combined.validate_answers({"rate": answer}, question)
+        answer["score"] = 3.7
+        with self.assertRaisesRegex(Exception, "disagrees with distribution"):
+            run_combined.validate_answers({"rate": answer}, question)
+
 
 class SectionTests(unittest.TestCase):
     def test_stable_ids_duplicate_occurrences_spans_and_extractor_diff(self):

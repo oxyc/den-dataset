@@ -104,7 +104,10 @@ def validate_answers(answers, questions):
                 raise TypeSafeError(f"{question_id}: invalid score {score!r}")
             probability(answer.get("confidence"), f"{question_id}.confidence")
             expected_score = sum(int(key) * value for key, value in probabilities.items())
-            if abs(score - expected_score) > 0.03:
+            # The API rounds the displayed score and each displayed level probability independently. With
+            # five levels those rounded fields can legitimately differ by a few hundredths even though the
+            # model's unrounded score was their weighted mean (observed live: 3.89 versus 3.92).
+            if abs(score - expected_score) > 0.051:
                 raise TypeSafeError(
                     f"{question_id}: score {score:.6f} disagrees with distribution {expected_score:.6f}")
             continue

@@ -210,6 +210,12 @@ capacity smoke on that exact record succeeded with the pinned model in one call:
 zero failures, and no circuit break. This confirms that the provider accepts the maximum request shape rather
 than discovering an undocumented count ceiling after the first 1,800 titles.
 
+The first full launch proved the breaker on a benign provider-format edge after 12 calls: Score `3.89` came
+with displayed probabilities whose displayed weighted mean was `3.92`. The API rounds those fields
+independently. The validator now allows at most 0.051 display-rounding drift and has a regression that accepts
+that exact boundary while rejecting a material mismatch. The 11 successful rows and manifest remain preserved
+in the aborted `combined-v1` artifact; the corrected run uses a fresh output rather than mixing source hashes.
+
 Exact dry run (no key, network, output, or manifest mutation):
 
 ```sh
