@@ -23,7 +23,7 @@ dataset and `dataset.meta.json` describes it. Current: **`c85c707b0b18`**, built
 | `vectors-bge-m3.bin` | the **main index** — Wikidata facts + our tags + the Wikipedia plot | semantic **search**, neighbours, rows |
 | `vectors-premise.bin` | the **premise index** — embedded structural tags, no proper nouns | **similar / recommend** |
 | `facets.bin` | country / language / year facets | attribute search |
-| `metadata-<ver>.json` | tmdbId → title + posterPath + year | rendering a card with no TMDB call |
+| `metadata-<ver>.json` | tmdbId → title + posterPath + year + optional voteAverage | rendering a rated card with no TMDB call |
 | `facts-<ver>.json` | CC0 Wikidata facts per title | `/recommend` ranking; covers titles with no labels at all |
 
 **The main index carries no TMDB Content.** It was rebuilt in September 2026: the embedded document has no

@@ -1579,7 +1579,7 @@ enum Commands {
     }
 
     // metadata — the on-device METADATA SIDECAR: a light TMDB pass over the finalized records fetching title +
-    // poster_path + year, written to metadata-<datasetVersion>.json. Ships as a ≤6-month SYNCED cache (den-atlas
+    // poster_path + year + rating, written to metadata-<datasetVersion>.json. Ships as a ≤6-month SYNCED cache (den-atlas
     // serves it beside labels/vectors; the app reads it to render a semantic/ANN neighbour without a detail call).
     // Never bundled — a frozen poster snapshot would break TMDB's 6-month caching allowance.
     /// Below this share of titles returning metadata, the run is a failure rather than a thin result.

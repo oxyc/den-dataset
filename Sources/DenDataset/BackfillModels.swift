@@ -183,9 +183,12 @@ public struct PosterMeta: Codable, Sendable, Equatable {
     public let title: String
     public let posterPath: String?
     public let year: Int?
-    public init(tmdbId: Int, mediaType: String, title: String, posterPath: String?, year: Int?) {
+    /// TMDB's 0–10 score. Optional so every previously published sidecar remains valid.
+    public let voteAverage: Double?
+    public init(tmdbId: Int, mediaType: String, title: String, posterPath: String?, year: Int?,
+                voteAverage: Double? = nil) {
         self.tmdbId = tmdbId; self.mediaType = mediaType; self.title = title
-        self.posterPath = posterPath; self.year = year
+        self.posterPath = posterPath; self.year = year; self.voteAverage = voteAverage
     }
 }
 

@@ -131,16 +131,13 @@ public final class TMDBClient: Sendable {
         return wire.toEnrichedTitle(id: identifier.id.rawValue, mediaType: identifier.mediaType)
     }
 
-    /// Light detail fetch for the on-device METADATA SIDECAR — title + poster_path + year only (no
+    /// Light detail fetch for the on-device METADATA SIDECAR — title + poster_path + year + rating (no
     /// append_to_response). Lets the app render a semantic/ANN neighbour card without a per-result detail call.
     /// Poster paths + titles are factual/artwork references (distinct from the expressive overviews the pipeline
     /// strips); the sidecar ships as a ≤6-month synced cache, never bundled.
     public func posterMeta(_ identifier: MediaIdentifier) async throws -> PosterMeta {
         let data = try await get("/\(identifier.mediaType.pathSegment)/\(identifier.id.rawValue)", [:])
-        let wire = try Self.decoder.decode(ClassificationWire.self, from: data)
-        let year = (wire.releaseDate ?? wire.firstAirDate).flatMap { Int($0.prefix(4)) }
-        return PosterMeta(tmdbId: identifier.id.rawValue, mediaType: identifier.mediaType.pathSegment,
-                          title: wire.title ?? wire.name ?? "", posterPath: wire.posterPath, year: year)
+        return try Self.posterMetaForTesting(data, identifier: identifier)
     }
 
     // MARK: - Transport
@@ -194,6 +191,15 @@ public final class TMDBClient: Sendable {
     /// Exists so a test can prove TMDB's overview does not survive the boundary — a rule worth pinning.
     static func enrichedTitleForTesting(_ data: Data, id: Int, mediaType: MediaType) throws -> EnrichedTitle {
         try decoder.decode(ClassificationWire.self, from: data).toEnrichedTitle(id: id, mediaType: mediaType)
+    }
+
+    /// Decode a detail body into the metadata-sidecar row without a network request.
+    static func posterMetaForTesting(_ data: Data, identifier: MediaIdentifier) throws -> PosterMeta {
+        let wire = try decoder.decode(ClassificationWire.self, from: data)
+        let year = (wire.releaseDate ?? wire.firstAirDate).flatMap { Int($0.prefix(4)) }
+        return PosterMeta(tmdbId: identifier.id.rawValue, mediaType: identifier.mediaType.pathSegment,
+                          title: wire.title ?? wire.name ?? "", posterPath: wire.posterPath, year: year,
+                          voteAverage: wire.voteAverage)
     }
 
     /// True when a body looks like a real TMDB title record and is therefore safe to persist.
@@ -255,6 +261,7 @@ public final class TMDBClient: Sendable {
         let posterPath: String?       // metadata-sidecar only (poster artwork reference, not expressive text)
         let releaseDate: String?      // movie
         let firstAirDate: String?     // tv
+        let voteAverage: Double?      // metadata-sidecar card rating
         let voteCount: Int?
         let originalLanguage: String?
         let genres: [GenreDTO]?
