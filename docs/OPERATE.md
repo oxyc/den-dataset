@@ -24,10 +24,41 @@ every generation of den-embed reports `bge-m3` and `1024`, including the two tha
 for the same text (ORT 1.22 → 1.28 moved int8 output, and the Rust rewrite added a 512-token truncation the
 Python service never had). So the manifest also carries `embedderRuntime` + `embedderMaxTokens`, taken from
 the service's own `/health` at build time, and the corpus build refuses to append to a store that a
-different embedder created. **That violation is resolved**: the corpus was re-embedded on 2026-09-13 by
-`den-embed/5.1.1` at `dims 1024` / `maxTokens 1024` / `vectorEpoch 1`, and the serving box runs the same
-build, so the manifest and the service agree. The paragraph below describes how it was done, not something
-still owed.
+different embedder created. **That violation is resolved for the corpus**: it was re-embedded on 2026-09-13
+by `den-embed/5.1.1` at `dims 1024` / `maxTokens 1024` / `vectorEpoch 1`. The paragraph below describes how
+it was done, not something still owed.
+
+**The serving box has since drifted off that build, and the manifest cannot see it.** `docker-publish`
+rebuilds every addon's newest tag weekly, so den-embed moved on its own. As of 2026-09-19 the box reports
+`runtime den-embed/5.1.2`, `max_tokens 512` — not `5.1.1` / `1024`:
+
+```
+ssh root@pve 'incus exec den -- podman run --rm --network den docker.io/curlimages/curl:latest \
+    -s http://den-embed:8080/health'
+{"status":"ok","model":"bge-m3","dims":1024,"vector_epoch":1,"runtime":"den-embed/5.1.2","max_tokens":512}
+```
+
+`vectorEpoch` is still `1`, which is the field that is supposed to mean "output unchanged", so whether the
+runtime bump moved vectors is a question about den-embed's release discipline and not one the manifest
+answers. **`maxTokens` 1024 → 512 is a real change regardless**: anything over 512 tokens is now truncated
+where it was not before. That covers most full-plot corpus documents and none of the premise tag documents
+(~55 tokens).
+
+Do not trust a version string here. The only sound check is to re-embed a sample of an existing blob's rows
+and compare bytes. `scripts/v2/embed_premise_v2.py` does exactly that as a precondition and refuses to reuse
+vectors when it fails. Measured that way on 2026-09-19:
+
+| blob | built | vs today's service |
+|---|---|---|
+| `out-t02/vectors-premise.bin` | 2026-07-05 | 48–55% of dims differ, cosine 0.977–0.982 |
+| `out-t02/v2/vectors/vectors-premise-v1-realigned.bin` | 2026-09-05 | **0 dims differ, cosine 1.000000** |
+| `out-t02/v2/vectors/vectors-coverage-fill.bin` | — | 62–78% of dims differ, cosine 0.899–0.964 |
+
+So the July premise blob and the coverage-fill blob come from a different embedder and cannot be extended;
+the realigned blob can, and is what premise-v2 builds on. **Whether `vectors-bge-m3.bin` (the 2026-09-13
+corpus) still matches the box is UNVERIFIED** — every probe above was on a premise blob. It needs the same
+byte test before anyone trusts live search relevance, because a corpus embedded on 5.1.1 answering queries
+embedded on 5.1.2 is the precise misalignment this section exists to prevent.
 
 ## Full re-embed (MacBook) — the shipped 37.5k-title corpus
 
