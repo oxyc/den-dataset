@@ -8,6 +8,10 @@ reports "16 works" as though that were the input. Re-running the whole batch to 
 for 16 that are already correct, so recovery is per TITLE — every key present in an input and absent from
 its output, swept into fresh batches numbered from `--start`, whatever batch they came from.
 
+A row whose `primary_genre` is missing or outside the vocabulary counts as NOT produced. It carries no
+usable label, so leaving it in place would mean a title that looks done and is not — the same silent gap,
+one level down. `validate_classify_batch.py` reports these as "drop"; this sweeps them.
+
 Running it twice is harmless: the second pass finds only what the first one's batches still missed.
 
 A batch with NO output is a different failure — never dispatched, or still in flight — and its titles are
@@ -26,6 +30,8 @@ ap.add_argument("--dry-run", action="store_true")
 args = ap.parse_args()
 
 in_dir, out_dir = os.path.join(args.phase, "in"), os.path.join(args.phase, "out")
+vocab = json.load(open(os.path.join(args.phase, "vocab.json"), encoding="utf-8"))
+pg_ok = set(vocab["primary_genre"])
 
 rows, produced, no_output = {}, set(), []
 for name in sorted(os.listdir(in_dir)):
@@ -42,7 +48,8 @@ for name in sorted(os.listdir(in_dir)):
     except json.JSONDecodeError:
         no_output.append(name)   # half-written; its titles are not done
         continue
-    produced |= {r.get("key") for r in got if isinstance(r, dict)}
+    produced |= {r.get("key") for r in got
+                 if isinstance(r, dict) and r.get("primary_genre") in pg_ok}
 
 swept = []
 for name in sorted(os.listdir(in_dir)):
