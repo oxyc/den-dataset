@@ -128,25 +128,24 @@ def ordinary_vocabulary(path=None):
 
 
 def proper_nouns(tag, plot):
-    """Tokens that appear in the plot ONLY capitalised mid-sentence — i.e. names, places, brands.
+    """Removed. Kept as a stub so the reasoning is not lost and nobody rebuilds it.
 
-    Read from the source text rather than a gazetteer, so it works in every language the corpus grounds in
-    and needs no list to maintain. A token that also appears lowercase somewhere is an ordinary word that
-    merely started a sentence, and is not flagged.
+    The idea was to flag tokens appearing in the plot only capitalised mid-sentence. Measured against real
+    batches it produced EIGHT false positives and ZERO true positives: `giant` and `time` (capitalised
+    inside "Giant God Warrior" and "Time Shift"), `sun`, `moon`, `archive`, `oni`, and — before the
+    German guard — `idol` and `talent`.
+
+    Three rounds of patching did not fix it, because the premise is wrong. A premise tag is built from
+    ordinary words, and ordinary words appear capitalised inside longer proper names constantly. The signal
+    does not separate the two, and a check that is wrong every time it fires costs good tags and teaches
+    everyone to ignore the report.
+
+    The spec still bans proper nouns and the generator largely complies. The residual rate is tolerable on
+    the evidence that matters: the shipped corpus that beat the plot index 12/12 contains `las-vegas-showdown`
+    and 31 tags with `paris`, and it works. If this is ever worth catching, it needs a gazetteer or a named
+    entity model, not a capitalisation rule.
     """
-    if capitalises_all_nouns(plot):
-        return []
-    ordinary = ordinary_vocabulary()
-    found = []
-    for token in tag.split("-"):
-        if len(token) < 3 or token in ordinary:
-            continue
-        mid = re.findall(rf"(?<![.!?]\s)(?<!^)\b({re.escape(token)})\b", plot, re.I | re.M)
-        if not mid:
-            continue
-        if all(m[:1].isupper() for m in mid):
-            found.append(token)
-    return found
+    return []
 
 
 def has_non_ascii(tag):
