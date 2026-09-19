@@ -93,6 +93,36 @@ def capitalises_all_nouns(plot):
     return sum(w[:1].isupper() for w in mid) / len(mid) > 0.15
 
 
+ORDINARY_MIN = 100
+_ordinary = None
+
+
+def ordinary_vocabulary(path=None):
+    """Tokens common enough in the SHIPPED tags to be ordinary premise vocabulary, never a name.
+
+    Derived from the corpus rather than written by hand, so it needs no maintenance and reflects what this
+    index actually says. The capitalisation heuristic below cannot tell `Giant` in "Giant God Warrior" or
+    `Time` in "Time Shift" from a real name — both appear only capitalised — and it flagged
+    `giant-creature-invasion` and `time-spanning-love` on exactly that. But `giant` is in 341 shipped tags
+    and `time` in 1,618, while `versailles` is in one and `bogota` in none.
+
+    The threshold separates them: at 100, `time` and `giant` pass while `vegas` (25) and `paris` (31) are
+    still checked — and those two ARE proper nouns that leaked into the shipped set.
+    """
+    global _ordinary
+    if _ordinary is None:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        tags = json.load(open(path or os.path.join(root, "data/premise-tags-v1.json"),
+                              encoding="utf-8"))["tags"]
+        counts = {}
+        for row in tags.values():
+            for tag in row:
+                for token in set(tag.split("-")):
+                    counts[token] = counts.get(token, 0) + 1
+        _ordinary = {t for t, n in counts.items() if n >= ORDINARY_MIN}
+    return _ordinary
+
+
 def proper_nouns(tag, plot):
     """Tokens that appear in the plot ONLY capitalised mid-sentence — i.e. names, places, brands.
 
@@ -102,9 +132,10 @@ def proper_nouns(tag, plot):
     """
     if capitalises_all_nouns(plot):
         return []
+    ordinary = ordinary_vocabulary()
     found = []
     for token in tag.split("-"):
-        if len(token) < 3:
+        if len(token) < 3 or token in ordinary:
             continue
         mid = re.findall(rf"(?<![.!?]\s)(?<!^)\b({re.escape(token)})\b", plot, re.I | re.M)
         if not mid:
@@ -123,24 +154,35 @@ def has_diacritic(tag):
 
 
 def check(batch_in, batch_out, strict_language):
-    """Returns a list of problems. Empty means the batch is usable."""
-    bad = []
+    """Returns (fatal, quality). Fatal rejects the batch; quality names tags to drop and keep going.
+
+    The split matters and I got it wrong first. CORRUPTION — an invented id, a dropped key, a duplicate, a
+    malformed answer — condemns the whole batch, because the rows around it came from the same confused pass
+    and keeping the survivors mixes verified with unverified work.
+
+    A bad TAG is not that. The first real batch carried two tags that were nothing but genre words out of
+    176; re-running 22 titles to fix 2 tags spends tokens to buy nothing, and at any realistic rate a
+    whole-batch rule would reject almost every batch, which is how a gate gets switched off. Those tags are
+    reported and dropped; the title keeps its remaining tags, and falls into the quality report if that
+    leaves it under the floor.
+    """
+    fatal, quality = [], []
     if not isinstance(batch_out, list):
-        return ["output is not a JSON array"]
+        return ["output is not a JSON array"], []
 
     want = [r["key"] for r in batch_in]
     got = [r.get("key") for r in batch_out if isinstance(r, dict)]
     if len(got) != len(batch_out):
-        bad.append("some rows are not objects")
+        fatal.append("some rows are not objects")
     if len(set(got)) != len(got):
         dupes = sorted({k for k in got if got.count(k) > 1})
-        bad.append(f"duplicated keys: {dupes}")
+        fatal.append(f"duplicated keys: {dupes}")
     invented = sorted(set(got) - set(want))
     missing = sorted(set(want) - set(got))
     if invented:
-        bad.append(f"invented keys not in the input: {invented}")
+        fatal.append(f"invented keys not in the input: {invented}")
     if missing:
-        bad.append(f"keys dropped from the input: {missing}")
+        fatal.append(f"keys dropped from the input: {missing}")
 
     plots = {r["key"]: r.get("plot", "") for r in batch_in}
     for row in batch_out:
@@ -148,26 +190,26 @@ def check(batch_in, batch_out, strict_language):
             continue
         key, tags = row.get("key"), row.get("tags")
         if not isinstance(tags, list) or not tags:
-            bad.append(f"{key}: no tags")
+            fatal.append(f"{key}: no tags")
             continue
         if not MIN_TAGS <= len(tags) <= MAX_TAGS:
-            bad.append(f"{key}: {len(tags)} tags, spec says {MIN_TAGS}-{MAX_TAGS}")
+            quality.append(f"{key}: {len(tags)} tags, spec says {MIN_TAGS}-{MAX_TAGS}")
         for tag in tags:
             if not isinstance(tag, str) or not tag.strip():
-                bad.append(f"{key}: empty tag")
+                fatal.append(f"{key}: empty tag")
             elif not TAG.match(tag):
-                bad.append(f"{key}: {tag!r} is not lowercase-kebab-case")
+                fatal.append(f"{key}: {tag!r} is not lowercase-kebab-case")
             elif has_non_ascii(tag) or has_diacritic(tag):
-                bad.append(f"{key}: {tag!r} is not English (non-ASCII)")
+                fatal.append(f"{key}: {tag!r} is not English (non-ASCII)")
             elif FOREIGN_HINT.search(tag):
                 problem = f"{key}: {tag!r} looks like it was left in the source language"
-                bad.append(problem) if strict_language else print(f"  warn {problem}", file=sys.stderr)
+                fatal.append(problem) if strict_language else quality.append(problem)
             else:
                 if words := genre_words(tag):
-                    bad.append(f"{key}: {tag!r} carries banned genre/mood word(s) {words}")
+                    quality.append(f"{key}: {tag!r} is only genre/mood words {words} — drop the tag")
                 if names := proper_nouns(tag, plots.get(key, "")):
-                    bad.append(f"{key}: {tag!r} carries proper noun(s) {names}")
-    return bad
+                    quality.append(f"{key}: {tag!r} carries proper noun(s) {names} — drop the tag")
+    return fatal, quality
 
 
 def main():
@@ -182,7 +224,7 @@ def main():
     names = ([f"batch-{args.batch}.json"] if args.batch
              else sorted(n for n in os.listdir(out_dir) if n.startswith("batch-")))
 
-    rejected, ok, rows = [], 0, 0
+    rejected, quality, ok, rows = [], [], 0, 0
     for name in names:
         out_path = os.path.join(out_dir, name)
         if not os.path.exists(out_path):
@@ -194,13 +236,21 @@ def main():
             rejected.append((name, [f"unparseable: {exc}"]))
             continue
         batch_in = json.load(open(os.path.join(in_dir, name), encoding="utf-8"))
-        problems = check(batch_in, batch_out, args.strict_language)
+        problems, notes = check(batch_in, batch_out, args.strict_language)
+        if notes:
+            quality.append((name, notes))
         if problems:
             rejected.append((name, problems))
         else:
             ok += 1
             rows += len(batch_out)
 
+    for name, notes in quality:
+        print(f"notes {name}  ({len(notes)} tag(s) to drop; the batch is still usable)")
+        for n in notes[:4]:
+            print(f"    {n}")
+        if len(notes) > 4:
+            print(f"    … and {len(notes) - 4} more")
     for name, problems in rejected:
         print(f"REJECT {name}")
         for p in problems[:6]:
@@ -208,7 +258,9 @@ def main():
         if len(problems) > 6:
             print(f"    … and {len(problems) - 6} more")
 
-    print(json.dumps({"checked": len(names), "accepted": ok, "rejected": len(rejected), "rowsAccepted": rows}))
+    print(json.dumps({"checked": len(names), "accepted": ok, "rejected": len(rejected), "rowsAccepted": rows,
+                      "batchesWithTagNotes": len(quality),
+                      "tagsToDrop": sum(len(n) for _, n in quality)}))
     sys.exit(1 if rejected else 0)
 
 
