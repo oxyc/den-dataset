@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The nine facet axes, as typed Choice questions, read from `prompts/facets-v1.md`.
+"""Plot facet axes as typed Choice questions, read from a versioned prompt.
 
 The vocabularies are PARSED from the prompt rather than restated here. They already exist in one place, in
 the file a human reads, and a second copy is where drift starts — an axis gains a value in the prompt, the
@@ -21,6 +21,7 @@ Run this file directly to print the questions it would send.
 import json
 import os
 import re
+import sys
 
 PROMPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "facets-v1.md")
 
@@ -62,7 +63,8 @@ def questions(path=PROMPT):
 
 
 if __name__ == "__main__":
-    qs = questions()
+    path = sys.argv[1] if len(sys.argv) > 1 else PROMPT
+    qs = questions(path)
     for axis, q in qs.items():
         opts = [k for k in q["criteria"] if k != NO_FIT]
         print(f"{axis:<10} {len(opts):>2} options   {q['instructions'][:60]}")

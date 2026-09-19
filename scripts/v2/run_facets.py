@@ -16,7 +16,7 @@ is checked against what was asked for, and a resumed run repeats nothing and dro
 
 ## What is asked
 
-The nine facet axes (`facet_questions.py`, parsed from `prompts/facets-v1.md`) plus `validity`, which is
+The facet axes (`facet_questions.py`, parsed from a versioned prompt) plus `validity`, which is
 free: the state is already paid for, so asking whether it is the RIGHT state costs nothing but makes a
 defect measurable that currently needs a human to notice. See den-dataset#16 — six tmdbIds share the
 Wuthering Heights novel's article, and nothing in the pipeline can tell.
@@ -36,7 +36,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from facet_questions import questions as facet_questions          # noqa: E402
+from facet_questions import PROMPT, questions as facet_questions  # noqa: E402
 from typesafe_client import TypeSafe, TypeSafeError               # noqa: E402
 
 VALIDITY = {
@@ -57,7 +57,7 @@ VALIDITY = {
 }
 
 
-def answer_row(rec, answers):
+def answer_row(rec, answers, question_set):
     """One output row: the identity, the choice and confidence per axis, and the full distribution."""
     facets = {}
     for axis, a in answers.items():
@@ -69,19 +69,22 @@ def answer_row(rec, answers):
     return {
         "mediaType": rec["mediaType"], "tmdbId": rec["tmdbId"], "title": rec.get("title"),
         "article": rec.get("article"), "language": rec.get("language"),
-        "articleChars": rec.get("chars"), "facets": facets,
+        "articleChars": rec.get("chars"), "questionSet": question_set, "facets": facets,
     }
 
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--articles", required=True, help="JSONL from `taxonomy-backfill dump-articles`")
 ap.add_argument("--out", required=True, help="JSONL, appended to; re-running resumes from it")
+ap.add_argument("--prompt", default=PROMPT,
+                help="versioned facet prompt (default: prompts/facets-v1.md)")
 ap.add_argument("--limit", type=int, help="stop after N titles (smoke tests)")
 ap.add_argument("--max-chars", type=int, default=0,
                 help="truncate the article state (0 = whole article, the default and the intent)")
 ap.add_argument("--workers", type=int, default=8,
                 help="concurrent calls. The documented ceiling is 1,200/min; 8 sits well under it.")
 args = ap.parse_args()
+question_set = os.path.basename(args.prompt)
 
 done = set()
 if os.path.exists(args.out):
@@ -89,6 +92,9 @@ if os.path.exists(args.out):
         for line in fh:
             try:
                 r = json.loads(line)
+                was = r.get("questionSet", "facets-v1.md")
+                if was != question_set:
+                    raise SystemExit(f"{args.out} contains {was}, cannot resume it with {question_set}")
                 done.add(f"{r['mediaType']}:{r['tmdbId']}")
             except Exception:
                 continue          # a torn last line from a kill; it will simply be redone
@@ -106,7 +112,7 @@ if args.limit:
 if not todo:
     sys.exit("nothing to do")
 
-QUESTIONS = {**facet_questions(), **VALIDITY}
+QUESTIONS = {**facet_questions(args.prompt), **VALIDITY}
 print(f"  {len(todo):,} titles · {len(QUESTIONS)} questions per call "
       f"({len(json.dumps(QUESTIONS)):,} chars of questions)", file=sys.stderr)
 
@@ -126,7 +132,7 @@ def work(rec):
             failed += 1
             print(f"  FAILED {rec['mediaType']}:{rec['tmdbId']} {rec.get('title')}: {exc}", file=sys.stderr)
         return
-    row = answer_row(rec, answers)
+    row = answer_row(rec, answers, question_set)
     with lock:
         out_fh.write(json.dumps(row, ensure_ascii=False) + "\n")
         out_fh.flush()           # a kill costs the calls in flight, not the run
