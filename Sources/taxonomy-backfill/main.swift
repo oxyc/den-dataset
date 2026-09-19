@@ -35,6 +35,7 @@ struct TaxonomyBackfill {
             case "escalation": try Commands.escalation(args)
             case "assemble": try await Commands.assemble(args)
             case "embed-corpus": try await Commands.embedCorpus(args)
+            case "dump-articles": try await Commands.dumpArticles(args)
             case "doc-facts": try await Commands.docFacts(args)
             case "facts": try await Commands.facts(args)
             case "finalize": try Commands.finalize(args)
@@ -60,9 +61,11 @@ struct TaxonomyBackfill {
           escalation --batch-id <n> --out-dir <dir>   (after pass 1: emit titles needing n=3)
           assemble --batch-id <n> --out-dir <dir>
           embed-corpus --labels <existing labels-t02.json> --out-dir <dir> [--enriched-dir <dir>]
-                       [--chunk 15] [--plot-cap 1500] [--limit N]
+                       [--chunk 15] [--plot-cap 1500] [--limit N] [--pause-ms 0]
                        (--chunk is bounded by den-embed's per-request token budget: 8192 / --plot-cap's
-                        token cost. Above it every request is a 413, which is not retried.)
+                        token cost. Above it every request is a 413, which is not retried.
+                        --pause-ms idles between requests so a long run can share a busy machine;
+                        with --chunk 15 each 1000ms costs ~45min over a full corpus.)
           doc-facts --labels <labels-t02.json> --out-dir <dir> [--batch 100]
                     (scrape Wikidata P57 director + P136 genre for the shipped corpus into
                      doc-facts.json — the two clauses of the embedding doc that still came from TMDB.
@@ -931,6 +934,100 @@ enum Commands {
     // vectors) into a dedicated out-dir. This is the "semantic vectors now" path: it upgrades the app's ANN
     // from lexical FNV to bge-m3 immediately, reusing the labels we already ship, while the fresh plot-grounded
     // reclassification (which improves the LABELS) is run later. `finalize --out-dir <same>` emits the artifact.
+    /// Write each grounded title's WHOLE Wikipedia article as prose, one JSON object per line.
+    ///
+    /// The classifier reads the article; the embedder reads the extracted plot. Two consumers with genuinely
+    /// different needs — see `WikipediaSource.articleProse` — and this is what feeds the first. Keeping them
+    /// apart also means a future extractor bug degrades similarity without silently corrupting labels.
+    ///
+    /// Every article was already fetched once to find its plot, and `plotArticle` + `plotLanguage` were
+    /// recorded per title, so this re-requests the same URL and the response cache answers nearly all of it.
+    /// That is why it goes through `WikipediaSource` rather than reading the cache directly: the cache is
+    /// keyed by a hash of the request, so reconstructing keys by hand would be a second implementation of
+    /// something that already works, and wrong the first time a parameter moves.
+    ///
+    /// Resumable by re-reading its own output — a kill costs at most the titles in flight.
+    static func dumpArticles(_ args: Args) async throws {
+        let outPath = try args.require("--out")
+        let enrichedDir = try args.require("--enriched-dir")
+        let limit = args.int("--limit")
+
+        var done: Set<String> = []
+        if FileManager.default.fileExists(atPath: outPath) {
+            for line in try FileIO.readLines(outPath) {
+                struct Row: Decodable { let mediaType: String; let tmdbId: Int }
+                if let r: Row = try? JSON.decode(line) { done.insert("\(r.mediaType):\(r.tmdbId)") }
+            }
+            FileHandle.standardError.write(Data("  resuming: \(done.count) already dumped\n".utf8))
+        }
+
+        // Newest batch wins, matching how every other reader folds this directory.
+        var wanted: [(key: String, dto: EnrichedDTO)] = []
+        var seen: Set<String> = []
+        for file in EnrichedBatches.orderedNames(inDirectory: enrichedDir).reversed() {
+            let dtos: [EnrichedDTO] = try JSON.read((enrichedDir as NSString).appendingPathComponent(file))
+            for dto in dtos {
+                let key = "\(dto.mediaType):\(dto.tmdbId)"
+                guard !seen.contains(key) else { continue }
+                seen.insert(key)
+                // ToS: only a title with a Wikipedia plot may reach an LLM, and only such a title has a
+                // recorded article to fetch.
+                guard dto.hasWikiPlot, let article = dto.plotArticle, !article.isEmpty else { continue }
+                guard !done.contains(key) else { continue }
+                wanted.append((key, dto))
+            }
+        }
+        if let limit { wanted = Array(wanted.prefix(limit)) }
+        FileHandle.standardError.write(Data("  \(wanted.count) articles to fetch\n".utf8))
+
+        let wiki = WikipediaSource()
+        let handle = try FileIO.appender(outPath)
+        defer { try? handle.close() }
+        struct ArticleRow: Encodable {
+            let mediaType: String, tmdbId: Int, title: String?, year: Int?, article: String, language: String
+            let resolvedArticle: String?, revId: Int?, extractorArticleRevId: Int?
+            let sections: [String], plotSections: [String]
+            let chars: Int, text: String
+        }
+
+        let gate = 4   // gentle on the public Wikipedia API, same as the plot pass
+        var written = 0, missing = 0
+        var index = 0
+        while index < wanted.count {
+            let slice = Array(wanted[index..<min(index + gate, wanted.count)])
+            let rows = try await withThrowingTaskGroup(of: ArticleRow?.self) { group -> [ArticleRow] in
+                for item in slice {
+                    group.addTask {
+                        let lang = item.dto.plotLanguage ?? "en"
+                        guard let article = item.dto.plotArticle,
+                              let found = try? await wiki.articleProse(articleTitle: article, language: lang)
+                        else { return nil }
+                        return ArticleRow(
+                            mediaType: item.dto.mediaType, tmdbId: item.dto.tmdbId, title: item.dto.title,
+                            year: item.dto.year,
+                            article: article, language: lang, resolvedArticle: found.resolvedArticle,
+                            revId: found.revId, extractorArticleRevId: item.dto.plotRevId,
+                            sections: found.sections,
+                            plotSections: item.dto.plotSections, chars: found.text.count,
+                            text: found.text)
+                    }
+                }
+                var out: [ArticleRow] = []
+                for try await row in group { if let row { out.append(row) } else { missing += 1 } }
+                return out
+            }
+            for row in rows {
+                try handle.writeLine(JSON.encodeLine(row))
+                written += 1
+            }
+            index += gate
+            if written % 500 == 0 && !rows.isEmpty {
+                FileHandle.standardError.write(Data("  dumped \(written) (no article \(missing))…\n".utf8))
+            }
+        }
+        print(JSON.line(["written": written, "noArticle": missing, "out": outPath]))
+    }
+
     static func embedCorpus(_ args: Args) async throws {
         let outDir = try args.require("--out-dir")
         let labelsPath = try args.require("--labels")            // the existing labels-t02.json (its tags per title)
@@ -957,6 +1054,12 @@ enum Commands {
         // so the run dies on its first flush having written nothing: the same shape as the max_batch bug.
         let chunk = args.int("--chunk") ?? 15
         let limit = args.int("--limit")                          // optional cap (testing)
+        // Idle between requests, so a long run can share a laptop. den-embed is already nice 20, but nice only
+        // orders CPU contention — it does not stop bge-m3 from holding its activations resident, and a machine
+        // deep in swap feels slow no matter how politely the work is scheduled. A pause leaves real gaps the
+        // rest of the system can reclaim memory in. Cost is linear and predictable: chunk 15 over ~38k titles
+        // is ~2,600 flushes, so each 1000ms of pause adds ~45 minutes.
+        let pauseMS = args.int("--pause-ms") ?? 0
         // Cap the PLOT portion (facts + tags are always kept). 4000 chars keeps the median plot whole and every
         // mid-plot genre pivot the length audit found, dropping only low-value end-of-plot twist tails — the
         // knee between similarity quality and bge-m3's O(seq^2) embedding cost.
@@ -1021,6 +1124,7 @@ enum Commands {
             }
             buffer.removeAll(keepingCapacity: true)
             if written % 2000 == 0 { FileHandle.standardError.write(Data("  embedded \(written) (skipped \(skipped))…\n".utf8)) }
+            if pauseMS > 0 { try await Task.sleep(nanoseconds: UInt64(pauseMS) * 1_000_000) }
         }
 
         // Stream the enriched batch files one at a time — only ONE batch of plots is in memory at once.
