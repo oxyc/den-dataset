@@ -31,11 +31,14 @@ _AXIS = re.compile(r"^- \*\*`(?P<axis>[a-z]+)`\*\*\s*[—-]\s*(?P<desc>.+?):\s*$
 _VALUE = re.compile(r"`(?P<value>[a-z0-9][a-z0-9-]*)`(?:\s*\((?P<gloss>[^)]*)\))?")
 
 NO_FIT = "does-not-apply"
+EVIDENCE_RULE = ("Answer from the supplied article only; do not guess from outside knowledge. "
+                 "Pick the dominant answer. ")
 
 
 def parse_axes(path=PROMPT):
     """{axis: (description, {value: gloss or None})} in the order the prompt lists them."""
-    text = open(path, encoding="utf-8").read()
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
     starts = [(m.group("axis"), m.group("desc").strip(), m.end()) for m in _AXIS.finditer(text)]
     if not starts:
         raise SystemExit(f"parsed no axes from {path} — the prompt's format changed, fix this parser")
@@ -56,9 +59,9 @@ def questions(path=PROMPT):
     out = {}
     for axis, (desc, values) in parse_axes(path).items():
         criteria = {v: gloss for v, gloss in values.items()}
-        criteria[NO_FIT] = ("Nothing in this list fits, or the plot does not say. Prefer a real value "
-                            "whenever one genuinely applies.")
-        out[axis] = {"type": "choice", "instructions": desc, "criteria": criteria}
+        criteria.setdefault(NO_FIT, ("Nothing in this list fits, or the article does not say. Prefer a real "
+                                     "value whenever one genuinely applies."))
+        out[axis] = {"type": "choice", "instructions": EVIDENCE_RULE + desc, "criteria": criteria}
     return out
 
 

@@ -19,36 +19,49 @@ support an answer, use `does-not-apply`; do not guess from outside knowledge.
 - **`scope`** — how much world the story covers:
   `single-location` · `single-city` · `regional` · `national` · `global` · `cosmic`
 
-- **`ending`** — how the main story resolves:
+- **`ending`** — how the main bounded narrative resolves, never the work's overall tone; use `does-not-apply` for a non-narrative or open-ended program:
   `happy` · `bittersweet` · `tragic` · `ambiguous` · `open` (sequel-shaped or unresolved) ·
   `cyclical` (ends where it began) · `unknown` (the article genuinely does not say)
 
-- **`pacing`** — the story's dominant tempo, independent of whether its structure is episodic or serialized:
+- **`pacing`** — the bounded narrative's dominant tempo; ignore whether it is episodic or serialized, and never use broadcast frequency or production history as tempo:
   `slow-burn` (deliberate accumulation toward a later payoff) ·
   `measured` (even and unhurried without a pronounced slow-build payoff) ·
   `brisk` (frequent forward movement with limited downtime) ·
-  `relentless` (sustained high urgency or action with few pauses)
+  `relentless` (sustained high urgency or action with few pauses) ·
+  `does-not-apply` (required when the article does not reveal tempo or the work is a talk, variety, game, news, reality or other program without a bounded narrative)
 
-- **`structure`** — how the telling is arranged; `episodic` belongs here, never under pacing:
-  `linear` · `nonlinear` · `framed` (story within a story) · `parallel-strands` ·
+- **`chronology`** — the dominant arrangement of presented story time, not article order or broadcast history; choose `framed` first when an explicit enclosing frame is central, otherwise `parallel-strands` for coequal intercut strands, otherwise `nonlinear` for substantially rearranged time, and use `linear` only when the article supports mainly chronological presentation:
+  `linear` (events are presented mainly in chronological order) ·
+  `nonlinear` (chronology is substantially rearranged through flashbacks, loops or reverse order) ·
+  `framed` (the main story is recounted inside an explicit present-day or storyteller frame) ·
+  `parallel-strands` (multiple timelines or storylines are intercut as coequal strands) ·
+  `does-not-apply` (required for a non-narrative program or when the article does not establish presentation order)
+
+- **`continuity`** — how narrative units connect, independent of chronology or tempo; use `does-not-apply` for a program without narrative units:
+  `continuous` (one main narrative progresses continuously; the ordinary film or serialized series case) ·
   `episodic` (successive substantially self-contained incidents or episodes) ·
-  `anthology` (separate stories with different central characters or worlds)
+  `hybrid` (self-contained units and a continuing main arc are both substantial) ·
+  `anthology` (separate, non-interacting stories or segments; intersecting plots in one shared story are not an anthology)
+
+- **`timespan`** — how much story time the main bounded narrative covers, never runtime, years on air or production history; use `does-not-apply` for a non-narrative program:
+  `single-day` · `several-days` · `weeks-or-months` · `years` ·
+  `multi-generational` (the story follows several family or social generations, not merely one long-lived character)
 
 - **`conflict`** — the primary opposition:
   `person-vs-person` · `person-vs-self` · `person-vs-society` · `person-vs-nature` ·
   `person-vs-system` · `person-vs-unknown`
 
-- **`ensemble`** — the narrative focus, not the number of credited or mentioned characters:
+- **`ensemble`** — the narrative focus, not cast size; supporting characters do not turn one clear protagonist into an ensemble, and a host or presenters do not form a narrative ensemble:
   `single-lead` (one clear protagonist carries the main arc, however many supporting characters appear) ·
   `dual-lead` (two comparably central protagonists, often a central pair or relationship) ·
   `group-led` (roughly three to five comparably central characters share one main arc) ·
   `ensemble-led` (many coequal characters or several storylines, with no durable single center)
 
-- **`tone`** — the dominant register:
+- **`tone`** — the dominant register, never the shape of the ending:
   `earnest` · `comic` · `satirical` · `bleak` · `melancholy` · `pulpy` · `dreamlike` ·
   `clinical`
 
-- **`archetype`** — the dominant whole-story arc, using neutral labels inspired by Booker's seven plots:
+- **`archetype`** — the dominant whole-story arc, not genre; assign an archetype only to a bounded fictional or dramatized protagonist arc:
   `overcoming-threat` (confront and overcome or escape a dangerous antagonist or force) ·
   `rise` (advance from deprivation or obscurity toward status, capability or success) ·
   `quest` (pursue a concrete goal, object, person or destination through obstacles) ·
@@ -56,14 +69,5 @@ support an answer, use `does-not-apply`; do not guess from outside knowledge.
   `comic-resolution` (confusion or division resolves through reunion, reconciliation or restored order;
   this does not mean the work is humorous) ·
   `downfall` (the protagonist's flaws or choices drive irreversible ruin) ·
-  `rebirth` (a trapped, diminished or morally lost protagonist undergoes renewal)
-
-## Boundaries that matter
-
-- A supporting cast does not turn a single protagonist into an ensemble. Count shared narrative focus.
-- `episodic` and `anthology` describe structure, not tempo. An episodic work can still be slow or relentless.
-- `comic-resolution` describes the shape of the resolution, not comic tone or comedy genre.
-- Tone words never belong in `ending`; `bleak` and `melancholy` are tone values.
-- For an anthology, documentary, open-ended series, or work with several equally strong arcs, `archetype` may
-  genuinely be `does-not-apply`.
-
+  `rebirth` (a trapped, diminished or morally lost protagonist undergoes renewal) ·
+  `does-not-apply` (required for documentaries, reality, talk, variety, game or news programs, anthologies, open-ended series, or several equal arcs; never map a documentary subject's life or a program's history onto an archetype)
