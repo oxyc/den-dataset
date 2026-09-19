@@ -112,7 +112,26 @@ for name in sorted(os.listdir(os.path.join(args.phase, "out"))):
             below_floor.append(key)
         new[key] = kept
 
-merged = dict(old_tags)
+# v1 carries 145 tags that are not tags: `suspected-wife's-affair`, `found-family-of-protégés`. An
+# apostrophe or an accent joins against nothing in an ASCII index, so those slots have been dead since the
+# corpus shipped. They are repaired here rather than left alone because v2 re-embeds anyway — the repair
+# rides along in the embed list at the cost of the ~140 titles carrying one, and leaving them would mean
+# knowingly publishing a new index with known-dead terms in it. A v1 tag that does NOT normalise to a valid
+# tag is dropped on the same rule as the new run's.
+v1_repairs, v1_drops, v1_touched = 0, 0, 0
+carried = {}
+for key, tags in old_tags.items():
+    kept, rep, drp = clean(tags)
+    if not kept:                      # never observed; keep the original rather than empty a record
+        carried[key] = tags
+        continue
+    if kept != tags:
+        v1_touched += 1
+        v1_repairs += len(rep)
+        v1_drops += len(drp)
+    carried[key] = kept
+
+merged = dict(carried)
 overwritten = sum(1 for k in new if k in merged)
 merged.update(new)
 
@@ -144,6 +163,7 @@ print(json.dumps({
     "v1Titles": len(old_tags), "v2Generated": len(new), "merged": len(merged),
     "addedTitles": len(merged) - len(old_tags), "overwrittenTitles": overwritten,
     "tagsRepaired": repairs, "tagsDropped": drops,
+    "v1TitlesTouched": v1_touched, "v1TagsRepaired": v1_repairs, "v1TagsDropped": v1_drops,
     "titlesBelowFloorAfterDrop": len(below_floor), "belowFloorSample": below_floor[:8],
     "stringsToEmbed": len(changed),
     "out": args.out, "embedList": args.embed_list,
