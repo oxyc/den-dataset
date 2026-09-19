@@ -59,8 +59,12 @@ FOREIGN_HINT = re.compile(
 GENRE_WORDS = {
     "comedy", "comedies", "comic", "horror", "thriller", "thrillers", "romance", "romantic", "drama",
     "dramatic", "biography", "biopic", "documentary", "musical", "western", "noir", "satire", "satirical",
-    "fantasy", "scifi", "sci-fi", "mystery", "action", "adventure", "slapstick", "feel-good", "scary",
+    "fantasy", "scifi", "mystery", "action", "adventure", "slapstick", "scary",
     "heartwarming", "dark", "gritty", "funny", "sad", "uplifting", "tense",
+    # Tokens, not tags: membership is tested after splitting on "-", so a hyphenated genre name has to be
+    # listed by its parts. `comedy-adventure-sci-fi` slipped through as "not entirely genre words" because
+    # `sci` and `fi` were absent while the joined `sci-fi` was present.
+    "sci", "fi", "feel", "good",
 }
 
 
