@@ -229,6 +229,22 @@ python3 scripts/v2/run_combined.py \
 The paid command is the same without `--plan`. Do not launch it until the code, questions, plan, tests, and
 smoke artifact have passed the final independent audit.
 
+After the writer exits successfully, independently reconstruct and audit the stored artifact before measuring
+or publishing it:
+
+```sh
+python3 scripts/v2/audit_combined.py \
+  --articles out-repass/articles.jsonl \
+  --enriched-dir out-repass/enriched \
+  --out out-repass/combined-v1-r2.jsonl
+```
+
+This is deliberately a strict completion gate, not a progress reporter. It checks the manifest and frozen input,
+requires every input key exactly once, revalidates every typed answer, reconstructs every whole/oversized state and
+question hash, and verifies the section spans, revision provenance, model id, and call plan. Only then does it
+report token cost, publication-gate coverage, and same-revision high-confidence section disagreements. Running it
+against a growing output must fail with the number of rows still absent; use `wc -l` to watch an active writer.
+
 ## Publication gates
 
 The pilots support collection, not unconditional argmax publication.
