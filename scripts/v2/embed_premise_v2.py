@@ -9,11 +9,11 @@
 int8 dot products are only meaningful between vectors from the SAME den-embed generation, and this repo has
 three premise blobs built by two different ones:
 
-  * `out-t02/vectors-premise.bin` (2026-07-05) — measured against the live service on 6 titles spanning the
+  * the July premise blob (now `legacy/out-t02/`) — measured against the live service on 6 titles spanning the
     blob: 48-55% of dims differ, cosine 0.977-0.982. A different embedder. Unusable as a base.
-  * `out-t02/v2/vectors/vectors-premise-v1-realigned.bin` (2026-09-05) — v1's strings re-embedded on the
+  * `out-premise-v2/vectors/vectors-premise-v1-realigned.bin` (2026-09-05) — v1's strings re-embedded on the
     newer service. Measured on the same 6 titles: 0 dims differ, cosine 1.000000. This is the base.
-  * `out-t02/v2/vectors/vectors-coverage-fill.bin` — cosine 0.90-0.96 against live. Also unusable; its 219
+  * the coverage-fill blob — cosine 0.90-0.96 against live. Also unusable; its 219
     titles are re-embedded here.
 
 So "reuse" means reuse from the REALIGNED blob only, and only where the composed string is unchanged. The
@@ -75,8 +75,8 @@ def embed(url, texts, retries=4):
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--tags", default="data/premise-tags-v2.json")
-ap.add_argument("--base-vectors", default="out-t02/v2/vectors/vectors-premise-v1-realigned.bin")
-ap.add_argument("--base-keys", default="out-t02/v2/vectors/keys-premise-v1-realigned.json")
+ap.add_argument("--base-vectors", default="out-premise-v2/vectors/vectors-premise-v1-realigned.bin")
+ap.add_argument("--base-keys", default="out-premise-v2/vectors/keys-premise-v1-realigned.json")
 ap.add_argument("--v1-tags", default="data/premise-tags-v1.json",
                 help="the strings the base blob was built from")
 ap.add_argument("--out-dir", required=True)
