@@ -22,6 +22,13 @@ corpus document can count its full 1024, so 8 documents is the ceiling and anyth
 default here is 7, matching what `embed-corpus --chunk` needs for the same reason. A 413 is fatal, not
 retried: it means the batch size is wrong, and retrying the same request just fails again more slowly.
 
+## Workers
+
+One request at a time leaves den-embed at ~313% of the box's 6 cores — the client is the bottleneck, not
+the model. `--workers` sends that many batches concurrently. Rows are written as each batch returns, so
+`vectors.jsonl` is no longer in document order; nothing downstream depends on that, because `keys.json` is
+built from the file's own row order below and every row carries its `key`.
+
 ## Resume
 
 Append-only, and an existing `vectors.jsonl` is read first so a killed run continues where it stopped. A
@@ -31,9 +38,11 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 
 def embed(url, texts, retries=4):
@@ -62,6 +71,7 @@ ap.add_argument("--docs", required=True, help="embed-corpus --dump-docs output")
 ap.add_argument("--out-dir", required=True)
 ap.add_argument("--url", required=True)
 ap.add_argument("--batch", type=int, default=7)
+ap.add_argument("--workers", type=int, default=1)
 args = ap.parse_args()
 
 os.makedirs(args.out_dir, exist_ok=True)
@@ -94,20 +104,29 @@ if health.get("max_tokens", 0) < 1024:
 
 t0 = time.time()
 written = 0
+lock = threading.Lock()
+blocks = [rows[i:i + args.batch] for i in range(0, len(rows), args.batch)]
+
 with open(vec_path, "a", encoding="utf-8") as out:
-    for start in range(0, len(rows), args.batch):
-        block = rows[start:start + args.batch]
+    def run(block):
+        global written
         vectors = embed(args.url, [r["doc"] for r in block])
         if len(vectors) != len(block):
             sys.exit(f"den-embed returned {len(vectors)} vectors for {len(block)} docs")
-        for r, v in zip(block, vectors):
-            out.write(json.dumps({"key": r["key"], "v": v}) + "\n")
-            written += 1
-        out.flush()
-        if written % (args.batch * 40) == 0 or written == len(rows):
-            rate = written / max(time.time() - t0, 1e-6)
-            print(f"  {written}/{len(rows)}  {rate:.1f}/s  eta {(len(rows)-written)/max(rate,1e-6)/60:.1f}m",
-                  file=sys.stderr)
+        # One lock around the write keeps lines whole; rows land in completion order, not document order.
+        with lock:
+            for r, v in zip(block, vectors):
+                out.write(json.dumps({"key": r["key"], "v": v}) + "\n")
+                written += 1
+            out.flush()
+            if written % (args.batch * 40) < args.batch or written == len(rows):
+                rate = written / max(time.time() - t0, 1e-6)
+                print(f"  {written}/{len(rows)}  {rate:.1f}/s  "
+                      f"eta {(len(rows)-written)/max(rate,1e-6)/60:.1f}m", file=sys.stderr)
+
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        for _ in pool.map(run, blocks):
+            pass
 
 keys = []
 with open(vec_path, encoding="utf-8") as fh:
