@@ -127,10 +127,29 @@ json.dump({"_": "tags on disk, vector never merged (DT-N). No model needed.", "k
           open(os.path.join(args.out_dir, "merge-only.json"), "w"), indent=2)
 
 chars = sum(r["evidenceChars"] for r in work)
-# Haiku batches carry a shared spec plus per-title evidence; ~3.8 chars/token on prose, as measured on the
-# facets batches. The spec is amortised over a batch, so it is added per batch, not per title.
+# The generator's batch carries a shared spec plus per-title evidence; ~3.8 chars/token on prose, as measured
+# on the facets batches. The spec is amortised over a batch, so it is added per batch, not per title.
 SPEC_CHARS, PER_BATCH = 5_200, 22
 batches = (len(work) + PER_BATCH - 1) // PER_BATCH
+
+# The batches themselves, in `llm_phase.py`'s layout so its manifest coverage and `--list-missing` resume
+# apply unchanged. Shape matches data/premise-tags-v1.SPEC.md exactly: the generator echoes `key` back, and
+# never reconstructs one from a bare tmdbId — 1,097 ids in this corpus are both a film and a series.
+in_dir = os.path.join(args.out_dir, "gen", "in")
+os.makedirs(in_dir, exist_ok=True)
+for i in range(batches):
+    slice_ = work[i * PER_BATCH:(i + 1) * PER_BATCH]
+    json.dump([{"key": f"{r['mediaType']}:{r['tmdbId']}", "mediaType": r["mediaType"],
+                "tmdbId": r["tmdbId"], "plot": r["evidence"]} for r in slice_],
+              open(os.path.join(in_dir, f"batch-{i:04d}.json"), "w", encoding="utf-8"),
+              ensure_ascii=False)
+json.dump({"titles": len(work), "batches": batches, "perBatch": PER_BATCH,
+           "spec": "data/premise-tags-v1.SPEC.md",
+           "ids": [f"{r['mediaType']}:{r['tmdbId']}" for r in work],
+           "provenance": ("evidence is Wikipedia story-premise and theme-subject sections only, selected by "
+                          "the Jev section audit; no TMDB prose is present in any batch file"),
+           "languages": sorted({r["language"] for r in work})},
+          open(os.path.join(args.out_dir, "gen", "manifest.json"), "w", encoding="utf-8"), indent=2)
 in_tokens = (chars + batches * SPEC_CHARS) / 3.8
 # 8-12 tags, ~28 chars each plus JSON scaffolding, per title.
 out_tokens = len(work) * (12 * 34 + 40) / 3.8
