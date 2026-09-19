@@ -5,7 +5,12 @@ Rules:
 - Emit 8–12 tags, **ordered MOST-DEFINING-FIRST**. The first ~5 must be the premise a viewer would use to
   say "it's the one where ___" (the story engine, central relationship, core situation); later tags may be
   secondary tropes. Ordering is the salience signal — put the essence first.
-- Each tag: lowercase-kebab-case, terse (2–4 words), a STRUCTURAL premise/trope. Good:
+- Each tag: lowercase-kebab-case **and plain ASCII** — a-z, 0-9 and hyphens, nothing else. No capitals, no
+  apostrophes, and **no accents**: transliterate them. `göring-collection` becomes `goring-collection`,
+  `ménage-à-trois-tension` becomes `menage-a-trois-tension`, `societal-collapse-London` becomes
+  `societal-collapse-london`. Most plots here are not in English and an accent carries through easily, but
+  the whole index is ASCII: a tag with `ö` in it joins against nothing.
+- Each tag: terse (2–4 words), a STRUCTURAL premise/trope. Good:
   `messages-to-the-dead`, `reassigned-phone-number`, `heist-gone-wrong`, `time-loop`, `enemies-to-lovers`,
   `undercover-cop`, `trapped-in-one-location`, `body-swap`, `wrongful-imprisonment`, `revenge-quest`.
 - **Tags are ALWAYS IN ENGLISH, whatever language the plot is written in.** Translate the idea; never

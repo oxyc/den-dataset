@@ -47,7 +47,9 @@ MIN_TAGS, MAX_TAGS = 8, 12
 FOREIGN_HINT = re.compile(
     r"(?:^|-)(?:der|das|und|mit|eine[nrsm]?|von|zum|zur|auf|für|nach|über|durch"
     r"|les|une|dans|pour|avec|sur|une"
-    r"|las|una|del|por|para|como"
+    # `como` is gone for the same reason `con` is: Lake Como is a place, and `lake-como-seduction` is a
+    # correct English tag. A hint that fires on a real word is worse than a missing hint.
+    r"|las|una|del|por|para"
     r"|gli|dei|nel|della|degli"
     r"|het|een|voor|naar)(?:-|$)")
 
@@ -148,6 +150,23 @@ def proper_nouns(tag, plot):
     return []
 
 
+def normalise(tag):
+    """The tag this one obviously meant: lowercased, accents transliterated, apostrophes dropped.
+
+    Most format failures are mechanical. Across 61 batches, 21 of 38 findings were `göring-collection`,
+    `ménage-à-trois-tension`, `societal-collapse-London` — correct premise tags carrying an accent or a
+    capital, which is unsurprising when 79% of the source plots are not in English. Rejecting a batch of 22
+    titles to fix one character spends a re-run to buy nothing, so a tag that normalises to a valid one is
+    repaired and reported rather than condemned.
+
+    A tag that does NOT survive this — a space, a slash, an empty string — is still fatal, because then the
+    generator produced something that was never a tag.
+    """
+    flat = unicodedata.normalize("NFD", tag)
+    flat = "".join(c for c in flat if not unicodedata.combining(c))
+    return flat.lower().replace("'", "").replace("’", "")
+
+
 def has_non_ascii(tag):
     return any(ord(c) > 127 for c in tag)
 
@@ -200,11 +219,17 @@ def check(batch_in, batch_out, strict_language):
         for tag in tags:
             if not isinstance(tag, str) or not tag.strip():
                 fatal.append(f"{key}: empty tag")
-            elif not TAG.match(tag):
-                fatal.append(f"{key}: {tag!r} is not lowercase-kebab-case")
-            elif has_non_ascii(tag) or has_diacritic(tag):
-                fatal.append(f"{key}: {tag!r} is not English (non-ASCII)")
-            elif FOREIGN_HINT.search(tag):
+                continue
+            if not TAG.match(tag) or has_non_ascii(tag) or has_diacritic(tag):
+                # Repairable, or genuinely not a tag? A capital or an accent is a typo with an obvious
+                # correction; a space or a slash means the generator produced something else entirely.
+                fixed = normalise(tag)
+                if TAG.match(fixed) and not has_non_ascii(fixed):
+                    quality.append(f"{key}: {tag!r} -> {fixed!r} (normalise)")
+                else:
+                    fatal.append(f"{key}: {tag!r} is not a tag and does not normalise to one")
+                continue
+            if FOREIGN_HINT.search(tag):
                 problem = f"{key}: {tag!r} looks like it was left in the source language"
                 fatal.append(problem) if strict_language else quality.append(problem)
             else:
