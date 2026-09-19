@@ -26,6 +26,7 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
+    full_articles_sha = sha256_file(args.articles)
     full_records, full_keys = load_articles(args.articles)
     attach_enriched_evidence(full_records, args.enriched_dir)
     full_by_key = {article_key(record): record for record in full_records}
@@ -63,10 +64,20 @@ def main(argv=None):
         })
 
     summary = audit(full_records, sources=sources)
+    if sha256_file(args.articles) != full_articles_sha:
+        raise ValueError("full article input changed during bundle audit")
+    for shard in shard_summary:
+        for path_key, hash_key in (
+            ("output", "outputSha256"),
+            ("manifest", "manifestSha256"),
+            ("sourceArticles", "sourceArticlesSha256"),
+        ):
+            if sha256_file(shard[path_key]) != shard[hash_key]:
+                raise ValueError(f"{shard[path_key]} changed during bundle audit")
     summary["bundle"] = {
         "schemaVersion": "combined-jev-bundle-v1",
         "articles": os.path.abspath(args.articles),
-        "articlesSha256": sha256_file(args.articles),
+        "articlesSha256": full_articles_sha,
         "enrichedEvidenceSha256": sha256_text(canonical({
             article_key(record): {
                 "year": record.get("year"), "plotSections": record.get("plotSections") or [],
