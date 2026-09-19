@@ -245,6 +245,36 @@ question hash, and verifies the section spans, revision provenance, model id, an
 report token cost, publication-gate coverage, and same-revision high-confidence section disagreements. Running it
 against a growing output must fail with the number of rows still absent; use `wc -l` to watch an active writer.
 
+### Token-capacity quarantine and manifested bundles
+
+The full run exposed a provider-capacity edge that serialized character count cannot predict: Japanese text
+has far more tokens per character than the English calibration. `tv:96451` (SSSS.DYNAZENON) and `tv:45799`
+(K) returned `HTTP 400 max_tokens_exceeded` on the ordinary combined path. The shared breaker stopped both
+runs without corrupting or duplicating completed rows.
+
+Never change a frozen runner and append under its old manifest. `resume_combined_excluding.py` instead imports
+the exact hashed implementation and changes only the selected record set, like `--only-key`; it requires an
+existing manifest and quarantines explicit keys for separately manifested shards. Capacity shards use the
+same questions/model/code with a lower state ceiling, which forces complete section-audit groups followed by
+one role-selected global call. No text is silently truncated and no question refers to an unseen section.
+
+Because each shard truthfully retains its own run/config provenance, final completeness is a bundle property.
+Validate the exact, disjoint 47,529-key union before deriving or publishing anything:
+
+```sh
+python3 scripts/v2/audit_combined_bundle.py \
+  --articles out-repass/articles.jsonl \
+  --enriched-dir out-repass/enriched \
+  --out out-repass/combined-v1-r2.jsonl \
+  --out out-repass/combined-v1-r2-token-fallback.jsonl \
+  --out out-repass/combined-v1-r2-token-fallback-2.jsonl
+```
+
+The bundle audit validates every shard against its own manifest and source artifact, proves each shard source
+record is semantically identical to the canonical full input after enriched evidence is attached, rejects
+cross-shard duplicates, requires exact full-corpus coverage, and records output/manifest/source hashes. The
+ordinary `audit_combined.py` remains strict for a single complete artifact.
+
 ## Publication gates
 
 The pilots support collection, not unconditional argmax publication.

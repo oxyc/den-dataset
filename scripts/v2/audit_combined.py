@@ -214,9 +214,17 @@ def validate_manifest(manifest, articles, enriched_sha):
         fail("manifest", "label question mapping hash differs")
 
 
-def audit(records, output, manifest):
-    global_questions = manifest["config"]["globalQuestions"]
+def audit(records, output=None, manifest=None, sources=None):
+    """Validate and summarize one artifact or an exact, disjoint set of manifested shards.
+
+    ``sources`` entries contain ``output``, ``manifest``, and the keys permitted by that shard's own
+    article input.  The ordinary single-artifact CLI uses the same path with every corpus key permitted.
+    """
     records_by_key = {article_key(record): record for record in records}
+    if sources is None:
+        if output is None or manifest is None:
+            raise TypeError("output and manifest are required for a single-artifact audit")
+        sources = [{"output": output, "manifest": manifest, "allowedKeys": set(records_by_key)}]
     seen = set()
     media = Counter()
     validity = Counter()
@@ -234,70 +242,82 @@ def audit(records, output, manifest):
     section_comparison = Counter()
     calls_total = input_tokens = output_tokens = oversized = different_revision = missing_heading_rows = 0
 
-    with open(output, encoding="utf-8") as fh:
-        for line_number, line in enumerate(fh, 1):
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError as exc:
-                fail(f"{output}:{line_number}", f"malformed JSON: {exc}")
-            key = f"{row.get('mediaType')}:{row.get('tmdbId')}"
-            if key in seen:
-                fail(f"{output}:{line_number}", f"duplicate key {key}")
-            rec = records_by_key.get(key)
-            if rec is None:
-                fail(f"{output}:{line_number}", f"key {key} absent from article input")
-            seen.add(key)
-            sections, section_answers, calls = validate_row(row, rec, manifest, global_questions)
-            media[row["mediaType"]] += 1
-            oversized += int(row["oversized"])
-            different_revision += int(not row["sectionAuditSameRevision"])
-            missing_heading_rows += int(bool(row["extractorSectionsMissingFromArticle"]))
-            calls_total += len(calls)
-            input_tokens += sum(call["inputTokens"] for call in calls)
-            output_tokens += sum(call["outputTokens"] for call in calls)
-            response_models.update(call["responseModel"] for call in calls)
+    for source in sources:
+        source_output = source["output"]
+        source_manifest = source["manifest"]
+        allowed_keys = source["allowedKeys"]
+        global_questions = source_manifest["config"]["globalQuestions"]
+        with open(source_output, encoding="utf-8") as fh:
+            for line_number, line in enumerate(fh, 1):
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    fail(f"{source_output}:{line_number}", f"malformed JSON: {exc}")
+                key = f"{row.get('mediaType')}:{row.get('tmdbId')}"
+                if key in seen:
+                    fail(f"{source_output}:{line_number}", f"duplicate key {key} across bundle")
+                if key not in allowed_keys:
+                    fail(f"{source_output}:{line_number}", f"key {key} absent from shard article input")
+                rec = records_by_key.get(key)
+                if rec is None:
+                    fail(f"{source_output}:{line_number}", f"key {key} absent from full article input")
+                seen.add(key)
+                sections, section_answers, calls = validate_row(
+                    row, rec, source_manifest, global_questions,
+                )
+                media[row["mediaType"]] += 1
+                oversized += int(row["oversized"])
+                different_revision += int(not row["sectionAuditSameRevision"])
+                missing_heading_rows += int(bool(row["extractorSectionsMissingFromArticle"]))
+                calls_total += len(calls)
+                input_tokens += sum(call["inputTokens"] for call in calls)
+                output_tokens += sum(call["outputTokens"] for call in calls)
+                response_models.update(call["responseModel"] for call in calls)
 
-            answers = row["answers"]
-            valid_answer = answers["validity"]
-            validity[valid_answer["choice"]] += 1
-            applicability[answers["narrative_applicability"]["choice"]] += 1
-            valid_probability = valid_answer["probabilities"]["correct-screen-work"]
-            valid_for_publication = valid_probability >= VALIDITY_PROBABILITY
-            narrative = answers["narrative_applicability"]["choice"]
-            for name, answer in answers.items():
-                if answer["type"] == "choice":
+                answers = row["answers"]
+                valid_answer = answers["validity"]
+                validity[valid_answer["choice"]] += 1
+                applicability[answers["narrative_applicability"]["choice"]] += 1
+                valid_probability = valid_answer["probabilities"]["correct-screen-work"]
+                valid_for_publication = valid_probability >= VALIDITY_PROBABILITY
+                narrative = answers["narrative_applicability"]["choice"]
+                for name, answer in answers.items():
+                    if answer["type"] == "choice":
+                        probability, margin = choice_strength(answer)
+                        choice_values[name][answer["choice"]] += 1
+                        choice_probabilities[name].append(probability)
+                        choice_margins[name].append(margin)
+                        excluded = answer["choice"] in EXCLUDED_VALUES \
+                            or (name == "ending" and answer["choice"] == "unknown")
+                        content_ok = narrative != "non-narrative-program"
+                        if name == "archetype":
+                            content_ok = narrative == "bounded-fictional-narrative"
+                        if valid_for_publication and (name not in PLOT_AXES or content_ok) \
+                                and probability >= VALUE_PROBABILITY and margin >= VALUE_MARGIN \
+                                and not excluded:
+                            publishable[name] += 1
+                    elif answer["type"] == "noul":
+                        if valid_for_publication and answer["noul"] >= VALUE_PROBABILITY:
+                            noul_positive[name] += 1
+                    else:
+                        score_values[name].append(answer["score"])
+                        score_confidences[name].append(answer["confidence"])
+
+                for section, answer in zip(sections, section_answers.values()):
                     probability, margin = choice_strength(answer)
-                    choice_values[name][answer["choice"]] += 1
-                    choice_probabilities[name].append(probability)
-                    choice_margins[name].append(margin)
-                    excluded = answer["choice"] in EXCLUDED_VALUES \
-                        or (name == "ending" and answer["choice"] == "unknown")
-                    content_ok = narrative != "non-narrative-program"
-                    if name == "archetype":
-                        content_ok = narrative == "bounded-fictional-narrative"
-                    if valid_for_publication and (name not in PLOT_AXES or content_ok) \
-                            and probability >= VALUE_PROBABILITY and margin >= VALUE_MARGIN and not excluded:
-                        publishable[name] += 1
-                elif answer["type"] == "noul":
-                    if valid_for_publication and answer["noul"] >= VALUE_PROBABILITY:
-                        noul_positive[name] += 1
-                else:
-                    score_values[name].append(answer["score"])
-                    score_confidences[name].append(answer["confidence"])
-
-            for section, answer in zip(sections, section_answers.values()):
-                probability, margin = choice_strength(answer)
-                role = answer["choice"]
-                section_roles[role] += 1
-                section_probabilities.append(probability)
-                high = probability >= VALUE_PROBABILITY and margin >= VALUE_MARGIN
-                if row["sectionAuditSameRevision"] and not row["extractorSectionsMissingFromArticle"] and high:
-                    selected = section["extractorSelected"]
-                    section_comparison[f"{'selected' if selected else 'unselected'}.{role}"] += 1
+                    role = answer["choice"]
+                    section_roles[role] += 1
+                    section_probabilities.append(probability)
+                    high = probability >= VALUE_PROBABILITY and margin >= VALUE_MARGIN
+                    if row["sectionAuditSameRevision"] \
+                            and not row["extractorSectionsMissingFromArticle"] and high:
+                        selected = section["extractorSelected"]
+                        section_comparison[f"{'selected' if selected else 'unselected'}.{role}"] += 1
 
     missing = set(records_by_key) - seen
     if missing:
-        fail(output, f"missing {len(missing):,} article keys")
+        label = output if output is not None else "combined bundle"
+        fail(label, f"missing {len(missing):,} article keys")
 
     choice_summary = {}
     for name in sorted(choice_values):
@@ -315,7 +335,7 @@ def audit(records, output, manifest):
     return {
         "integrity": {
             "rows": len(seen), "expectedRows": len(records_by_key), "uniqueKeys": len(seen),
-            "mediaTypes": dict(media), "schemaVersion": SCHEMA_VERSION,
+            "mediaTypes": dict(media), "schemaVersion": SCHEMA_VERSION, "shards": len(sources),
         },
         "run": {
             "calls": calls_total, "oversizedTitles": oversized, "inputTokens": input_tokens,

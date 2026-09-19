@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import article_sections
 import combined_questions
 import run_combined
+import resume_combined_excluding
 
 
 def answer_for(question):
@@ -230,6 +231,79 @@ class RunnerTests(unittest.TestCase):
             self.assertGreaterEqual(client.calls, 1)
             self.assertLessEqual(client.calls, 8, "only calls already in flight may escape the breaker")
             self.assertEqual(os.path.getsize(output), 0)
+
+    def test_resume_exclusion_requires_an_existing_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            articles = os.path.join(directory, "articles.jsonl")
+            output = os.path.join(directory, "out.jsonl")
+            with open(articles, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(record("Lead\n\n== Plot ==\nStory")) + "\n")
+            with self.assertRaisesRegex(SystemExit, "existing manifest required"):
+                resume_combined_excluding.main([
+                    "--articles", articles, "--out", output, "--exclude-key", "movie:7",
+                ])
+
+    def test_resume_exclusion_rejects_unknown_key_before_paid_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            articles = os.path.join(directory, "articles.jsonl")
+            output = os.path.join(directory, "out.jsonl")
+            with open(articles, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(record("Lead\n\n== Plot ==\nStory")) + "\n")
+            with open(output + ".manifest.json", "w", encoding="utf-8") as fh:
+                fh.write("{}")
+            with self.assertRaisesRegex(SystemExit, "excluded keys absent"):
+                resume_combined_excluding.main([
+                    "--articles", articles, "--out", output,
+                    "--exclude-key", "movie:999",
+                ])
+
+    def test_resume_exclusion_rejects_zero_limit(self):
+        with self.assertRaisesRegex(SystemExit, "cannot be combined"):
+            resume_combined_excluding.main([
+                "--articles", "unused", "--out", "unused", "--exclude-key", "movie:7",
+                "--limit", "0",
+            ])
+
+    def test_resume_exclusion_selects_other_rows_and_releases_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            articles = os.path.join(directory, "articles.jsonl")
+            output = os.path.join(directory, "out.jsonl")
+            first = record("Lead\n\n== Plot ==\nOne")
+            second = record("Lead\n\n== Plot ==\nTwo")
+            second["tmdbId"] = 8
+            with open(articles, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(first) + "\n")
+                fh.write(json.dumps(second) + "\n")
+            with open(output + ".manifest.json", "w", encoding="utf-8") as fh:
+                fh.write("{}")
+            handle = object()
+            with mock.patch.object(resume_combined_excluding, "global_questions", return_value=({}, {}, {})), \
+                    mock.patch.object(resume_combined_excluding, "attach_enriched_evidence", return_value="sha"), \
+                    mock.patch.object(resume_combined_excluding, "acquire_output_lock", return_value=handle), \
+                    mock.patch.object(resume_combined_excluding, "release_output_lock") as release, \
+                    mock.patch.object(resume_combined_excluding, "paid_run", return_value=0) as paid:
+                status = resume_combined_excluding.main([
+                    "--articles", articles, "--out", output, "--exclude-key", "movie:7",
+                ])
+            self.assertEqual(status, 0)
+            self.assertEqual([run_combined.article_key(rec) for rec in paid.call_args.args[-1]], ["movie:8"])
+            release.assert_called_once_with(handle)
+
+    def test_resume_exclusion_rejects_key_already_in_original_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            articles = os.path.join(directory, "articles.jsonl")
+            output = os.path.join(directory, "out.jsonl")
+            rec = record("Lead\n\n== Plot ==\nStory")
+            with open(articles, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec) + "\n")
+            with open(output, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"mediaType": "movie", "tmdbId": 7}) + "\n")
+            with open(output + ".manifest.json", "w", encoding="utf-8") as fh:
+                fh.write("{}")
+            with self.assertRaisesRegex(SystemExit, "already present"):
+                resume_combined_excluding.main([
+                    "--articles", articles, "--out", output, "--exclude-key", "movie:7",
+                ])
 
 
 if __name__ == "__main__":

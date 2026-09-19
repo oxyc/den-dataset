@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import copy
 import json
 import os
 import sys
@@ -107,6 +108,33 @@ class CombinedAuditTests(unittest.TestCase):
             open(output, "w", encoding="utf-8").close()
             with self.assertRaisesRegex(ValueError, "missing 1 article keys"):
                 audit_combined.audit([rec], output, manifest)
+
+    def test_disjoint_manifested_shards_form_exact_union(self):
+        first, first_manifest, first_row = fixture()
+        second = copy.deepcopy(first)
+        second["tmdbId"] = 8
+        second["title"] = "Second"
+        second_manifest = copy.deepcopy(first_manifest)
+        second_manifest["runId"] = "fallback-run"
+        second_manifest["configSha256"] = "fallback-config"
+        second_row = run_combined.classify(
+            second, FakeClient(), second_manifest["config"]["globalQuestions"],
+            second_manifest, 110_000,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            first_output = os.path.join(directory, "first.jsonl")
+            second_output = os.path.join(directory, "second.jsonl")
+            with open(first_output, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(first_row) + "\n")
+            with open(second_output, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(second_row) + "\n")
+            summary = audit_combined.audit([first, second], sources=[
+                {"output": first_output, "manifest": first_manifest, "allowedKeys": {"movie:7"}},
+                {"output": second_output, "manifest": second_manifest, "allowedKeys": {"movie:8"}},
+            ])
+        self.assertEqual(summary["integrity"]["rows"], 2)
+        self.assertEqual(summary["integrity"]["shards"], 2)
+        self.assertEqual(summary["run"]["calls"], 2)
 
 
 if __name__ == "__main__":
