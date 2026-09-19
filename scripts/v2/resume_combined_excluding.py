@@ -35,27 +35,27 @@ def main(argv=None):
     absent = excluded - input_keys
     if absent:
         raise SystemExit(f"excluded keys absent from article input: {sorted(absent)}")
-    existing = set()
-    if os.path.isfile(args.out):
-        with open(args.out, encoding="utf-8") as fh:
-            for line_number, line in enumerate(fh, 1):
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise SystemExit(f"{args.out}:{line_number}: malformed JSON: {exc}") from None
-                existing.add(f"{row.get('mediaType')}:{row.get('tmdbId')}")
-    overlap = excluded & existing
-    if overlap:
-        raise SystemExit(
-            f"excluded keys already present in original output; separate shard would duplicate: "
-            f"{sorted(overlap)}"
-        )
     enriched_sha = attach_enriched_evidence(records, args.enriched_dir)
     selected = [record for record in records if article_key(record) not in excluded]
-    print(f"  quarantining {len(excluded)} key(s) for a separate manifested shard", file=sys.stderr)
 
     lock_handle = acquire_output_lock(args.out + ".lock")
     try:
+        existing = set()
+        if os.path.isfile(args.out):
+            with open(args.out, encoding="utf-8") as fh:
+                for line_number, line in enumerate(fh, 1):
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise SystemExit(f"{args.out}:{line_number}: malformed JSON: {exc}") from None
+                    existing.add(f"{row.get('mediaType')}:{row.get('tmdbId')}")
+        overlap = excluded & existing
+        if overlap:
+            raise SystemExit(
+                f"excluded keys already present in original output; separate shard would duplicate: "
+                f"{sorted(overlap)}"
+            )
+        print(f"  quarantining {len(excluded)} key(s) for a separate manifested shard", file=sys.stderr)
         return paid_run(
             args, global_qs, label_mapping, tax, enriched_sha, records, input_keys, selected,
         )
