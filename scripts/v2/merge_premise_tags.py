@@ -86,12 +86,32 @@ def clean(tags):
 ap = argparse.ArgumentParser()
 ap.add_argument("--phase", required=True, help="the gen/ directory holding in/ and out/")
 ap.add_argument("--v1", default="data/premise-tags-v1.json")
+ap.add_argument("--extra", default="out-premise-999/tags.json",
+                help="tags that exist only in a gitignored working dir but ARE in the published index")
 ap.add_argument("--out", required=True)
 ap.add_argument("--embed-list", help="write the keys whose string changed, for the embed run")
 args = ap.parse_args()
 
 v1 = json.load(open(args.v1, encoding="utf-8"))
-old_tags = v1["tags"]
+old_tags = dict(v1["tags"])
+
+# The published index carries 999 titles that `data/premise-tags-v1.json` does not: they were generated
+# into a gitignored working dir and merged straight into the blob. Leaving them out here would not just
+# lose them — it would SHRINK live premise coverage by 999 titles while appearing to grow it by 5,999.
+# The generation worklist already skipped them for exactly this reason (build_premise_worklist.load_have),
+# so they are re-joined here rather than regenerated.
+extra_count = 0
+if args.extra and os.path.exists(args.extra):
+    extra = json.load(open(args.extra, encoding="utf-8"))
+    if not isinstance(extra, dict):
+        extra = {f"{r['mediaType']}:{r['tmdbId']}": r["tags"] for r in extra}
+    for k, t in extra.items():
+        if k not in old_tags:
+            old_tags[k] = t
+            extra_count += 1
+elif args.extra:
+    sys.exit(f"{args.extra} is missing — it holds 999 titles that are in the published index and nowhere "
+             f"else; merging without it would silently drop them from premise coverage")
 
 new, repairs, drops, below_floor = {}, 0, 0, []
 for name in sorted(os.listdir(os.path.join(args.phase, "out"))):
@@ -160,7 +180,7 @@ if args.embed_list:
     json.dump(sorted(changed), open(args.embed_list, "w", encoding="utf-8"), indent=1)
 
 print(json.dumps({
-    "v1Titles": len(old_tags), "v2Generated": len(new), "merged": len(merged),
+    "v1Titles": len(old_tags), "fromExtraWorkingDir": extra_count, "v2Generated": len(new), "merged": len(merged),
     "addedTitles": len(merged) - len(old_tags), "overwrittenTitles": overwritten,
     "tagsRepaired": repairs, "tagsDropped": drops,
     "v1TitlesTouched": v1_touched, "v1TagsRepaired": v1_repairs, "v1TagsDropped": v1_drops,
