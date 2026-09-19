@@ -1078,8 +1078,14 @@ enum Commands {
         // different embedder than built this store, or a plot cap the service would silently truncate. The
         // repair below rewrites files, and a run that cannot do any work has no business repairing anything.
         let denEmbed = DenEmbedClient()
-        let embedder = try await recordEmbedder(outDir: outDir, client: denEmbed, plotCap: plotCap)
-        FileHandle.standardError.write(Data("  embedder: \(embedder.label)\n".utf8))
+        // `--dump-docs` composes and embeds nothing, so it must not require an embedder to exist. Gating on
+        // one here would mean standing up a service on THIS machine purely to write text — and the whole
+        // reason the documents are being dumped is that this machine's embedder is the wrong one.
+        let dumpOnly = args["--dump-docs"] != nil
+        if !dumpOnly {
+            let embedder = try await recordEmbedder(outDir: outDir, client: denEmbed, plotCap: plotCap)
+            FileHandle.standardError.write(Data("  embedder: \(embedder.label)\n".utf8))
+        }
         // The embedder identity cannot see how the document was composed, and two runs of the same service
         // over the same corpus differ entirely on one clause. Refuse a shape change the same way.
         // `dropDirector` only means anything in the lean path — `ComposedDoc.build` always emits the
