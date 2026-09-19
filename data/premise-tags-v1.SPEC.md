@@ -15,7 +15,13 @@ Rules:
   language is worse than no tag at all.
 - NO proper nouns — no character names, places, countries, franchises, real people, brands. This applies to
   the source language too: do not keep a foreign name merely because it was not recognised as a name.
-- NO genre or mood words — not `romance`, `thriller`, `scary`, `feel-good`, `drama`, `comedy`.
+- **A tag is never JUST a genre or mood.** `documentary`, `slapstick-comedy`, `noir-comedy-thriller`,
+  `action-comedy-adventure` say nothing the taxonomy labels do not already record, and spend one of your
+  8–12 slots restating it.
+  A genre word MAY qualify a structure — `doomed-romance`, `found-footage-horror`, `workplace-romance`,
+  `body-horror-transformation` are all fine, because the tag still names a shape. The test is whether
+  anything remains when you take the genre word out: `religious-horror` leaves nothing, so prefer
+  `exorcism-in-a-convent`; `doomed-romance` leaves `doomed`, which is the premise.
 - Base tags ONLY on the plot text provided. Do not invent events not in the plot.
 
 You will be given a batch: a JSON array of `{key, mediaType, tmdbId, plot}`. For EVERY work, output one

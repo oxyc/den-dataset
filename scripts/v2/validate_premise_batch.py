@@ -34,12 +34,84 @@ import unicodedata
 TAG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 MIN_TAGS, MAX_TAGS = 8, 12
 # Function words that would only appear inside a tag left in its source language.
+#
+# Deliberately EXCLUDES every foreign function word that is also an ordinary English word, because those
+# produce false rejections on correct tags: `con` (con-artists-lovers), `die` (die-hard), `van`, `per`,
+# `la`, `il`, `de`, `lo`, `los`, `el`, `du`, `le`, `col`, `im`. The first smoke batch rejected
+# `con-artists-lovers` on exactly this, which is a worse failure than a missed tag — a validator that cries
+# wolf gets switched off, and then it catches nothing.
+#
+# What remains cannot be an English word, so a hit is real. It will still miss a German compound rendered in
+# plausible ASCII with no function word in it, which is why `--strict-language` is a gate on the run rather
+# than the whole check: read a sample of non-English output by hand as well.
 FOREIGN_HINT = re.compile(
-    r"(?:^|-)(?:der|die|das|und|mit|eine?[nrsm]?|von|zum|zur|im|auf|für"
-    r"|le|la|les|une?|des|du|dans|pour|avec|sur"
-    r"|el|los|las|una?|del|por|para|con"
-    r"|il|lo|gli|una|dei|nel|per|col"
-    r"|de|het|een|van|voor)(?:-|$)")
+    r"(?:^|-)(?:der|das|und|mit|eine[nrsm]?|von|zum|zur|auf|für|nach|über|durch"
+    r"|les|une|dans|pour|avec|sur|une"
+    r"|las|una|del|por|para|como"
+    r"|gli|dei|nel|della|degli"
+    r"|het|een|voor|naar)(?:-|$)")
+
+
+# Genre and mood words the spec bans outright. `data/README.md` credits that ban, together with the ban on
+# proper nouns, with why this index beats the plot index by +11.3 pp: the tags describe STRUCTURE, and a
+# genre word is the one thing the plot index already encodes better. A tag like `religious-horror` spends a
+# slot re-stating what the taxonomy labels already say.
+GENRE_WORDS = {
+    "comedy", "comedies", "comic", "horror", "thriller", "thrillers", "romance", "romantic", "drama",
+    "dramatic", "biography", "biopic", "documentary", "musical", "western", "noir", "satire", "satirical",
+    "fantasy", "scifi", "sci-fi", "mystery", "action", "adventure", "slapstick", "feel-good", "scary",
+    "heartwarming", "dark", "gritty", "funny", "sad", "uplifting", "tense",
+}
+
+
+def genre_words(tag):
+    """Flag a tag that is ENTIRELY genre/mood words — never one that merely contains one.
+
+    Measured against the shipped corpus, which is the only evidence that matters here: 5.4% of its 316,355
+    tags contain a genre word (`doomed-romance`, `found-footage-horror`, `class-divide-romance`), and that
+    corpus is the one that beat the plot index 12/12. Those are structural tags where the genre word
+    qualifies a shape. Rejecting them would reject the thing that works.
+
+    Tags that are nothing BUT genre words are 47 of 316,355 — 0.01% — and they are the real violation:
+    `documentary`, `slapstick-comedy`, `noir-comedy-thriller`. That is what the spec means and all this
+    should catch.
+    """
+    tokens = set(tag.split("-"))
+    return sorted(tokens) if tokens <= GENRE_WORDS else []
+
+
+def capitalises_all_nouns(plot):
+    """German (and Luxembourgish) capitalise every noun, which defeats the check below entirely.
+
+    Detected from the text rather than declared, so it needs no language field and covers any language with
+    the same property. The first smoke batch flagged `idol` and `talent` as proper nouns in a German plot
+    for exactly this reason — a check that is wrong for a fifth of the corpus is worse than no check.
+    """
+    mid = re.findall(r"(?<![.!?]\s)(?<!^)\b([A-Za-zÀ-ÿ]{3,})\b", plot, re.M)
+    if len(mid) < 40:
+        return True          # too little text to judge; decline to guess rather than accuse
+    return sum(w[:1].isupper() for w in mid) / len(mid) > 0.15
+
+
+def proper_nouns(tag, plot):
+    """Tokens that appear in the plot ONLY capitalised mid-sentence — i.e. names, places, brands.
+
+    Read from the source text rather than a gazetteer, so it works in every language the corpus grounds in
+    and needs no list to maintain. A token that also appears lowercase somewhere is an ordinary word that
+    merely started a sentence, and is not flagged.
+    """
+    if capitalises_all_nouns(plot):
+        return []
+    found = []
+    for token in tag.split("-"):
+        if len(token) < 3:
+            continue
+        mid = re.findall(rf"(?<![.!?]\s)(?<!^)\b({re.escape(token)})\b", plot, re.I | re.M)
+        if not mid:
+            continue
+        if all(m[:1].isupper() for m in mid):
+            found.append(token)
+    return found
 
 
 def has_non_ascii(tag):
@@ -70,6 +142,7 @@ def check(batch_in, batch_out, strict_language):
     if missing:
         bad.append(f"keys dropped from the input: {missing}")
 
+    plots = {r["key"]: r.get("plot", "") for r in batch_in}
     for row in batch_out:
         if not isinstance(row, dict):
             continue
@@ -89,45 +162,55 @@ def check(batch_in, batch_out, strict_language):
             elif FOREIGN_HINT.search(tag):
                 problem = f"{key}: {tag!r} looks like it was left in the source language"
                 bad.append(problem) if strict_language else print(f"  warn {problem}", file=sys.stderr)
+            else:
+                if words := genre_words(tag):
+                    bad.append(f"{key}: {tag!r} carries banned genre/mood word(s) {words}")
+                if names := proper_nouns(tag, plots.get(key, "")):
+                    bad.append(f"{key}: {tag!r} carries proper noun(s) {names}")
     return bad
 
 
-ap = argparse.ArgumentParser()
-ap.add_argument("--phase", required=True, help="the gen/ directory holding in/ and out/")
-ap.add_argument("--batch", help="one batch number, e.g. 0000 (default: every batch with an output)")
-ap.add_argument("--strict-language", action="store_true",
-                help="fail on a suspected source-language tag rather than warning")
-args = ap.parse_args()
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--phase", required=True, help="the gen/ directory holding in/ and out/")
+    ap.add_argument("--batch", help="one batch number, e.g. 0000 (default: every batch with an output)")
+    ap.add_argument("--strict-language", action="store_true",
+                    help="fail on a suspected source-language tag rather than warning")
+    args = ap.parse_args()
 
-in_dir, out_dir = os.path.join(args.phase, "in"), os.path.join(args.phase, "out")
-names = ([f"batch-{args.batch}.json"] if args.batch
-         else sorted(n for n in os.listdir(out_dir) if n.startswith("batch-")))
+    in_dir, out_dir = os.path.join(args.phase, "in"), os.path.join(args.phase, "out")
+    names = ([f"batch-{args.batch}.json"] if args.batch
+             else sorted(n for n in os.listdir(out_dir) if n.startswith("batch-")))
 
-rejected, ok, rows = [], 0, 0
-for name in names:
-    out_path = os.path.join(out_dir, name)
-    if not os.path.exists(out_path):
-        rejected.append((name, ["no output written"]))
-        continue
-    try:
-        batch_out = json.load(open(out_path, encoding="utf-8"))
-    except Exception as exc:
-        rejected.append((name, [f"unparseable: {exc}"]))
-        continue
-    batch_in = json.load(open(os.path.join(in_dir, name), encoding="utf-8"))
-    problems = check(batch_in, batch_out, args.strict_language)
-    if problems:
-        rejected.append((name, problems))
-    else:
-        ok += 1
-        rows += len(batch_out)
+    rejected, ok, rows = [], 0, 0
+    for name in names:
+        out_path = os.path.join(out_dir, name)
+        if not os.path.exists(out_path):
+            rejected.append((name, ["no output written"]))
+            continue
+        try:
+            batch_out = json.load(open(out_path, encoding="utf-8"))
+        except Exception as exc:
+            rejected.append((name, [f"unparseable: {exc}"]))
+            continue
+        batch_in = json.load(open(os.path.join(in_dir, name), encoding="utf-8"))
+        problems = check(batch_in, batch_out, args.strict_language)
+        if problems:
+            rejected.append((name, problems))
+        else:
+            ok += 1
+            rows += len(batch_out)
 
-for name, problems in rejected:
-    print(f"REJECT {name}")
-    for p in problems[:6]:
-        print(f"    {p}")
-    if len(problems) > 6:
-        print(f"    … and {len(problems) - 6} more")
+    for name, problems in rejected:
+        print(f"REJECT {name}")
+        for p in problems[:6]:
+            print(f"    {p}")
+        if len(problems) > 6:
+            print(f"    … and {len(problems) - 6} more")
 
-print(json.dumps({"checked": len(names), "accepted": ok, "rejected": len(rejected), "rowsAccepted": rows}))
-sys.exit(1 if rejected else 0)
+    print(json.dumps({"checked": len(names), "accepted": ok, "rejected": len(rejected), "rowsAccepted": rows}))
+    sys.exit(1 if rejected else 0)
+
+
+if __name__ == "__main__":
+    main()
