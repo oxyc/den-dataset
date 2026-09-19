@@ -25,6 +25,11 @@ they are mechanical:
   * a tag that is nothing but genre words (`romantic-comedy`, `comedy-adventure-sci-fi`) is DROPPED. It
     restates what the taxonomy labels already record, and `data/README.md` credits that ban with why this
     index beats the plot index by +11.3 pp.
+  * a tag naming a storytelling property (`character-arc`, `plot-twist`, `emotional-journey`) is DROPPED
+    for a sharper reason: it is true of nearly every narrative, so it does not merely waste a slot, it
+    drags unrelated titles together. The six batches that produced these in bulk were re-run; dropping
+    here covers the long tail of one or two per batch, where a re-run would pay for 21 good rows to fix
+    one tag.
 
 A drop can take a title below the spec's 8-tag floor. That is reported, not fixed: re-running the title
 costs a model call for something a short tag list still answers, and a title with 7 real tags is worth
@@ -70,7 +75,7 @@ def clean(tags):
                 continue
             repaired.append((t, fixed))
             t = fixed
-        if _v.genre_words(t):
+        if _v.genre_words(t) or t in _v.VAGUE_TAGS:
             dropped.append(t)
             continue
         if t not in kept:  # a repair can collide with a tag already present

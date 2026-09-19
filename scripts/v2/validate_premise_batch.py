@@ -101,6 +101,26 @@ def meta_tag(tag):
     return bool(tokens) and tokens <= META_WORDS
 
 
+# Tags that name a STORYTELLING PROPERTY rather than a situation. `character-arc`, `plot-twist` and
+# `emotional-journey` are true of almost every narrative ever filmed, so as index terms they behave exactly
+# like `placeholder-content`: everything carrying one "matches" everything else carrying one, and the
+# neighbours they produce have nothing in common. They read as legitimate, which is what makes them worse —
+# the meta-tag check cannot see them and neither could a human skimming a batch.
+#
+# A deliberate literal list, not a word rule. `identity-crisis` is here while `mistaken-identity` is a real
+# premise, and no combination rule separates those; a rule broad enough to catch the first would eat the
+# second. Measured against the shipped corpus: 35 of 316,355 tags, 0.01%, on 34 of 37,533 titles. The v2
+# generation run produced them at 1.61% of tags and 3.7% of titles — 160x the rate — which is how this got
+# noticed at all.
+VAGUE_TAGS = {
+    "personal-growth", "moral-dilemma", "emotional-journey", "character-arc", "plot-twist",
+    "dramatic-climax", "power-dynamics", "group-dynamics", "self-discovery", "inner-conflict",
+    "character-study", "emotional-depth", "social-commentary", "moral-ambiguity", "psychological-depth",
+    "identity-crisis", "interpersonal-conflict", "emotional-turmoil", "character-development",
+    "narrative-tension", "dramatic-irony", "emotional-resonance", "thematic-exploration",
+}
+
+
 def genre_words(tag):
     """Flag a tag that is ENTIRELY genre/mood words — never one that merely contains one.
 
@@ -276,6 +296,9 @@ def check(batch_in, batch_out, strict_language):
             else:
                 if words := genre_words(tag):
                     quality.append(f"{key}: {tag!r} is only genre/mood words {words} — drop the tag")
+                if tag in VAGUE_TAGS:
+                    quality.append(f"{key}: {tag!r} names a storytelling property, not a premise "
+                                   f"— drop the tag")
                 if names := proper_nouns(tag, plots.get(key, "")):
                     quality.append(f"{key}: {tag!r} carries proper noun(s) {names} — drop the tag")
     return fatal, quality
