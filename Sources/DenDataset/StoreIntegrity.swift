@@ -15,6 +15,22 @@ public struct VectorRow: Codable, Sendable, Equatable {
     }
 }
 
+/// One composed document, for `embed-corpus --dump-docs`: the embedder's input, carried to whichever
+/// machine will embed it.
+///
+/// Keyed `mediaType:tmdbId`, never a bare id — 1,097 ids in this corpus are both a film and a series, and
+/// this file exists precisely to travel between machines, where a bare-id or positional join has nothing
+/// left to correct itself against.
+public struct DocRow: Codable, Sendable, Equatable {
+    public let key: String
+    public let doc: String
+
+    public init(key: String, doc: String) {
+        self.key = key
+        self.doc = doc
+    }
+}
+
 /// The labels store and the vector store are two append-only files, zipped positionally from the moment
 /// they are read: line *i* of one is assumed to describe line *i* of the other, and nothing downstream
 /// carries the vector's own id to check it against.

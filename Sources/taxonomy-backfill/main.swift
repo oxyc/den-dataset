@@ -1111,8 +1111,32 @@ enum Commands {
         var buffer: [(record: IndexRecord, doc: String)] = []
         var written = 0, skipped = done.count, missing = 0
 
+        // `--dump-docs <path>`: compose and write `{"key":…,"doc":…}` per line, embedding nothing.
+        //
+        // Composition must not be reimplemented anywhere else — it is 87% plot, capped, in the exact shape
+        // recorded in composition.json — but the embedding must happen on whichever den-embed answers live
+        // queries. Those pull apart when the machine holding the plots is not the machine that serves: arm64
+        // and x86_64 den-embed return different int8 vectors for identical input (525 of 1024 dims, measured
+        // — oxyc/den-dataset#21). Dumping lets the DOCUMENTS travel instead of the vectors, so composition
+        // stays here, embedding happens there, nothing is reimplemented and no service is exposed.
+        let dumpPath = args["--dump-docs"]
+        let dumpHandle = try dumpPath.map { try FileIO.appender($0) }
+        defer { try? dumpHandle?.close() }
+
         func flush() async throws {
             guard !buffer.isEmpty else { return }
+            if let dumpHandle {
+                for item in buffer {
+                    try dumpHandle.writeLine(JSON.encodeLine(
+                        DocRow(key: "\(item.record.mediaType):\(item.record.tmdbId)", doc: item.doc)))
+                    written += 1
+                }
+                buffer.removeAll(keepingCapacity: true)
+                if written % 2000 == 0 {
+                    FileHandle.standardError.write(Data("  composed \(written) (skipped \(skipped))…\n".utf8))
+                }
+                return
+            }
             let vectors = try await denEmbed.embedManyInt8(buffer.map(\.doc))
             guard vectors.count == buffer.count else {
                 throw ToolError(message: "den-embed returned \(vectors.count) vectors for \(buffer.count) docs")
