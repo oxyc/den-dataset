@@ -290,23 +290,26 @@ premise discrimination against raw plot's 8/12, and abstracting to the t02 contr
 **5/12 — worse than raw plot**. Do not "improve" the plot index by making it more abstract; that experiment
 was run and lost. The two indexes are complements.
 
-The Sonnet tag strings are frozen at `out-t02/premise-tags-wip/tags-raw.json` (37,314 titles), so the premise
-index can be re-embedded any time for zero LLM cost — **on this machine**. The 999 tags that closed the gap
-to the 38,532-title corpus live only in gitignored `out-premise-999/tags.json`, and committed
-`data/premise-tags-v1.json` holds 37,533. A re-embed from a fresh checkout comes up 999 short.
+The premise tag strings are committed at [`data/premise-tags-v2.json`](data/premise-tags-v2.json) — **44,531
+titles**, which is every title the index covers, so it re-embeds from a fresh checkout for zero LLM cost.
+That was not true before 2026-09-19: 999 of the strings lived only in a gitignored directory and a rebuild
+came up short (#13). `premise-tags-v1.json` (37,533) is kept because `vectors-premise.bin` is aligned to its
+exact strings.
 
 ### 1. Corpus and query vectors must come from the same embedder
-int8 dot products are only meaningful between vectors from the same model *and the same runtime*. den-embed
-reports a **`vector_epoch`** that moves only when its output moves (an ONNX Runtime upgrade, a model change,
-a pooling change) — deliberately not its crate version, or a log-line fix would invalidate 37.5k titles.
-`embedderRuntime` / `embedderMaxTokens` in the manifest record what built the corpus, and the producer
-refuses to append a different embedder to an existing store.
+int8 dot products are only meaningful between vectors from the same model *and the same runtime*.
 
-`embeddingModel` + `dims` are NOT sufficient: every generation reports `bge-m3` and `1024`, including the two
-that return different vectors for the same text. That is how the original violation went unseen — a corpus
-embedded by the **Python** service on ORT 1.22, queried through the Rust one on 1.28 (`tickets/FP-5` in the
-den repo). **Resolved**: the corpus was re-embedded 2026-09-13 by `den-embed/5.1.1`, and the box serves the
-same build.
+**No identity field can be trusted to tell you whether they are.** `embeddingModel` + `dims` are identical
+across every generation (`bge-m3`, `1024`). `vectorEpoch` is meant to move when output moves and has stayed
+`1` across generations that return different vectors. `embedderRuntime` records only den-embed's own crate
+version, which does not change when what is underneath it does.
+
+The only sound check is to re-embed a sample of a blob and compare bytes; `scripts/v2/embed_premise_v2.py`
+does that before reusing anything and refuses on mismatch.
+
+**The live index and live queries are NOT aligned today** — measured cost 6.3/10 top-10 overlap, and the
+cause is the build host, not a version. Current state and what to do: `docs/OPERATE.md` "The alignment
+rule". Evidence: oxyc/den-dataset#21. Not restated here, so there is one copy to keep true.
 
 What the gate still cannot see is the **doc shape** and the **plot cap**. The shipped index is the CC0 lean
 shape (`embed-corpus --doc-facts`), and its cap is recorded nowhere. Both differ silently from what a plain
