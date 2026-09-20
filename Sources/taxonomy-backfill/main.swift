@@ -696,30 +696,56 @@ enum Commands {
             }
         }
         var done = 0
+        var skipped = 0
         for (type, ids) in byType {
             let mediaType: MediaType = type == "tv" ? .tv : .movie
             for start in stride(from: 0, to: ids.count, by: batchSize) {
                 let slice = Array(ids[start..<min(start + batchSize, ids.count)])
-                for spec in WikidataFacts.specs where !titlesOnly && !(spec.tvOnly && mediaType != .tv) {
-                    let got = try await source.facts(spec: spec, forTMDBIds: slice, mediaType: mediaType)
-                    for (id, value) in got { fields["\(type):\(id)", default: [:]][spec.key] = value }
-                    // Pace the scrape. Firing 24 requests back-to-back per batch sustains ~3/s for hours,
-                    // which WDQS throttles: the run then fast-fails on intermittent 429s rather than timing
-                    // out, and a restart loop retries the same batch forever without advancing. Measured at
-                    // 0.36 s/request, this roughly halves throughput and is the difference between finishing
-                    // and stalling at 16,500.
-                    try await Task.sleep(nanoseconds: 300_000_000)
-                }
-                // Titles are their own hop: search needs the enwiki article title, the label, P1476 and every
-                // alias, and atlas's title index carries only TMDB's ORIGINAL title today — so "parasite" and
-                // "spirited away" miss while "Gisaengchung" and "Sen to Chihiro" hit.
-                let t = try await source.titles(forTMDBIds: slice, mediaType: mediaType)
-                for (id, v) in t {
-                    var m: [String: WikidataFacts.FieldValue] = [:]
-                    if let a = v.article ?? v.label { m["en"] = .string(WikidataFacts.strippedArticleSuffix(a)) }
-                    if let o = v.original ?? v.label { m["orig"] = .string(o) }
-                    if !v.aliases.isEmpty { m["aliases"] = .list(v.aliases.sorted()) }
-                    if !m.isEmpty { fields["\(type):\(id)", default: [:]]["titles"] = .object(m) }
+                do {
+                    for spec in WikidataFacts.specs where !titlesOnly && !(spec.tvOnly && mediaType != .tv) {
+                        let got = try await source.facts(spec: spec, forTMDBIds: slice, mediaType: mediaType)
+                        for (id, value) in got { fields["\(type):\(id)", default: [:]][spec.key] = value }
+                        // Pace the scrape. Firing 24 requests back-to-back per batch sustains ~3/s for hours,
+                        // which WDQS throttles: the run then fast-fails on intermittent 429s rather than timing
+                        // out, and a restart loop retries the same batch forever without advancing. Measured at
+                        // 0.36 s/request, this roughly halves throughput and is the difference between finishing
+                        // and stalling at 16,500.
+                        try await Task.sleep(nanoseconds: 300_000_000)
+                    }
+                    // Titles are their own hop: search needs the enwiki article title, the label, P1476 and every
+                    // alias, and atlas's title index carries only TMDB's ORIGINAL title today — so "parasite" and
+                    // "spirited away" miss while "Gisaengchung" and "Sen to Chihiro" hit.
+                    let t = try await source.titles(forTMDBIds: slice, mediaType: mediaType)
+                    for (id, v) in t {
+                        var m: [String: WikidataFacts.FieldValue] = [:]
+                        if let a = v.article ?? v.label { m["en"] = .string(WikidataFacts.strippedArticleSuffix(a)) }
+                        if let o = v.original ?? v.label { m["orig"] = .string(o) }
+                        if !v.aliases.isEmpty { m["aliases"] = .list(v.aliases.sorted()) }
+                        if !m.isEmpty { fields["\(type):\(id)", default: [:]]["titles"] = .object(m) }
+                    }
+                } catch {
+                    // A batch that dies after Transport's retries must not end the run. This is 24 requests
+                    // per 100 ids against WDQS for hours: one of them WILL eventually time out, and throwing
+                    // here abandoned every title after it — a scrape died at 3,100 of 8,949 with the other
+                    // 5,849 untouched, despite the checkpoint being per batch.
+                    //
+                    // A full pass also drops whatever this batch half-wrote. Its resume keys on a row
+                    // EXISTING, so a row holding the 9 properties that landed before the timeout would read
+                    // as finished and the title would ship missing the other 15 — silently, and only in the
+                    // titles unlucky enough to straddle a failure. One re-fetch is cheaper than that.
+                    //
+                    // `--titles-only` must NOT drop the row: there the resume deliberately keeps rows that
+                    // already exist (it selects on a missing `titles` key), so those rows hold a COMPLETE
+                    // set of facts from an earlier pass, and deleting one over a failed titles hop would
+                    // destroy 24 properties to retry a 25th.
+                    if !titlesOnly {
+                        for id in slice { fields.removeValue(forKey: "\(type):\(id)") }
+                    }
+                    skipped += slice.count
+                    try JSON.write(fields, to: checkpoint)
+                    FileHandle.standardError.write(Data(
+                        "  facts: batch of \(slice.count) \(type) FAILED, left for a later pass — \(error)\n".utf8))
+                    continue
                 }
                 done += slice.count
                 try JSON.write(fields, to: checkpoint)
@@ -872,8 +898,10 @@ enum Commands {
         let path = (outDir as NSString).appendingPathComponent("facts-\(version).json")
         try JSON.write(Out(schema: 1, datasetVersion: version, genreMap: genreMap,
                            entities: entities.mapValues(Out.Entity.init), records: records), to: path)
+        // `skipped` is reported rather than swallowed: a pass that gave up on batches is not a finished
+        // scrape, and the caller's next move (run it again to sweep them) depends on knowing the number.
         print(JSON.line(["facts": records.count, "entities": entities.count, "genreMap": genreMap.count, "path": path,
-                         "hasVector": hasVector ? 1 : 0]))
+                         "skippedAfterFailure": skipped, "hasVector": hasVector ? 1 : 0]))
     }
 
     // doc-facts — scrape the two embedding-doc clauses that still came from TMDB (director, genre) from
