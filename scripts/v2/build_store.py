@@ -46,7 +46,6 @@ FANTASTICAL = [f"theme__{k}" for k in (
     "dystopian_post_apocalyptic", "folk_horror")] + [f"subgenre__{k}" for k in (
     "supernatural_horror", "sci_fi_horror", "sci_fi_action", "fantasy_adventure")]
 
-U16_NONE = 0xFFFF
 U32_NONE = 0xFFFFFFFF
 I16_NONE = -0x8000
 I32_NONE = -0x80000000
@@ -108,7 +107,7 @@ def labelled(entries, strings, what, key):
             label, conf = entry, None
         if not label:
             continue
-        out.append((strings.id(label, U16_NONE), hundredths(conf, f"{what} confidence", key) if conf else 0))
+        out.append((strings.id(label), hundredths(conf, f"{what} confidence", key) if conf else 0))
     return out
 
 
@@ -196,7 +195,7 @@ class Sections:
             offsets.append(len(ids))
         if len(offsets) != self.rows + 1:
             sys.exit(f"section {name}: {len(offsets)} offsets, expected {self.rows + 1}")
-        self.put(f"{name}_v", "H", ids, 2)
+        self.put(f"{name}_v", "I", ids, 4)
         self.put(f"{name}_c", "B", confs, 1)
         self.put(f"{name}_o", "I", offsets, 4)
 
@@ -230,19 +229,22 @@ def main():
     if args.premise_labels:
         premise_row = {k: i for i, k in enumerate(labels_by_key(args.premise_labels, "premise labels"))}
 
-    strings = Strings()   # free text: titles, aliases, entity names, poster paths, imdb ids (u32)
-    vocab = Strings()     # the controlled vocabulary: facet values, label names, countries (u16)
+    # ONE dictionary. Splitting a controlled vocabulary out to keep u16 ids saved 1.84 MB of 123 MB
+    # and bought two bare integer id spaces with nothing in the format telling them apart: a reader
+    # resolving a vocabulary id against the free-text table gets a wrong but perfectly valid string,
+    # silently. That is the failure this whole store exists to make impossible. u32 everywhere.
+    strings = Strings()
     noul_names, critique_names, technique_names = set(), set(), set()
     for key in keys:
         r = rows[key]
         labels = r.get("labels") or {}
-        vocab.add(labels.get("primaryGenre"))
+        strings.add(labels.get("primaryGenre"))
         for entry in (labels.get("subgenres") or []) + (labels.get("moods") or []):
-            vocab.add(entry.get("label") if isinstance(entry, dict) else entry)
+            strings.add(entry.get("label") if isinstance(entry, dict) else entry)
         for axis in FACET_AXES:
             v = (r.get("facets") or {}).get(axis)
             if isinstance(v, dict) and v.get("choice") and v["choice"] != "does-not-apply":
-                vocab.add(v["choice"])
+                strings.add(v["choice"])
         noul_names.update((r.get("nouls") or {}).keys())
         critique_names.update((r.get("critique") or {}).keys())
         technique_names.update((r.get("technique") or {}).keys())
@@ -256,23 +258,19 @@ def main():
         imdb = facts.get("imdbId")
         strings.add(imdb[0] if isinstance(imdb, list) and imdb else imdb)
         for c in facts.get("countries") or []:
-            vocab.add(c)
+            strings.add(c)
         for lang in facts.get("languages") or []:
-            vocab.add(lang)
+            strings.add(lang)
     noul_names = sorted(noul_names)
     critique_names = sorted(critique_names)
     technique_names = sorted(technique_names)
     for name in noul_names + critique_names + technique_names:
-        vocab.add(name)
+        strings.add(name)
     for qid, ent in entities.items():
         strings.add((ent.get("en") if isinstance(ent, dict) else ent) or qid)
 
     ordered_strings = strings.freeze()
-    ordered_vocab = vocab.freeze()
-    if len(ordered_vocab) > 0xFFFE:
-        sys.exit(f"vocabulary is {len(ordered_vocab)} entries — too many for u16 ids")
-    print(f"  {len(ordered_strings)} strings, {len(ordered_vocab)} vocabulary",
-          file=sys.stderr)
+    print(f"  {len(ordered_strings)} strings", file=sys.stderr)
 
     # Entity ids: the sorted Q-id numbers. Everything referring to a person or company uses this index.
     ent_qids = sorted(int(q[1:]) for q in entities if q.startswith("Q") and q[1:].isdigit())
@@ -295,13 +293,6 @@ def main():
         offs.append(at)
     sec.put_raw("strings", blob, 1)
     sec.put("str_off", "I", offs, 4, expect=len(ordered_strings) + 1)
-    vblob = "".join(ordered_vocab).encode("utf-8")
-    voffs, vat = [0], 0
-    for s_ in ordered_vocab:
-        vat += len(s_.encode("utf-8"))
-        voffs.append(vat)
-    sec.put_raw("vocab", vblob, 1)
-    sec.put("vocab_off", "I", voffs, 4, expect=len(ordered_vocab) + 1)
 
     card_title, card_poster, card_year = [], [], []
     primary, subgenres, moods, animated = [], [], [], []
@@ -328,18 +319,18 @@ def main():
         year = facts.get("year")
         card_year.append(int(year) if isinstance(year, int) else I16_NONE)
 
-        primary.append(vocab.id(labels.get("primaryGenre"), U16_NONE))
-        subgenres.append(labelled(labels.get("subgenres"), vocab, "subgenre", key))
-        moods.append(labelled(labels.get("moods"), vocab, "mood", key))
+        primary.append(strings.id(labels.get("primaryGenre")))
+        subgenres.append(labelled(labels.get("subgenres"), strings, "subgenre", key))
+        moods.append(labelled(labels.get("moods"), strings, "mood", key))
         animated.append(1 if labels.get("animated") else 0)
 
         for axis in FACET_AXES:
             v = (r.get("facets") or {}).get(axis)
             if isinstance(v, dict) and v.get("choice") and v["choice"] != "does-not-apply":
-                facet_v.append(vocab.id(v["choice"], U16_NONE))
+                facet_v.append(strings.id(v["choice"]))
                 facet_c.append(hundredths(v.get("confidence"), f"facet {axis} confidence", key))
             else:
-                facet_v.append(U16_NONE)
+                facet_v.append(U32_NONE)
                 facet_c.append(0)
 
         sc = r.get("scores") or {}
@@ -379,8 +370,8 @@ def main():
         cast.append([i for i in (ent_id(q) for q in facts.get("cast") or []) if i is not None])
         broadcasters.append([i for i in (ent_id(q) for q in facts.get("broadcaster") or []) if i is not None])
         genres.append([g for g in facts.get("genres") or [] if isinstance(g, int)])
-        countries.append([vocab.id(c, U16_NONE) for c in facts.get("countries") or []])
-        languages.append([vocab.id(x, U16_NONE) for x in facts.get("languages") or []])
+        countries.append([strings.id(c) for c in facts.get("countries") or []])
+        languages.append([strings.id(x) for x in facts.get("languages") or []])
         aliases.append([strings.id(a) for a in (t.get("aliases") or []) if a])
 
         raw_imdb = facts.get("imdbId")
@@ -393,39 +384,39 @@ def main():
         fr = fr[0] if isinstance(fr, list) and fr else fr
         franchise.append(ent_id(fr) if ent_id(fr) is not None else U32_NONE)
         langs = facts.get("languages") or []
-        orig_lang.append(vocab.id(langs[0], U16_NONE) if langs else U16_NONE)
+        orig_lang.append(strings.id(langs[0]) if langs else U32_NONE)
 
     sec.put("card_title", "I", card_title, 4, expect=n)
     sec.put("card_poster", "I", card_poster, 4, expect=n)
     sec.put("card_year", "h", card_year, 2, expect=n)
-    sec.put("primary_genre", "H", primary, 2, expect=n)
+    sec.put("primary_genre", "I", primary, 4, expect=n)
     sec.put_labelled_list("subgenre", subgenres)
     sec.put_labelled_list("mood", moods)
     sec.put("animated", "B", animated, 1, expect=n)
-    sec.put("facet_v", "H", facet_v, 2, expect=n * len(FACET_AXES))
+    sec.put("facet_v", "I", facet_v, 4, expect=n * len(FACET_AXES))
     sec.put_raw("facet_c", facet_c, 1)
     for axis in SCORE_AXES:
         sec.put(SCORE_SECTION[axis], "B", scores[axis], 1, expect=n)
     sec.put("world", "B", world, 1, expect=n)
     sec.put_list("noul_k", "B", 1, [[k for k, _ in row] for row in noul_rows])
     sec.put_list("noul_v", "B", 1, [[v for _, v in row] for row in noul_rows])
-    sec.put("noul_names", "H", [vocab.id(x, U16_NONE) for x in noul_names], 2)
+    sec.put("noul_names", "I", [strings.id(x) for x in noul_names], 4)
     sec.put_raw("critique", critique, 1)
-    sec.put("critique_names", "H", [vocab.id(x, U16_NONE) for x in critique_names], 2)
+    sec.put("critique_names", "I", [strings.id(x) for x in critique_names], 4)
     sec.put_raw("technique", technique, 1)
-    sec.put("technique_names", "H", [vocab.id(x, U16_NONE) for x in technique_names], 2)
+    sec.put("technique_names", "I", [strings.id(x) for x in technique_names], 4)
     sec.put_list("makers", "I", 4, makers)
     sec.put_list("cast", "I", 4, cast)
     sec.put_list("broadcasters", "I", 4, broadcasters)
     sec.put_list("genres", "I", 4, genres)
-    sec.put_list("countries", "H", 2, countries)
-    sec.put_list("languages", "H", 2, languages)
+    sec.put_list("countries", "I", 4, countries)
+    sec.put_list("languages", "I", 4, languages)
     sec.put_list("alias_titles", "I", 4, aliases)
     sec.put("imdb", "I", imdb, 4, expect=n)
     sec.put("released", "i", released, 4, expect=n)
     sec.put("runtime", "H", runtime, 2, expect=n)
     sec.put("franchise", "I", franchise, 4, expect=n)
-    sec.put("orig_lang", "H", orig_lang, 2, expect=n)
+    sec.put("orig_lang", "I", orig_lang, 4, expect=n)
 
     # Entities, and how many titles credit each — the rarity weight the people row needs.
     credits = [0] * len(ent_qids)
@@ -505,7 +496,7 @@ def main():
         sys.exit(f"only {plot_hits} of {n} rows matched a plot vector — the row order is wrong")
     print(json.dumps({"titles": n, "withLabels": with_labels, "withPremiseLabels": with_premise,
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
-                      "entities": len(ent_qids), "strings": len(ordered_strings), "vocab": len(ordered_vocab),
+                      "entities": len(ent_qids), "strings": len(ordered_strings),
                       "sections": len(sec.order)}, indent=1), file=sys.stderr)
 
     # ---- assemble --------------------------------------------------------------------------------
