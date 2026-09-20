@@ -1,182 +1,139 @@
-# The one-pass Jev question set
+# The Jev delta pass — what the completed run did not ask
 
-**Status: draft for audit. Not a task to start — Jev is waitlisted (#14).**
+**The corpus pass already ran.** `out-repass/combined-v1-r2.jsonl`: 47,529 titles, `jev-1.13.0`,
+2026-09-19, **$20.47**, audited at exact coverage in `combined-v1-r2.bundle-audit.json`. It holds 12 facet
+Choices, `validity` (6 target-aware values), `narrative_applicability`, `primary_genre`, 75 `tax__*` Nouls,
+4 `score__*` Scores, and a role Choice **per article section** — 27 of them for The Wire.
 
-## Why one pass, and why ask more than we need
+So this document is a **diff**, not a design. Anything already answered is listed under "do not re-ask"
+with the reason, because the expensive mistake now is paying for the state twice.
 
-The state is the whole Wikipedia article; the questions are nearly free. #14 prices the corpus at **$2.24
-for facets alone, $4.67 for labels alone, and $5.51 for both in one call with shared state**. So a second
-pass later does not cost a little more — it costs the entire state again, plus the risk that the corpus has
-moved underneath it and the two halves no longer describe the same reading.
-
-That inverts the usual discipline. The expensive mistake is not asking something we never use; it is
-**failing to ask something we later want**. So this set deliberately includes axes nothing reads today.
-
-Two rules follow, and both are load-bearing:
-
-1. **Store the raw answer, never the thresholded one.** Every `Choice` keeps its full distribution, every
-   `Noul` its probability, every `Score` its value. Today's `confidence >= 0.55` cutoff is a decision we
-   already want to revisit — `similar.rs` uses it as a hard gate — and re-deriving a threshold from stored
-   values is free while re-asking is not.
-2. **Record what produced the answer**: model id, prompt version, article `revid`, and the date. Without
-   the revid we cannot tell a changed answer from a changed article, which is the mistake the corpus/query
-   embedder drift (#21) made in a different register.
-
-## The state
-
-The article's **whole prose, every section, no clamp** — the position argued in #14. Not the extracted
-plot. Three reasons, all still true:
-
-- **Validity needs the context the extractor strips.** #16: 940 titles carry another title's plot because
-  `ownArticleSufficient` falls through to the P144 source work. Handed prose about Heathcliff, a classifier
-  cannot know it came from the novel's article; handed the article, the lead sentence settles it.
-- The article carries country, animated-vs-live-action, miniseries-vs-series and release format, which
-  today come from Wikidata and are missing wherever Wikidata is thin.
-- The extractor stays for the embedder, which genuinely needs it: the lean CC0 doc measures 0.091 against
-  0.018 discrimination, and embedding Reception text would cluster titles by critical consensus.
+**Price of the delta.** The state is the whole article and it is what costs: the completed run spent $20.47
+on 487M input tokens. A delta pass costs approximately the same again regardless of how few questions it
+carries — which is the entire argument for making this list as complete as we can stand.
 
 ---
 
-## A. Validity — asked first, gates everything after it
+## 1. `subject_of_critique` — a Noul set. The one proven gap.
 
-| id | primitive | values |
-|---|---|---|
-| `article_is_about_this_title` | Noul | — |
-| `article_subject` | Choice | `this-title`, `source-work`, `franchise`, `person`, `other` |
-| `describes_a_different_medium` | Noul | — |
+> *What is this work arguing about?* — asked as independent Nouls, not one Choice.
 
-**Why.** This is the #16 fix and it is worth the whole pass on its own. A title whose article is the
-novel's gets every downstream answer wrong in a way nothing detects — the labels look plausible, the
-vectors cluster it with the other adaptations, and only a human reading both notices.
+`institution` · `the-state` · `capitalism-or-market` · `justice-system` · `policing` · `war-or-military` ·
+`media` · `religion` · `family` · `class` · `race` · `gender` · `education` · `healthcare` ·
+`technology` · `colonialism` · `the-self`
 
----
+**Why it is needed, measured.** The Wire and Oz are the same kind of show to a human — a sociological study
+of a closed American institution with its own economy and moral compromise — and **no feature on disk
+connects them**. Every content-bearing axis correctly disagrees; everything they share is generic
+prestige-drama form (`bleak`, `ensemble-led`, `continuous`, `Dark & Gritty`, `Thought-provoking`) — which is
+exactly the Angel failure mode. Two independent gates keep Oz out: premise rank 4,450 / plot rank 1,134, and
+a tonal score of 0.257.
 
-## B. Identity and medium — facts the article states and Wikidata often lacks
+The "use the probability distributions rather than the argmax" idea is **dead, measured**: on this pair
+`scope` and `setting` are perfectly one-hot. The Wire's mass on `setting = institution` is **0.000**; Oz's
+on `scope = single-city` is **0.000**. No hidden mass. Switching to distributions ranked Oz *worse*
+(164 → 176).
 
-| id | primitive | values |
-|---|---|---|
-| `medium` | Choice | `live-action`, `animated`, `mixed`, `documentary-footage`, `stop-motion` |
-| `format` | Choice | `feature`, `short`, `series`, `miniseries`, `tv-movie`, `special` |
-| `is_adaptation` | Noul | — |
-| `adapted_from` | Choice | `novel`, `short-story`, `comic`, `manga`, `play`, `game`, `true-events`, `film`, `series`, `none` |
-| `is_sequel_or_remake` | Choice | `standalone`, `sequel`, `prequel`, `remake`, `reboot`, `spin-off` |
+**It must be a Noul set, not a Choice**: The Wire critiques policing *and* the justice system *and* class.
+A Choice would split the mass and all three would read weak.
 
-**Why `medium` is a Choice, not a boolean.** `animated` is currently a hard gate in `similar.rs:35-37` and
-it starves animated anchors: Spirited Away returns 10 neighbours and Inside Out 8, against a screen sized
-for 20. A gate that coarse needs a better input than a boolean before it can be softened.
-
----
-
-## C. Labels — the shipped taxonomy, asked as the shape it actually is
-
-| id | primitive | values |
-|---|---|---|
-| `primary_genre` | Choice | the shipped 17 |
-| `subgenres` | Noul × 59 | the shipped 59 |
-| `moods` | Noul × 16 | the shipped 16 |
-
-**Multi-label belongs in Nouls, not one Choice** (#14): a Choice distribution sums to 1, so a film honestly
-both Heist *and* Revenge splits its mass and both read weak. Nouls ask independently, which is what is true.
-
-Keep the vocabularies exactly as shipped so this pass can be diffed against the current labels rather than
-replacing them blind. Vocabulary changes are a separate decision from re-labelling.
+**It must ask about the argument, not the premises.** `setting = institution` already exists and covers
+1,064 TV titles; its members include Night Court, Saved by the Bell and Are You Being Served?. That is a
+location fact. Wording that reproduces it is worthless — the question is what the work is *about*, not
+where it is *set*.
 
 ---
 
-## D. Plot facets — the nine axes that already exist and are 5% filled
+## 2. Depiction Nouls — the only cleanly novel ask
 
-Vocabularies taken verbatim from `plot-facets-c85c707b0b18.json`, which defines all nine and fills 2,456 of
-47,539 titles. **The Wire's entry is null.**
+`depicts_graphic_violence` · `depicts_sexual_content` · `depicts_drug_use` · `depicts_self_harm` ·
+`depicts_animal_harm` · `intended_to_frighten`
 
-| axis | primitive | values |
-|---|---|---|
-| `era` | Choice | prehistoric, ancient, medieval, early-modern, 19th-century, early-20th-century, mid-20th-century, late-20th-century, contemporary, near-future, far-future, timeless |
-| `setting` | Choice | urban, suburban, rural, small-town, domestic, institution, wilderness, sea, space, underground, virtual, road |
-| `scope` | Choice | single-location, single-city, regional, national, global, cosmic |
-| `ending` | Choice | happy, bittersweet, tragic, open, ambiguous, cyclical, unknown |
-| `pacing` | Choice | slow-burn, steady, propulsive, frantic, episodic |
-| `structure` | Choice | linear, nonlinear, framed, parallel-strands, single-day, anthology |
-| `conflict` | Choice | person-vs-person, person-vs-self, person-vs-system, person-vs-society, person-vs-nature, person-vs-unknown |
-| `ensemble` | Choice | solo, duo, small-group, large-ensemble |
-| `tone` | Choice | earnest, comic, satirical, pulpy, bleak, melancholy, dreamlike, clinical |
+**Nouls, not Scores, and no profanity question.** A plot summary essentially never describes dialogue
+register, so a `language` Score would be a pure genre transform — crime 0.7, family 0.1 — and a model asked
+for a number will always produce one. A Noul at least has an implicit abstain in being low.
 
-**Why this section is the point of the exercise.** The measured defect in More Like This is that the rail
-cannot tell register from subject matter. Angel holds 12th on The Wire because it carries both of The
-Wire's moods (`Dark & Gritty`, `Thought-provoking`) and shares no subgenre; the tonal term cannot see the
-difference. `conflict = person-vs-system` + `ensemble = large-ensemble` + `scope = single-city` describes
-The Wire exactly and describes Angel not at all. Oz and Deadwood pass that test and are currently absent.
+**Ask what the article says is depicted, not how intense it is.** "A drug-dealing film" and "a film that
+shows drug use" are different claims and the question must not conflate them.
+
+TMDB's `release_dates` / `content_ratings` give certificates as hard facts and should be preferred for an
+age gate. These Nouls are for what a certificate cannot say: *which* content, per title, at corpus scale.
 
 ---
 
-## E. Register scores — continuous, because these are not categories
+## 3. Audience intent — two Nouls
 
-| id | primitive | 0 … 1 |
-|---|---|---|
-| `institutional_focus` | Score | one person's life … how a system works |
-| `ensemble_breadth` | Score | one protagonist … no protagonist |
-| `moral_ambiguity` | Score | clear right and wrong … no clean side |
-| `naturalism` | Score | stylised/heightened … documentary-plain |
-| `sociological_intent` | Score | tells a story … argues about society |
-| `interiority` | Score | external action … inner life |
-| `intensity` | Score | gentle … relentless |
-| `humour` | Score | none … constant |
-| `weight` | Score | light … heavy |
-| `complexity` | Score | follow it half-asleep … demands attention |
+`made_for_children` · `made_for_teens`
 
-The last four are #14's own list. The first six are this exercise's finding: they are what separates The
-Wire from a cop show, and a `Choice` would force a false cut through a continuum.
+Distinct from safety: a slow French drama is harmless to an eight-year-old and is for nobody's eight-year-
+old. Nothing on disk expresses intended audience.
 
 ---
 
-## F. Content signals — asked once so they never need a pass of their own
+## 4. Animation technique — a Noul set
 
-| id | primitive | 0 … 1 |
-|---|---|---|
-| `violence`, `sexual_content`, `language`, `substance_use`, `frightening` | Score × 5 | absent … pervasive |
-| `family_suitable_floor_age` | Choice | `0`, `7`, `12`, `15`, `18` |
+`hand-drawn` · `cg-animation` · `stop-motion` · `anime` · `puppetry` · `rotoscope` · `archival-footage` ·
+`live-action`
 
-Nothing reads these today. They are the clearest case of the rule above: a kids-safe filter is an obvious
-future ask, and adding it later would cost the entire corpus state again.
+`animated` is currently a **hard gate** (`similar.rs`, the animated/live-action split), and it starves
+animated anchors: Spirited Away returned 10 neighbours of 20 and Inside Out 8, because the gate drops
+live-action candidates from a fixed pool. Softening it needs a better input than a boolean — "anime vs
+Pixar vs Aardman" is what a viewer means, and one flag cannot say it.
+
+Nouls because stop-motion *is* animated and a documentary is also live-action; an exclusive Choice would
+force the model to arbitrate a subset relation.
 
 ---
 
-## G. Deliberately NOT asked
+## 5. Do NOT re-ask — already bought, with the reason
 
-- **Cast, crew, studio, country, release date, runtime.** Wikidata has them, they are facts rather than
-  judgements, and a model reading prose will hallucinate a plausible one where the article is silent.
-- **Popularity, quality, ratings.** Not properties of the work, and `facets.bin` carries vote counts.
-- **Free-text summaries.** Jev is decision-only; prose answers are not what it is for, and a stored summary
-  invites someone to embed it, which would be a third document shape.
-- **Anything derivable from the answers above.** Store the primitives, derive in code, where a mistake
-  costs a re-run of `derive`, not a re-run of the corpus.
+| Tempting | Already there |
+|---|---|
+| Validity / "is this article about this title" | `validity`, 6 values (`correct-screen-work` 44,151 · `source-work` 1,625 · `other-screen-work` 1,539 · …) |
+| Per-section extraction audit (#16) | a role Choice per section, with probabilities — 27 sections for The Wire |
+| Serialized vs episodic | `continuity` (`continuous` / `episodic` / `hybrid` / `anthology`), 81% publishable |
+| The nine/twelve plot facets | all present, full distributions |
+| Genre, subgenres, moods | `primary_genre` + 75 Nouls |
+| "Store the raw answer" / provenance | already stricter than proposed: `articleRevId`, `articleSha256`, `questionsSha256`, `promptSha256`, `configSha256`, pinned `responseModels` |
+| Medium, format, adaptation source | Wikidata: `instanceOf` **100%**, `basedOn`/`basedOnKind` 19.9% (and absence *is* the answer) |
+| A "fantastical world" axis | **derivable today** from 12 existing Nouls (vampire, werewolf, zombie, superhero, time-travel, cyberpunk, post-apocalyptic, folk/supernatural/sci-fi horror, sci-fi action, fantasy adventure). Measured: The Wire 0.04, Angel 0.97, Oz 0.06. Already wired and shipping in the rescorer. |
 
-## Storage contract
+### And the one to refuse outright
 
-One record per title, in the pass's own artifact, never merged into `labels-t02.json`:
+**More register Scores.** The draft this replaces proposed six (`institutional_focus`, `moral_ambiguity`,
+`naturalism`, `sociological_intent`, `interiority`, `ensemble_breadth`). The four Scores that already exist
+falsify the idea: **PC1 = 61.9%** of variance, `intensity ↔ emotional_weight` r = **+0.70**,
+`humour ↔ weight` r = **−0.74**. They are one "serious vs light" axis already.
 
-```json
-{
-  "mediaType": "tv", "tmdbId": 1438,
-  "article": "The Wire", "revid": 1234567890,
-  "model": "jev-…", "promptVersion": "q1", "askedAt": "2026-…",
-  "validity": {"article_is_about_this_title": 0.99, "article_subject": {"this-title": 0.98, …}},
-  "labels": {"primary_genre": {"Crime": 0.71, "Drama": 0.24, …},
-             "subgenres": {"Police Procedural": 0.93, …},
-             "moods": {"Dark & Gritty": 0.95, …}},
-  "facets": {"conflict": {"person-vs-system": 0.88, …}, …},
-  "scores": {"institutional_focus": 0.94, …}
-}
-```
+Decisively: **Angel sits 0.03 from The Wire on `intensity` and 0.05 on `emotional_weight`, while Oz sits
+0.86 and 0.18 away.** The exact defect the new Scores were proposed to fix, reproduced inside the primitive
+proposed to fix it. Asking six more buys another loading on PC1.
 
-Full distributions, every axis, every title — including the ones that lose. The argmax and the 0.55 cut are
-applied downstream by `derive`, which is cheap to re-run and is where the thresholds belong.
+---
 
-## Open questions for the audit
+## 6. Rules for the new questions
 
-1. Is any question unanswerable from an article, such that the model will confabulate rather than abstain?
-2. Do any two axes collide (`setting = institution` vs `conflict = person-vs-system`; `pacing = slow-burn`
-   vs mood `Slow-burn`), and does that cost us or merely duplicate?
-3. Is the Score set too large to be answered consistently — would the model anchor them all to the same
-   latent "seriousness"?
-4. Does anything here need a `Choice` where it is written as a `Noul`, or the reverse?
-5. What is missing that will be expensive to add later?
+Learned from auditing the draft this replaces:
+
+1. **`not-stated` and `other` on every Choice.** Two different conditions — the article is silent, versus
+   our vocabulary has no slot — and collapsing them loses the census that justifies the next vocabulary
+   change. The existing pass has `does-not-apply`, which is one of the two.
+2. **Multi-valued properties are Nouls.** Every new group above is a Noul set for this reason.
+3. **Store every value, always**, including zeros; no top-k. Thresholds are applied by `derive`, which is
+   cheap to re-run.
+4. **Ask the new questions before `primary_genre`** if the pass re-asks it at all. Once a genre token is in
+   the output stream every later answer has reason to agree with it, which is the mechanism that turns a
+   content question into a genre transform.
+
+## 7. Validate on 500 titles before the corpus
+
+~$0.25 against ~$20. Report, and gate the full run on it:
+
+- `subject_of_critique` **prevalence per value** — if `institution` fires on 30% of TV it has reproduced
+  `setting = institution` and the wording must change before the corpus run.
+- **Does it separate the pair it exists for?** The Wire and Oz both high on `institution` + `policing` /
+  `justice-system`; Angel low on all of them. If not, this pass has no justification.
+- **Correlation with the existing four Scores.** Any |r| > 0.8 against PC1 means it is the prestige axis
+  again in new clothes.
+- **Depiction Nouls against article length**, to catch "measures Wikipedia, not the film".
+- **Test–retest on 200 titles**: same questions, two runs, report mean |Δ|.
