@@ -138,6 +138,12 @@ scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. 
 #    `$BIN escalation --batch-id <id> --out-dir out` before pass 2/3.)
 
 # 5. Assemble — compose(facts + classified tags + Wikipedia plot) -> den-embed -> int8[1024]; append to index.
+#
+#    `assemble` IS STEP 4's SECOND HALF, NOT A GENERAL "APPLY LABELS" STEP. It reads the vote passes in
+#    out/votes/ and runs the calibrated classifier over them. It cannot see labels that arrived any other
+#    way, and there is no --labels flag to give it any. If your labels came from somewhere else — a direct
+#    classification pass, a merge, a hand edit — `assemble` is the wrong command and will ignore them.
+#    What applies already-decided labels is `embed-corpus --labels <labels-t02.json>` (step 5b).
 export DEN_EMBED_URL=http://127.0.0.1:8791     # default; set if the service is elsewhere
 $BIN assemble --batch-id <id> --out-dir out    # per batch (default embedder = den-embed)
 #    First run in a fresh out-dir records the service's identity to out/index/embedder.json; later runs
@@ -146,6 +152,17 @@ $BIN assemble --batch-id <id> --out-dir out    # per batch (default embedder = d
 #    The same now holds for out/index/composition.json, which records how the DOCUMENT was composed —
 #    docShape, dropDirector, plotCap. The embedder identity cannot see any of those, and they change the
 #    vector completely: `assemble` composes the FULL shape, `embed-corpus --doc-facts` the CC0 lean one.
+
+# 5b. embed-corpus — the path for labels that are ALREADY DECIDED. Reads labels-t02.json instead of votes,
+#     composes the same document, embeds, appends to the same store. Use this after a classification pass
+#     that wrote labels directly (`scripts/v2/merge_classify_labels.py`), or to re-embed a corpus whose
+#     labels did not change. The flags must match out/index/composition.json or the run refuses — two doc
+#     shapes in one vector space is the failure that record exists to prevent.
+$BIN embed-corpus --out-dir out --labels out/labels-t02.json \
+    --doc-facts out/doc-facts.json --doc-drop-director --plot-cap 3500
+#     `--dump-docs <path>` writes the composed documents and embeds NOTHING, for embedding elsewhere — the
+#     arm64/x86_64 split means the documents travel to the serving box rather than the vectors coming back.
+#     It needs no embedder: gating it on one would mean standing up a service purely to write text.
 
 # 6. Finalize — index store -> labels-t02.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
 $BIN finalize --out-dir out
