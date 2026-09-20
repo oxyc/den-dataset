@@ -2469,8 +2469,19 @@ enum JSON {
     static func decode<T: Decodable>(_ s: String) throws -> T {
         try JSONDecoder().decode(T.self, from: Data(s.utf8))
     }
+    /// `.sortedKeys` because the output has to be BYTE-stable across runs, not merely equal as JSON.
+    ///
+    /// A bare `JSONEncoder` emits a struct's keys in an unspecified order, and Swift reseeds its hash per
+    /// process, so two runs over identical data produced identical rows in identical order and still hashed
+    /// differently. Measured on the poster sidecar: three consecutive runs, three sha256s, the same 5,933,843
+    /// bytes, and a parsed diff showing zero differing rows — only the key order inside each object moved.
+    ///
+    /// That is not cosmetic. The app folds `metadataSha256` into its syncKey, so every publish re-downloaded
+    /// the whole 5.9 MB sidecar on every device even when nothing in it had changed. `SidecarOrder` fixed the
+    /// ROW order for exactly this reason and could not fix this, because the remaining instability is inside
+    /// the rows.
     static func write<T: Encodable>(_ value: T, to path: String) throws {
-        try FileIO.write(try JSONEncoder().encode(value), to: path)
+        try FileIO.write(try encodeSorted(value), to: path)
     }
     static func writePretty<T: Encodable>(_ value: T, to path: String) throws {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
