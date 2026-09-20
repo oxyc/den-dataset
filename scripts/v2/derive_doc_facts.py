@@ -46,6 +46,9 @@ def stripped_genre(label):
 ap = argparse.ArgumentParser()
 ap.add_argument("--facts", required=True, help="facts-<version>.json (records + entities)")
 ap.add_argument("--out", required=True)
+ap.add_argument("--merge", action="store_true",
+                help="fold into an existing --out instead of replacing it, for a facts artifact covering "
+                     "only part of the corpus (a scrape run with --ids)")
 args = ap.parse_args()
 
 facts = json.load(open(args.facts, encoding="utf-8"))
@@ -67,7 +70,25 @@ for r in facts["records"]:
     no_director += not directors
     no_genre += not genres
 
+# A facts artifact scraped with `--ids` covers only the titles that run asked for, so writing its derivation
+# straight over an existing doc-facts would delete every other title's row. That is not a hypothetical: the
+# premise merge lost 999 titles exactly this way, silently, because it had every title it was ASKED about and
+# no way to notice the ones it was not. --merge folds in instead, and the guard below refuses to shrink.
+before, derived = 0, len(rows)
+if args.merge:
+    try:
+        existing = json.load(open(args.out, encoding="utf-8"))
+    except FileNotFoundError:
+        existing = {}
+    before = len(existing)
+    existing.update(rows)
+    rows = existing
+    if len(rows) < before:
+        raise SystemExit(f"refusing to write: {before} rows in, {len(rows)} out — the merge LOST titles.")
+
 json.dump(rows, open(args.out, "w", encoding="utf-8"), indent=1, sort_keys=True)
 print(json.dumps({
-    "rows": len(rows), "withoutDirector": no_director, "withoutGenre": no_genre, "out": args.out,
+    # withoutDirector/withoutGenre count THIS derivation, not the merged file.
+    "rows": len(rows), "rowsBefore": before, "derived": derived,
+    "withoutDirector": no_director, "withoutGenre": no_genre, "out": args.out,
 }, indent=2))
