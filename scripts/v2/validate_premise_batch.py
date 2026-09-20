@@ -48,8 +48,10 @@ FOREIGN_HINT = re.compile(
     r"(?:^|-)(?:der|das|und|mit|eine[nrsm]?|von|zum|zur|auf|für|nach|über|durch"
     r"|les|une|dans|pour|avec|sur|une"
     # `como` is gone for the same reason `con` is: Lake Como is a place, and `lake-como-seduction` is a
-    # correct English tag. A hint that fires on a real word is worse than a missing hint.
-    r"|las|una|del|por|para"
+    # correct English tag. A hint that fires on a real word is worse than a missing hint. `las` went the
+    # same way: across 346,130 tags its only hits were `las-vegas-underworld` and `las-vegas-showdown`
+    # — a place name carried into English, 3 false rejections and no true ones.
+    r"|una|del|por|para"
     r"|gli|dei|nel|della|degli"
     r"|het|een|voor|naar)(?:-|$)")
 
@@ -67,6 +69,55 @@ GENRE_WORDS = {
     # listed by its parts. `comedy-adventure-sci-fi` slipped through as "not entirely genre words" because
     # `sci` and `fi` were absent while the joined `sci-fi` was present.
     "sci", "fi", "feel", "good",
+}
+
+
+# Vocabulary a generator reaches for when it gives up on a work and describes the JOB instead of the story:
+# `placeholder-content`, `missing-plot`, `insufficient-data`, `unknown-series`, `unprocessed-work`. Batch
+# 0258 returned 13 of these while every one of those works had a plot — 399 to 25,237 characters of it — and
+# reported success. Nothing else caught it: the row count was right, the keys were right, the tags were valid
+# kebab-case. Only the tags' MEANING was fabricated, which is why this is fatal rather than a tag to drop: a
+# pass that invented one of these invented whatever else it could not be bothered to read.
+META_WORDS = {
+    "placeholder", "insufficient", "unprocessed", "unavailable", "untagged", "unknown", "missing",
+    "todo", "tbd", "none", "null", "na", "error", "failed",
+    # Only ever meta in combination with the above — `data`, `plot` and `content` never stand alone as a
+    # premise, and a tag built entirely from this set describes the pipeline, not a film.
+    "data", "plot", "content", "work", "series", "film", "movie", "entry", "record",
+    # `premise` earns its place the same way: `premise-unknown` is filler, while the 59 shipped tags that
+    # contain one of these words (`reality-show-premise`, `best-friend-tags-along`) survive because the
+    # test is whether the WHOLE tag is meta, not whether it contains a meta word.
+    "premise", "description", "summary", "generic", "undetermined", "unspecified",
+}
+
+
+def meta_tag(tag):
+    """True when a tag is built ENTIRELY from process/data vocabulary, so it describes no story.
+
+    Entirely, for the same reason `genre_words` tests entirely: `missing-child` and `unknown-father` are real
+    premises. Measured against the shipped 316,355-tag corpus, this flags 0.
+    """
+    tokens = set(tag.split("-"))
+    return bool(tokens) and tokens <= META_WORDS
+
+
+# Tags that name a STORYTELLING PROPERTY rather than a situation. `character-arc`, `plot-twist` and
+# `emotional-journey` are true of almost every narrative ever filmed, so as index terms they behave exactly
+# like `placeholder-content`: everything carrying one "matches" everything else carrying one, and the
+# neighbours they produce have nothing in common. They read as legitimate, which is what makes them worse —
+# the meta-tag check cannot see them and neither could a human skimming a batch.
+#
+# A deliberate literal list, not a word rule. `identity-crisis` is here while `mistaken-identity` is a real
+# premise, and no combination rule separates those; a rule broad enough to catch the first would eat the
+# second. Measured against the shipped corpus: 35 of 316,355 tags, 0.01%, on 34 of 37,533 titles. The v2
+# generation run produced them at 1.61% of tags and 3.7% of titles — 160x the rate — which is how this got
+# noticed at all.
+VAGUE_TAGS = {
+    "personal-growth", "moral-dilemma", "emotional-journey", "character-arc", "plot-twist",
+    "dramatic-climax", "power-dynamics", "group-dynamics", "self-discovery", "inner-conflict",
+    "character-study", "emotional-depth", "social-commentary", "moral-ambiguity", "psychological-depth",
+    "identity-crisis", "interpersonal-conflict", "emotional-turmoil", "character-development",
+    "narrative-tension", "dramatic-irony", "emotional-resonance", "thematic-exploration",
 }
 
 
@@ -216,6 +267,13 @@ def check(batch_in, batch_out, strict_language):
             continue
         if not MIN_TAGS <= len(tags) <= MAX_TAGS:
             quality.append(f"{key}: {len(tags)} tags, spec says {MIN_TAGS}-{MAX_TAGS}")
+        # Padding to the floor by repeating one tag is how a generator fakes the count when it has stopped
+        # reading: `['superhero-origin', 'power-awakening', 'mentor-conflict', 'premise-unknown' x5]`.
+        # It catches that whatever filler word is chosen, so it does not depend on META_WORDS being complete.
+        # 1 of 37,533 shipped works repeats a tag; 15 of 5,897 in this run did, and all 15 were padding.
+        if len(set(tags)) != len(tags):
+            repeats = sorted({t for t in tags if isinstance(t, str) and tags.count(t) > 1})
+            fatal.append(f"{key}: repeated tag(s) {repeats} — the list was padded, not generated")
         for tag in tags:
             if not isinstance(tag, str) or not tag.strip():
                 fatal.append(f"{key}: empty tag")
@@ -229,12 +287,18 @@ def check(batch_in, batch_out, strict_language):
                 else:
                     fatal.append(f"{key}: {tag!r} is not a tag and does not normalise to one")
                 continue
-            if FOREIGN_HINT.search(tag):
+            if meta_tag(tag):
+                fatal.append(f"{key}: {tag!r} describes the pipeline, not the story "
+                             f"(plot was {len(plots.get(key, ''))} chars)")
+            elif FOREIGN_HINT.search(tag):
                 problem = f"{key}: {tag!r} looks like it was left in the source language"
                 fatal.append(problem) if strict_language else quality.append(problem)
             else:
                 if words := genre_words(tag):
                     quality.append(f"{key}: {tag!r} is only genre/mood words {words} — drop the tag")
+                if tag in VAGUE_TAGS:
+                    quality.append(f"{key}: {tag!r} names a storytelling property, not a premise "
+                                   f"— drop the tag")
                 if names := proper_nouns(tag, plots.get(key, "")):
                     quality.append(f"{key}: {tag!r} carries proper noun(s) {names} — drop the tag")
     return fatal, quality

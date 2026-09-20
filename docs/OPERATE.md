@@ -1,49 +1,60 @@
-# Operating the dataset producer (FP-2)
+# Operating the dataset producer
 
 The producer builds Den's discovery index: **derived labels** (`labels-<tax>.json`) + an **int8 vector blob**
-(`vectors-<embed>.bin`) + a manifest (`dataset.meta.json`). FP-2 changed two things about how it's built:
+(`vectors-<embed>.bin`) + a manifest (`dataset.meta.json`).
 
-- **Enrichment prose comes from Wikipedia**, live, not from TMDB overviews. TMDB still supplies the facts
-  (title, year, genres, keywords, credits); the *plot* the classifier reads and the embedder embeds is the
-  live English-Wikipedia plot section (ToS-clean). A title with no Wikipedia plot is still processed on
-  facts + tags — it is never skipped.
-- **Embeddings come from `den-embed` (bge-m3, 1024-dim int8)**, not the old lexical FNV embedder. The *same*
-  service embeds the corpus here and live search queries in the app, so their int8 vectors are comparable.
-  The int8 quantization lives in the service and nowhere else — the producer stores the service's vector
-  verbatim.
+- **Prose comes from Wikipedia**, live, not TMDB overviews. TMDB supplies the facts (title, year, genres,
+  keywords, credits); the *plot* the classifier reads and the embedder embeds is the live English-Wikipedia
+  plot section (ToS-clean). A title with no Wikipedia plot is processed on facts + tags, never skipped.
+- **Embeddings come from `den-embed`** (bge-m3, 1024-dim int8). The producer stores the service's vector
+  verbatim; the int8 quantization lives in the service and nowhere else.
 
 ## The alignment rule (do not break this)
 
-The corpus and every live query MUST embed through the **same `den-embed` model/version**. bge-m3 int8 dot
-products are only meaningful between vectors from the same model. If you re-embed the corpus with a new model,
-the app must point its query embedder at the same one. `dataset.meta.json.embeddingModel` + `dims` are how the
-app detects a mismatch and re-syncs (FP-1 keys the on-device index on those two fields).
+**The corpus and every live query must come from the same `den-embed`.** int8 dot products are meaningless
+between vectors from different ones, and nothing about the result looks wrong when they are — see
+`README.md` "How retrieval actually works" for what that costs.
 
-`embeddingModel` + `dims` are NOT enough on their own, and were the whole reason this rule went unenforced:
-every generation of den-embed reports `bge-m3` and `1024`, including the two that return different vectors
-for the same text (ORT 1.22 → 1.28 moved int8 output, and the Rust rewrite added a 512-token truncation the
-Python service never had). So the manifest also carries `embedderRuntime` + `embedderMaxTokens`, taken from
-the service's own `/health` at build time, and the corpus build refuses to append to a store that a
-different embedder created. **That violation is resolved**: the corpus was re-embedded on 2026-09-13 by
-`den-embed/5.1.1` at `dims 1024` / `maxTokens 1024` / `vectorEpoch 1`, and the serving box runs the same
-build, so the manifest and the service agree. The paragraph below describes how it was done, not something
-still owed.
+Three things follow, in order of how often they have bitten:
 
-## Full re-embed (MacBook) — the shipped 37.5k-title corpus
+**1. Embed where you serve.** Run the embed against the `den-embed` that answers live queries — the one on
+the box — not a local container. This laptop is `arm64`, the box is `x86_64`, and ONNX Runtime picks
+architecture-specific kernels:
+
+```
+ssh root@pve 'incus exec den -- podman run --rm --network den -v /opt/den/embed:/w:z \
+    docker.io/library/python:3.12-slim python3 /w/<script>.py --url http://den-embed:8080'
+```
+
+**2. A version string is not evidence.** `embeddingModel` + `dims` are identical across every generation,
+`vectorEpoch` has stayed `1` across generations whose output moved, and `embedderRuntime` only records
+den-embed's own crate version. The sound check is to re-embed a sample of the blob you intend to extend and
+compare bytes. `scripts/v2/embed_premise_v2.py` does this as a precondition and refuses on mismatch; any
+future embed path should too.
+
+**3. Set `MAX_TOKENS=1024`.** The default is 512 (`env_clamped("MAX_TOKENS", 512, 16, 1024)`, 1024 is the
+ceiling). At 512 the corpus loses **half its total plot prose** and 64% of titles truncate — the table in
+`README.md` §2 has the measurements. It makes no difference to short documents such as premise tags
+(0 dims differ, measured), so it matters for the plot corpus and not the premise index.
+
+### Current state
+
+| | |
+|---|---|
+| serving box | `den-embed/5.1.2`, `dims 1024`, `vector_epoch 1`, **`max_tokens 512`** — the env is not set |
+| live corpus `vectors-bge-m3.bin` | built 2026-09-13, `embedderRuntime den-embed/5.1.1`, `embedderMaxTokens 1024` |
+| live `vectors-premise.bin` | built 2026-09-13; **does not reproduce on the box** (462–567 of 1024 dims differ) |
+| `out-premise-v2/vectors/vectors-premise-v2.bin` | built on the box 2026-09-19, 44,531 × 1024, reproduces exactly |
+
+The live index and live queries are therefore **not aligned today**, at a measured cost of 6.3/10 top-10
+overlap. Tracked in oxyc/den-dataset#21, which holds the evidence; do not re-derive it here.
+
+## Full re-embed
 
 Both TMDB and Wikipedia are hit live; `den-embed` must be running for step 5 (not for plot-finding).
 
-**Re-embed at den-embed's `MAX_TOKENS=1024` and `--plot-cap 3500`, not at the defaults.**
-
-This section is the record of the re-embed that has since happened, kept because the constraints still bind
-any future one. The corpus shipping today has `builtAt 2026-09-13T19:22:39Z` and `embedderRuntime
-den-embed/5.1.1`; what follows describes the run that produced it.
-
-An EARLIER corpus was embedded from uncapped plots: its `builtAt` was 2026-07-05T07:22:47Z and the commit
-that introduced plot capping (8f93235) was authored four hours later, so the code that built it read
-`plot = title.hasWikiPlot ? title.overview : ""`. It ran against the PYTHON service, five weeks before the
-Rust rewrite, and that service had no token cap at all — only `MAX_CHARS`, ~0.8% of titles at its 8000
-default (the runtime value is unverified; `out/embed-corpus*.out` show 5000/6000/2000 on other runs).
+**Run at `MAX_TOKENS=1024` and `--plot-cap 3500`, not at the defaults**, and against the box's service —
+see the alignment rule above.
 
 Plot is 87% of the composed document by length (median 93%), so the cap matters. Per title, which is what
 retrieval sees:
@@ -97,16 +108,13 @@ truncates server-side and says nothing. Its ceiling is 1024 tokens (peak RSS 121
 limit), so a longer cap needs both settings raised together.
 
 ```sh
-# 0. Boot the embedding service. Run the PUBLISHED CONTAINER, not a local build — the model is pinned inside
-#    the image, so the corpus is embedded by exactly the runtime that serves queries. (The old `bash run.sh`
-#    here booted a Python service that was deleted in the Rust rewrite at 5cf9e72.)
-podman run -d --rm --name den-embed -p 127.0.0.1:8791:8080 -e MAX_TOKENS=1024 \
-    ghcr.io/oxyc/den-embed:latest     # -d: the remaining steps run in this same terminal
-#    Health is a CONSTANT — it answers ok while the model is missing and every /embed 500s. Probe the real
-#    thing instead:
-#    curl -fsS -H 'content-type: application/json' -d '{"text":"probe"}' localhost:8791/embed | head -c 80
-#
-#    Or skip step 0 and 5 entirely and let scripts/embed-corpus-run.sh manage the container for you.
+# 0. Point at the embedding service. Use the one ON THE BOX — the same instance den-atlas queries. A local
+#    container is a DIFFERENT embedder even on the same image tag (arm64 here, x86_64 there); see the
+#    alignment rule above. Confirm it before a long run, and confirm MAX_TOKENS took:
+ssh root@pve 'incus exec den -- podman run --rm --network den docker.io/curlimages/curl:latest \
+    -s http://den-embed:8080/health'   # expect max_tokens 1024 — it is 512 unless the unit sets it
+#    Health is a CONSTANT — it answers ok while the model is missing and every /embed 500s, so probe
+#    /embed/batch with a real string rather than trusting /health.
 
 # 1. Secrets — copy the template and fill it (gitignored via *.env). The run wrapper sources this.
 cd ~/Projects/Personal/den-dataset
@@ -130,6 +138,12 @@ scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. 
 #    `$BIN escalation --batch-id <id> --out-dir out` before pass 2/3.)
 
 # 5. Assemble — compose(facts + classified tags + Wikipedia plot) -> den-embed -> int8[1024]; append to index.
+#
+#    `assemble` IS STEP 4's SECOND HALF, NOT A GENERAL "APPLY LABELS" STEP. It reads the vote passes in
+#    out/votes/ and runs the calibrated classifier over them. It cannot see labels that arrived any other
+#    way, and there is no --labels flag to give it any. If your labels came from somewhere else — a direct
+#    classification pass, a merge, a hand edit — `assemble` is the wrong command and will ignore them.
+#    What applies already-decided labels is `embed-corpus --labels <labels-t02.json>` (step 5b).
 export DEN_EMBED_URL=http://127.0.0.1:8791     # default; set if the service is elsewhere
 $BIN assemble --batch-id <id> --out-dir out    # per batch (default embedder = den-embed)
 #    First run in a fresh out-dir records the service's identity to out/index/embedder.json; later runs
@@ -138,6 +152,17 @@ $BIN assemble --batch-id <id> --out-dir out    # per batch (default embedder = d
 #    The same now holds for out/index/composition.json, which records how the DOCUMENT was composed —
 #    docShape, dropDirector, plotCap. The embedder identity cannot see any of those, and they change the
 #    vector completely: `assemble` composes the FULL shape, `embed-corpus --doc-facts` the CC0 lean one.
+
+# 5b. embed-corpus — the path for labels that are ALREADY DECIDED. Reads labels-t02.json instead of votes,
+#     composes the same document, embeds, appends to the same store. Use this after a classification pass
+#     that wrote labels directly (`scripts/v2/merge_classify_labels.py`), or to re-embed a corpus whose
+#     labels did not change. The flags must match out/index/composition.json or the run refuses — two doc
+#     shapes in one vector space is the failure that record exists to prevent.
+$BIN embed-corpus --out-dir out --labels out/labels-t02.json \
+    --doc-facts out/doc-facts.json --doc-drop-director --plot-cap 3500
+#     `--dump-docs <path>` writes the composed documents and embeds NOTHING, for embedding elsewhere — the
+#     arm64/x86_64 split means the documents travel to the serving box rather than the vectors coming back.
+#     It needs no embedder: gating it on one would mean standing up a service purely to write text.
 
 # 6. Finalize — index store -> labels-t02.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
 $BIN finalize --out-dir out

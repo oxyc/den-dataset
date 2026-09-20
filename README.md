@@ -5,17 +5,23 @@ evolve independently. It builds the shipped artifacts (a labels JSON + an int8 v
 has **no dependency on DenKit**: it carries its own copies of the small shared types and a thin TMDB client.
 The only coupling to the app is the artifact **format**.
 
-**FP-2 (current):** movie/TV enrichment prose is sourced **live from Wikipedia** (Wikidata SPARQL → article →
-plot section, ToS-clean) rather than shipping TMDB overviews, and embeddings come from the **`den-embed`**
-service (**bge-m3**, 1024-dim int8) — the single embedding path shared with the app's live search queries, so
-corpus and query vectors are comparable. The offline FNV embedder remains as a `--embedder fnv` fallback. See
-[`docs/OPERATE.md`](docs/OPERATE.md) for the full re-embed + incremental-top-up runbooks and the alignment rule.
+Enrichment prose is sourced **live from Wikipedia** (Wikidata SPARQL → article → plot section, ToS-clean)
+rather than shipping TMDB overviews, and embeddings come from the **`den-embed`** service (**bge-m3**,
+1024-dim int8). The offline FNV embedder remains as a `--embedder fnv` fallback.
+
+- [`docs/OPERATE.md`](docs/OPERATE.md) — **current state and how to run it**: the alignment rule, the
+  re-embed and incremental-top-up procedures. Start there for anything you intend to execute.
+- [`docs/LESSONS.md`](docs/LESSONS.md) — what this pipeline has taught the hard way, and why the procedure
+  is shaped the way it is. Read before changing how classification or tagging works.
+- [`data/README.md`](data/README.md) — the committed tags, plots and evaluation rulers.
+
+This file is reference: what the artifacts are and what is in them.
 
 ## The published artifacts, and which job each does
 
 `data-latest` is a **moving release**: every publish clobbers its assets, so there is exactly one live
-dataset and `dataset.meta.json` describes it. Current: **`c85c707b0b18`**, built by `den-embed/5.1.1` at
-`max_tokens 1024`.
+dataset and `dataset.meta.json` describes it. Current: **`c85c707b0b18`**. What built it, and whether that
+still matches the serving embedder, is in `docs/OPERATE.md` — not repeated here.
 
 | blob | what it is | job |
 |---|---|---|
@@ -58,7 +64,7 @@ committed under [`data/`](data/README.md) — read that before re-deriving any o
 
 2,469 shipped titles are animated (a *format* flag, not a genre — see DT-C).
 
-**Why 57,715 enriched becomes 37,533 shipped.** 19,255 of the 20,182 dropped titles have no Wikipedia
+**Why 57,715 enriched becomes 38,532 shipped.** 19,255 of the 20,182 dropped titles have no Wikipedia
 plot. Those were classified from the TMDB overview *prose*, which TMDB's terms forbid us deriving from,
 so `assemble --require-wiki-plot` drops them from the index entirely rather than shipping labels we are
 not entitled to. That single rule accounts for 95.4% of the gap. The remaining 927 are titles that *do*
@@ -134,7 +140,7 @@ would leave a tight band, not a 53k outlier. Titles with `hasWikiPlot=false` sit
 that is the **TMDB overview**, which is a different thing wearing the same field name.
 
 **`labels-t02.json` and `vectors-bge-m3.bin` cover the IDENTICAL set of ids.** Verified:
-`set(labels ids) == set(vectors ids)`, 37,533 each. So "has no vector" and "has no labels" are the same
+`set(labels ids) == set(vectors ids)`, 38,532 each. So "has no vector" and "has no labels" are the same
 population, not two overlapping gaps — a title outside the index has *no local semantic signal at all*,
 only its TMDB overview. That is **20,182 of the 57,715 enriched rows (35%)**.
 
@@ -143,10 +149,9 @@ in its labels file; it is **`vectors-premise.bin`**, a genuinely separate embedd
 |cos| 0.43 against the plot vectors for the same titles). Reading only the labels file and concluding
 "premise adds nothing" is the specific mistake this paragraph exists to prevent.
 
-**The premise index is 219 rows short of the plot index** (37,314 vs 37,533) and those rows are NOT
-missing work — they are computed and unmerged, sitting in `out-t02/v2/vectors/vectors-coverage-fill.bin`
-+ `keys-coverage-fill.json`. *The Dark Knight* is one of them. The live gap is derived from the index by
-`build_tag_batches.py --scope uncovered`, which must select 0 after a merge; **do not** trust
+**The premise index covers the same 38,532 ids as the plot index.** It was 219 rows short until the DT-N
+coverage-fill was merged (*The Dark Knight* was one of them). Derive the live gap from the index with
+`build_tag_batches.py --scope uncovered`, which selects 0 today; **do not** trust
 `premise-tags-wip/missing.json`, which is stale DT-H-era state.
 
 **`maxTokens: 0` in `index/embedder.json` means "the service was too old to report it"** — NOT "there was
@@ -162,98 +167,6 @@ whenever content moves, which is what drives client re-sync.
 
 **`topCast` is only 4 names deep.** Any rule needing two shared cast members between titles returns
 essentially nothing outside a franchise.
-
-## Running the Haiku classification — and the two ways it silently fails
-
-`enrich` writes batches; nothing in this repo can classify them. Labels come from a Claude Code run over
-`DT-classification-prompt.md` (in the den repo), writing `out-t02/votes/batch-<id>-pass<n>.json`, which
-`assemble` then aggregates. Both failure modes below were hit in one session, and neither is visible to any
-check that was in place at the time.
-
-### Failure 1: a batch can be structurally perfect and still worthless
-
-A run of 999 titles produced, for 11 of 18 batches: valid JSON, exact record counts, real tmdbIds, every
-label in-vocabulary, zero fabrications — and **46-70% of titles with no subgenre at all**, one batch with no
-moods whatsoever. Density by batch ran 0.35-0.97 subgenres/title against a careful reference run's **1.77**.
-
-Nothing caught it. Counts matched, checksums matched, the JSON parsed. It surfaced only because one title
-(*Blake's 7*) appeared in both a validation slice and a production batch and came back
-`Science Fiction / Sci-Fi Action / Dystopian` in one and `Drama / nothing` in the other. *Star Trek* had
-likewise become plain `Drama`.
-
-So **density is a gate, not a statistic**. Refuse any batch below ~1.2 subgenres/title or above 25% empty.
-The fix that worked: smaller slices (20 titles, not 60) and a prompt section stating the expected density
-outright — that a reference run averages 1.77 subgenres and 2.09 moods, that repeated empty arrays mean the
-plots are being under-read, and that thin runs are rejected. The redo came back at **1.94 / 2.21 with 5%
-empty**.
-
-### Failure 2: fabricated ids are invisible to every count
-
-A prior run had Haiku invent tmdbIds in 3 of 12 batches **with correct row counts**. A fabricated id attaches
-one title's labels to another; no count, checksum or schema check can see it. So a batch containing even one
-is refused **whole** rather than partially salvaged.
-
-`scripts/check-votes.py out-t02` runs all of the below; `--batch N` for one. It reads the vocabulary from
-the SHIPPED labels rather than a hardcoded copy, so it cannot drift from the taxonomy. Run it before
-`assemble`.
-
-### The checks worth keeping, in order
-
-1. Count in == count out, same order.
-2. No tmdbId absent from the input batch (fabrication) and none missing.
-3. Every label in the vocabulary — and note the three lists are SEPARATE. Observed confusions: `Adventure`
-   and `Mystery` (primary genres) used as subgenres, `Dark Comedy` (a subgenre) filed under moods. Strip
-   them; an invalid label is unusable anyway.
-4. **Density** — the gate above.
-5. Spot-check titles you personally know. This is what caught Failure 1 and is not optional.
-
-### One batch id per batch, and never reuse one
-
-Vote passes are keyed by batch id, so writing a new batch over an existing id leaves the OLD votes on disk
-pointing at the new titles. Assembling that pairs each title with a stranger's labels, silently. `enrich`
-now takes the highest batch on disk as its floor and refuses to overwrite an existing batch file — see
-`EnrichedBatches` — but if you build batches by hand, keep one media type per batch too: vote records carry
-a bare `tmdbId`, and movie/TV ids overlap.
-
-## What this pipeline has taught, the hard way
-
-Each of these cost real time to learn and is cheap to re-learn wrongly.
-
-**Close the vocabulary.** The single highest-leverage finding in the project. Asking an LLM for
-open-vocabulary tags gives ~11% agreement between two runs of the same model on the same plot;
-asking it to pick from a closed list gives 97.5-100%, with 6 off-vocabulary values in 5,400.
-Voting cannot rescue an open vocabulary — a tag must be *named identically* twice to survive, so
-2-of-3 voting DELETED content (15.22 tags/title down to 6.34). With a closed list the vote picks
-a winner and never empties a slot.
-
-**A closed vocabulary is also what makes errors catchable.** Six independent agents typed a tone
-word (`bleak`) into the `ending` axis. Every one was caught, because `bleak` is not in `ending`'s
-list and a validator could say so. An open vocabulary would have shipped all six silently.
-
-**Say what to do, not what to avoid.** Listing forbidden words did not stop the `bleak` error.
-"Ask how it RESOLVED, not how it FELT" did.
-
-**A correct row count proves nothing.** Observed in this pipeline: fabricated TMDB ids with exact
-counts, a duplicated key silently dropping another title, a key-shift where one title carried its
-neighbour's tags, and one title dropped by two independent agents on two independent passes.
-Verify keys element-by-element against the input, never by length.
-
-**Batch size is a correctness parameter, not a tuning one.** A 100-id SPARQL batch that returns in
-~1 s from one client hung to a 60 s timeout from another; 25 advanced steadily.
-
-**Checkpoint what was paid for, and check what the resume actually skips.** A facts scrape froze at
-16,500 titles through 22 restarts. It was not rate limiting: an entity-resolution pass ran over the
-WHOLE accumulated checkpoint on every restart — 92,036 names, minutes of work redone — so a resumed
-run never reached a new batch. Resumability is not just "write as you go"; it is "do not redo what
-you already have".
-
-**An artifact whose source text is not committed will be described wrongly.** The premise index was
-called stale and TMDB-derived twice in one session, by someone reading file sizes, because its tags
-and spec lived in an uncommitted working directory. They are in [`data/`](data/README.md) now.
-
-**Measure before extrapolating from the first sample.** A rate read off the first minute of a run
-projected 50 hours for work that took 3; a token estimate from one agent was 40% under. Both were
-sampled during a cold start.
 
 ## The TMDB rule, in one place
 
@@ -290,23 +203,26 @@ premise discrimination against raw plot's 8/12, and abstracting to the t02 contr
 **5/12 — worse than raw plot**. Do not "improve" the plot index by making it more abstract; that experiment
 was run and lost. The two indexes are complements.
 
-The Sonnet tag strings are frozen at `out-t02/premise-tags-wip/tags-raw.json` (37,314 titles), so the premise
-index can be re-embedded any time for zero LLM cost — **on this machine**. The 999 tags that closed the gap
-to the 38,532-title corpus live only in gitignored `out-premise-999/tags.json`, and committed
-`data/premise-tags-v1.json` holds 37,533. A re-embed from a fresh checkout comes up 999 short.
+The premise tag strings are committed at [`data/premise-tags-v2.json`](data/premise-tags-v2.json) — **44,531
+titles**, which is every title the index covers, so it re-embeds from a fresh checkout for zero LLM cost.
+That was not true before 2026-09-19: 999 of the strings lived only in a gitignored directory and a rebuild
+came up short (#13). `premise-tags-v1.json` (37,533) is kept because `vectors-premise.bin` is aligned to its
+exact strings.
 
 ### 1. Corpus and query vectors must come from the same embedder
-int8 dot products are only meaningful between vectors from the same model *and the same runtime*. den-embed
-reports a **`vector_epoch`** that moves only when its output moves (an ONNX Runtime upgrade, a model change,
-a pooling change) — deliberately not its crate version, or a log-line fix would invalidate 37.5k titles.
-`embedderRuntime` / `embedderMaxTokens` in the manifest record what built the corpus, and the producer
-refuses to append a different embedder to an existing store.
+int8 dot products are only meaningful between vectors from the same model *and the same runtime*.
 
-`embeddingModel` + `dims` are NOT sufficient: every generation reports `bge-m3` and `1024`, including the two
-that return different vectors for the same text. That is how the original violation went unseen — a corpus
-embedded by the **Python** service on ORT 1.22, queried through the Rust one on 1.28 (`tickets/FP-5` in the
-den repo). **Resolved**: the corpus was re-embedded 2026-09-13 by `den-embed/5.1.1`, and the box serves the
-same build.
+**No identity field can be trusted to tell you whether they are.** `embeddingModel` + `dims` are identical
+across every generation (`bge-m3`, `1024`). `vectorEpoch` is meant to move when output moves and has stayed
+`1` across generations that return different vectors. `embedderRuntime` records only den-embed's own crate
+version, which does not change when what is underneath it does.
+
+The only sound check is to re-embed a sample of a blob and compare bytes; `scripts/v2/embed_premise_v2.py`
+does that before reusing anything and refuses on mismatch.
+
+**The live index and live queries are NOT aligned today** — measured cost 6.3/10 top-10 overlap, and the
+cause is the build host, not a version. Current state and what to do: `docs/OPERATE.md` "The alignment
+rule". Evidence: oxyc/den-dataset#21. Not restated here, so there is one copy to keep true.
 
 What the gate still cannot see is the **doc shape** and the **plot cap**. The shipped index is the CC0 lean
 shape (`embed-corpus --doc-facts`), and its cap is recorded nowhere. Both differ silently from what a plain

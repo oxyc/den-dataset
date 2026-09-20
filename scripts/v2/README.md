@@ -21,7 +21,7 @@ The session ran out of model budget. What exists, what does not, and the exact n
 | blind judging, pass 2 | **complete or near** — see `--list-missing` |
 | blind judging, pass 3 | **NOT RUN** — two passes give unanimity, which is stricter than 2-of-3 but keeps fewer cases; a third would recover the middle ground |
 | confirmed triplet sets | `triplets-provisional.json`, `triplets-1pass.json`, `triplets-final.json` |
-| bake-off, Phase 2 tagging, v1-vs-v2 gate | **NOT RUN** — priced at 234–400 M tokens for the full corpus |
+| bake-off, Phase 2 tagging, v1-vs-v2 gate | **NOT RUN** — 234–400 M tokens priced against a generative model. A decision-only model reprices it to ~$10–17; see oxyc/den-dataset#18 step 12 before treating this as blocked |
 
 **Resume, in order:**
 

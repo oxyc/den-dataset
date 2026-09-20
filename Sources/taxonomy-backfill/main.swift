@@ -696,30 +696,56 @@ enum Commands {
             }
         }
         var done = 0
+        var skipped = 0
         for (type, ids) in byType {
             let mediaType: MediaType = type == "tv" ? .tv : .movie
             for start in stride(from: 0, to: ids.count, by: batchSize) {
                 let slice = Array(ids[start..<min(start + batchSize, ids.count)])
-                for spec in WikidataFacts.specs where !titlesOnly && !(spec.tvOnly && mediaType != .tv) {
-                    let got = try await source.facts(spec: spec, forTMDBIds: slice, mediaType: mediaType)
-                    for (id, value) in got { fields["\(type):\(id)", default: [:]][spec.key] = value }
-                    // Pace the scrape. Firing 24 requests back-to-back per batch sustains ~3/s for hours,
-                    // which WDQS throttles: the run then fast-fails on intermittent 429s rather than timing
-                    // out, and a restart loop retries the same batch forever without advancing. Measured at
-                    // 0.36 s/request, this roughly halves throughput and is the difference between finishing
-                    // and stalling at 16,500.
-                    try await Task.sleep(nanoseconds: 300_000_000)
-                }
-                // Titles are their own hop: search needs the enwiki article title, the label, P1476 and every
-                // alias, and atlas's title index carries only TMDB's ORIGINAL title today — so "parasite" and
-                // "spirited away" miss while "Gisaengchung" and "Sen to Chihiro" hit.
-                let t = try await source.titles(forTMDBIds: slice, mediaType: mediaType)
-                for (id, v) in t {
-                    var m: [String: WikidataFacts.FieldValue] = [:]
-                    if let a = v.article ?? v.label { m["en"] = .string(WikidataFacts.strippedArticleSuffix(a)) }
-                    if let o = v.original ?? v.label { m["orig"] = .string(o) }
-                    if !v.aliases.isEmpty { m["aliases"] = .list(v.aliases.sorted()) }
-                    if !m.isEmpty { fields["\(type):\(id)", default: [:]]["titles"] = .object(m) }
+                do {
+                    for spec in WikidataFacts.specs where !titlesOnly && !(spec.tvOnly && mediaType != .tv) {
+                        let got = try await source.facts(spec: spec, forTMDBIds: slice, mediaType: mediaType)
+                        for (id, value) in got { fields["\(type):\(id)", default: [:]][spec.key] = value }
+                        // Pace the scrape. Firing 24 requests back-to-back per batch sustains ~3/s for hours,
+                        // which WDQS throttles: the run then fast-fails on intermittent 429s rather than timing
+                        // out, and a restart loop retries the same batch forever without advancing. Measured at
+                        // 0.36 s/request, this roughly halves throughput and is the difference between finishing
+                        // and stalling at 16,500.
+                        try await Task.sleep(nanoseconds: 300_000_000)
+                    }
+                    // Titles are their own hop: search needs the enwiki article title, the label, P1476 and every
+                    // alias, and atlas's title index carries only TMDB's ORIGINAL title today — so "parasite" and
+                    // "spirited away" miss while "Gisaengchung" and "Sen to Chihiro" hit.
+                    let t = try await source.titles(forTMDBIds: slice, mediaType: mediaType)
+                    for (id, v) in t {
+                        var m: [String: WikidataFacts.FieldValue] = [:]
+                        if let a = v.article ?? v.label { m["en"] = .string(WikidataFacts.strippedArticleSuffix(a)) }
+                        if let o = v.original ?? v.label { m["orig"] = .string(o) }
+                        if !v.aliases.isEmpty { m["aliases"] = .list(v.aliases.sorted()) }
+                        if !m.isEmpty { fields["\(type):\(id)", default: [:]]["titles"] = .object(m) }
+                    }
+                } catch {
+                    // A batch that dies after Transport's retries must not end the run. This is 24 requests
+                    // per 100 ids against WDQS for hours: one of them WILL eventually time out, and throwing
+                    // here abandoned every title after it — a scrape died at 3,100 of 8,949 with the other
+                    // 5,849 untouched, despite the checkpoint being per batch.
+                    //
+                    // A full pass also drops whatever this batch half-wrote. Its resume keys on a row
+                    // EXISTING, so a row holding the 9 properties that landed before the timeout would read
+                    // as finished and the title would ship missing the other 15 — silently, and only in the
+                    // titles unlucky enough to straddle a failure. One re-fetch is cheaper than that.
+                    //
+                    // `--titles-only` must NOT drop the row: there the resume deliberately keeps rows that
+                    // already exist (it selects on a missing `titles` key), so those rows hold a COMPLETE
+                    // set of facts from an earlier pass, and deleting one over a failed titles hop would
+                    // destroy 24 properties to retry a 25th.
+                    if !titlesOnly {
+                        for id in slice { fields.removeValue(forKey: "\(type):\(id)") }
+                    }
+                    skipped += slice.count
+                    try JSON.write(fields, to: checkpoint)
+                    FileHandle.standardError.write(Data(
+                        "  facts: batch of \(slice.count) \(type) FAILED, left for a later pass — \(error)\n".utf8))
+                    continue
                 }
                 done += slice.count
                 try JSON.write(fields, to: checkpoint)
@@ -872,8 +898,10 @@ enum Commands {
         let path = (outDir as NSString).appendingPathComponent("facts-\(version).json")
         try JSON.write(Out(schema: 1, datasetVersion: version, genreMap: genreMap,
                            entities: entities.mapValues(Out.Entity.init), records: records), to: path)
+        // `skipped` is reported rather than swallowed: a pass that gave up on batches is not a finished
+        // scrape, and the caller's next move (run it again to sweep them) depends on knowing the number.
         print(JSON.line(["facts": records.count, "entities": entities.count, "genreMap": genreMap.count, "path": path,
-                         "hasVector": hasVector ? 1 : 0]))
+                         "skippedAfterFailure": skipped, "hasVector": hasVector ? 1 : 0]))
     }
 
     // doc-facts — scrape the two embedding-doc clauses that still came from TMDB (director, genre) from
@@ -1078,8 +1106,14 @@ enum Commands {
         // different embedder than built this store, or a plot cap the service would silently truncate. The
         // repair below rewrites files, and a run that cannot do any work has no business repairing anything.
         let denEmbed = DenEmbedClient()
-        let embedder = try await recordEmbedder(outDir: outDir, client: denEmbed, plotCap: plotCap)
-        FileHandle.standardError.write(Data("  embedder: \(embedder.label)\n".utf8))
+        // `--dump-docs` composes and embeds nothing, so it must not require an embedder to exist. Gating on
+        // one here would mean standing up a service on THIS machine purely to write text — and the whole
+        // reason the documents are being dumped is that this machine's embedder is the wrong one.
+        let dumpOnly = args["--dump-docs"] != nil
+        if !dumpOnly {
+            let embedder = try await recordEmbedder(outDir: outDir, client: denEmbed, plotCap: plotCap)
+            FileHandle.standardError.write(Data("  embedder: \(embedder.label)\n".utf8))
+        }
         // The embedder identity cannot see how the document was composed, and two runs of the same service
         // over the same corpus differ entirely on one clause. Refuse a shape change the same way.
         // `dropDirector` only means anything in the lean path — `ComposedDoc.build` always emits the
@@ -1111,8 +1145,32 @@ enum Commands {
         var buffer: [(record: IndexRecord, doc: String)] = []
         var written = 0, skipped = done.count, missing = 0
 
+        // `--dump-docs <path>`: compose and write `{"key":…,"doc":…}` per line, embedding nothing.
+        //
+        // Composition must not be reimplemented anywhere else — it is 87% plot, capped, in the exact shape
+        // recorded in composition.json — but the embedding must happen on whichever den-embed answers live
+        // queries. Those pull apart when the machine holding the plots is not the machine that serves: arm64
+        // and x86_64 den-embed return different int8 vectors for identical input (525 of 1024 dims, measured
+        // — oxyc/den-dataset#21). Dumping lets the DOCUMENTS travel instead of the vectors, so composition
+        // stays here, embedding happens there, nothing is reimplemented and no service is exposed.
+        let dumpPath = args["--dump-docs"]
+        let dumpHandle = try dumpPath.map { try FileIO.appender($0) }
+        defer { try? dumpHandle?.close() }
+
         func flush() async throws {
             guard !buffer.isEmpty else { return }
+            if let dumpHandle {
+                for item in buffer {
+                    try dumpHandle.writeLine(JSON.encodeLine(
+                        DocRow(key: "\(item.record.mediaType):\(item.record.tmdbId)", doc: item.doc)))
+                    written += 1
+                }
+                buffer.removeAll(keepingCapacity: true)
+                if written % 2000 == 0 {
+                    FileHandle.standardError.write(Data("  composed \(written) (skipped \(skipped))…\n".utf8))
+                }
+                return
+            }
             let vectors = try await denEmbed.embedManyInt8(buffer.map(\.doc))
             guard vectors.count == buffer.count else {
                 throw ToolError(message: "den-embed returned \(vectors.count) vectors for \(buffer.count) docs")
@@ -2411,8 +2469,19 @@ enum JSON {
     static func decode<T: Decodable>(_ s: String) throws -> T {
         try JSONDecoder().decode(T.self, from: Data(s.utf8))
     }
+    /// `.sortedKeys` because the output has to be BYTE-stable across runs, not merely equal as JSON.
+    ///
+    /// A bare `JSONEncoder` emits a struct's keys in an unspecified order, and Swift reseeds its hash per
+    /// process, so two runs over identical data produced identical rows in identical order and still hashed
+    /// differently. Measured on the poster sidecar: three consecutive runs, three sha256s, the same 5,933,843
+    /// bytes, and a parsed diff showing zero differing rows — only the key order inside each object moved.
+    ///
+    /// That is not cosmetic. The app folds `metadataSha256` into its syncKey, so every publish re-downloaded
+    /// the whole 5.9 MB sidecar on every device even when nothing in it had changed. `SidecarOrder` fixed the
+    /// ROW order for exactly this reason and could not fix this, because the remaining instability is inside
+    /// the rows.
     static func write<T: Encodable>(_ value: T, to path: String) throws {
-        try FileIO.write(try JSONEncoder().encode(value), to: path)
+        try FileIO.write(try encodeSorted(value), to: path)
     }
     static func writePretty<T: Encodable>(_ value: T, to path: String) throws {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
