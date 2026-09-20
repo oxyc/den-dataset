@@ -51,25 +51,41 @@ CRITIQUE_FLOOR = 0.10
 WORLD_FLOOR = 0.05
 
 
-def answers(path):
-    with open(path, encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            record = json.loads(line)
-            yield f"{record['mediaType']}:{record['tmdbId']}", record.get("answers") or {}
+def answers(paths):
+    """Every record across one or more shards of a pass."""
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                yield f"{record['mediaType']}:{record['tmdbId']}", record.get("answers") or {}
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--combined", required=True, help="the corpus pass: facets, nouls, scores")
-    ap.add_argument("--delta", required=True, help="the delta pass: critique, depiction, technique")
+    # The combined pass is a BUNDLE, not a file: oversized articles run in separately-manifested
+    # capacity shards (`combined-v1-r2-token-fallback*.jsonl`), and FACETS-V2.md says completeness is
+    # a bundle property to be validated over the disjoint union "before deriving or publishing
+    # anything". Passed one shard, this built a blob of 47,518 of 47,529 titles and shipped it —
+    # House of the Dragon and Moon Knight among the eleven it dropped, absent from every rail that
+    # reads facets, nouls or world. Repeat --combined once per shard.
+    ap.add_argument("--combined", required=True, action="append",
+                    help="a shard of the corpus pass (facets, nouls, scores); repeat for each")
+    ap.add_argument("--delta", required=True, action="append",
+                    help="a shard of the delta pass (critique, depiction, technique); repeat for each")
+    ap.add_argument("--expect", type=int, default=None,
+                    help="required title count; fails rather than shipping a short blob")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
     out = {}
+    seen = set()
     for key, a in answers(args.combined):
+        if key in seen:
+            raise SystemExit(f"duplicate key across combined shards: {key}")
+        seen.add(key)
         record = {}
         for axis in FACET_AXES:
             value = a.get(axis)
@@ -99,9 +115,16 @@ def main():
             out[key]["__critique"] = critique
             critiqued += 1
 
+    # A short blob is silent: every downstream rail just never returns the missing titles. Say the
+    # number out loud and refuse to write one that does not match what the caller expects.
+    if args.expect is not None and len(out) != args.expect:
+        raise SystemExit(f"expected {args.expect} titles, built {len(out)} — a shard is missing")
+
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(out, fh, separators=(",", ":"))
-    print(json.dumps({"titles": len(out), "withCritique": critiqued, "out": args.out}, indent=1))
+    print(json.dumps({"titles": len(out), "withCritique": critiqued,
+                      "combinedShards": len(args.combined), "deltaShards": len(args.delta),
+                      "out": args.out}, indent=1))
 
 
 if __name__ == "__main__":

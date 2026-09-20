@@ -58,7 +58,12 @@ def load_have(root):
 
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--combined", required=True, help="the Jev bundle (combined-v1-r2.jsonl)")
+# The bundle is every shard, not combined-v1-r2.jsonl alone: oversized articles run in separately
+# manifested capacity shards (combined-v1-r2-token-fallback*.jsonl). Reading one shard silently
+# leaves its titles off the worklist for good, which is how eleven of them — House of the Dragon
+# and Moon Knight among them — ended up absent from a derived artifact. Repeat once per shard.
+ap.add_argument("--combined", required=True, action="append",
+                help="a shard of the Jev bundle; repeat for each (incl. the token-fallback shards)")
 ap.add_argument("--articles", required=True, help="dump-articles output, for the section text")
 ap.add_argument("--out-dir", required=True)
 args = ap.parse_args()
@@ -74,41 +79,48 @@ with open(args.articles, encoding="utf-8") as fh:
         r = json.loads(line)
         text[f"{r['mediaType']}:{r['tmdbId']}"] = r["text"]
 
-work, review, skipped = [], [], {"hasTags": 0, "badValidity": 0, "nonNarrative": 0, "noArticleText": 0}
-with open(args.combined, encoding="utf-8") as fh:
-    for line in fh:
-        r = json.loads(line)
-        key = f"{r['mediaType']}:{r['tmdbId']}"
-        if key in have:
-            skipped["hasTags"] += 1
-            continue
-        answers = r.get("answers") or {}
-        if (answers.get("validity") or {}).get("choice") != "correct-screen-work":
-            skipped["badValidity"] += 1
-            continue
-        applic = (answers.get("narrative_applicability") or {}).get("choice")
-        if applic in ("non-narrative-program", "documentary-or-factual"):
-            skipped["nonNarrative"] += 1
-            continue
-        body = text.get(key)
-        if body is None:
-            skipped["noArticleText"] += 1
-            continue
+def bundle(paths):
+    """Every record across the shards of the Jev bundle."""
+    for path in paths:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    yield json.loads(line)
 
-        kept = [s for s in r.get("sections", [])
-                if ((s.get("role") or {}).get("value") in ROLE_KEEP)]
-        premise_only = [s for s in kept if (s.get("role") or {}).get("value") == "story-premise"]
-        evidence = "\n\n".join(
-            f"== {s['heading']} ==\n{body[s['start']:s['end']]}" for s in kept)
-        row = {
-            "mediaType": r["mediaType"], "tmdbId": r["tmdbId"], "title": r.get("title"),
-            "year": r.get("year"), "language": r.get("language"), "article": r.get("article"),
-            "applicability": applic,
-            "sections": [s["heading"] for s in kept],
-            "storyPremiseSections": len(premise_only),
-            "evidenceChars": len(evidence), "evidence": evidence,
-        }
-        (work if premise_only else review).append(row)
+
+work, review, skipped = [], [], {"hasTags": 0, "badValidity": 0, "nonNarrative": 0, "noArticleText": 0}
+for r in bundle(args.combined):
+    key = f"{r['mediaType']}:{r['tmdbId']}"
+    if key in have:
+        skipped["hasTags"] += 1
+        continue
+    answers = r.get("answers") or {}
+    if (answers.get("validity") or {}).get("choice") != "correct-screen-work":
+        skipped["badValidity"] += 1
+        continue
+    applic = (answers.get("narrative_applicability") or {}).get("choice")
+    if applic in ("non-narrative-program", "documentary-or-factual"):
+        skipped["nonNarrative"] += 1
+        continue
+    body = text.get(key)
+    if body is None:
+        skipped["noArticleText"] += 1
+        continue
+
+    kept = [s for s in r.get("sections", [])
+            if ((s.get("role") or {}).get("value") in ROLE_KEEP)]
+    premise_only = [s for s in kept if (s.get("role") or {}).get("value") == "story-premise"]
+    evidence = "\n\n".join(
+        f"== {s['heading']} ==\n{body[s['start']:s['end']]}" for s in kept)
+    row = {
+        "mediaType": r["mediaType"], "tmdbId": r["tmdbId"], "title": r.get("title"),
+        "year": r.get("year"), "language": r.get("language"), "article": r.get("article"),
+        "applicability": applic,
+        "sections": [s["heading"] for s in kept],
+        "storyPremiseSections": len(premise_only),
+        "evidenceChars": len(evidence), "evidence": evidence,
+    }
+    (work if premise_only else review).append(row)
 
 # Tags on disk, vector never merged: no model needed, and regenerating would pay twice.
 v1 = json.load(open(os.path.join(root, "data/premise-tags-v1.json"), encoding="utf-8"))
