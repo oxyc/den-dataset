@@ -75,16 +75,38 @@ def prefixed(answers, prefix):
             if k.startswith(prefix) and isinstance(v, dict)}
 
 
-def by_key(path, what):
-    """A labels artifact keyed by `media:tmdbId`, whatever shape it ships in."""
+def by_key(path, label):
+    """A labels artifact keyed by `media:tmdbId`.
+
+    The wrapper key is NOT guessed. `labels-t02.json` nests under `records`, and an earlier version of
+    this function tried `labels`/`tags` and then fell through to the wrapper dict itself — which is a
+    dict, so it was returned as if it were the rows. Every lookup then missed and every corpus row was
+    written with `labels: null`, silently, for all 47,529 titles. Name the shapes, and fail on anything
+    else rather than returning something dict-like.
+    """
     if not path:
         return {}
     with open(path, encoding="utf-8") as fh:
         blob = json.load(fh)
-    rows = blob.get(what) or blob.get("labels") or blob.get("tags") or blob
+    rows = None
+    if isinstance(blob, dict):
+        for key in ("records", "labels", "tags"):
+            if isinstance(blob.get(key), (list, dict)):
+                rows = blob[key]
+                break
+        else:
+            # A bare mapping of key -> row is legitimate; a wrapper with no known rows key is not.
+            rows = blob if all(":" in k for k in list(blob)[:8]) else None
+    else:
+        rows = blob
+    if rows is None:
+        sys.exit(f"{label}: {path} has no recognisable rows (keys: {sorted(blob)[:6]})")
     if isinstance(rows, dict):
         return rows
-    return {key_of(r): r for r in rows if isinstance(r, dict) and "tmdbId" in r}
+    out = {key_of(r): r for r in rows if isinstance(r, dict) and "tmdbId" in r}
+    if not out:
+        sys.exit(f"{label}: {path} produced no keyed rows")
+    return out
 
 
 def main():
@@ -114,14 +136,25 @@ def main():
     print("joining …", file=sys.stderr)
     out_path = args.out
     opener = gzip.open if out_path.endswith(".gz") else open
-    written, with_delta, with_facts = 0, 0, 0
+    written, with_delta, with_facts, with_labels, with_premise = 0, 0, 0, 0, 0
     # mtime=0 so an unchanged corpus produces byte-identical output and the publish step does not
     # re-upload an asset that did not change.
     handle = (gzip.GzipFile(filename="", mode="wb", fileobj=open(out_path, "wb"), compresslevel=9, mtime=0)
               if out_path.endswith(".gz") else open(out_path, "w", encoding="utf-8"))
+    # The spine is the union of the facts and the combined pass, NOT the combined pass alone. 89 titles
+    # carry facts and no pass row at all, and they are exactly the records that nothing else covers: no
+    # labels, no vectors, no facets. `fit.rs` reads them to judge library titles that are not in the
+    # index, and publish-dataset.sh's record-count guard exists because a facts rebuild once dropped 137
+    # of them — "the only symptom was /recommend quietly losing library titles". Iterating the pass
+    # silently omitted all 89, and a coverage guard against labelsRecords reads 99.98% and passes.
+    combined_rows = {key: record for key, record in records(args.combined, "combined")}
+    spine = sorted(set(combined_rows) | set(facts))
     try:
-        for key, record in records(args.combined, "combined"):
-            answers = record.get("answers") or {}
+        for key in spine:
+            record = combined_rows.get(key)
+            answers = (record or {}).get("answers") or {}
+            media, tmdb = key.split(":", 1)
+            record = record or {"mediaType": media, "tmdbId": int(tmdb)}
             leaked = [k for k in answers if any(p in k.lower() for p in PROSE)]
             if leaked:
                 sys.exit(f"{key}: refusing to write source prose ({', '.join(sorted(leaked))})")
@@ -150,11 +183,27 @@ def main():
             written += 1
             with_delta += 1 if d else 0
             with_facts += 1 if fact else 0
+            with_labels += 1 if row["labels"] else 0
+            with_premise += 1 if row["premiseLabels"] else 0
     finally:
         handle.close()
 
     if args.expect is not None and written != args.expect:
         sys.exit(f"expected {args.expect} titles, wrote {written} — a shard is missing")
+
+    # Every facts record must appear. The count is the union, so a facts record that never made it is a
+    # bug in the join, not a corpus that legitimately lacks it.
+    if with_facts != len(facts):
+        sys.exit(f"{len(facts) - with_facts} facts records did not reach the corpus")
+
+    # A join that silently misses is how `labels` was null on all 47,529 rows: the lookup returned a dict
+    # for every key and none of them matched. A join producing nothing is always a bug; assert a floor
+    # rather than trusting the shape.
+    for name, hits, source in (("labels", with_labels, args.labels),
+                               ("premiseLabels", with_premise, args.premise_labels)):
+        if source and hits < written * 0.5:
+            sys.exit(f"{name}: only {hits} of {written} rows matched {source} — the join is wrong, "
+                     f"not the data")
 
     # The entity names the Q-ids refer to, beside the corpus rather than repeated 47,529 times in it.
     ents_path = out_path.replace(".jsonl", "-entities.json").replace(".gz", "") + (
@@ -164,7 +213,9 @@ def main():
         blob = json.dumps(entities, ensure_ascii=False, sort_keys=True)
         eh.write(blob.encode("utf-8") if ents_path.endswith(".gz") else blob)
 
-    print(json.dumps({"titles": written, "withDelta": with_delta, "withFacts": with_facts,
+    print(json.dumps({"titles": written, "withFacts": with_facts, "withLabels": with_labels,
+                      "withPremiseLabels": with_premise, "withDelta": with_delta,
+                      "withPass": len(combined_rows), "factsOnly": written - len(combined_rows),
                       "entities": len(entities), "out": out_path, "entitiesOut": ents_path}, indent=1))
 
 
