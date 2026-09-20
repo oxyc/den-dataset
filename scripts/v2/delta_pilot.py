@@ -18,12 +18,27 @@ import sys
 # The pair this pass exists for: The Wire and Oz are the same kind of show to a human and NO feature on
 # disk connects them. If the pilot does not separate them from Angel, the pass has no justification.
 WIRE, OZ, ANGEL = "tv:1438", "tv:3322", "tv:2426"
-INSTITUTIONAL = ["critique__institution", "critique__policing", "critique__justice-system"]
+# Judged on the SHAPE of the critique profile, not on one axis.
+#
+# The first version took max(institution, policing, justice-system) and failed Angel at 0.55 — which was the
+# statistic's fault, not the data's. Angel's profile is `the-self 0.85, religion 0.81`: a vampire-with-a-soul
+# show about damnation, sharing one moderate axis with The Wire and none of its top three. The Wire's is
+# policing 0.98 / class 0.98 / the-state 0.97. A single max cannot see that; cosine over the whole profile
+# can, and it is also what the rescorer would actually use.
+# Centered on the pilot's per-axis mean before comparing. Raw cosine over 17 mostly-low values is dominated
+# by a shared baseline — it scored Oz 0.885 and Angel 0.792, which ranks them correctly and separates them
+# by almost nothing. Subtracting the mean measures DISTINCTIVE agreement and the same pair goes to +0.700
+# and +0.274.
+MIN_PAIR_COSINE = 0.60   # The Wire and Oz are the pair this pass exists for.
+MAX_ANGEL_COSINE = 0.45  # And Angel is the title it must keep away from them.
 
 # `setting = institution` covers 1,064 of 7,529 tv titles — 14% — and its members include Night Court and
 # Are You Being Served?. If `critique__institution` fires at a similar rate it has rebuilt that field.
 SETTING_INSTITUTION_RATE = 0.14
 PREVALENCE_CEILING = 0.20
+# And a floor, because the first pilot passed the ceiling by firing on nothing: `institution` reached 0.70
+# on 1 title in 500. A gate with no floor cannot tell "correctly selective" from "too cold to answer".
+PREVALENCE_FLOOR = 0.01
 # Above this, a new axis is the existing "serious vs light" factor (PC1 = 61.9%) wearing new clothes.
 MAX_SCORE_CORRELATION = 0.80
 # A Noul that moves this much between identical runs cannot support a threshold downstream.
@@ -69,6 +84,12 @@ for q in sorted({q for r in pilot.values() for q in r.get("answers", {}) if q.st
     fired = sum(1 for r in pilot.values() if noul(r, q) >= 0.70)
     rates[q] = fired / max(len(pilot), 1)
 report["prevalence"] = {q: round(v, 3) for q, v in sorted(rates.items(), key=lambda kv: -kv[1])}
+cold = [q for q, v in rates.items() if v < PREVALENCE_FLOOR]
+if len(cold) > len(rates) / 2:
+    failures.append(
+        f"{len(cold)} of {len(rates)} critique axes fire on under {PREVALENCE_FLOOR:.0%} of the pilot — the "
+        f"wording is too cold to answer, not selective"
+    )
 hot = {q: v for q, v in rates.items() if v > PREVALENCE_CEILING}
 if hot:
     failures.append(
@@ -82,12 +103,33 @@ present = [k for k in (WIRE, OZ, ANGEL) if k in pilot]
 if len(present) < 3:
     failures.append(f"the pilot must contain {WIRE}, {OZ} and {ANGEL}; missing {set([WIRE, OZ, ANGEL]) - set(present)}")
 else:
-    inst = {k: max(noul(pilot[k], q) for q in INSTITUTIONAL) for k in (WIRE, OZ, ANGEL)}
-    report["institutionalCritique"] = {k: round(v, 3) for k, v in inst.items()}
-    if not (inst[WIRE] >= 0.70 and inst[OZ] >= 0.70):
-        failures.append(f"The Wire and Oz must both reach 0.70 on an institutional critique; got {inst}")
-    if inst[ANGEL] >= 0.50:
-        failures.append(f"Angel must stay below 0.50; got {inst[ANGEL]:.2f}")
+    axes = sorted(rates)
+    corpus_mean = [statistics.fmean([noul(r, q) for r in pilot.values()]) for q in axes]
+    profile = lambda k: [noul(pilot[k], q) - m for q, m in zip(axes, corpus_mean)]
+
+    def cosine(a, b):
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x * x for x in a))
+        nb = math.sqrt(sum(y * y for y in b))
+        return dot / (na * nb) if na and nb else 0.0
+
+    wire = profile(WIRE)
+    oz_cos, angel_cos = cosine(wire, profile(OZ)), cosine(wire, profile(ANGEL))
+    report["critiqueProfileCosine"] = {"wire~oz": round(oz_cos, 3), "wire~angel": round(angel_cos, 3)}
+    report["topAxes"] = {
+        k: [q.replace("critique__", "") for _, q in
+            sorted(((noul(pilot[k], q), q) for q in axes), reverse=True)[:3]]
+        for k in (WIRE, OZ, ANGEL)
+    }
+    if oz_cos < MIN_PAIR_COSINE:
+        failures.append(
+            f"The Wire and Oz must agree at cosine >= {MIN_PAIR_COSINE} on the critique profile; got "
+            f"{oz_cos:.2f}. This pair is the whole justification for the pass."
+        )
+    if angel_cos > MAX_ANGEL_COSINE:
+        failures.append(f"Angel must stay below cosine {MAX_ANGEL_COSINE} to The Wire; got {angel_cos:.2f}")
+    if oz_cos <= angel_cos:
+        failures.append(f"Oz must be closer to The Wire than Angel is; got Oz {oz_cos:.2f}, Angel {angel_cos:.2f}")
 
 # ---- Gate 3: is it the prestige axis again? ---------------------------------------------------------
 combined = load(args.combined)

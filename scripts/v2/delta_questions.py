@@ -15,9 +15,10 @@ comment, because a question that falls into it costs the corpus state to discove
 # covers 1,064 tv titles, and its members include Night Court, Saved by the Bell and Are You Being Served?.
 # A question that reproduces that list has spent the corpus state on a location field we already have.
 #
-# So every instruction below says "examines/critiques ... as a subject", forbids inference from setting,
-# and demands the article support it. A prison drama that is only a thriller set in a prison must answer
-# low on `institution`; The Wire and Oz must answer high.
+# The single brake is "merely SET in one does not count". A first draft added two more — "as one of its
+# SUBJECTS" and "the article must support this; do not infer" — and measured far too cold: `institution`
+# fired above 0.70 on 1 title in 500, with The Wire's own 0.64 at the TOP of the distribution. Three brakes
+# on one question is one instruction telling the model to say no.
 #
 # Nouls, not a Choice: The Wire critiques policing AND the justice system AND class, and a Choice would
 # split the mass so all three read weak.
@@ -45,10 +46,9 @@ SUBJECT_OF_CRITIQUE = {
     f"critique__{key}": {
         "type": "noul",
         "instructions": (
-            f"Does the requested work examine or criticise {gloss} as one of its SUBJECTS — something the "
-            f"work is arguing about? Judge what the work is about, NOT where it is set or who appears in "
-            f"it: a thriller that merely takes place inside one, or features one, does not qualify. The "
-            f"article must support this; do not infer it from genre or setting."
+            f"Is {gloss} one of the requested work's significant themes — something it explores, examines "
+            f"or takes a view about? A work merely SET in one, or featuring one incidentally, does not "
+            f"count: the work must engage with it."
         ),
     }
     for key, gloss in CRITIQUE.items()
