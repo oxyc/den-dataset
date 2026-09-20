@@ -32,6 +32,11 @@ KEEP = (
     "imdbId", "released", "started",
     "genres", "countries", "productionCountries", "languages",
     "directors", "creators", "cast", "franchise", "broadcaster",
+    # Authorship is the heaviest weight in the rail's scorer and these two were scraped, then dropped here,
+    # so atlas never saw them: screenwriters 67.2% coverage, productionCompanies 44.6%. David Simon is
+    # credited on We Own This City and The Plot Against America only via `screenwriters`; `creators` links
+    # him to The Deuce alone.
+    "screenwriters", "productionCompanies",
     "titles",
     # What a title was adapted from: the Q-ids link adaptations of one source to each other, the kinds are
     # what "based on a book" needs. 7,279 records carry the first, 7,271 the second.

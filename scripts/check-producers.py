@@ -53,6 +53,7 @@ PRODUCERS = {
     "factsSlimFile": ("scripts/build-facts-slim.py", "scripts/build-facts-slim.py", True),
     "facetsFile": ("scripts/build-facets-bin.py", "scripts/build-facets-bin.py", True),
     "plotFacetsFile": ("scripts/v2/aggregate_facets.py", "scripts/v2/aggregate_facets.py", True),
+    "railFacetsFile": ("scripts/v2/build_rail_facets.py", "scripts/v2/build_rail_facets.py", True),
 }
 
 # Keys that name a DERIVED copy of another blob (the gzips publish-dataset.sh writes). They inherit their
