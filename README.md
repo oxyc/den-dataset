@@ -20,17 +20,59 @@ This file is reference: what the artifacts are and what is in them.
 ## The published artifacts, and which job each does
 
 `data-latest` is a **moving release**: every publish clobbers its assets, so there is exactly one live
-dataset and `dataset.meta.json` describes it. Current: **`c85c707b0b18`**. What built it, and whether that
+dataset and `dataset.meta.json` describes it. Current: **`5b1c3213b6a1`**. What built it, and whether that
 still matches the serving embedder, is in `docs/OPERATE.md` — not repeated here.
 
-| blob | what it is | job |
-|---|---|---|
-| `labels-t02.json` | 38,532 titles × primaryGenre + subgenres + moods + `animated` | filtering, taste, hide-lists |
-| `vectors-bge-m3.bin` | the **main index** — Wikidata facts + our tags + the Wikipedia plot | semantic **search**, neighbours, rows |
-| `vectors-premise.bin` | the **premise index** — embedded structural tags, no proper nouns | **similar / recommend** |
-| `facets.bin` | country / language / year facets | attribute search |
-| `metadata-<ver>.json` | tmdbId → title + posterPath + year | rendering a card with no TMDB call |
-| `facts-<ver>.json` | CC0 Wikidata facts per title | `/recommend` ranking; covers titles with no labels at all |
+Only what `dataset.meta.json` NAMES is published. A file the manifest does not declare has no hash, no
+record count and no producer, so no publish guard can see it — it is skipped rather than uploaded.
+
+| blob | records | raw | served | what it is | read by |
+|---|---|---|---|---|---|
+| `corpus-<ver>.jsonl.gz` | 47,529 | — | 40.4M | **source of truth** — every per-title signal, one JSON object per line | humans; the store build |
+| `corpus-<ver>-entities.json.gz` | 162,812 | — | 3.6M | Q-id → name for every entity the corpus references | humans; the store build |
+| `vectors-bge-m3.bin` | 47,539 | 48.7M | 48.7M | the **main index** — Wikidata facts + our tags + the Wikipedia plot | atlas, TV app |
+| `vectors-premise.bin` | 38,532 | 45.6M | 45.6M | the **premise index** — embedded structural tags, no proper nouns | atlas |
+| `rail-facets-<ver>.json` | 47,529 | 49.9M | 6.0M | 12 narrative facets, `__world`, 75 nouls, 17 critique axes | atlas (More Like This) |
+| `facts-<ver>.json` | 47,618 | 43.5M | 10.8M | CC0 Wikidata facts per title | atlas (`/recommend`, people search) |
+| `labels-premise.json` | 44,531 | 16.4M | 0.7M | premise tags, the row order `vectors-premise.bin` aligns to | atlas |
+| `labels-t02.json` | 47,539 | 11.8M | 0.7M | primaryGenre + subgenres + moods + `animated` | atlas, TV app |
+| `metadata-<ver>.json` | 47,539 | 5.9M | 1.8M | tmdbId → title + posterPath + year | atlas (a card with no TMDB call) |
+| `plot-facets-<ver>.json` | 5,336 | 1.6M | 0.1M | per-title plot facets | atlas |
+| `facets.bin` | 47,539 | 0.6M | 0.6M | country / language / year facets | atlas (attribute search) |
+
+**Where this is going.** The nine per-title artifacts below the corpus are being replaced by it: they are
+all one row per title, keyed identically, and nothing checked they agreed — which is how eleven titles
+(House of the Dragon and Moon Knight among them) sat in `facts` and `labels` but not in `rail-facets` for a
+day, with no error anywhere. The end state is the corpus JSONL as the inspectable source of truth, a
+**generated binary store** that den-atlas mmaps, and the two vector blobs flat. `facts-slim` is retired: it
+dropped `composers`, `cinematographers`, `narrativeLocations` and `mainSubjects` while saving only 17%.
+
+### A corpus row
+
+One line per title, `sort_keys`, no source prose. Model answers are kept whole — every probability and
+confidence — so a later ranker can use a signal this one did not anticipate without a re-run.
+
+```jsonc
+{
+  "key": "tv:1399", "mediaType": "tv", "tmdbId": 1399,
+  "facts":     { "directors": [...], "creators": [...], "cast": [...], "composers": [...],
+                 "cinematographers": [...], "genres": [...], "basedOn": [...], ... },  // CC0 Wikidata
+  "labels":    { "primaryGenre": ..., "subgenres": [...], "moods": [...] },
+  "premiseLabels": { ... },
+  "applicability": { "validity": {...}, "narrative_applicability": {...} },
+  "facets":    { "era": {...}, "setting": {...}, "ensemble": {...}, ... },   // the 12 axes
+  "scores":    { "intensity": {...}, "humour": {...}, "emotional_weight": {...}, "complexity": {...} },
+  "nouls":     { "theme__epic": {...}, "mood__dark_gritty": {...}, ... },    // the 75 taxonomy nouls
+  "critique":  { "institution": {...}, "the-state": {...}, ... },            // the 17 axes
+  "technique": { "live_action": {...}, "anime": {...}, ... },
+  "depicts":   { ... },
+  "audience":  { "intended_to_frighten": {...}, "made_for_children": {...} }
+}
+```
+
+`scores`, `technique`, `depicts` and `audience` are computed by the model passes and were **never
+published** before this file — `build_rail_facets.py` dropped them. The four `scores` axes (intensity,
+humour, emotional weight, complexity) are the closest thing the dataset has to a register signal.
 
 **The main index carries no TMDB Content.** It was rebuilt in September 2026: the embedded document has no
 title, no year, no cast and no director, and its director/genre clauses come from Wikidata rather than TMDB.
