@@ -276,6 +276,15 @@ public struct WikipediaSource: Sendable {
             }
             ORDER BY ?tmdb ?vLabel
             """
+            // Cached like every other WDQS call here. The caller's resume already skips ids present in its
+            // output file, so this earns its keep on a different axis: the two properties below are two
+            // requests over the same id batch, and a re-run scoped to a different id list still repeats
+            // whole batches whose membership happens to coincide.
+            let cacheKey = cache?.key(path: "sparql-docfacts", query: ["q": query])
+            if let cacheKey, let hit = cache?.read(cacheKey) {
+                if let parsed = try? Self.parseLabelled(hit) { return parsed }
+            }
+
             var components = URLComponents(url: sparqlEndpoint, resolvingAgainstBaseURL: false)!
             components.queryItems = [URLQueryItem(name: "format", value: "json")]
             var request = URLRequest(url: components.url!)
@@ -284,7 +293,12 @@ public struct WikipediaSource: Sendable {
             request.setValue("application/sparql-query", forHTTPHeaderField: "Content-Type")
             request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
             request.httpBody = Data(query.utf8)
-            return try Self.parseLabelled(try await send(request))
+
+            let data = try await send(request)
+            let parsed = try Self.parseLabelled(data)
+            // After a successful parse only — a WDQS maintenance page must not outlive the outage.
+            if let cacheKey { cache?.write(cacheKey, data) }
+            return parsed
         }
 
         let directors = try await fetch("P57")
@@ -376,6 +390,23 @@ public struct WikipediaSource: Sendable {
           \(body)
         }
         """
+        // Cached on the query text, exactly like the mapping query above and for the same reason: WDQS is the
+        // flakiest thing the pipeline touches, and a fact scrape is re-run far more often than it succeeds
+        // outright. Without this, every retry re-asked for the ids that had already answered — so a scrape
+        // that failed on its last property paid for all of them again, and a batch boundary that moved
+        // invalidated nothing but still refetched everything.
+        //
+        // The key covers the whole query, so it includes the id batch AND the property. Re-batching the same
+        // ids differently therefore misses, which is correct rather than merely safe: a different VALUES set
+        // is a different question, and answering it from a cache keyed on something coarser would silently
+        // return facts for ids the caller did not ask about.
+        let cacheKey = cache?.key(path: "sparql-facts", query: ["q": query])
+        if let cacheKey, let hit = cache?.read(cacheKey) {
+            // Same fall-through as the mapping query: a stored body that no longer decodes must not be able
+            // to fail a run, it just costs one live fetch.
+            if let parsed = try? Self.parseFacts(hit, spec: spec) { return parsed }
+        }
+
         var components = URLComponents(url: sparqlEndpoint, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "format", value: "json")]
         var request = URLRequest(url: components.url!)
@@ -384,7 +415,13 @@ public struct WikipediaSource: Sendable {
         request.setValue("application/sparql-query", forHTTPHeaderField: "Content-Type")
         request.setValue("application/sparql-results+json", forHTTPHeaderField: "Accept")
         request.httpBody = Data(query.utf8)
-        return try Self.parseFacts(try await send(request), spec: spec)
+
+        let data = try await send(request)
+        let parsed = try Self.parseFacts(data, spec: spec)
+        // Written only after parsing succeeded — a WDQS maintenance page is HTML, decodes as nothing, and
+        // storing it would make the outage outlive itself.
+        if let cacheKey { cache?.write(cacheKey, data) }
+        return parsed
     }
 
     static func parseFacts(_ data: Data,
