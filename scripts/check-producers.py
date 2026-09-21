@@ -63,9 +63,19 @@ PRODUCERS = {
 # `factsFile` stays. Its producer is `taxonomy-backfill facts`, which is the same binary that makes labels,
 # vectors and metadata, and the key is merely unpublished — not unbuildable. The loop below only visits keys
 # the manifest actually names, so the entry costs nothing and covers a generation that publishes facts again.
+#
+# WHAT THIS GUARD NOW SEES, AND WHAT IT DOES NOT. `publish-dataset.sh` prunes the manifest down to the
+# store (oxyc/den#113), so the only registered key the loop visits is `storeFile` — plus the corpus below,
+# which is matched by filename rather than by key. Every other entry is dormant for the same reason
+# `factsFile` is: the artifact is still BUILT, as an INPUT to the store, it is just no longer declared. So
+# this loop cannot see it, and cannot warn that its producer was edited after it was made. The staleness
+# that used to be caught on `vectors-premise.bin` is now caught only one level up — `build_store.py` is
+# dedicated to the store, so a store older than its builder warns, but a store built correctly from a stale
+# INPUT does not. That is a real narrowing; closing it means a store build that records what it read.
 
-# Keys that name a DERIVED copy of another blob (the gzips publish-dataset.sh writes). They inherit their
-# source's producer, so registering them separately would be noise.
+# Keys that name a DERIVED copy of another blob (the gzips an earlier publisher wrote — nothing publishes
+# one now, and the store must never have one: atlas mmaps it). They inherit their source's producer, so
+# registering them separately would be noise.
 DERIVED_SUFFIXES = ("GzFile",)
 
 # Published artifacts that NO manifest key names, matched by filename instead.

@@ -184,6 +184,43 @@ def days_since_epoch(value, key):
         sys.exit(f"{key}: released date {text!r} is not a date this writer understands")
 
 
+def title_labels(row):
+    """The labelling a title got, from EITHER pass — `labels` (plot) or `premiseLabels`.
+
+    Two passes label a title and only one of them was ever read here. 3 titles of 47,618 were labelled
+    from their premise and never from a plot, so the store answered no primary genre, no subgenres and no
+    moods for them while the legacy blobs answered all three — *Father and Sons*, *Two Sons of Ringo* and
+    *Sítio do Picapau Amarelo*. They sit in the premise index, which is exactly where a reader asks.
+
+    The plot record wins WHOLE where both passes answered, rather than field by field: within one pass the
+    fields are coherent — an empty `subgenres` is the pass saying "none", not a gap — so filling one pass's
+    empty list from the other's would emit a combination neither pass produced. It costs nothing on this
+    corpus: all 44,528 titles both passes labelled agree byte-identically on all four fields, so this rule
+    and any other give the same bytes for them, and the union is a pure addition of the 3.
+
+    That agreement is a property of TODAY'S corpus, not a guarantee, so `disagreement()` below counts it
+    and the build refuses rather than quietly choosing. A repass where the passes diverge is a decision
+    about which labelling ships, and it should be made by someone rather than by the order of an `or`.
+    """
+    return (row.get("labels") or row.get("premiseLabels")) or {}
+
+
+#: The fields a pass answers — the whole of what `title_labels` picks between.
+LABEL_FIELDS = ("primaryGenre", "subgenres", "moods", "animated")
+
+
+def disagreement(row):
+    """The fields the two passes answer differently for one title, or `()` when they agree or only one
+    answered.
+
+    `title_labels` silently prefers the plot record, so this is the only thing that can see a divergence
+    at all."""
+    plot, premise = row.get("labels"), row.get("premiseLabels")
+    if not plot or not premise:
+        return ()
+    return tuple(f for f in LABEL_FIELDS if plot.get(f) != premise.get(f))
+
+
 def labelled(entries, strings, what, key):
     """`[{"label": ..., "confidence": ...}]` → `[(string id, hundredths)]`, tolerating a bare string."""
     out = []
@@ -341,8 +378,16 @@ def main():
                     help="metadata-<ver>.json — the cards: title, posterPath, year")
     ap.add_argument("--vectors", required=True, help="vectors-bge-m3.bin")
     ap.add_argument("--vector-labels", required=True, help="labels-t02.json — the row order the vectors align to")
-    ap.add_argument("--premise-vectors")
-    ap.add_argument("--premise-labels")
+    ap.add_argument("--premise-vectors", help="vectors-premise.bin")
+    ap.add_argument("--premise-labels", required=True,
+                    help="labels-premise.json — the row order vectors-premise.bin aligns to, and the "
+                         "premise pass's key set. Nothing else records that order, so this stays a BUILD "
+                         "input after it stops being a published artifact. The premise LABELS themselves "
+                         "come from the corpus `premiseLabels` field, which consolidate_corpus.py joined "
+                         "from this same file. REQUIRED since the label sections became the union of both "
+                         "passes: the corpus supplies the premise labels either way, so without this the "
+                         "count assert compares a union against the plot artifact alone and fails naming "
+                         "the wrong file.")
     ap.add_argument("--enriched",
                     help="the enriched/ batch directory, for TMDB vote counts. Without it the `votes` "
                          "section is all zeros and atlas cannot order a browse row by popularity.")
@@ -385,9 +430,14 @@ def main():
     labels_source = labels_by_key(args.vector_labels, "vector labels")
     plot_order = list(labels_source)
     plot_row = {k: i for i, k in enumerate(plot_order)}
-    premise_row = {}
+    premise_labels_source = {}
     if args.premise_labels:
-        premise_row = {k: i for i, k in enumerate(labels_by_key(args.premise_labels, "premise labels"))}
+        premise_labels_source = labels_by_key(args.premise_labels, "premise labels")
+    premise_row = {k: i for i, k in enumerate(premise_labels_source)}
+    # The titles SOME pass labelled, from the two artifacts rather than from the corpus — the count the
+    # store's label sections are asserted against below. Counting the corpus field would be asserting the
+    # corpus against itself.
+    labelled_keys = set(labels_source) | set(premise_labels_source)
 
     # ONE dictionary. Splitting a controlled vocabulary out to keep u16 ids saved 1.84 MB of 123 MB
     # and bought two bare integer id spaces with nothing in the format telling them apart: a reader
@@ -398,7 +448,7 @@ def main():
     depicts_names, audience_names = set(), set()
     for key in keys:
         r = rows[key]
-        labels = r.get("labels") or {}
+        labels = title_labels(r)
         strings.add(labels.get("primaryGenre"))
         for entry in (labels.get("subgenres") or []) + (labels.get("moods") or []):
             strings.add(entry.get("label") if isinstance(entry, dict) else entry)
@@ -509,16 +559,24 @@ def main():
     applic_v, applic_c = [], bytearray()
     depicts, audience = bytearray(), bytearray()
     orig_lang = []
-    with_labels = with_premise = with_cards = 0
+    with_labels = with_plot_labels = with_premise = with_cards = 0
+    divergent = []
 
     for key in keys:
         r = rows[key]
         facts = r.get("facts") or {}
-        labels = r.get("labels") or {}
+        # Counted off the SAME dict the sections below are written from, so the count proves the union
+        # happened rather than agreeing with it by construction.
+        labels = title_labels(r)
         if labels:
             with_labels += 1
+        if r.get("labels"):
+            with_plot_labels += 1
         if r.get("premiseLabels"):
             with_premise += 1
+        fields = disagreement(r)
+        if fields:
+            divergent.append((key, fields))
         t = facts.get("titles") or {}
         card = cards.get(key) or {}
         card_title.append(strings.id(card.get("title") or t.get("en") or t.get("orig")))
@@ -824,13 +882,27 @@ def main():
     # 23,000 rows, and "more than half worked" is not a standard anything here should meet.
     for what, got, want, source in (
         ("rows", n, facts_records, args.facts),
-        ("labels", with_labels, len(labels_source), args.vector_labels),
+        ("plot labels", with_plot_labels, len(labels_source), args.vector_labels),
+        # The union, against the union of the two artifacts' keys: a title EITHER pass labelled must carry
+        # labels in the store. Checking only the plot side is how the premise-only titles went missing —
+        # the plot count matched its artifact exactly while three titles held no labels at all.
+        ("labelled titles", with_labels, len(labelled_keys),
+         " ∪ ".join(p for p in (args.vector_labels, args.premise_labels) if p)),
         ("cards", with_cards, len(cards), args.metadata),
         ("plot vectors", plot_hits, len(plot_order), args.vectors),
         ("premise vectors", premise_hits, len(premise_row), args.premise_labels),
     ):
         if got != want:
             sys.exit(f"{what}: {got} in the store, {want} in {source} — they must agree exactly")
+    # Where both passes labelled a title, `title_labels` takes the plot record whole. That is safe only
+    # while the passes agree, which they do today for all 44,528 such titles. If a repass makes them
+    # diverge, which labelling ships is a decision, and the `or` in `title_labels` would make it silently
+    # by preferring whichever came first. Refuse instead, and name the titles.
+    if divergent:
+        shown = ", ".join(f"{k} ({'/'.join(f)})" for k, f in divergent[:5])
+        sys.exit(f"the two labelling passes disagree on {len(divergent)} titles: {shown}"
+                 f"{' …' if len(divergent) > 5 else ''} — `title_labels` would silently ship the plot "
+                 f"record. Decide which pass wins for these and say so in the writer.")
     # Unresolved references, named and counted. A reference the entity table cannot resolve is dropped —
     # that is unavoidable when the table is short — but dropping it WITHOUT SAYING SO is how 2,680
     # franchise links disappeared into a section that looked perfectly well formed.
@@ -839,7 +911,8 @@ def main():
         for what, count in sorted(unresolved.items(), key=lambda kv: -kv[1]):
             print(f"  {what:14} {count}", file=sys.stderr)
 
-    print(json.dumps({"titles": n, "withLabels": with_labels, "withPremiseLabels": with_premise,
+    print(json.dumps({"titles": n, "withLabels": with_labels, "withPlotLabels": with_plot_labels,
+                      "withPremiseLabels": with_premise,
                       "withCards": with_cards, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
                       "entities": len(ent_qids), "strings": len(ordered_strings),
