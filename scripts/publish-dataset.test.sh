@@ -371,6 +371,41 @@ else
 fi
 teardown
 
+# --- a deliberate store rebuild, said out loud -------------------------------------------------------
+#
+# `datasetVersion` names the GENERATION, and check-filename-version.py requires every versioned filename
+# to carry it — so a store rebuilt from an UNCHANGED corpus by a fixed writer legitimately keeps the same
+# version. The fault was never that this happens; it was that it happened silently. So it is allowed when
+# you say why, and the reason is written into the manifest the release carries.
+
+setup
+write_meta aaaaaaaaaaaa
+publish_baseline
+printf 'a rebuilt store' >> "$DIR/den-aaaaaaaaaaaa.store"
+python3 - "$DIR/dataset.meta.json" "$DIR/den-aaaaaaaaaaaa.store" <<'PY'
+import hashlib, json, os, sys
+meta = json.load(open(sys.argv[1]))
+meta["storeSha256"] = hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest()
+meta["storeBytes"] = os.path.getsize(sys.argv[2])
+json.dump(meta, open(sys.argv[1], "w"))
+PY
+if DEN_STORE_REBUILD="the label sections gained the premise pass" PATH="$BIN:$PATH" \
+     bash "$PUBLISH" "$DIR" > "$WORK/out.log" 2> "$WORK/err.log"; then
+  grep -q "store rebuilt within datasetVersion" "$WORK/out.log" \
+    && ok "a stated rebuild is allowed and announced" \
+    || bad "it published but said nothing: $(tail -3 "$WORK/out.log")"
+  python3 -c '
+import json, sys
+meta = json.load(open(sys.argv[1]))
+sys.exit(0 if meta.get("storeRebuild") == "the label sections gained the premise pass" else 1)
+' "$DIR/dataset.meta.json" \
+    && ok "and the reason is recorded in the manifest the release carries" \
+    || bad "storeRebuild missing from the published manifest"
+else
+  bad "a stated rebuild was refused: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
 # --- the override is deliberate, not accidental -----------------------------------------------------
 
 setup

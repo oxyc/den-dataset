@@ -221,9 +221,19 @@ fi
 # generation it claims. With the store as the ONLY artifact, that identifier is the only handle anything
 # has on it.
 #
-# So: republishing a version whose store bytes changed is refused. A changed store is a new generation and
-# wants a new version. Deliberately NOT behind DEN_ALLOW_DROPPING_BLOBS — that flag is for a deliberate
-# shrink, and there is no such thing as a deliberate silent identity collision.
+# So: republishing a version whose store bytes changed is refused unless you SAY WHY.
+#
+# It cannot simply demand a new version. `datasetVersion` names the GENERATION — the corpus — and
+# `check-filename-version.py` requires every versioned filename to carry it, so a store rebuilt from an
+# unchanged corpus by a fixed writer legitimately keeps the same version. That is almost certainly what
+# produced the two stores above: sections were added, the store was rebuilt, the corpus never moved.
+#
+# The fault was never that it happened. It was that it happened SILENTLY. So `DEN_STORE_REBUILD=<reason>`
+# lets it through and prints the reason, and the release carries it as `storeRebuild` — the generation
+# stays honest, and the fact that its store was replaced is written down where a rollback can read it.
+#
+# Deliberately NOT DEN_ALLOW_DROPPING_BLOBS: that flag is for a deliberate shrink, it suppresses three
+# guards at once, and "I meant to drop records" is not "I meant to replace the artifact".
 if [ "$have_published" -eq 1 ]; then
   json_key() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$1" "$2"; }
   was_version="$(json_key "$published_meta" datasetVersion)"
@@ -234,13 +244,31 @@ if [ "$have_published" -eq 1 ]; then
   # collision, and the guard above reports that far more usefully than "a different store" would.
   if [ -n "$was_version" ] && [ "$was_version" = "$now_version" ] \
      && [ -n "$was_store" ] && [ -n "$now_store" ] && [ "$was_store" != "$now_store" ]; then
-    echo "error: datasetVersion $now_version is already published with a DIFFERENT store." >&2
-    echo "       published:        $was_store" >&2
-    echo "       about to publish: $now_store" >&2
-    echo "       One version must name one store. Publishing this would leave two different artifacts" >&2
-    echo "       sharing an identifier — which is what every other guard here keys on, and it has" >&2
-    echo "       happened before, undetected. Rebuild with a new datasetVersion." >&2
-    exit 1
+    if [ -n "${DEN_STORE_REBUILD:-}" ]; then
+      echo "store rebuilt within datasetVersion $now_version: ${DEN_STORE_REBUILD}"
+      echo "  was $was_store"
+      echo "  now $now_store"
+      python3 - "$meta" "$DEN_STORE_REBUILD" <<'PY'
+import json, sys
+meta_path, reason = sys.argv[1], sys.argv[2]
+meta = json.load(open(meta_path))
+# Recorded IN the manifest, so the release itself says its store was replaced. A rollback reading only
+# the assets would otherwise have no way to tell this generation's store from the one it superseded.
+meta["storeRebuild"] = reason
+json.dump(meta, open(meta_path, "w"), indent=2, sort_keys=True)
+PY
+    else
+      echo "error: datasetVersion $now_version is already published with a DIFFERENT store." >&2
+      echo "       published:        $was_store" >&2
+      echo "       about to publish: $now_store" >&2
+      echo "       One version must name one store, or a rollback cannot name what it restores — and" >&2
+      echo "       two stores have already shipped under one version, undetected, because every other" >&2
+      echo "       guard here keys on that identifier." >&2
+      echo "       If the corpus is unchanged and you rebuilt the store deliberately, say so:" >&2
+      echo "         DEN_STORE_REBUILD='what changed in the writer' scripts/publish-dataset.sh $DIR" >&2
+      echo "       If the CORPUS changed, it is a new generation and wants a new datasetVersion." >&2
+      exit 1
+    fi
   fi
 fi
 
