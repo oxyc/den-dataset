@@ -8,7 +8,8 @@ prose somewhere that can go stale without anything failing.
 | What runs, and in what order? | `pipeline/__init__.py` — `STAGES`. Or `./den stages`. |
 | What does a stage read and write? | That stage's `INPUTS` / `OUTPUTS`, at the top of its module. |
 | What builds an artifact? | `pipeline/artifacts.py` — one entry per file, naming its producer. |
-| What does a store section mean? | den-spec `wire/store-v1.md`, then `scripts/v2/build_store.py`. |
+| What does a store section mean? | den-spec `wire/store-v1.md`, then the `store/` module named for its heading. |
+| What order are the store's sections written in? | `store/build.py`, and `PROVENANCE` declares the same order. |
 | Why was a publish refused? | `scripts/publish-dataset.sh` and the checks it runs under `scripts/`. |
 | How do I run it? | `./den run --dataset-version <ver> --out-dir out` |
 
@@ -28,5 +29,6 @@ Two rules keep it from becoming `scripts/v3/`, and both are enforced rather than
 
 Tests sit beside the code: `pipeline/store.py` and `pipeline/store_test.py`, no parallel tree.
 
-Soft ceiling of ~400 lines per file. `scripts/v2/build_store.py` is 1,468 and is the reason the number
-is written down.
+Soft ceiling of ~400 lines per file. `scripts/v2/build_store.py` was 1,468 and is the reason the number
+is written down; it is now the command line and the publication policy, over a `store/` package with one
+module per section group in `wire/store-v1.md`. Nothing there is over 260 lines.

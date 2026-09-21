@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """The STORE build, behind the stage contract.
 
-The rule lives in `scripts/v2/build_store.py` — 1,468 lines of section writers, join guards and count
-asserts, every one of them bought by a join bug this pipeline actually had. None of it is reimplemented
+The rule lives in `scripts/v2/build_store.py` and the `store/` package it drives — the section writers,
+join guards and count asserts, every one of them bought by a join bug this pipeline actually had. None of
+it is reimplemented
 here and none of it is wrapped in new behaviour: this stage decides which files the writer is handed and
 runs it, so `den stage store` and the hand-typed command in `docs/OPERATE.md` produce the same bytes.
 
