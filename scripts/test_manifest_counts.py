@@ -165,6 +165,44 @@ class AdvertisedCounts(unittest.TestCase):
                 self.assertNotIn("premiseCount", json.load(fh))
 
 
+class Consistency(unittest.TestCase):
+    """Is the manifest internally TRUE right now — a different question from whether a blob moved."""
+
+    LIVE = {  # the manifest exactly as it was published, before the fix
+        "count": 47539, "labelsRecords": 47539,
+        "dims": 1024, "vectorsBytes": 48679944,
+        "premiseCount": 38532, "premiseLabelsRecords": 44531,
+        "premiseDims": 1024, "premiseVectorsBytes": 45599752,
+    }
+    COUNTS = {"labelsFile": 47539, "premiseLabelsFile": 44531}
+
+    def test_it_catches_the_real_one(self):
+        found = mc.inconsistencies(self.LIVE, self.COUNTS)
+        self.assertEqual(len(found), 2, f"both directions must fire: {found}")
+        self.assertTrue(any("premiseCount" in f and "38532" in f for f in found))
+        self.assertTrue(any("premise vectors" in f for f in found))
+
+    def test_a_consistent_manifest_is_silent(self):
+        fixed = dict(self.LIVE, premiseCount=44531)
+        self.assertEqual(mc.inconsistencies(fixed, self.COUNTS), [])
+
+    def test_the_vector_check_uses_the_real_key_names(self):
+        """`f"{prefix}dims"` gives `premisedims`, which no manifest has — so the premise half of this
+        check silently did nothing when it was first written. Drop premiseCount's own agreement and the
+        vector arithmetic must still catch it on its own."""
+        only_vectors = {k: v for k, v in self.LIVE.items() if k != "premiseLabelsRecords"}
+        found = mc.inconsistencies(only_vectors, {"labelsFile": 47539})
+        self.assertTrue(any("premise vectors" in f for f in found), found)
+
+    def test_the_plot_index_is_consistent_in_the_real_manifest(self):
+        """The control. 48,679,944 = 8 + 47,539 x 1024, so the plot half must NOT fire — a check that
+        flags a healthy artifact gets switched off."""
+        self.assertFalse(any("plot vectors" in f for f in mc.inconsistencies(self.LIVE, self.COUNTS)))
+
+    def test_a_missing_number_is_not_a_mismatch(self):
+        self.assertEqual(mc.inconsistencies({"count": 10}, {}), [])
+
+
 class Coverage(unittest.TestCase):
     """A blob's records as a share of the labels — the question an absolute count cannot answer."""
 

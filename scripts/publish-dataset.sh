@@ -217,6 +217,17 @@ python3 "$(dirname "$0")/check-producers.py" "$meta" "$DIR"
 # datasetVersion 5b1c3213b6a1.
 python3 "$(dirname "$0")/check-filename-version.py" "$meta"
 
+# INTERNAL-CONSISTENCY GUARD. Every check above asks whether a blob is right. This asks whether the
+# manifest's own NUMBERS are — the ones den-atlas serves to the app in /dataset.json. `premiseCount` sat
+# at 38,532 for months while the premise labels and vectors both held 44,531, because nothing models that
+# key, so ManifestMerge carried it forward and no counter ever looked at it.
+inconsistent="$(python3 "$(dirname "$0")/manifest-counts.py" --consistent "$meta" "$DIR")"
+if [ -n "$inconsistent" ]; then
+  echo "error: the manifest contradicts the files it describes:" >&2
+  echo "$inconsistent" | sed 's/^/       /' >&2
+  exit 1
+fi
+
 # SHAPE GUARD. A producer can exist, be committed, be run correctly — and still emit a shape its consumer
 # cannot read. One entity carrying `"aliases": "Adrian Anthony Lester"` where atlas types Vec<String> made a
 # 27 MB facts file unparseable at its first entity; atlas does not partially load one, so it dropped the

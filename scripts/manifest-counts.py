@@ -12,6 +12,7 @@ baseline; `--compare` reads the published manifest's stamps and prints any blob 
 
     manifest-counts.py --stamp   <meta.json> <out-dir>
     manifest-counts.py --compare <published-meta.json> <meta.json> <out-dir>
+    manifest-counts.py --consistent <meta.json> <out-dir>
 
 ## Why an absolute count is not enough
 
@@ -74,6 +75,9 @@ DENOMINATOR = "labelsFile"
 # un-rebuilt plot-facets blob drops 1.87 points and passes. A blob covering under 2% of the corpus could
 # never trip a 2-point rule even by going to zero. As a ratio the threshold is the same for all of them.
 COVERAGE_RATIO = 0.98
+
+# A vector blob is an 8-byte header then `rows * dims` int8s, so its row count is arithmetic.
+VECTOR_HEADER = 8
 
 
 def store_rows(path):
@@ -141,6 +145,45 @@ def count(meta, key, base):
             if isinstance(v, (list, dict)):
                 return len(v)
     return None
+
+
+def count_all(meta, base):
+    """Every countable blob's real row count, by manifest key."""
+    return {key: count(meta, key, base) for key in COUNTED}
+
+
+def inconsistencies(meta, counts):
+    """Where the manifest's ADVERTISED numbers disagree with the files they describe.
+
+    A different question from `--compare`, which asks whether a blob moved since the last publish. This
+    asks whether the manifest is internally true right now — and it is the question that was going
+    unasked: `premiseCount` advertised 38,532 to the app for months while `labels-premise.json` held
+    44,531 and `vectors-premise.bin` was 44,531 rows. Nothing counted it, because nothing models it, so
+    `ManifestMerge` carried it forward from whenever the premise index was first published.
+
+    A vector blob is `8 + rows * dims` bytes, so its row count is checkable from the manifest alone — no
+    need to read 45 MB to know it disagrees with the labels beside it.
+    """
+    out = []
+
+    def claim(label, claimed, actual, why):
+        if claimed is not None and actual is not None and claimed != actual:
+            out.append(f"{label}: manifest says {claimed}, {why} says {actual}")
+
+    claim("count", meta.get("count"), counts.get("labelsFile"), "labelsFile")
+    claim("premiseCount", meta.get("premiseCount"), counts.get("premiseLabelsFile"), "premiseLabelsFile")
+    # Spelled out rather than built from a prefix: `f"{prefix}dims"` gives `premisedims`, which no
+    # manifest has, so the check silently did nothing for the half it was written for.
+    for label, dims_key, size_key, rows_key in (
+        ("plot vectors", "dims", "vectorsBytes", "count"),
+        ("premise vectors", "premiseDims", "premiseVectorsBytes", "premiseCount"),
+    ):
+        dims, size = meta.get(dims_key), meta.get(size_key)
+        if not dims or not size:
+            continue
+        claim(label, (size - VECTOR_HEADER) // dims, meta.get(rows_key),
+              f"{rows_key} (blob is {size} bytes at {dims} dims)")
+    return out
 
 
 def highest_batch_id(base):
@@ -237,6 +280,14 @@ def main():
                         f"kept {100.0 * is_now / was:.1f}% of its share, floor is "
                         f"{100.0 * COVERAGE_RATIO:.0f}%"
                     )
+        return
+
+    if mode == "--consistent":
+        meta_path, base = sys.argv[2], sys.argv[3]
+        with open(meta_path) as f:
+            meta = json.load(f)
+        for line in inconsistencies(meta, count_all(meta, base)):
+            print(line)
         return
 
     sys.exit(f"unknown mode {mode}")
