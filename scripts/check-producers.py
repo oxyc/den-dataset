@@ -30,6 +30,7 @@ publish it. Staleness is the cheap signal that catches the real failure.
 
     scripts/check-producers.py <meta.json> <out-dir>
 """
+import glob
 import json
 import os
 import subprocess
@@ -60,6 +61,20 @@ PRODUCERS = {
 # Keys that name a DERIVED copy of another blob (the gzips publish-dataset.sh writes). They inherit their
 # source's producer, so registering them separately would be noise.
 DERIVED_SUFFIXES = ("GzFile",)
+
+# Published artifacts that NO manifest key names, matched by filename instead.
+#
+# The loop below only sees keys in `dataset.meta.json`, so an artifact published on its own tag is
+# invisible to it — and the corpus is exactly that: the source of truth every other artifact is built
+# from, released as `corpus-<ver>`, owned by nothing as far as this guard could tell. Putting it in the
+# serving manifest is not the fix: `fetch-dataset.sh` pulls every `*File` key, so the box would download
+# 44 MB of corpus it never reads.
+#
+# (glob, producer, how to run it)
+UNMANIFESTED = (
+    ("corpus-*.jsonl.gz", "scripts/v2/consolidate_corpus.py", "scripts/v2/consolidate_corpus.py"),
+    ("corpus-*-entities.json.gz", "scripts/v2/consolidate_corpus.py", "scripts/v2/consolidate_corpus.py"),
+)
 
 
 def tracked(repo_relative):
@@ -105,6 +120,17 @@ def main():
                 f"{key} ({name}): {producer} was edited after this artifact was built, so it may have been "
                 f"built by an older version of the rule. Re-run: {how}"
             )
+
+    # The artifacts no manifest key names. Same question — "does anything in this repo build it" — asked
+    # of the out-dir directly, because the manifest cannot answer it for a separately-tagged release.
+    for pattern, producer, how in UNMANIFESTED:
+        for artifact in sorted(glob.glob(os.path.join(out_dir, pattern))):
+            name = os.path.basename(artifact)
+            if not os.path.exists(producer):
+                problems.append(f"{name}: its producer {producer} does not exist (build it with: {how})")
+            elif not tracked(producer):
+                problems.append(f"{name}: its producer {producer} is not tracked by git — commit it, or "
+                                f"the next machine cannot rebuild it")
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)

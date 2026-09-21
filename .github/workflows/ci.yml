@@ -66,7 +66,7 @@ jobs:
       # is allowed to serve: the store writer against den-spec's fixture, and the record-count guard that
       # refuses a silent shrink.
       - name: The publisher's guards
-        run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py
+        run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py
         env:
           DEN_SPEC_DIR: ${{ github.workspace }}/den-spec-checkout
 
