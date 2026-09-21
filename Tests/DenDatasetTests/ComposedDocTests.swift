@@ -104,6 +104,19 @@ final class ComposedDocTests: XCTestCase {
         XCTAssertEqual(WikipediaSource.strippedGenre("Thriller Film"), "thriller")
         XCTAssertEqual(WikipediaSource.strippedGenre("cyberpunk"), "cyberpunk", "no suffix → unchanged")
         XCTAssertEqual(WikipediaSource.strippedGenre("film"), "", "a bare medium is not a genre")
+
+        // The suffixes added after the first version, each with a genre Q-id the corpus really references.
+        XCTAssertEqual(WikipediaSource.strippedGenre("reality television"), "reality")
+        XCTAssertEqual(WikipediaSource.strippedGenre("drama television program"), "drama")
+        XCTAssertEqual(WikipediaSource.strippedGenre("science fiction anime and manga"), "science fiction")
+        XCTAssertEqual(WikipediaSource.strippedGenre("crime fiction"), "crime")
+
+        // `fiction` must not eat the head of a genre that ENDS in "science fiction". An equality guard
+        // let these through as "hard science" and "military science", and the stripped label is written
+        // into the shipped entity map and the composed document the embedding reads — so it travels.
+        XCTAssertEqual(WikipediaSource.strippedGenre("hard science fiction"), "hard science fiction")
+        XCTAssertEqual(WikipediaSource.strippedGenre("military science fiction"), "military science fiction")
+        XCTAssertEqual(WikipediaSource.strippedGenre("science fiction"), "science fiction")
     }
 
     func testUnresolvedQIdLabelsAreDropped() throws {

@@ -355,7 +355,12 @@ public struct WikipediaSource: Sendable {
             }
             // `fiction` only when something survives it AND the whole phrase is not itself a genre —
             // otherwise "science fiction" becomes "science", which is not a TMDB genre and not a thing.
-            if !changed, s.hasSuffix(" fiction"), s != "science fiction", s.count > " fiction".count + 1 {
+            // hasSuffix, not equality: "hard science fiction" and "military science fiction" are
+            // real referenced genres, and an equality guard strips them to "hard science" and
+            // "military science". The stripped label is written back into the shipped entity map
+            // and into the composed document the embedding reads, so a mangled one travels.
+            if !changed, s.hasSuffix(" fiction"), !s.hasSuffix("science fiction"),
+               s.count > " fiction".count + 1 {
                 s.removeLast(" fiction".count)
                 s = s.trimmingCharacters(in: .whitespaces)
                 changed = true
