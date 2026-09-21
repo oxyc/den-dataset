@@ -29,11 +29,22 @@ for no gain. The labels file is reordered to match.
 A title in --labels that the box never embedded (no plot, so no document was composed) simply does not
 appear in the store. That is correct — but it is also how a much larger loss would look, so the count is
 printed and compared against --expect-missing when given.
+
+## The embedding space travels with the vectors
+
+`embed_docs.py` verifies the known-answer canary before it writes a row and records the verified `spaceId`
+beside its output. `--embed-space` carries that record into the index dir, having first checked it against
+the canary THIS checkout holds. Without it the import is a join that knows the shape of the vectors and
+nothing about what produced them, which is how a file embedded in a retired space gets into a store that
+looks healthy.
 """
 import argparse
 import json
 import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import embed_canary  # noqa: E402
 
 DIMS = 1024
 
@@ -49,8 +60,19 @@ ap.add_argument("--out-dir", required=True, help="the index dir to write labels.
 ap.add_argument("--embedder-health", help="the serving den-embed's /health JSON, recorded as embedder.json")
 ap.add_argument("--expect-missing", type=int,
                 help="how many labelled titles are expected to have no vector; refuse if more")
+ap.add_argument("--embed-space", help="the embedding-space.json embed_docs.py wrote beside these vectors")
+ap.add_argument("--canary", default=None, help="the canary to check --embed-space against")
 ap.add_argument("--dry-run", action="store_true", help="run every check and report, but write nothing")
 args = ap.parse_args()
+
+space = None
+if args.embed_space:
+    space = json.load(open(args.embed_space, encoding="utf-8"))
+    expected = embed_canary.load(args.canary or embed_canary.DEFAULT_CANARY)["spaceId"]
+    if space.get("spaceId") != expected:
+        die(f"{args.embed_space} records space {space.get('spaceId')!r}, but this checkout's canary is "
+            f"{expected!r} — these vectors were embedded against a different set of known answers, so "
+            f"nothing here can say they are in the space this repo ships")
 
 store = json.load(open(args.labels, encoding="utf-8"))
 records = {f"{r['mediaType']}:{r['tmdbId']}": r for r in store["records"]}
@@ -113,4 +135,12 @@ if args.embedder_health:
                "runtime": h["runtime"], "vectorEpoch": h["vector_epoch"]},
               open(os.path.join(args.out_dir, "embedder.json"), "w"), indent=1, sort_keys=True)
 
-print(json.dumps({"wrote": len(rows), "labels": labels_path, "vectors": vectors_path}, indent=2))
+if space:
+    # `finalize` reads this from the index dir and stamps it into dataset.meta.json, so a published
+    # dataset names the space it was embedded in rather than leaving it to be inferred from a version.
+    with open(os.path.join(args.out_dir, "embedding-space.json"), "w", encoding="utf-8") as fh:
+        json.dump(space, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+
+print(json.dumps({"wrote": len(rows), "labels": labels_path, "vectors": vectors_path,
+                  "embeddingSpace": (space or {}).get("spaceId")}, indent=2))

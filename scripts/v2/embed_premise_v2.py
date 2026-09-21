@@ -20,12 +20,17 @@ So "reuse" means reuse from the REALIGNED blob only, and only where the composed
 manifest could not have told us any of this: the July blob predates the `embedderRuntime` / `vectorEpoch`
 fields that exist to catch exactly this, which is why the check below is a measurement, not a metadata read.
 
-## The guard
+## Two guards, and they answer different questions
 
-Before reusing anything, this re-embeds a sample of the base blob's own rows and refuses if they do not come
-back identical. That is the whole safety property: if the box's den-embed is redeployed (it rebuilds weekly)
-and its output moves, the reuse silently becomes a two-embedder index — the failure this file exists to
-prevent. Better to refuse and re-embed everything than to publish a blob that loads cleanly and ranks wrong.
+`embed_canary.py` runs first and asks whether the service is in the space the repo has committed answers
+for — a fixed known-answer test that holds whatever blob is being built, and that fails before anything is
+written.
+
+The reuse guard below then asks the narrower question the canary cannot: whether THIS base blob, which is
+not the canary and may predate it, is reproduced by the service about to extend it. A blob can be in a
+retired space while the service is in the current one; that is a correct state for the canary and a fatal
+one for reuse. So both run, in that order: no point measuring the base against an embedder that is already
+the wrong one.
 """
 import argparse
 import json
@@ -38,6 +43,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import embed_canary  # noqa: E402
 import vector_blob  # noqa: E402
 
 
@@ -85,7 +91,13 @@ ap.add_argument("--url", required=True)
 ap.add_argument("--batch", type=int, default=48)
 ap.add_argument("--probe", type=int, default=8, help="base rows to re-embed as the reuse guard")
 ap.add_argument("--no-reuse", action="store_true", help="embed every title, ignoring the base blob")
+ap.add_argument("--canary", default=None,
+                help="the known-answer file for the embedding space (default: data/embed-canary.json "
+                     "beside this checkout; pass it explicitly when running from a container)")
 args = ap.parse_args()
+
+# First, and before anything is read or written: is this service in the space the repo has answers for?
+embed_canary.gate(args.url, canary=args.canary)
 
 tags = json.load(open(args.tags, encoding="utf-8"))["tags"]
 v1 = json.load(open(args.v1_tags, encoding="utf-8"))["tags"]

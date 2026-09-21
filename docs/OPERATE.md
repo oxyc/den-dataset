@@ -26,28 +26,59 @@ ssh root@pve 'incus exec den -- podman run --rm --network den -v /opt/den/embed:
     docker.io/library/python:3.12-slim python3 /w/<script>.py --url http://den-embed:8080'
 ```
 
-**2. A version string is not evidence.** `embeddingModel` + `dims` are identical across every generation,
-`vectorEpoch` has stayed `1` across generations whose output moved, and `embedderRuntime` only records
-den-embed's own crate version. The sound check is to re-embed a sample of the blob you intend to extend and
-compare bytes. `scripts/v2/embed_premise_v2.py` does this as a precondition and refuses on mismatch; any
-future embed path should too.
+**2. A version string is not evidence — the canary is.** `embeddingModel` + `dims` are identical across
+every generation, `vectorEpoch` has stayed `1` across generations whose output moved, and `embedderRuntime`
+only records den-embed's own crate version. So `data/embed-canary.json` holds a handful of fixed texts and
+the exact int8 vectors the service is supposed to return for them, and **every path that writes a vector
+verifies them before opening its output**:
+
+```sh
+scripts/v2/embed_canary.py --url http://den-embed:8080      # exit 0, or exit 2 and a report per case
+```
+
+Byte-identical is the bar; cosine is reported so a reader of a failure can tell a rounding difference from
+a different space, but both fail. The verified identity — `<canarySet>:<digest over the expected vectors>`
+— is recorded beside the vectors and stamped into `dataset.meta.json` as `embeddingSpace`, so a published
+dataset NAMES the space it is in rather than leaving it to be inferred from a version that cannot express
+it. A consumer checks alignment by embedding the same committed texts through its own den-embed.
+
+The check is deliberately cause-agnostic. It does not test for a configuration, an architecture or a
+runtime version; it tests the answers, so a cause nobody has thought of yet moves them too.
+
+Regenerating (`--regenerate`, which re-embeds the texts already in the file and never invents one) is
+legitimate only when the space is MEANT to move: a `VECTOR_EPOCH` bump, a model change, or a settings
+change made together with a full re-embed. It is not a way past a failing check — the `spaceId` is
+published, so regenerating to get a run going renames the space the corpus claims to be in.
+
+`embed_premise_v2.py`'s reuse guard stays, and answers the narrower question the canary cannot: whether one
+specific base blob, which may predate the canary, is still reproduced by the service about to extend it.
 
 **3. Set `MAX_TOKENS=1024`.** The default is 512 (`env_clamped("MAX_TOKENS", 512, 16, 1024)`, 1024 is the
 ceiling). At 512 the corpus loses **half its total plot prose** and 64% of titles truncate — the table in
 `README.md` §2 has the measurements. It makes no difference to short documents such as premise tags
 (0 dims differ, measured), so it matters for the plot corpus and not the premise index.
 
+This is the setting that has actually caused a space difference, twice, and both times it was diagnosed as
+something else first — an instruction-set difference, then a thread-pool setting. Neither was real: an
+AVX2 host and an AVX-512 one return byte-identical vectors once their caps match, and ONNX Runtime's
+`INTRA_THREADS` makes no difference at all. A comparison run against a container at the image's DEFAULT cap
+is comparing caps, whatever else it looks like. The canary refuses on a cap mismatch before it embeds
+anything, and says so, rather than failing on the long cases and leaving the pattern to be interpreted.
+
 ### Current state
 
 | | |
 |---|---|
-| serving box | `den-embed/5.1.2`, `dims 1024`, `vector_epoch 1`, **`max_tokens 512`** — the env is not set |
+| serving box | `den-embed/5.1.2`, `dims 1024`, `vector_epoch 1`, `max_tokens 1024` — checked 2026-09-21 |
+| the space it serves | `canary-v1:42f4618a055103411edec2ad0f87dfa94f1e7f3d40bf768563e82a0fe692a2df` (7/7 cases byte-identical) |
 | live corpus `vectors-bge-m3.bin` | built 2026-09-13, `embedderRuntime den-embed/5.1.1`, `embedderMaxTokens 1024` |
 | live `vectors-premise.bin` | built 2026-09-13; **does not reproduce on the box** (462–567 of 1024 dims differ) |
 | `out-premise-v2/vectors/vectors-premise-v2.bin` | built on the box 2026-09-19, 44,531 × 1024, reproduces exactly |
 
-The live index and live queries are therefore **not aligned today**, at a measured cost of 6.3/10 top-10
-overlap. Tracked in oxyc/den-dataset#21, which holds the evidence; do not re-derive it here.
+Tracked in oxyc/den-dataset#21, which holds the evidence for the 6.3/10 top-10 overlap; do not re-derive it
+here. The canary says the box is in the space this repo has answers for; it says **nothing** about the
+shipped blobs, which were built before it existed and therefore carry no `embeddingSpace`. Only a corpus
+embedded through a run that verified the canary can claim one, which is the point of publishing it.
 
 ## Full re-embed
 
@@ -168,6 +199,25 @@ $BIN embed-corpus --out-dir out --labels out/labels-t02.json \
 #     `--dump-docs <path>` writes the composed documents and embeds NOTHING, for embedding elsewhere — the
 #     arm64/x86_64 split means the documents travel to the serving box rather than the vectors coming back.
 #     It needs no embedder: gating it on one would mean standing up a service purely to write text.
+
+# 5c. The other half of --dump-docs: embed the documents ON THE BOX, against the service that answers live
+#     queries. The canary is mounted alongside the script because it is the thing that decides whether any
+#     of this may be written — embed_docs.py verifies it and writes nothing if it fails.
+#     Copy docs.jsonl, embed_docs.py, embed_canary.py and data/embed-canary.json into the container's /tmp
+#     first (`ssh root@pve 'incus exec den -- tee /tmp/<name>' < <file>`), then:
+ssh root@pve 'incus exec den -- podman run --rm --network den \
+    -v /tmp/embed_docs.py:/embed_docs.py:ro -v /tmp/embed_canary.py:/embed_canary.py:ro \
+    -v /tmp/embed-canary.json:/canary.json:ro -v /tmp/box:/w:z \
+    docker.io/library/python:3.12-slim python /embed_docs.py \
+        --docs /w/docs.jsonl --out-dir /w/out --url http://den-embed:8080 --canary /canary.json'
+#     It writes /w/out/vectors.jsonl, keys.json, and embedding-space.json — the verified space. Bring all
+#     three back, then join them to the labels and carry the space into the index dir:
+python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels out/labels-t02.json \
+    --out-dir out/index --embed-space box/embedding-space.json \
+    --embedder-health '{"model":"bge-m3","dims":1024,"vector_epoch":1,"runtime":"…","max_tokens":1024}'
+#     --embed-space is checked against THIS checkout's data/embed-canary.json before anything is written:
+#     vectors verified against a different set of known answers cannot be said to be in the space we ship.
+#     finalize (step 6) then stamps it into dataset.meta.json as `embeddingSpace`.
 
 # 6. Finalize — index store -> labels-t02.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
 $BIN finalize --out-dir out
