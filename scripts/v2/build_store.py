@@ -137,6 +137,29 @@ def score_hundredths(value, what, key):
     return scaled
 
 
+def read_votes(enriched_dir):
+    """`key -> voteCount`, from the enriched batches.
+
+    The same source and the same rule as `build-facets-bin.py`: BATCH-NUMBER order, last occurrence
+    winning, matching `finalize`'s de-dup and `EnrichedBatches.orderedNames`. `sorted()` on the names is
+    lexicographic — `batch-99.json` after `batch-177.json` — so the winner would depend on how many digits
+    a batch id happens to have, and 97 keys disagree about voteCount across batches.
+
+    Votes are why this exists: atlas orders every browse row by them, so a title without one sorts by
+    tmdbId and lands *La Job* (tv:5) next to Game of Thrones. `facets.bin` carried them and fell 9,007
+    titles behind the corpus; read from here the store has them for every title it holds.
+    """
+    if not enriched_dir:
+        return {}
+    votes = {}
+    names = [n for n in os.listdir(enriched_dir) if n.startswith("batch-") and n.endswith(".json")]
+    for name in sorted(names, key=lambda n: int(n[len("batch-"):-len(".json")])):
+        with open(os.path.join(enriched_dir, name), encoding="utf-8") as fh:
+            for d in json.load(fh):
+                votes[f"{d['mediaType']}:{d['tmdbId']}"] = int(d.get("voteCount") or 0)
+    return votes
+
+
 def days_since_epoch(value, key):
     """`{"date": "2007-01-20", "precision": "day"}` → (days, precision code).
 
@@ -315,6 +338,9 @@ def main():
     ap.add_argument("--vector-labels", required=True, help="labels-t02.json — the row order the vectors align to")
     ap.add_argument("--premise-vectors")
     ap.add_argument("--premise-labels")
+    ap.add_argument("--enriched",
+                    help="the enriched/ batch directory, for TMDB vote counts. Without it the `votes` "
+                         "section is all zeros and atlas cannot order a browse row by popularity.")
     ap.add_argument("--dataset-version", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--stamp-meta",
@@ -328,6 +354,10 @@ def main():
     keys = sorted(rows, key=lambda k: ((0 if k.split(":", 1)[0] == "movie" else 1), int(k.split(":", 1)[1])))
     n = len(keys)
     print(f"  {n} titles", file=sys.stderr)
+
+    vote_counts = read_votes(args.enriched)
+    if args.enriched:
+        print(f"  {len(vote_counts)} vote counts", file=sys.stderr)
 
     entities = read_json(args.entities)
 
@@ -439,7 +469,7 @@ def main():
     sec.put_raw("strings", blob, 1)
     sec.put("str_off", "I", offs, 4, expect=len(ordered_strings) + 1)
 
-    card_title, card_poster, card_year = [], [], []
+    card_title, card_poster, card_year, votes = [], [], [], []
     primary, subgenres, moods, animated = [], [], [], []
     facet_v, facet_c = [], bytearray()   # dense R x 12, axis order = FACET_AXES
     scores = {a: [] for a in SCORE_AXES}
@@ -469,6 +499,8 @@ def main():
         card_poster.append(strings.id(card.get("posterPath")))
         year = card.get("year")
         card_year.append(int(year) if isinstance(year, int) and -32767 <= year <= 32767 else I16_NONE)
+        # u32, clamped: TMDB's largest is five figures, and a browse row only ever compares them.
+        votes.append(min(0xFFFFFFFF, max(0, vote_counts.get(key, 0))))
         if card:
             with_cards += 1
 
@@ -586,6 +618,7 @@ def main():
     sec.put("card_title", "I", card_title, 4, expect=n)
     sec.put("card_poster", "I", card_poster, 4, expect=n)
     sec.put("card_year", "h", card_year, 2, expect=n)
+    sec.put("votes", "I", votes, 4, expect=n)
     sec.put("primary_genre", "I", primary, 4, expect=n)
     sec.put_labelled_list("subgenre", subgenres)
     sec.put_labelled_list("mood", moods)
