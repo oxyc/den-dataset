@@ -178,7 +178,22 @@ $BIN finalize --out-dir out
 #    correctly, so both consumers accept it and never re-sync — the new titles render with no poster forever.
 $BIN metadata --out-dir out
 
-# 8. Publish — the moving `data-latest` GitHub release the app + den-atlas both fetch.
+# 7b. The STORE — the only artifact that publishes (oxyc/den#113). Everything above is an INPUT to it: it
+#     carries facts, labels, cards, facets, rail facets, the entity table, alias titles and both vector
+#     matrices as sections, and den-atlas mmaps it. `--stamp-meta` is what DECLARES it; without that flag
+#     the file is written, no manifest names it, and the publish refuses.
+python3 scripts/v2/build_store.py \
+    --corpus out/corpus-<ver>.jsonl.gz --entities out/corpus-<ver>-entities.json.gz \
+    --facts out/facts-<ver>.json --metadata out/metadata-<ver>.json \
+    --vectors out/vectors-bge-m3.bin --vector-labels out/labels-t02.json \
+    --premise-vectors out/vectors-premise.bin --premise-labels out/labels-premise.json \
+    --enriched out/enriched --dataset-version <ver> \
+    --out out/den-<ver>.store --stamp-meta out/dataset.meta.json
+#     Without --enriched the `votes` section is all zeros and atlas cannot order a browse row by popularity.
+
+# 8. Publish — the moving `data-latest` GitHub release den-atlas fetches. Run it FROM THE REPO ROOT: the
+#    ownership guard resolves producer paths and `git ls-files` against the working directory. It uploads
+#    the store and the manifest, and prunes every retired blob's keys out of that manifest first.
 scripts/publish-dataset.sh out
 ```
 

@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
-# Publish the finalize output as the den-dataset `data-latest` GitHub Release — the SINGLE SOURCE OF TRUTH
-# for the dataset artifact. den-atlas (serving) and the Den app (bundled snapshot) both fetch from it, so
-# neither depends on the other's source tree. `data-latest` is a MOVING release: this clobbers its assets on
+# Publish the store as the den-dataset `data-latest` GitHub Release — the SINGLE SOURCE OF TRUTH for the
+# dataset artifact, which den-atlas fetches. `data-latest` is a MOVING release: this clobbers its assets on
 # every publish, so consumers always pull the current dataset.
 #
-#   taxonomy-backfill finalize --out-dir out   # produces labels-*.json + vectors-*.bin + *.gz + dataset.meta.json
+# TWO FILES SHIP (oxyc/den#113): `den-<version>.store` and the `dataset.meta.json` describing it. The store
+# carries what the per-blob artifacts carried — facts, labels, cards, facets, rail facets, the entity table,
+# alias titles, and both vector matrices as sections — and atlas mmaps it. Everything else in the out-dir is
+# an INPUT to that build and stays there; step 0 prunes their keys out of the manifest.
+#
+#   taxonomy-backfill finalize --out-dir out   # labels-*.json + vectors-*.bin + dataset.meta.json
+#   taxonomy-backfill metadata --out-dir out   # the cards the store's card sections are built from
+#   python3 scripts/v2/build_store.py … --stamp-meta out/dataset.meta.json    # THE artifact
 #   scripts/publish-dataset.sh [OUT_DIR]       # default: ./out, then ./data
 #
 # Requires `gh` authenticated with write access to the repo. The blobs are gitignored (large derived data),
 # so they live as release assets, never in git.
+#
+# Run it FROM THE REPO ROOT: the ownership guard resolves producer paths (`Sources/…`, `scripts/…`) and
+# `git ls-files` against the working directory.
 set -euo pipefail
 
 # An explicit argument is taken at its word. Falling back to ./data when the NAMED directory has no manifest
@@ -25,66 +34,46 @@ fi
 
 REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
 
-# Version-agnostic: glob the finalize output (labels-<tax>.json / vectors-<embed>.bin / <labels>.gz).
-# dataset.meta.json is kept SEPARATE from the blobs on purpose (see the ordering below).
 shopt -s nullglob
 meta="$DIR/dataset.meta.json"
 
-# 0) GZIP VARIANTS — every declared JSON blob ships a precompressed copy, declared as `<key>GzFile`, which
-# den-atlas serves to any client sending `Accept-Encoding: gzip` (9-10 MB of labels JSON → ~0.5 MB). The
-# server never compresses anything itself, so a blob without one here goes out at full size.
+# 0) PRUNE — the release carries ONE artifact, `den-<ver>.store`, and the manifest that describes it
+# (oxyc/den#113). The store holds what the per-blob artifacts held: facts, labels, cards, facets, rail
+# facets, the entity table, alias titles, and both vector matrices as sections.
 #
-# Regenerated from the blob on EVERY publish, never trusted from the meta. `finalize` merges unowned keys
-# forward, so a `premiseLabelsGzFile` or `metadataGzFile` from an earlier run can outlive the blob it was
-# made from — and atlas would then serve the old bytes under the new blob's `"<sha>-gzip"` ETag. A key whose
-# blob is no longer declared is dropped for the same reason. `mtime=0` and no stored filename keep the
-# output byte-identical across runs, so republishing an unchanged dataset uploads unchanged assets.
-python3 - "$meta" "$DIR" <<'PY'
-import gzip, json, os, sys
-meta_path, out_dir = sys.argv[1], sys.argv[2]
-with open(meta_path) as f:
-    meta = json.load(f)
-for key in ("labelsFile", "premiseLabelsFile", "metadataFile", "factsFile", "factsSlimFile",
-            "plotFacetsFile", "railFacetsFile"):
-    gz_key = key[: -len("File")] + "GzFile"
-    name = meta.get(key)
-    if not name:
-        meta.pop(gz_key, None)
-        continue
-    # A declared blob that is NOT THERE is left to the local check below, which says so in one sentence
-    # and names the directory. Opening it here instead died on a raw FileNotFoundError traceback — before
-    # the check written for exactly this case could run — so the script's own best error message was
-    # unreachable for the commonest slip there is.
-    if not os.path.exists(os.path.join(out_dir, name)):
-        continue
-    with open(os.path.join(out_dir, name), "rb") as src, open(os.path.join(out_dir, name + ".gz"), "wb") as dst:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=dst, compresslevel=9, mtime=0) as gz:
-            gz.write(src.read())
-    meta[gz_key] = name + ".gz"
-with open(meta_path, "w") as f:
-    json.dump(meta, f, indent=1)
-    f.write("\n")
-PY
-# `labels-*.json.gz`, not a bare `*.gz`: that also swept up the TMDB daily-export dumps build-worklist.py
-# writes into the same out-dir (movie_ids.json.gz + tv_series_ids.json.gz, ~31 MB), publishing TMDB's
-# raw export data as release assets from a repo that otherwise refuses to ship raw TMDB text.
-# Every entry is a GLOB, including facets: a literal path is not subject to nullglob, so `"$DIR"/facets.bin`
-# stayed in the array when the file was absent and the uploader failed on it three times with a message
-# about an upload rather than a missing file.
-# `facts-*.json` is listed here as well as in the manifest: the upload pass works from THIS array, so a blob
-# the manifest names but no glob matches is announced and never uploaded — atlas would then 404 on a file the
-# manifest promises.
-# `labels-*.json` and `vectors-*.bin` already match the cc0 experimental index (labels-cc0.json,
-# vectors-cc0.bin). That is deliberate: its vectors align to ITS OWN label order, not the shipped one, so the
-# two must travel together or every title pairs with a stranger's vector.
-# `den-*.store` — the one artifact den-atlas actually serves from (den-spec wire/store-v1). It has NO gz
-# twin and must never get one: atlas mmaps it, and a compressed file cannot be mapped.
-blobs=("$DIR"/facets*.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json "$DIR"/facts-*.json "$DIR"/facts-*.json.gz "$DIR"/plot-facets-*.json "$DIR"/plot-facets-*.json.gz "$DIR"/rail-facets-*.json "$DIR"/rail-facets-*.json.gz "$DIR"/den-*.store)
-[ ${#blobs[@]} -ge 3 ] || { echo "error: expected labels/vectors/gz/metadata in $DIR, found: ${blobs[*]:-none}" >&2; exit 1; }
+# Pruned here rather than never written, because the producers that write those keys are the producers that
+# build the store's INPUTS — `finalize` writes `labels-t02.json` and declares it in the same pass, and
+# `ManifestMerge` carries every unowned key forward. The blobs keep being built; they stop being published.
+# The rule, and what it deliberately keeps, is in `prune-manifest.py`.
+#
+# This is also what removed the gzip pass that used to run here: a precompressed twin existed because atlas
+# SERVED those JSON blobs to clients sending `Accept-Encoding: gzip`. Nothing is served from the release any
+# more — atlas reads the store from disk and mmaps it, and a compressed file cannot be mapped.
+retired="$(python3 "$(dirname "$0")/prune-manifest.py" --retired "$meta")"
+if [ -n "$retired" ]; then
+  # The prune rewrites the manifest IN PLACE, and the publish then clobbers the one on the release — so
+  # after a store-only publish neither copy of the old key set exists any more. This is the rollback: the
+  # retired blobs are still on `data-latest` (a publish only adds or clobbers, it never deletes an asset),
+  # so re-uploading this file restores the previous contract exactly.
+  cp "$meta" "$meta.prepublish"
+  echo "dropping from the manifest (the store carries what they held; the previous manifest is kept at"
+  echo "$(basename "$meta").prepublish, which is what a rollback re-uploads):"
+  echo "$retired" | sed 's/^/  /'
+fi
+python3 "$(dirname "$0")/prune-manifest.py" --prune "$meta"
 
-# What actually publishes: the files the manifest names, plus whatever else the globs found that it does
-# not (announced as such). Listing only the globs over-promised superseded sidecars the upload pass skips;
-# listing only the manifest under-promised the premise and facets blobs, ~86 MB of it.
+# Every entry is a GLOB: a literal path is not subject to nullglob, so a missing file stayed in the array
+# and the uploader failed on it three times with a message about an upload rather than a missing file.
+#
+# It is one glob now. The array decides what is *worth looking at* — the upload pass works from the
+# MANIFEST — and the out-dir's other files (labels, vectors, metadata, premise, the TMDB daily-export dumps
+# build-worklist.py drops in there) are the store's inputs, not publish candidates. Naming them here would
+# print a "skipping" line for each on every publish, which is how a notice stops being read.
+blobs=("$DIR"/den-*.store)
+[ ${#blobs[@]} -ge 1 ] || { echo "error: no den-<version>.store in $DIR — it is the only artifact this release carries. Build it with scripts/v2/build_store.py --stamp-meta $meta" >&2; exit 1; }
+
+# What actually publishes: the files the manifest names, plus whatever else the glob found that it does
+# not (announced as such).
 echo "publishing → $REPO data-latest:"
 python3 -c '
 import json, sys
@@ -93,21 +82,21 @@ for key, name in sorted(meta.items()):
     if key.endswith("File") and name:
         print("  " + name)
 ' "$meta"
-# Only what the second pass will ACTUALLY upload. Listing every unnamed glob hit re-promised the
-# superseded sidecars that pass explicitly skips — the over-promise this banner was rewritten to remove.
+# A store the manifest does not name is the one thing the glob can still catch: `build_store.py` writes the
+# file and only `--stamp-meta` declares it, so a run without that flag leaves an artifact here that no guard
+# can see and atlas never loads.
 for f in "${blobs[@]}"; do
   b="$(basename "$f")"
-  case "$b" in metadata-*.json) continue ;; esac
   grep -q "\"$b\"" "$meta" || echo "  $b (not named by the manifest)"
 done
 echo "  $(basename "$meta")"
 
 # Create the release if it doesn't exist yet.
 gh release view data-latest -R "$REPO" >/dev/null 2>&1 \
-  || gh release create data-latest -R "$REPO" --title "Dataset (latest)" --notes "The published Den dataset artifact — labels + int8 vectors + meta + gzip. Consumed by den-atlas + the Den app."
+  || gh release create data-latest -R "$REPO" --title "Dataset (latest)" --notes "The published Den dataset artifact — the den-<version>.store den-atlas mmaps, and the manifest describing it."
 
 # Upload one asset with retries. A single multi-file `gh release upload` is all-or-nothing: if it dies partway
-# (the ~38 MB vectors blob is the usual culprit), it aborts and you can't tell what landed. Per-file keeps
+# (the ~130 MB store is the usual culprit), it aborts and you can't tell what landed. Per-file keeps
 # progress and lets a transient failure retry just the slow one.
 upload_one() {
   local f="$1" n=0
@@ -239,6 +228,11 @@ fi
 # 27 MB facts file unparseable at its first entity; atlas does not partially load one, so it dropped the
 # whole file and ran facts_unusable, losing people search, imdbId, countries and /recommend. Record counts,
 # shas, gzip and the ownership guard all passed. Nothing read it the way atlas does.
+#
+# DORMANT: the prune above retires `factsFile`, so this loop visits nothing. The facts file is now a store
+# INPUT rather than a published artifact — `build_store.py` reads it and fails loudly on a shape it cannot
+# use — and what atlas parses is the store. Kept because a guard costs nothing while it has nothing to do,
+# and re-arms itself the day a generation publishes facts beside the store again.
 for facts_key in factsFile factsSlimFile; do
   facts_name="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]) or "")' "$meta" "$facts_key")"
   [ -n "$facts_name" ] || continue
@@ -256,80 +250,52 @@ done
 # Reported, not enforced, for now: the current labels' MOOD family is already under its floor
 # (micro .639 vs .640, macro .564 vs .580), so gating would block every publish over a regression that has
 # already shipped. Add --gate once that is resolved, which is the point of printing it every time.
-python3 "$(dirname "$0")/eval-taxonomy.py" "$DIR/$(python3 -c '
+#
+# The labels are read from the OUT-DIR, not from `labelsFile` — the prune above retires that key, and
+# reading it here would have handed the scorer an empty path, which `|| true` then swallows. The quality
+# signal would have gone dark as a side effect of a delivery change, which is the second time that exact
+# thing would have happened to this check. `finalize` names the file after the taxonomy (`labels-<tax>.json`)
+# and rewrites it in place every run, so the name is derivable and carries no version to go stale; naming it
+# by glob instead would also match `labels-cc0.json`, the experimental index that scores a different corpus.
+labels="$DIR/labels-$(python3 -c '
 import json, sys
-print(json.load(open(sys.argv[1])).get("labelsFile") or "")
-' "$meta")" --golden "$(dirname "$0")/../data/eval/golden-large.json" || true
+print(json.load(open(sys.argv[1])).get("taxonomyVersion") or "")
+' "$meta").json"
+if [ -f "$labels" ]; then
+  python3 "$(dirname "$0")/eval-taxonomy.py" "$labels" \
+    --golden "$(dirname "$0")/../data/eval/golden-large.json" || true
+else
+  echo "quality gate: SKIPPED — $labels is not in $DIR. The labels are no longer published, but they are" >&2
+  echo "              still the store's input and the only thing the golden set can be scored against." >&2
+fi
 
 if [ "$have_published" -eq 1 ]; then
+  # A key the prune RETIRES is not a dropped blob — it is the cutover, and it happens on every publish
+  # until the published manifest is a pruned one too. Filtering them here rather than reaching for
+  # DEN_ALLOW_DROPPING_BLOBS=1 matters: that override also disables the record-count/coverage guard and the
+  # "could not read the published manifest" guard, so the one publish that changes what the release carries
+  # would be the publish that checked the least. The retired set comes from `prune-manifest.py` itself, so
+  # there is one answer to "is this key still published", not two that can disagree.
   dropped="$(python3 -c '
 import json, sys
 old = json.load(open(sys.argv[1]))
 new = json.load(open(sys.argv[2]))
-print(" ".join(sorted(k for k, v in old.items() if k.endswith("File") and v and not new.get(k))))
-' "$published_meta" "$meta")"
+retired = set(sys.argv[3].split())
+print(" ".join(sorted(k for k, v in old.items()
+                      if k.endswith("File") and v and k not in retired and not new.get(k))))
+' "$published_meta" "$meta" "$(python3 "$(dirname "$0")/prune-manifest.py" --retired "$published_meta" | tr '\n' ' ')")"
   if [ -n "$dropped" ]; then
     echo "error: the published manifest declares files this one does not: $dropped" >&2
     echo "       Publishing would make den-atlas delete them." >&2
     echo "" >&2
-    # metadataFile is the one dropped key `finalize` CANNOT restore — it is the key finalize removes.
-    # DatasetMeta owns it, and an owned key the struct omits always wins the merge, so every finalize
-    # strips it and only `metadata` writes it back. Advising a re-run of finalize here printed
-    # instructions that reproduce this identical error, leaving DEN_ALLOW_DROPPING_BLOBS=1 as the only
-    # exit — and that override is exactly what makes atlas-dataset-sync delete the sidecar. Forgetting
-    # `metadata` after a finalize is the most-warned-about slip in this pipeline, so it is also the
-    # likeliest way to arrive here.
-    # ONE finalize step, then metadata. Every key here except metadataFile is restored the same way —
-    # `finalize` merges unowned keys forward from the manifest at the target path — so splitting them into a
-    # premise/facets step and a separate catch-all printed the SAME two commands twice, the second numbered
-    # after the metadata step it would then undo. And metadata must come last, because finalize strips
-    # metadataFile; a recipe that ends on finalize refuses again on the next publish.
-    merge_forward=""
-    for key in $dropped; do
-      case "$key" in
-        metadataFile) : ;;
-        *) merge_forward="$merge_forward $key" ;;
-      esac
-    done
-
-    # metadata is needed when the key was dropped, and ALSO whenever a finalize is prescribed while the
-    # manifest still declares a sidecar — that finalize is about to remove it.
-    needs_metadata=no
-    case " $dropped " in *" metadataFile "*) needs_metadata=yes ;; esac
-    if [ "$needs_metadata" = no ] && [ -n "$merge_forward" ]; then
-      # `if`, not `a && b`: as the last command in a branch, a failing && list is that branch's status and
-      # would abort the whole script under set -e.
-      if grep -q '"metadataFile"' "$meta"; then needs_metadata=yes; fi
-    fi
-
-    echo "       Fix, in this order:" >&2
+    # The recipe that used to stand here — copy the published manifest back, re-run `finalize`, then
+    # `metadata` — restored the keys that are now retired, so following it would reinstate a declaration the
+    # prune removes on the next line. What is left is the store, and the store has one producer.
+    echo "       Every retired blob is already filtered out above, so what remains is an artifact the" >&2
+    echo "       release still carries — in practice the store. Build it, which also declares it:" >&2
     echo "" >&2
-    step=1
-    if [ -n "$merge_forward" ]; then
-      echo "       $step. These have no producer in this repo —$merge_forward. They survive only by being" >&2
-      echo "          merged forward, so copy the PUBLISHED MANIFEST (not the blobs) into $DIR and re-run" >&2
-      echo "          finalize, which carries every unowned key across in one pass:" >&2
-      echo "" >&2
-      echo "             gh release download data-latest -R $REPO -p dataset.meta.json -O $DIR/dataset.meta.json --clobber" >&2
-      echo "             <taxonomy-backfill> finalize --out-dir $DIR" >&2
-      echo "" >&2
-      echo "          (Those blobs must also be in $DIR, or this script's local check will say so.)" >&2
-      echo "" >&2
-      step=$((step + 1))
-    fi
-    if [ "$needs_metadata" = yes ]; then
-      echo "       $step. metadataFile: run the metadata step, which is what writes it. finalize cannot —" >&2
-      echo "          finalize is the command that REMOVES it, so this has to come last." >&2
-      echo "" >&2
-      echo "             <taxonomy-backfill> metadata --out-dir $DIR" >&2
-      echo "" >&2
-      echo "          If labels and vectors did not change then datasetVersion did not either, the existing" >&2
-      echo "          sidecar still applies, and --skip-fetch re-patches from it with no TMDB spend:" >&2
-      echo "" >&2
-      echo "             <taxonomy-backfill> metadata --skip-fetch --out-dir $DIR" >&2
-      echo "" >&2
-    fi
-
+    echo "          python3 scripts/v2/build_store.py … --out $DIR/den-<version>.store --stamp-meta $meta" >&2
+    echo "" >&2
     echo "       If dropping them is deliberate, set DEN_ALLOW_DROPPING_BLOBS=1." >&2
     [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
     echo "       DEN_ALLOW_DROPPING_BLOBS=1 — continuing." >&2
@@ -338,11 +304,11 @@ fi
 
 # 3) BLOBS — driven by the MANIFEST, not by a parallel list of globs.
 #
-# The globs above decide what is *worth looking at*; the manifest decides what actually ships. When those
+# The glob above decides what is *worth looking at*; the manifest decides what actually ships. When those
 # two lists were separate, a declared file whose name matched no glob was hash-checked locally, never
 # uploaded, and still passed step 4 — because `data-latest` is a moving release and the previous publish's
 # same-named asset satisfies a name check. Consumers would then verify a stale blob against a new sha and
-# wedge. den-atlas already models a `metadataGzFile` that no glob here covers.
+# wedge. That is why this loop reads the manifest and the glob is only ever a second opinion.
 while read -r name _sha; do
   [ -z "$name" ] && continue
   echo "→ $name"
@@ -362,7 +328,10 @@ done < "$manifest_files"
 # producer, and the guards will cover it.
 #
 # Assets already on the release are NOT removed by this (a publish only ever adds or clobbers). Clearing
-# the ones that predate this rule is a one-off, done by hand.
+# the ones that predate this rule is a one-off, done by hand — and that includes the artifacts the prune
+# retires: the first store-only publish stops NAMING labels/vectors/metadata/premise/facets, it does not
+# delete them from `data-latest`. Consumers stop fetching them (they follow the manifest), and the assets
+# are deleted by hand afterwards with `gh release delete-asset`.
 for f in "${blobs[@]}"; do
   base="$(basename "$f")"
   grep -q "^$base " "$manifest_files" && continue

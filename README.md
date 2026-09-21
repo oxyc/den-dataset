@@ -28,26 +28,31 @@ still matches the serving embedder, is in `docs/OPERATE.md` — not repeated her
 Only what `dataset.meta.json` NAMES is published. A file the manifest does not declare has no hash, no
 record count and no producer, so no publish guard can see it — it is skipped rather than uploaded.
 
-| blob | records | raw | served | what it is | read by |
-|---|---|---|---|---|---|
-| `corpus-<ver>.jsonl.gz` | 47,529 | — | 40.4M | **source of truth** — every per-title signal, one JSON object per line | humans; the store build |
-| `corpus-<ver>-entities.json.gz` | 162,812 | — | 3.6M | Q-id → name for every entity the corpus references | humans; the store build |
-| `vectors-bge-m3.bin` | 47,539 | 48.7M | 48.7M | the **main index** — Wikidata facts + our tags + the Wikipedia plot | atlas, TV app |
-| `vectors-premise.bin` | 38,532 | 45.6M | 45.6M | the **premise index** — embedded structural tags, no proper nouns | atlas |
-| `rail-facets-<ver>.json` | 47,529 | 49.9M | 6.0M | 12 narrative facets, `__world`, 75 nouls, 17 critique axes | atlas (More Like This) |
-| `facts-<ver>.json` | 47,618 | 43.5M | 10.8M | CC0 Wikidata facts per title | atlas (`/recommend`, people search) |
-| `labels-premise.json` | 44,531 | 16.4M | 0.7M | premise tags, the row order `vectors-premise.bin` aligns to | atlas |
-| `labels-t02.json` | 47,539 | 11.8M | 0.7M | primaryGenre + subgenres + moods + `animated` | atlas, TV app |
-| `metadata-<ver>.json` | 47,539 | 5.9M | 1.8M | tmdbId → title + posterPath + year | atlas (a card with no TMDB call) |
-| `plot-facets-<ver>.json` | 5,336 | 1.6M | 0.1M | per-title plot facets | atlas |
-| `facets.bin` | 47,539 | 0.6M | 0.6M | country / language / year facets | atlas (attribute search) |
+`data-latest` carries **two files** (oxyc/den#113):
 
-**Where this is going.** The nine per-title artifacts below the corpus are being replaced by it: they are
-all one row per title, keyed identically, and nothing checked they agreed — which is how eleven titles
-(House of the Dragon and Moon Knight among them) sat in `facts` and `labels` but not in `rail-facets` for a
-day, with no error anywhere. The end state is the corpus JSONL as the inspectable source of truth, a
-**generated binary store** that den-atlas mmaps, and the two vector blobs flat. `facts-slim` is retired: it
-dropped `composers`, `cinematographers`, `narrativeLocations` and `mainSubjects` while saving only 17%.
+| blob | records | bytes | what it is | read by |
+|---|---|---|---|---|
+| `den-<ver>.store` | 47,618 | 135M | EVERYTHING: facts, labels, cards, facets, rail facets, the entity table, alias titles, and both vector matrices as sections | den-atlas, which mmaps it |
+| `dataset.meta.json` | — | <1K | the descriptor: version, embedder, dims, count, quantization, and the store's name/sha/size/rows | den-atlas |
+
+The corpus ships separately, under its own `corpus-<ver>` tag, and is deliberately NOT in the serving
+manifest — `fetch-dataset.sh` pulls every `*File` key, so naming it there would make the box download 44 MB
+it never reads:
+
+| blob | records | bytes | what it is | read by |
+|---|---|---|---|---|
+| `corpus-<ver>.jsonl.gz` | 47,529 | 40.4M | **source of truth** — every per-title signal, one JSON object per line | humans; the store build |
+| `corpus-<ver>-entities.json.gz` | 162,812 | 3.6M | Q-id → name for every entity the corpus references | humans; the store build |
+
+**What was published until 2026-09, and is not any more.** `vectors-bge-m3.bin`, `vectors-premise.bin`,
+`labels-t02.json`, `labels-premise.json`, `metadata-<ver>.json`, `facets.bin`, `facts-<ver>.json`,
+`rail-facets-<ver>.json`, `plot-facets-<ver>.json`, every `.gz` twin. The store carries what they held.
+They are still BUILT — they are the store's inputs and they stay in the out-dir — but `publish-dataset.sh`
+prunes their keys out of the manifest, so nothing fetches them. They were all one row per title, keyed
+identically, and nothing checked they agreed: eleven titles (House of the Dragon and Moon Knight among
+them) sat in `facts` and `labels` but not in `rail-facets` for a day, with no error anywhere. `facts-slim`
+is separately retired: it dropped `composers`, `cinematographers`, `narrativeLocations` and `mainSubjects`
+while saving only 17%.
 
 ### A corpus row
 
@@ -162,9 +167,11 @@ aggregation + embeds + quantizes; `finalize` writes the shipped artifacts.
 
 ## `finalize` outputs
 
-- `labels-<tax>.json` — the derived labels (no raw TMDB text; asserted).
-- `labels-<tax>.json.gz` — gzip of the labels blob. `scripts/publish-dataset.sh` regenerates it, and the
-  premise-labels and metadata variants, from the blobs on every publish (see its step 0).
+These are now INPUTS to the store build, not published artifacts (see the table above). They stay in the
+out-dir; `publish-dataset.sh` prunes their keys out of the manifest.
+
+- `labels-<tax>.json` — the derived labels (no raw TMDB text; asserted). Also what the publish-time quality
+  gate scores against the golden set — it reads this file by name, not from the manifest.
 - `vectors-bge-m3.bin` — `[int32 count][int32 dim]` little-endian header + `count × dim` int8 rows (dim 1024
   for the bge-m3 build; `--embedding-version` overrides the label for an FNV run).
 - `dataset.meta.json` — the manifest the server reads (dataset version, hashes, byte counts, timestamps).

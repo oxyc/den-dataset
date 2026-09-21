@@ -14,6 +14,11 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PUBLISH="$HERE/publish-dataset.sh"
+# The publisher's ownership guard resolves producer paths and `git ls-files` against the working directory,
+# so the script only works from the repo root. Run from anywhere else, every case here failed on the
+# ownership guard instead of the thing it tests — a test that passes only when it is invoked one particular
+# way is a test that will one day be believed for the wrong reason.
+cd "$HERE/.." || exit 1
 pass=0
 fail=0
 
@@ -50,11 +55,10 @@ esac
 exit 0
 STUB
   chmod +x "$BIN/gh"
-  # A real out-dir holds more than the manifest names, and the script has a floor on how many blobs its
-  # globs must find before it will publish at all. Without something here, removing one manifested file
-  # trips that floor instead of the per-file check the case is about.
+  # A real out-dir holds the store's INPUTS beside it — labels, vectors, the cc0 experimental pair — and
+  # none of them publish any more. They are here so the cases below prove that: what lands on the release
+  # is the store and the meta, with these sitting right next to them untouched.
   printf 'unmanifested' > "$DIR/vectors-bge-m3.bin"
-  # The cc0 experimental pair, which really does sit in out-dirs beside the shipped one.
   printf '{"records":[]}' > "$DIR/labels-cc0.json"
   printf 'unmanifested' > "$DIR/vectors-cc0.bin"
   PUBLISHED_META="$WORK/published.json"
@@ -105,7 +109,9 @@ import json, sys
 path, version, labels_sha, store_sha, records, extra = sys.argv[1:7]
 meta = {
     "datasetVersion": version,
+    "taxonomyVersion": "t02",
     "count": int(records),
+    # Declared the way `finalize` still declares them — the publisher is what stops publishing them.
     "labelsFile": "labels-t02.json",
     "labelsSha256": labels_sha,
     "labelsRecords": int(records),
@@ -134,8 +140,10 @@ setup
 write_meta
 publish_baseline
 if run_publish; then
-  if grep -qx "labels-t02.json" "$UPLOADS" && grep -qx "dataset.meta.json" "$UPLOADS"; then
-    ok "a manifest that describes its out-dir publishes, blobs then meta"
+  # THE CONTRACT (oxyc/den#113): the store and the manifest that describes it, and nothing else. The
+  # labels this fixture's manifest declares are in the out-dir, hashed correctly, and must NOT go out.
+  if [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store dataset.meta.json " ]; then
+    ok "a publish uploads the store and the meta, in that order, and nothing else"
   else
     bad "the happy path uploaded $(tr '\n' ' ' < "$UPLOADS")"
   fi
@@ -145,8 +153,46 @@ if run_publish; then
   else
     bad "the meta was not uploaded last"
   fi
+  if grep -q "labelsFile" "$DIR/dataset.meta.json"; then
+    bad "the published meta still declares the labels"
+  else
+    ok "the meta it publishes no longer declares a blob the release does not carry"
+  fi
 else
   bad "the happy path failed: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
+# --- the cutover: every retired key goes, and none of them reads as a dropped blob ------------------
+#
+# The publish that changes what `data-latest` carries is the one to get right. The published manifest still
+# declares labels, vectors, metadata, premise and facets; this one declares none of them. That must NOT be
+# reported as a dropped blob, because the operator's only way past that guard is DEN_ALLOW_DROPPING_BLOBS=1
+# — which ALSO switches off the record-count guard and the "could not read the published manifest" guard,
+# making the most consequential publish in the pipeline's history the one that checked the least.
+
+setup
+write_meta aaaaaaaaaaaa 10 '{"metadataFile":"metadata-aaaaaaaaaaaa.json","metadataSha256":"unused",
+  "metadataRecords":10,"premiseVectorsFile":"vectors-premise.bin","premiseVectorsSha256":"unused",
+  "premiseCount":10,"premiseDims":1024,"premiseEmbeddingModel":"bge-m3-premise",
+  "facetsFile":"facets.bin","facetsSha256":"unused","labelsGzFile":"labels-t02.json.gz"}'
+publish_baseline
+write_meta aaaaaaaaaaaa 10   # this one declares only the labels finalize writes, and the store
+if run_publish; then
+  if [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store dataset.meta.json " ]; then
+    ok "the first store-only publish goes out with no override, and carries only the store"
+  else
+    bad "the cutover uploaded $(tr '\n' ' ' < "$UPLOADS")"
+  fi
+  # The rollback. Both copies of the old key set are otherwise gone — the prune rewrote the local manifest
+  # and the publish clobbered the one on the release — while the blobs themselves are still on the release.
+  if grep -q "labelsFile" "$DIR/dataset.meta.json.prepublish"; then
+    ok "the manifest it replaced is kept beside it, so the cutover can be rolled back"
+  else
+    bad "no usable pre-publish manifest was kept"
+  fi
+else
+  bad "the cutover was refused: $(tail -3 "$WORK/err.log")"
 fi
 teardown
 
@@ -158,7 +204,7 @@ publish_baseline
 python3 - "$DIR/dataset.meta.json" <<'PY'
 import json, sys
 meta = json.load(open(sys.argv[1]))
-meta["labelsSha256"] = "0" * 64
+meta["storeSha256"] = "0" * 64
 json.dump(meta, open(sys.argv[1], "w"))
 PY
 if run_publish; then
@@ -176,7 +222,7 @@ teardown
 setup
 write_meta
 publish_baseline
-rm "$DIR/labels-t02.json"
+mv "$DIR/den-aaaaaaaaaaaa.store" "$DIR/den-cccccccccccc.store"
 if run_publish; then
   bad "a manifest naming a missing blob published anyway"
 else
@@ -186,16 +232,40 @@ else
 fi
 teardown
 
-# --- dropping a key the published manifest declares -----------------------------------------------
+# --- an out-dir with no store at all ---------------------------------------------------------------
 #
-# The failure this exists for: finalizing into a FRESH dir emits a manifest that simply does not mention
-# the blobs nothing in this repo produces, and `atlas-dataset-sync.sh` DELETES local blobs the new meta
-# stops naming — so a publish takes features dark on den-atlas with no error on either side.
+# The store is the only artifact now, so an out-dir without one has nothing to publish. Before, the floor
+# counted blobs and a dir full of inputs satisfied it — a publish could go out carrying no store.
 
 setup
-write_meta aaaaaaaaaaaa 10 '{"premiseVectorsFile":"vectors-premise.bin","premiseVectorsSha256":"unused"}'
+write_meta
 publish_baseline
-write_meta aaaaaaaaaaaa 10   # …and now without the premise key
+rm "$DIR"/den-*.store
+if run_publish; then
+  bad "an out-dir with no store published something"
+else
+  grep -q "no den-<version>.store" "$WORK/err.log" \
+    && ok "an out-dir holding the inputs but no store is refused" \
+    || bad "refused, but not for the missing store: $(tail -2 "$WORK/err.log")"
+fi
+teardown
+
+# --- dropping a key the published manifest declares -----------------------------------------------
+#
+# The failure this exists for: `atlas-dataset-sync.sh` DELETES local blobs the new meta stops naming, so a
+# publish takes a feature dark on den-atlas with no error on either side. With one artifact left, the key
+# that can go missing is the store's, and a manifest with no store is a dataset with nothing in it.
+
+setup
+write_meta
+publish_baseline
+python3 - "$DIR/dataset.meta.json" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+for key in ("storeFile", "storeSha256", "storeRecords"):
+    meta.pop(key)
+json.dump(meta, open(sys.argv[1], "w"))
+PY
 if run_publish; then
   bad "a manifest dropping a published key went out"
 else
@@ -232,12 +302,12 @@ teardown
 setup
 write_meta aaaaaaaaaaaa
 publish_baseline
-cp "$DIR/den-aaaaaaaaaaaa.store" "$DIR/facts-bbbbbbbbbbbb.json"
-python3 - "$DIR/dataset.meta.json" "$DIR/facts-bbbbbbbbbbbb.json" <<'PY'
+cp "$DIR/den-aaaaaaaaaaaa.store" "$DIR/den-bbbbbbbbbbbb.store"
+python3 - "$DIR/dataset.meta.json" "$DIR/den-bbbbbbbbbbbb.store" <<'PY'
 import hashlib, json, sys
 meta = json.load(open(sys.argv[1]))
-meta["factsFile"] = "facts-bbbbbbbbbbbb.json"
-meta["factsSha256"] = hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest()
+meta["storeFile"] = "den-bbbbbbbbbbbb.store"
+meta["storeSha256"] = hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest()
 json.dump(meta, open(sys.argv[1], "w"))
 PY
 if run_publish; then

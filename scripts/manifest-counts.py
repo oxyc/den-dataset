@@ -16,7 +16,8 @@ baseline; `--compare` reads the published manifest's stamps and prints any blob 
 
 ## Why an absolute count is not enough
 
-`--compare` also watches COVERAGE — a blob's records as a share of `labelsRecords`. An absolute count only
+`--compare` also watches COVERAGE — a blob's records as a share of the largest published artifact's (see
+DENOMINATOR; it was `labelsRecords`, it is `storeRecords`). An absolute count only
 falls when rows are lost; it does not move at all when a blob is simply never rebuilt while the corpus
 grows around it. `facets.bin` fell 999 titles behind that way: generated once, carried forward by every
 publish since, its own count never dropping.
@@ -60,10 +61,17 @@ MUST_COUNT = ("storeFile", "labelsFile")
 STORE_MAGIC = b"DENSTOR1"
 FACETS_MAGIC = b"DFI2"
 
-# Coverage is measured against the labels, which are the closest thing the pipeline has to "the titles the
-# corpus knows". The store deliberately holds MORE than this — it is the union of facts and the pass — so
-# its coverage reads above 100%. That is fine: the guard watches for a FALL, not for a ceiling.
-DENOMINATOR = "labelsFile"
+# Coverage is a blob's records as a share of the largest published one. It used to be measured against the
+# labels; `data-latest` stopped publishing them (oxyc/den#113 — the store carries what they held), and a
+# denominator no manifest names is a guard that returns nothing and says nothing, which is the shape of
+# every failure in this file's docstring. So it is the store.
+#
+# COVERAGE IS DORMANT WHILE THE STORE IS THE ONLY PUBLISHED ARTIFACT. It answers "did this blob keep up
+# with the corpus", and with one blob there is nothing to compare it against — the loop below skips the
+# denominator itself. What still guards the store is the ABSOLUTE count above (`storeRecords` may not fall)
+# and `MUST_COUNT`, which turns an unreadable store into a refusal. Publish a second artifact beside the
+# store and it is covered from its second publish, with no change here.
+DENOMINATOR = "storeFile"
 
 # The FRACTION of its coverage a blob may keep before the publish is refused — i.e. it may lose 2% of
 # whatever share it had, not 2 points of the whole corpus.
@@ -75,11 +83,10 @@ DENOMINATOR = "labelsFile"
 # un-rebuilt plot-facets blob drops 1.87 points and passes. A blob covering under 2% of the corpus could
 # never trip a 2-point rule even by going to zero. As a ratio the threshold is the same for all of them.
 #
-# THE NUMBER AN OPERATOR NEEDS: an un-rebuilt blob keeps `1/(1+g)` of its share when the labels grow by
-# `g`, so it trips as soon as the labels grow by more than **2.041%**. From today's 47,539 that is any
-# publish past 48,510, about +971 titles — and it fires for EVERY blob behind the labels at once, which
-# today means `facetsFile` (81.1%), `premiseLabelsFile` (93.7%) and `plotFacetsFile` (11.2%). A publish
-# that grows the corpus meaningfully therefore has to rebuild all three, or say why not.
+# THE NUMBER AN OPERATOR NEEDS: an un-rebuilt blob keeps `1/(1+g)` of its share when the denominator grows
+# by `g`, so it trips as soon as the denominator grows by more than **2.041%** — and it fires for every
+# blob behind it at once, so a publish that grows the corpus meaningfully has to rebuild them all, or say
+# why not. Nothing is behind it today: the store is the only published artifact (see DENOMINATOR).
 COVERAGE_RATIO = 0.98
 
 # A vector blob is an 8-byte header then `rows * dims` int8s, so its row count is arithmetic.
@@ -188,6 +195,12 @@ def inconsistencies(meta, counts):
             if key.endswith(suffix) and key[: -len(suffix)] not in named:
                 out.append(f"{key}: describes {key[: -len(suffix)]}File, which the manifest does not name")
 
+    # DORMANT, and worth knowing: `count` is what den-atlas serves to the app as the dataset's size, and it
+    # means "titles carrying labels" — `labelsRecords`, 47,539 on the live manifest, not the store's 47,618
+    # rows (the store is the union of facts and the pass, so it holds more). With the labels no longer
+    # published there is nothing here to check it against, and asserting it against `storeRecords` instead
+    # would refuse every publish over a difference that is correct. It is an unvalidated claim until
+    # whatever reads it decides which number it wants.
     claim("count", meta.get("count"), counts.get("labelsFile"), "labelsFile")
     claim("premiseCount", meta.get("premiseCount"), counts.get("premiseLabelsFile"), "premiseLabelsFile")
     # Spelled out rather than built from a prefix: `f"{prefix}dims"` gives `premisedims`, which no
