@@ -51,13 +51,26 @@ meta="$DIR/dataset.meta.json"
 # more — atlas reads the store from disk and mmaps it, and a compressed file cannot be mapped.
 retired="$(python3 "$(dirname "$0")/prune-manifest.py" --retired "$meta")"
 if [ -n "$retired" ]; then
-  # The prune rewrites the manifest IN PLACE, and the publish then clobbers the one on the release — so
-  # after a store-only publish neither copy of the old key set exists any more. This is the rollback: the
-  # retired blobs are still on `data-latest` (a publish only adds or clobbers, it never deletes an asset),
-  # so re-uploading this file restores the previous contract exactly.
-  cp "$meta" "$meta.prepublish"
-  echo "dropping from the manifest (the store carries what they held; the previous manifest is kept at"
-  echo "$(basename "$meta").prepublish, which is what a rollback re-uploads):"
+  # Keep the FIRST pre-cutover manifest and never clobber it.
+  #
+  # `facets*`, `premise*` and the premise scalars are UNOWNED: nothing in this repo produces them, and
+  # they survived only because `finalize` merges over whatever meta was already in the out-dir. Once a
+  # store-only publish has pruned them they are gone from the out-dir, so the next `finalize` re-owns
+  # labels/vectors/metadata, makes `retired` non-empty again, and a `cp` here would overwrite the only
+  # copy of those keys with a manifest that never had them. First write wins: that is the one holding the
+  # contract that cannot be regenerated.
+  if [ -e "$meta.prepublish" ]; then
+    echo "keeping the existing $(basename "$meta").prepublish — it holds keys nothing can regenerate"
+  else
+    cp "$meta" "$meta.prepublish"
+  fi
+  # NOT a rollback on its own. It declares the LOCAL blob checksums, and a store-only publish uploads
+  # none of those blobs — so re-uploading it alone hands the box a manifest whose shas do not match the
+  # assets, and every sync tick then dies on `sha256sum -c`. It is exact only while the out-dir's blobs
+  # are byte-identical to what is on the release. The rollback that works is the full asset restore in
+  # oxyc/den `deploy/README.md` — blobs first, manifest last.
+  echo "dropping from the manifest (the store carries what they held; the pre-cutover manifest is kept"
+  echo "at $(basename "$meta").prepublish — for its KEYS, not as a rollback; see deploy/README.md):"
   echo "$retired" | sed 's/^/  /'
 fi
 python3 "$(dirname "$0")/prune-manifest.py" --prune "$meta"

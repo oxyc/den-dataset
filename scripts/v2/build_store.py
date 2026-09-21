@@ -197,8 +197,28 @@ def title_labels(row):
     empty list from the other's would emit a combination neither pass produced. It costs nothing on this
     corpus: all 44,528 titles both passes labelled agree byte-identically on all four fields, so this rule
     and any other give the same bytes for them, and the union is a pure addition of the 3.
+
+    That agreement is a property of TODAY'S corpus, not a guarantee, so `disagreement()` below counts it
+    and the build refuses rather than quietly choosing. A repass where the passes diverge is a decision
+    about which labelling ships, and it should be made by someone rather than by the order of an `or`.
     """
     return (row.get("labels") or row.get("premiseLabels")) or {}
+
+
+#: The fields a pass answers — the whole of what `title_labels` picks between.
+LABEL_FIELDS = ("primaryGenre", "subgenres", "moods", "animated")
+
+
+def disagreement(row):
+    """The fields the two passes answer differently for one title, or `()` when they agree or only one
+    answered.
+
+    `title_labels` silently prefers the plot record, so this is the only thing that can see a divergence
+    at all."""
+    plot, premise = row.get("labels"), row.get("premiseLabels")
+    if not plot or not premise:
+        return ()
+    return tuple(f for f in LABEL_FIELDS if plot.get(f) != premise.get(f))
 
 
 def labelled(entries, strings, what, key):
@@ -359,12 +379,15 @@ def main():
     ap.add_argument("--vectors", required=True, help="vectors-bge-m3.bin")
     ap.add_argument("--vector-labels", required=True, help="labels-t02.json — the row order the vectors align to")
     ap.add_argument("--premise-vectors", help="vectors-premise.bin")
-    ap.add_argument("--premise-labels",
+    ap.add_argument("--premise-labels", required=True,
                     help="labels-premise.json — the row order vectors-premise.bin aligns to, and the "
                          "premise pass's key set. Nothing else records that order, so this stays a BUILD "
                          "input after it stops being a published artifact. The premise LABELS themselves "
                          "come from the corpus `premiseLabels` field, which consolidate_corpus.py joined "
-                         "from this same file.")
+                         "from this same file. REQUIRED since the label sections became the union of both "
+                         "passes: the corpus supplies the premise labels either way, so without this the "
+                         "count assert compares a union against the plot artifact alone and fails naming "
+                         "the wrong file.")
     ap.add_argument("--enriched",
                     help="the enriched/ batch directory, for TMDB vote counts. Without it the `votes` "
                          "section is all zeros and atlas cannot order a browse row by popularity.")
@@ -537,6 +560,7 @@ def main():
     depicts, audience = bytearray(), bytearray()
     orig_lang = []
     with_labels = with_plot_labels = with_premise = with_cards = 0
+    divergent = []
 
     for key in keys:
         r = rows[key]
@@ -550,6 +574,9 @@ def main():
             with_plot_labels += 1
         if r.get("premiseLabels"):
             with_premise += 1
+        fields = disagreement(r)
+        if fields:
+            divergent.append((key, fields))
         t = facts.get("titles") or {}
         card = cards.get(key) or {}
         card_title.append(strings.id(card.get("title") or t.get("en") or t.get("orig")))
@@ -867,6 +894,15 @@ def main():
     ):
         if got != want:
             sys.exit(f"{what}: {got} in the store, {want} in {source} — they must agree exactly")
+    # Where both passes labelled a title, `title_labels` takes the plot record whole. That is safe only
+    # while the passes agree, which they do today for all 44,528 such titles. If a repass makes them
+    # diverge, which labelling ships is a decision, and the `or` in `title_labels` would make it silently
+    # by preferring whichever came first. Refuse instead, and name the titles.
+    if divergent:
+        shown = ", ".join(f"{k} ({'/'.join(f)})" for k, f in divergent[:5])
+        sys.exit(f"the two labelling passes disagree on {len(divergent)} titles: {shown}"
+                 f"{' …' if len(divergent) > 5 else ''} — `title_labels` would silently ship the plot "
+                 f"record. Decide which pass wins for these and say so in the writer.")
     # Unresolved references, named and counted. A reference the entity table cannot resolve is dropped —
     # that is unavoidable when the table is short — but dropping it WITHOUT SAYING SO is how 2,680
     # franchise links disappeared into a section that looked perfectly well formed.

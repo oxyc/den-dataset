@@ -69,8 +69,13 @@ LIVE = {
 }
 
 # What has to survive: the descriptor den-atlas serves, and the one artifact it reads.
+#
+# `count` is deliberately NOT here. It counted the titles the LABELS artifact carried (47,539), never the
+# store's rows (47,618), and atlas served it to the app as though it described the corpus. Its premise twin
+# `premiseCount` was retired for describing nothing; keeping the plot one would reinstate the same unowned
+# number on the other side. `storeRecords` is the row count, and unlike `count` it is checked.
 KEPT = {
-    "builtAt", "count", "datasetVersion", "dims", "embedderMaxTokens", "embedderRuntime",
+    "builtAt", "datasetVersion", "dims", "embedderMaxTokens", "embedderRuntime",
     "embeddingModel", "lastModifiedHttp", "maxBatchId", "quantization", "storeBytes", "storeFile",
     "storeRecords", "storeSha256", "taxonomyVersion",
 }

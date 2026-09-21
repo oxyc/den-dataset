@@ -264,6 +264,28 @@ class PremiseOnlyTitlesKeepTheirLabels(unittest.TestCase):
                 self.build(out, stripped)
         self.assertIn("labelled titles", str(caught.exception))
 
+    def test_the_two_passes_disagreeing_is_fatal_rather_than_silently_resolved(self):
+        """`title_labels` takes the plot record WHOLE where both passes answered, which is safe only while
+        they agree — and they do today, for all 44,528 such titles. If a repass ever makes them diverge,
+        which labelling ships is a decision, and the `or` would make it by preferring whichever field came
+        first. The build refuses and names the titles instead of choosing quietly.
+
+        movie:1 is plot-labelled `Drama` in the fixture; give it a premise record calling it `Horror`."""
+        clashing = [
+            dict(t, premiseLabels={"primaryGenre": "Horror", "animated": False,
+                                   "subgenres": [{"label": "Prison", "confidence": 0.7}],
+                                   "moods": [{"label": "Bleak", "confidence": 0.55}]})
+            if t["key"] == "movie:1" else t
+            for t in self.TITLES
+        ]
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, clashing)
+        message = str(caught.exception)
+        self.assertIn("disagree", message)
+        self.assertIn("primaryGenre", message)
+        self.assertIn("movie:1", message)
+
 
 class StampsTheManifest(unittest.TestCase):
     """`--stamp-meta`. Without it the store is written and nothing names it: `publish-dataset.sh`

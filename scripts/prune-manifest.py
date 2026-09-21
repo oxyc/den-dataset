@@ -41,7 +41,15 @@ PUBLISHED = ("store",)
 # and geometry, and `premiseEmbeddingModel` names the space it was embedded in. With no premise blob
 # published they describe nothing — and den-atlas served `premiseCount` to the app for months while it sat
 # a generation behind the file it described, which is what an unowned number does.
-RETIRED_SCALARS = ("premiseCount", "premiseDims", "premiseEmbeddingModel")
+#
+# `count` goes with them, for the identical reason its premise twin does: it is the number of titles the
+# LABELS artifact carried (47,539), not the store's rows (47,618), and atlas served it to the app as though
+# it described the corpus. Keeping it while retiring `premiseCount` would reinstate on the plot side the
+# exact failure `manifest-counts.py` was written about. `storeRecords` is the row count, and it is checked.
+#
+# `dims`, `embeddingModel` and `quantization` STAY: they describe the vector sections inside the store,
+# which is published, and the app's `/embed` has to produce query vectors in that same space.
+RETIRED_SCALARS = ("premiseCount", "premiseDims", "premiseEmbeddingModel", "count")
 
 # Every suffix a per-blob claim can carry.
 BLOB_SUFFIXES = ("File", "Sha256", "Bytes", "Records")
