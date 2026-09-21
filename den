@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""den — the entry point. It dispatches; it does not implement.
+
+    den stages                     what runs, in what order, and what each stage reads and writes
+    den stage <name> [options]     run one
+    den run [options]              run them all, in order
+
+Options (both run forms):
+
+    --out-dir DIR                  where artifacts are read and written  (default: out)
+    --dataset-version VER          the version the filenames carry       (required)
+    --stamp-meta PATH              the manifest to declare the outputs in
+    --set NAME=PATH                point one artifact at a path outright, repeatable
+
+The work is in `pipeline/`: `pipeline/__init__.py` holds the order, and each stage module holds its own
+inputs and outputs. Anything this file grows beyond argument parsing belongs there instead.
+"""
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import pipeline  # noqa: E402
+
+
+def describe():
+    """The pipeline, printed. The answer to all three questions the tree used to need a search for."""
+    for number, module in enumerate(pipeline.stages(), start=1):
+        print(f"{number}. {module.NAME}")
+        for role, declared in (("reads ", module.INPUTS), ("writes", module.OUTPUTS)):
+            for artifact in declared:
+                optional = "" if artifact.required else "  (optional)"
+                print(f"     {role}  {artifact.name:<16} {artifact.filename:<32} "
+                      f"{artifact.producer}{optional}")
+    return 0
+
+
+def context(args):
+    overrides = {}
+    for pair in args.set:
+        if "=" not in pair:
+            raise pipeline.StageError(f"--set wants NAME=PATH, got {pair!r}")
+        name, path = pair.split("=", 1)
+        overrides[name] = path
+    return pipeline.Context(out_dir=args.out_dir, dataset_version=args.dataset_version,
+                            overrides=overrides, stamp_meta=args.stamp_meta or "")
+
+
+def execute(module, ctx):
+    print(f"==> {module.NAME}", file=sys.stderr)
+    made = module.run(ctx)
+    print(f"==> {module.NAME}: {made}", file=sys.stderr)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="den", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("stages", help="list the pipeline")
+
+    def with_options(sub):
+        sub.add_argument("--out-dir", default="out")
+        sub.add_argument("--dataset-version", required=True)
+        sub.add_argument("--stamp-meta")
+        sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
+        return sub
+
+    with_options(commands.add_parser("run", help="run every stage, in order"))
+    with_options(commands.add_parser("stage", help="run one stage")).add_argument("name")
+
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "stages":
+            return describe()
+        ctx = context(args)
+        for module in ([pipeline.stage(args.name)] if args.command == "stage" else pipeline.stages()):
+            execute(module, ctx)
+    except pipeline.StageError as refusal:
+        print(f"error: {refusal}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
