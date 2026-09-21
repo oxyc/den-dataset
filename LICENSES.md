@@ -48,16 +48,24 @@ can weigh it, and so that the CC BY-SA text itself — which is unambiguous — 
 The store is a **public** release asset on a public repo, so "redistribute" is literal here. What it
 carries that came from TMDB, named column by column:
 
-| column | rows | source |
-|---|---|---|
-| the key's `tmdbId` | 47,618 | TMDB |
-| `card_poster` | 47,534 | TMDB (a poster path) |
-| `card_title` | 47,618 | TMDB, with a Wikidata label as fallback |
-| `card_year` | 47,618 | TMDB |
-| `votes` | 47,547 | TMDB (`vote_count`) |
+| column | rows | source | |
+|---|---|---|---|
+| the key's `tmdbId` | 47,618 | TMDB | an identifier; stays |
+| `card_title` | 47,618 | TMDB, with a Wikidata label as fallback | goes (oxyc/den#118) |
+| `card_year` | 47,618 | TMDB | goes |
+| `votes` | 47,547 | TMDB (`vote_count`) | goes |
+| `card_poster` | 47,534 | TMDB (a poster path) | **removed from the writer; still in the live store** |
 
-Nothing else does. `genres` are Wikidata Q-ids mapped into TMDB's genre *id space* — the values are CC0
-and the vocabulary is TMDB's. No TMDB prose is redistributed at all: no overview, no tagline, no review.
+`card_poster` is the state to read carefully: `build_store.py` no longer emits it, but `data-latest` still
+carries the store built before that change, so the published artifact has it until the next publish. That
+publish cannot happen until den-atlas stops requiring the section — `cards_from_store` fetches it with `?`
+before it builds a single card, so a poster-less store costs the whole card map, not just the art.
+
+Nothing else is TMDB-sourced, and `build_store.py` is where that is enforced rather than asserted:
+`PROVENANCE` names the source of every section, `VENDOR_ALLOWED` is the list above, and a build whose
+sections are not exactly the declared set refuses to write. `genres` are Wikidata Q-ids mapped into TMDB's
+genre *id space* — the values are CC0 and the vocabulary is TMDB's. No TMDB prose is redistributed at all:
+no overview, no tagline, no review.
 Enrichment prose is sourced from Wikipedia specifically so that holds, and
 `scripts/v2/assert_compliance.py` proves from the batch files on disk that no TMDB prose reached a model.
 See `data/README.md`.

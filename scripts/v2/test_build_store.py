@@ -204,11 +204,13 @@ class StoreFixture:
     ]
 
     def build(self, out_dir, titles=None, plot_keys=("movie:1",), premise_keys=("movie:2",),
-              plot_labels=None, premise_labels=None, write_plot_vectors=None, stamp=None):
+              plot_labels=None, premise_labels=None, write_plot_vectors=None, stamp=None,
+              build_store=BUILD_STORE):
         """`*_keys` are the blob's OWN key column; `*_labels` the labels artifact's records, which
         default to the same thing. Passing them apart is how the key-set assert is exercised;
         `write_plot_vectors` swaps in a writer of another format. `stamp` asks the writer to record
-        what it read into that manifest."""
+        what it read into that manifest. `build_store` runs a wrapper around the real writer instead of
+        the writer itself — the only way to reach a guard that fires on the writer's own constants."""
         titles = self.TITLES if titles is None else titles
         plot_keys, premise_keys = list(plot_keys), list(premise_keys)
         plot_labels = plot_keys if plot_labels is None else list(plot_labels)
@@ -239,7 +241,7 @@ class StoreFixture:
 
         store = os.path.join(out_dir, "test.store")
         result = subprocess.run(
-            [sys.executable, BUILD_STORE,
+            [sys.executable, build_store,
              "--corpus", corpus,
              # Q100 carries an alias: `ent_alias_v` is one of the sections the writer refuses to ship empty.
              "--entities", dump("entities.json", dict(
@@ -248,9 +250,13 @@ class StoreFixture:
              "--facts", dump("facts.json", {"genreMap": {"Q1": {"movie": 18}},
                                             "records": [{"mediaType": t["mediaType"], "tmdbId": t["tmdbId"]}
                                                         for t in titles]}),
+             # The sidecar carries `posterPath` and the store must not: it is a TMDB artwork reference,
+             # and `ThePosterPathIsNotPublished` asserts it gets no further than this input.
              "--metadata", dump("metadata.json", {"records": [
-                 {"mediaType": "movie", "tmdbId": 1, "title": "Alpha", "year": 1999},
-                 {"mediaType": "movie", "tmdbId": 2, "title": "Beta", "year": 2001}]}),
+                 {"mediaType": "movie", "tmdbId": 1, "title": "Alpha", "posterPath": "/alpha.jpg",
+                  "year": 1999},
+                 {"mediaType": "movie", "tmdbId": 2, "title": "Beta", "posterPath": "/beta.jpg",
+                  "year": 2001}]}),
              # The plot pass labelled movie:1 only; the premise pass labelled movie:2 only.
              "--vectors", (write_plot_vectors or vectors)(os.path.join(out_dir, "plot.bin"), plot_keys, 7),
              "--vector-labels", dump("plot-labels.json", rows_file(plot_labels)),
@@ -847,3 +853,182 @@ class GatedFacetsReachTheStore(StoreFixture, unittest.TestCase):
         self.assertEqual(gates["axes"]["archetype"]["published"], 0)
         self.assertEqual(gates["axes"]["setting"]["published"], 1)
         self.assertIn("ending=unknown", gates["axes"]["ending"]["withheld"])
+
+
+#: A wrapper that loads the real writer, edits one of its constants, and runs it. `check_provenance`
+#: fires on the writer's own table, so nothing a test can put in the INPUTS reaches it — the table has
+#: to be the thing that moves.
+MUTATED_WRITER = """import importlib.util, sys
+spec = importlib.util.spec_from_file_location("build_store", {writer!r})
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+{mutation}
+mod.main()
+"""
+
+
+class EverySectionDeclaresWhereItsBytesCameFrom(StoreFixture, unittest.TestCase):
+    """`PROVENANCE` is total over the sections, and checked as a set at assembly.
+
+    The store is a PUBLIC release asset, so publishing it redistributes whatever it holds — and until
+    this table, a column carrying vendor-licensed content reached that asset by being added to the
+    writer and nothing else. Every other guard in this file checks a section against its SOURCE; none
+    of them could see a section that should not exist. See LICENSES.md and oxyc/den#118.
+    """
+
+    def mutated(self, out_dir, mutation):
+        """A writer with `mutation` applied to its module namespace, as a path to run."""
+        path = os.path.join(out_dir, "mutated_writer.py")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(MUTATED_WRITER.format(writer=BUILD_STORE, mutation=mutation))
+        return path
+
+    def test_the_table_names_exactly_the_sections_the_writer_writes(self):
+        """The invariant the build asserts, held against a store that was actually built — so the table
+        is checked against the bytes rather than against a reading of this file."""
+        mod = build_store_module()
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out)
+        self.assertEqual(
+            set(store.table), set(mod.PROVENANCE),
+            "the sections in the built store and the sections PROVENANCE declares have diverged. A "
+            "section with no entry is a column nothing reviewed; an entry with no section is a table "
+            "describing a store that does not exist.")
+
+    def test_a_section_with_no_declared_source_stops_the_build(self):
+        """The case this exists for, end to end: the writer emits a section the table does not know
+        about and the store is not written."""
+        with tempfile.TemporaryDirectory() as out:
+            writer = self.mutated(out, 'mod.PROVENANCE.pop("card_title")')
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, build_store=writer)
+            self.assertFalse(os.path.exists(os.path.join(out, "test.store")),
+                             "the refusal must come before the bytes are written")
+        message = str(caught.exception)
+        self.assertIn("card_title", message)
+        self.assertIn("declare no source", message)
+
+    def test_an_entry_for_a_section_that_is_not_written_stops_the_build(self):
+        """The other direction. A stale entry would let a removal look reviewed: the table would still
+        describe the column, and the allowlist below would still be granting permission for it."""
+        with tempfile.TemporaryDirectory() as out:
+            writer = self.mutated(out, 'mod.PROVENANCE["overview"] = "wikipedia"')
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, build_store=writer)
+        message = str(caught.exception)
+        self.assertIn("overview", message)
+        self.assertIn("not written", message)
+
+    def test_every_section_declares_one_of_the_named_sources(self):
+        """A source outside `SOURCES` is a section that looks declared and says nothing — the check
+        below reads `VENDOR_SOURCES` membership, so a typo'd `"tmdb "` would read as harmless."""
+        mod = build_store_module()
+        self.assertEqual(set(mod.PROVENANCE.values()) - mod.SOURCES, set())
+
+    def test_a_source_the_named_set_does_not_hold_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as out:
+            writer = self.mutated(out, 'mod.PROVENANCE["card_title"] = "tmdb "')
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, build_store=writer)
+        self.assertIn("is not one of", str(caught.exception))
+
+    def test_the_only_vendor_sourced_sections_are_the_ones_118_is_removing(self):
+        """The allowlist, held against the table. `card_title`, `card_year` and `votes` are what #118
+        has left to replace; everything else is Wikidata, Wikipedia, a model's answer over those, our
+        own bookkeeping, or an identifier. When the last of the three goes, this set is empty."""
+        mod = build_store_module()
+        vendor = {name for name, source in mod.PROVENANCE.items() if source in mod.VENDOR_SOURCES}
+        self.assertEqual(vendor, {"card_title", "card_year", "votes"})
+        self.assertEqual(vendor, mod.VENDOR_ALLOWED)
+        self.assertNotIn("imdb", vendor, "an id is a join key, not content")
+        self.assertNotIn("keys", vendor)
+
+    def test_a_vendor_sourced_section_outside_the_allowlist_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as out:
+            writer = self.mutated(out, 'mod.PROVENANCE["primary_genre"] = "tmdb"')
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, build_store=writer)
+        message = str(caught.exception)
+        self.assertIn("primary_genre", message)
+        self.assertIn("VENDOR_ALLOWED", message)
+
+    def test_an_allowlist_entry_for_a_column_that_is_gone_stops_the_build(self):
+        """So removing a vendor column is two deliberate edits — the PROVENANCE entry and the allowlist
+        entry — rather than one that leaves a permission behind."""
+        with tempfile.TemporaryDirectory() as out:
+            writer = self.mutated(out, 'mod.PROVENANCE["votes"] = "ours"')
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, build_store=writer)
+        message = str(caught.exception)
+        self.assertIn("votes", message)
+        self.assertIn("allowlist", message)
+
+
+class ProseCannotEnterTheDictionary(StoreFixture, unittest.TestCase):
+    """The backstop on `strings`.
+
+    Every other section is a number, an id, or an offset into this one, so the string dictionary is the
+    only way prose can reach the store — and a bound on its longest entry is a bound on the whole
+    artifact. It is a BACKSTOP, not the guard: `check_provenance` is what stops a new column, and a
+    short vendor string (a ~40-character tagline) would pass this unremarked.
+    """
+
+    def test_a_dictionary_entry_longer_than_the_bound_stops_the_build(self):
+        """An overview-shaped string arriving through a section that already exists — here `alias_titles`,
+        which interns whatever `facts.titles` holds."""
+        overview = "A sweeping account of " + "a very long sentence about the picture " * 8
+        self.assertGreater(len(overview.encode()), build_store_module().MAX_STRING_BYTES)
+        titles = [self.TITLES[0], dict(self.TITLES[1], facts={"titles": {"en": overview}})]
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, titles)
+            self.assertFalse(os.path.exists(os.path.join(out, "test.store")))
+        message = str(caught.exception)
+        self.assertIn("longest entry", message)
+        self.assertIn("260", message)
+
+    def test_the_bound_clears_the_longest_real_name_and_refuses_an_overview(self):
+        """445,817 strings in the shipped store, the longest 217 bytes — a performer's full name — and
+        only 34 over 120. The bound has 43 bytes of headroom above the real corpus and is two orders of
+        magnitude below an enriched overview, whose median is 3,321 characters."""
+        mod = build_store_module()
+        self.assertIsNone(mod.prose_in_the_dictionary(["x" * 217]))
+        self.assertIsNone(mod.prose_in_the_dictionary([]))
+        self.assertIsNotNone(mod.prose_in_the_dictionary(["x" * 261]))
+
+    def test_the_bound_is_in_bytes_not_characters(self):
+        """`str_off` indexes the UTF-8 blob, so the bound has to be measured the way the store stores
+        it — 131 accented characters are 262 bytes and must not read as comfortably short."""
+        mod = build_store_module()
+        self.assertIsNotNone(mod.prose_in_the_dictionary(["é" * 131]))
+
+
+class ThePosterPathIsNotPublished(StoreFixture, unittest.TestCase):
+    """`card_poster` held a TMDB poster path for 47,534 rows of a public release asset.
+
+    It is the one card column with no argument for keeping it: den-edge's `/metadata/title/query`
+    batches posters 100 titles to a request, and den-atlas's Stremio metas already carry a metahub
+    `poster` URL beside `posterPath`. `card_title` and `card_year` still ship — they need a Wikidata
+    replacement first, which is the rest of oxyc/den#118.
+    """
+
+    def test_the_store_has_no_poster_section(self):
+        mod = build_store_module()
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out)
+        self.assertNotIn("card_poster", store.table)
+        self.assertNotIn("card_poster", mod.PROVENANCE)
+        self.assertNotIn("card_poster", mod.VENDOR_ALLOWED)
+        self.assertIn("card_title", store.table, "the other two card columns are not this change's")
+        self.assertIn("card_year", store.table)
+
+    def test_the_poster_path_does_not_even_reach_the_dictionary(self):
+        """The metadata sidecar carries one for every row. Dropping the section while still interning
+        the strings would leave the paths in the published bytes, reachable by anyone who reads the
+        dictionary — which is redistribution just the same."""
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out)
+        interned = {store.text(i) for i in range(len(store.str_off) - 1)}
+        self.assertNotIn("/alpha.jpg", interned)
+        self.assertNotIn("/beta.jpg", interned)
+        self.assertIn("Alpha", interned, "the title still ships; only the artwork reference is gone")
