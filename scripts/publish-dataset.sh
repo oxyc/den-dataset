@@ -51,6 +51,12 @@ for key in ("labelsFile", "premiseLabelsFile", "metadataFile", "factsFile", "fac
     if not name:
         meta.pop(gz_key, None)
         continue
+    # A declared blob that is NOT THERE is left to the local check below, which says so in one sentence
+    # and names the directory. Opening it here instead died on a raw FileNotFoundError traceback — before
+    # the check written for exactly this case could run — so the script's own best error message was
+    # unreachable for the commonest slip there is.
+    if not os.path.exists(os.path.join(out_dir, name)):
+        continue
     with open(os.path.join(out_dir, name), "rb") as src, open(os.path.join(out_dir, name + ".gz"), "wb") as dst:
         with gzip.GzipFile(filename="", mode="wb", fileobj=dst, compresslevel=9, mtime=0) as gz:
             gz.write(src.read())
