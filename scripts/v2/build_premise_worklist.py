@@ -12,9 +12,12 @@ sent and *what* they are shown, because both decide the bill and neither is reco
 
 Not the raw coverage gap. The Jev pass already judged every article, so the gap is filtered by what it found:
 
-- a title that already has tags is skipped — `data/premise-tags-v1.json` **and** `out-premise-999/tags.json`,
-  which is gitignored and holds 999 results that exist nowhere else. Missing it would regenerate work
-  already paid for (den-dataset#13).
+- a title that already has tags is skipped — BOTH committed tag files, `data/premise-tags-v1.json` and
+  `data/premise-tags-v2.json`, plus `out-premise-999/tags.json` when that gitignored directory happens to
+  be present. It used to be v1 plus that directory, required, on the belief that its 999 results existed
+  nowhere else; they are all in v2 (verified, 0 missing), so the hard exit is gone. Reading v2 as well is
+  not a no-op: it skips 5,999 more titles than v1 ∪ the extras did, which is correct — v2 is the complete
+  run — but it is a real change to the worklist, not just a portability fix (den-dataset#13).
 - `validity` must be `correct-screen-work`. A title grounded on the source novel would otherwise get premise
   tags describing the book — which is how six tmdbIds came to share Wuthering Heights (#16).
 - `narrative_applicability` must not be a non-narrative program. A talk or game show has no premise, and

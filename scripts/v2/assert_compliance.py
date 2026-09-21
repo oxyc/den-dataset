@@ -2,7 +2,7 @@
 """Prove, from the batch files on disk, that no TMDB prose reached an LLM.
 
 The rule: only titles with `hasWikiPlot == true` may be sent to an AI application. The other
-19,255 enriched rows carry TMDB overview prose in the same `overview` field, and sending that
+19,542 enriched rows carry TMDB overview prose in the same `overview` field, and sending that
 is barred by TMDb §1.C. Every batch builder draws from the wiki-plot corpus, so the rule holds
 by construction — but "holds by construction" is what everyone says right up until it doesn't,
 and this is the claim that would be most expensive to be wrong about.
@@ -11,6 +11,20 @@ So this re-derives the allowed id-set from the **enriched records**, independent
 corpus file, and checks every title reference in every batch input on disk against it. It also
 spot-checks that the plot text actually shipped in a batch is the enriched Wikipedia plot
 rather than something that arrived by another path.
+
+## What last-write-wins does NOT cover
+
+Resolving each key once means a title whose `hasWikiPlot` FLIPPED is judged by its latest record. 505 keys
+flip today and every one is false -> true, which is the direction that matters: a batch built during the
+false era would have carried TMDB prose, and this script now clears those keys. Checked directly — none of
+the 505 appears in any batch item carrying prose, so there is no live exposure — but the hole is
+structural. If a flipped key HAD been batched before its flip, this reports PASS over a real breach where
+the old two-set version reported a violation. The two-set version also reported 505 violations that were
+not real, which is why it was replaced; the honest summary is that this trades a guaranteed false alarm
+for a narrow, currently-empty blind spot.
+
+The plot-text spot check is not a backstop for it: it only samples directories matching `tags-v2`, which
+is 3 of the 25 phase directories.
 
 Exits non-zero on any violation. Run before any LLM phase, and after any change to a builder.
 """
