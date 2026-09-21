@@ -79,6 +79,116 @@ ENTITY_LISTS = {
 # The two applicability questions, and the audience Nouls from the delta pass.
 APPLICABILITY = ("validity", "narrative_applicability")
 
+# ---- where every section's bytes come from ---------------------------------------------------------
+#
+# The store is a PUBLIC release asset on a public repo, so publishing it is redistribution — see
+# LICENSES.md and oxyc/den#118. The count asserts below hold each section against its source artifact;
+# until this table nothing held the SET of sections against anything, so a column carrying vendor content
+# could be added and would ship. "Someone will notice the new column" is the guard that failed.
+
+#: The sources a section may declare.
+#:
+#:   wikidata   — a fact scraped from Wikidata (CC0)
+#:   wikipedia  — derived from the English Wikipedia article text (CC BY-SA; see LICENSES.md)
+#:   llm        — a model's answer over that text
+#:   ours       — this pipeline's own bookkeeping: offsets, indices, counts, controlled vocabularies
+#:   identifier — an id rather than content: the TMDB key, the IMDb id, a TMDB person id
+#:   tmdb       — TMDB CONTENT, which is what #118 is removing
+SOURCES = {"wikidata", "wikipedia", "llm", "ours", "identifier", "tmdb"}
+
+#: Every section, and its source. Asserted at assembly as `set(PROVENANCE) == set(sec.order)`, which
+#: fails in BOTH directions: a new section with no entry here is fatal, and so is an entry for a section
+#: that is no longer written. Listed in the order the writer emits them.
+PROVENANCE = {
+    "keys": "identifier",
+    # The dictionary is a container, not a source: each string's provenance is the section that
+    # references it. `prose_in_the_dictionary` is what bounds what can arrive here.
+    "strings": "ours",
+    "str_off": "ours",
+    "card_title": "tmdb",
+    "card_year": "tmdb",
+    "votes": "tmdb",
+    "primary_genre": "llm",
+    "subgenre_v": "llm", "subgenre_c": "llm", "subgenre_o": "llm",
+    "mood_v": "llm", "mood_c": "llm", "mood_o": "llm",
+    "animated": "llm",
+    "facet_v": "llm", "facet_c": "llm",
+    "score_intensity": "llm", "score_humour": "llm",
+    "score_weight": "llm", "score_complexity": "llm",
+    "world": "llm",
+    "noul_k_v": "llm", "noul_k_o": "llm",
+    "noul_v_v": "llm", "noul_v_o": "llm",
+    # The Noul/critique/technique/depicts/audience VOCABULARIES are our question taxonomy; the scores
+    # against them are the model's.
+    "noul_names": "ours",
+    "critique": "llm", "critique_names": "ours",
+    "technique": "llm", "technique_names": "ours",
+    "depicts": "llm", "depicts_names": "ours",
+    "audience": "llm", "audience_names": "ours",
+    "makers_v": "wikidata", "makers_o": "wikidata",
+    "cast_v": "wikidata", "cast_o": "wikidata",
+    "broadcasters_v": "wikidata", "broadcasters_o": "wikidata",
+    "composers_v": "wikidata", "composers_o": "wikidata",
+    "dops_v": "wikidata", "dops_o": "wikidata",
+    "distributors_v": "wikidata", "distributors_o": "wikidata",
+    "companies_v": "wikidata", "companies_o": "wikidata",
+    "locations_v": "wikidata", "locations_o": "wikidata",
+    "subjects_v": "wikidata", "subjects_o": "wikidata",
+    "instance_of_v": "wikidata", "instance_of_o": "wikidata",
+    "based_on_v": "wikidata", "based_on_o": "wikidata",
+    "based_kind_v": "wikidata", "based_kind_o": "wikidata",
+    # Wikidata genre Q-ids mapped into TMDB's genre ID SPACE. The values are CC0; the vocabulary the ids
+    # index is TMDB's, which is a numbering, not content.
+    "genres_v": "wikidata", "genres_o": "wikidata",
+    "countries_v": "wikidata", "countries_o": "wikidata",
+    "languages_v": "wikidata", "languages_o": "wikidata",
+    "alias_titles_v": "wikidata", "alias_titles_o": "wikidata",
+    "imdb": "identifier",
+    "released": "wikidata", "released_prec": "wikidata",
+    "ended": "wikidata", "ended_prec": "wikidata",
+    "episodes": "wikidata", "seasons": "wikidata",
+    # A scrape-time claim about whether a vector was expected — this pipeline's bookkeeping, not a fact
+    # about the work.
+    "facts_has_vec": "ours",
+    "applic_v": "llm", "applic_c": "llm",
+    "runtime": "wikidata",
+    "franchise": "wikidata",
+    "orig_lang": "wikidata",
+    "ent_qid": "wikidata", "ent_name": "wikidata",
+    "ent_tmdb": "identifier",
+    "ent_credits": "ours",
+    "ent_alias_v": "wikidata", "ent_alias_o": "wikidata",
+    "maker_ent": "wikidata",
+    "maker_rows_v": "ours", "maker_rows_o": "ours",
+    # Embeddings of the article's plot text, and of the premise tags a model wrote from it.
+    "vec_plot": "wikipedia",
+    "vec_premise": "llm",
+    "vec_premise_has": "ours", "vec_plot_has": "ours",
+}
+
+#: The sources that are a vendor's CONTENT. `identifier` is deliberately not one: an id is a join key,
+#: which is the one thing both catalogue licences leave us.
+VENDOR_SOURCES = {"tmdb"}
+
+#: The vendor-sourced sections the store may still carry. Each is a column oxyc/den#118 is replacing —
+#: `card_title` and `card_year` with the Wikidata label and date, `votes` with nothing (the README shows
+#: how to join IMDb's own public ratings dump on the `imdb` column). When the last one goes this set is
+#: empty and the store carries identifiers only.
+#:
+#: Removing a column is two edits — its PROVENANCE entry and its entry here — because an allowlist entry
+#: for a section that is no longer written is fatal too.
+VENDOR_ALLOWED = {"card_title", "card_year", "votes"}
+
+#: The longest string the dictionary may hold, in bytes. Measured on the shipped store: 445,817 strings,
+#: longest 217 (a performer's full name), only 34 over 120 — a Peter Greenaway title at 190 is the next.
+#: 260 leaves 43 bytes of headroom and fails closed against a prose column: enriched overviews run to a
+#: median of 3,321 characters, so one could not reach the dictionary without tripping this.
+#:
+#: Its honest limit, and the reason this is a BACKSTOP rather than the guard: a ~40-character tagline
+#: would pass it unnoticed. `check_provenance` is the guard; this catches the case where prose arrives
+#: through a section that already exists.
+MAX_STRING_BYTES = 260
+
 # ---- the FACETS-V2 publication gates ---------------------------------------------------------------
 #
 # `scripts/v2/FACETS-V2.md` § "Publication gates": "The pilots support collection, not unconditional
@@ -274,6 +384,61 @@ def votes_are_missing(votes):
     if len(votes) > VOTES_REQUIRED_ABOVE and not any(votes):
         return (f"votes: all {len(votes)} rows are zero — every browse row would sort by tmdbId. Pass "
                 f"--enriched so the vote counts are read, or say why a corpus this size has none.")
+    return None
+
+
+def check_provenance(names):
+    """Refuse a store whose sections are not exactly the ones `PROVENANCE` declares.
+
+    Three ways to fail, all fatal:
+
+    * a section nothing declares — the case this exists for. A new column reaches a public release asset
+      by being added to the writer and nothing else, so the only way to stop one carrying licensed
+      content is to make an undeclared section impossible to build.
+    * a declared section that is no longer written — a stale entry, which would let a later removal look
+      like it had been reviewed when the table describes a store that does not exist.
+    * a vendor-sourced section outside `VENDOR_ALLOWED`, in either direction.
+
+    `names` is `sec.order`, so what is checked is what is about to be written rather than what this
+    file appears to write.
+    """
+    written, declared = set(names), set(PROVENANCE)
+    if written != declared:
+        undeclared, stale = sorted(written - declared), sorted(declared - written)
+        sys.exit(f"provenance: {len(undeclared)} section(s) declare no source ({undeclared}) and "
+                 f"{len(stale)} declared section(s) are not written ({stale}). Every section says in "
+                 f"PROVENANCE where its bytes come from; the table is compared as a SET, so neither "
+                 f"adding a column nor removing one can skip it.")
+    unknown = sorted(set(PROVENANCE.values()) - SOURCES)
+    if unknown:
+        sys.exit(f"provenance: {unknown} is not one of {sorted(SOURCES)}")
+    vendor = {name for name, source in PROVENANCE.items() if source in VENDOR_SOURCES}
+    if vendor - VENDOR_ALLOWED:
+        sys.exit(f"provenance: {sorted(vendor - VENDOR_ALLOWED)} carries vendor content and is not in "
+                 f"VENDOR_ALLOWED. The store is a public release asset, so shipping it redistributes "
+                 f"that content — see LICENSES.md and oxyc/den#118. Source it from Wikidata or "
+                 f"Wikipedia, or add it to the allowlist and say in #118 why it is there.")
+    if VENDOR_ALLOWED - vendor:
+        sys.exit(f"provenance: VENDOR_ALLOWED still permits {sorted(VENDOR_ALLOWED - vendor)}, which no "
+                 f"section declares as vendor-sourced. Drop it from the allowlist — a permission for a "
+                 f"column that no longer exists makes the remaining list read as longer than it is.")
+
+
+def prose_in_the_dictionary(ordered):
+    """The complaint when the string dictionary holds something too long to be a name, else `None`.
+
+    Prose can only enter the store through `strings`: every other section is a number, an id, or an
+    offset into this one. A bound on the longest entry is therefore a bound on the whole artifact, and
+    it is the check that would still fire if a column carrying overviews were declared in `PROVENANCE`
+    under an honest-looking source.
+    """
+    longest = max(ordered, key=lambda s: len(s.encode("utf-8")), default="")
+    size = len(longest.encode("utf-8"))
+    if size > MAX_STRING_BYTES:
+        return (f"strings: the longest entry is {size} bytes, over the {MAX_STRING_BYTES}-byte bound — "
+                f"{longest[:80]!r}…. This dictionary holds names, titles and controlled vocabulary; "
+                f"something that long is prose, and the store may not publish it. If a real name is "
+                f"genuinely this long, raise MAX_STRING_BYTES and say which one.")
     return None
 
 
@@ -578,7 +743,7 @@ def build_parser():
     ap.add_argument("--facts", required=True,
                     help="facts-<ver>.json — for genreMap, and to assert the row count")
     ap.add_argument("--metadata", required=True,
-                    help="metadata-<ver>.json — the cards: title, posterPath, year")
+                    help="metadata-<ver>.json — the cards: title, year")
     ap.add_argument("--vectors", required=True, help="vectors-bge-m3.bin (DENVEC02: it names its own rows)")
     ap.add_argument("--vector-labels", required=True,
                     help="labels-t02.json — the PLOT pass's key set. No longer the vectors' row order: "
@@ -635,9 +800,14 @@ def main():
     if not genre_map:
         sys.exit(f"{args.facts} has no genreMap — the genres section would ship empty")
 
-    # Cards come from the metadata sidecar, which is where title/posterPath/year actually live. Reading
-    # them off `facts` left card_year and card_poster at their sentinels on all 47,618 rows: the keys
-    # simply do not exist there, and a column of sentinels looks perfect from the outside.
+    # Cards come from the metadata sidecar, which is where title/year actually live. Reading them off
+    # `facts` left card_year at its sentinel on all 47,618 rows: the keys simply do not exist there, and
+    # a column of sentinels looks perfect from the outside.
+    #
+    # The sidecar also carries `posterPath`, which the store no longer publishes: it is a TMDB artwork
+    # reference, and a public release asset may not redistribute one. Readers get posters from
+    # den-edge's `/metadata/title/query` (100 titles a request) and from the `poster` URL den-atlas's
+    # Stremio metas already carry beside `posterPath`.
     cards = labels_by_key(args.metadata, "metadata")
 
     # Which titles each PASS labelled. Not the vector row order — the blobs carry their own keys — but the
@@ -693,7 +863,6 @@ def main():
             strings.add(alias)
         card_pre = cards.get(key) or {}
         strings.add(card_pre.get("title"))
-        strings.add(card_pre.get("posterPath"))
         imdb = facts.get("imdbId")
         strings.add(imdb[0] if isinstance(imdb, list) and imdb else imdb)
         for c in facts.get("countries") or []:
@@ -727,6 +896,9 @@ def main():
         strings.add(f"Q{num}")
 
     ordered_strings = strings.freeze()
+    prose_complaint = prose_in_the_dictionary(ordered_strings)
+    if prose_complaint:
+        sys.exit(prose_complaint)
     print(f"  {len(ordered_strings)} strings", file=sys.stderr)
 
     # Entity ids: the sorted Q-id numbers. Everything referring to a person or company uses this index.
@@ -763,7 +935,7 @@ def main():
     sec.put_raw("strings", blob, 1)
     sec.put("str_off", "I", offs, 4, expect=len(ordered_strings) + 1)
 
-    card_title, card_poster, card_year, votes = [], [], [], []
+    card_title, card_year, votes = [], [], []
     primary, subgenres, moods, animated = [], [], [], []
     facet_v, facet_c = [], bytearray()   # dense R x 12, axis order = FACET_AXES
     scores = {a: [] for a in SCORE_AXES}
@@ -803,7 +975,6 @@ def main():
         t = facts.get("titles") or {}
         card = cards.get(key) or {}
         card_title.append(strings.id(card.get("title") or t.get("en") or t.get("orig")))
-        card_poster.append(strings.id(card.get("posterPath")))
         year = card.get("year")
         card_year.append(int(year) if isinstance(year, int) and -32767 <= year <= 32767 else I16_NONE)
         # u32, clamped: TMDB's largest is five figures, and a browse row only ever compares them.
@@ -973,7 +1144,6 @@ def main():
         orig_lang.append(strings.id(langs[0]) if langs else U32_NONE)
 
     sec.put("card_title", "I", card_title, 4, expect=n)
-    sec.put("card_poster", "I", card_poster, 4, expect=n)
     sec.put("card_year", "h", card_year, 2, expect=n)
     # A vote count of zero is a real answer for an obscure title; a whole COLUMN of zeros is not. It is
     # what `--enriched` omitted produces, and the row-count assert below cannot see it — `expect=n` is
@@ -1185,6 +1355,9 @@ def main():
                       "sections": len(sec.order)}, indent=1), file=sys.stderr)
 
     # ---- assemble --------------------------------------------------------------------------------
+    # What is about to be written must be exactly what declares a source. See `check_provenance`.
+    check_provenance(sec.order)
+
     table_bytes = ENTRY_BYTES * len(sec.order)
     at = HEADER_BYTES + table_bytes
     entries, body = [], []

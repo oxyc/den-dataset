@@ -232,10 +232,19 @@ essentially nothing outside a franchise.
 or a free source produced.** Plot text comes from Wikipedia, labels and premise tags from an LLM over that
 text, and the facts from Wikidata.
 
-**Not yet true, and tracked in oxyc/den#118.** Four columns still carry TMDB data — `card_title`,
-`card_poster`, `card_year` and `votes` — and are being replaced by Wikidata and the English Wikipedia
-article title, with the poster dropped. Until that lands, this section is the rule and the list is the
-exception; `LICENSES.md` names the four columns and their counts.
+**Not yet true, and tracked in oxyc/den#118.** Three columns still carry TMDB data — `card_title`,
+`card_year` and `votes` — and are being replaced by Wikidata and the English Wikipedia article title.
+`card_poster` was the fourth and **the writer no longer emits it** — den-edge's `/metadata/title/query`
+batches posters 100 titles to a request and den-atlas's Stremio metas already carry a metahub `poster`
+URL, so it had no replacement to wait for. It is still in the *published* store, and must stay there until
+den-atlas stops requiring the section: `cards_from_store` reads it with `?` before building any card, so a
+poster-less store empties every plot row and leaves search with no display titles. Until all four land,
+this section is the rule and the list is the exception; `LICENSES.md` names them and their counts.
+
+**The rule is enforced in the writer, not just written here.** `scripts/v2/build_store.py` declares the
+source of every store section in `PROVENANCE` and refuses to assemble a store whose sections are not
+exactly that set — so a new column carrying vendor content cannot be added without the declaration being
+edited too. `VENDOR_ALLOWED` is the three columns above and shrinks to nothing when #118 completes.
 
 The rule follows from one property of this artifact: **the store is a public release asset on a public
 repo**, so publishing it is redistribution to anyone, not use by us. Both catalogue licences we might have
