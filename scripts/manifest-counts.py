@@ -17,12 +17,18 @@ baseline; `--compare` reads the published manifest's stamps and prints any blob 
 
 `--compare` also watches COVERAGE — a blob's records as a share of `labelsRecords`. An absolute count only
 falls when rows are lost; it does not move at all when a blob is simply never rebuilt while the corpus
-grows around it. That is the failure that has happened twice here: `facets.bin` fell 999 titles behind the
-corpus, and `facts-slim` kept shipping a field set frozen years earlier. Both were generated once, carried
-forward by every publish since, and passed every shrink check because their own counts never dropped.
+grows around it. `facets.bin` fell 999 titles behind that way: generated once, carried forward by every
+publish since, its own count never dropping.
 
-Coverage cannot be satisfied by renaming a key either: a renamed key has no published baseline, so it is
-reported as new rather than silently starting over at whatever it happens to be.
+**What coverage does not cover.** `facts-slim` shipped a field set frozen years earlier at full ROW parity
+— `factsSlimRecords == factsRecords` — so coverage moves by exactly zero for it. That failure is a shape
+failure and `check-facts-schema.py` is what catches it; counting rows never could. And coverage is a
+per-publish comparison, so drift spread thinly across many publishes stays under the threshold at every
+step. It catches a blob that falls behind in a jump, not one that erodes a tenth of a point at a time.
+
+Coverage cannot be satisfied by renaming a key: a renamed key has no published baseline, so it is skipped
+here rather than scored, and the key that disappeared is caught by the dropped-file guard in
+`publish-dataset.sh` instead.
 """
 import json
 import os
@@ -38,20 +44,36 @@ COUNTED = (
     "metadataFile",
     "labelsFile",
     "premiseLabelsFile",
+    "railFacetsFile",
+    "facetsFile",
     "storeFile",
 )
 
+# Keys whose blob MUST be countable. For these, a file this script cannot read is a failure, not an
+# uncounted key: the whole point of counting them is that they are the ones a silent miss hides in, and
+# skipping the check for a file that will not parse is the same silent pass in a different place.
+# `storeSha256` cannot save us either — `--stamp-meta` computes it from the bytes it just wrote, so a
+# wrongly-written store is self-consistently wrong.
+MUST_COUNT = ("storeFile", "labelsFile")
+
 STORE_MAGIC = b"DENSTOR1"
+FACETS_MAGIC = b"DFI2"
 
 # Coverage is measured against the labels, which are the closest thing the pipeline has to "the titles the
 # corpus knows". The store deliberately holds MORE than this — it is the union of facts and the pass — so
 # its coverage reads above 100%. That is fine: the guard watches for a FALL, not for a ceiling.
 DENOMINATOR = "labelsFile"
 
-# Percentage points a blob's coverage may fall before the publish is refused. A real rebuild moves coverage
-# by fractions of a point; 2 points is about 950 titles at the current corpus size, which is far past any
-# honest churn and well inside the 999 titles facets.bin silently fell behind.
-COVERAGE_DROP = 2.0
+# The FRACTION of its coverage a blob may keep before the publish is refused — i.e. it may lose 2% of
+# whatever share it had, not 2 points of the whole corpus.
+#
+# Relative, because absolute points cannot see the failure this is for. A blob that is never rebuilt loses
+# `c·g/(1+g)` points in a publish where the corpus grows by `g`, so the points it loses scale with its own
+# coverage `c`: at c=100% a 2-point threshold needs 2% growth in one publish, but at c=13.85% — where
+# plot-facets actually sits — it needs 16.9%, and across the real 38,532 → 44,531 repass a completely
+# un-rebuilt plot-facets blob drops 1.87 points and passes. A blob covering under 2% of the corpus could
+# never trip a 2-point rule even by going to zero. As a ratio the threshold is the same for all of them.
+COVERAGE_RATIO = 0.98
 
 
 def store_rows(path):
@@ -73,19 +95,35 @@ def store_rows(path):
     return struct.unpack_from("<I", head, 28)[0]
 
 
+def facets_rows(path):
+    """`count` from a DFI2 facets blob, or None if this is not one (`build-facets-bin.py`: magic + u32)."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(8)
+    except OSError:
+        return None
+    if len(head) < 8 or head[:4] != FACETS_MAGIC:
+        return None
+    return struct.unpack_from("<I", head, 4)[0]
+
+
 def count(meta, key, base):
-    """Rows in the blob a manifest key names, or None when it cannot be counted cheaply."""
+    """Rows in the blob a manifest key names, or None when it cannot be counted cheaply.
+
+    The two binary blobs are counted from their own headers. Restricting this to `.json` meant the two
+    artifacts the guard was WRITTEN for were the two it could not see: the store, which holds every title,
+    and `facets.bin`, which is the blob that actually fell 999 titles behind the corpus.
+    """
     name = meta.get(key)
     if not name:
         return None
     path = os.path.join(base, name)
     if not os.path.exists(path):
         return None
-    # The store is the one counted blob that is not JSON. This used to return None for anything not ending
-    # `.json`, so the artifact the whole serving path reads was the ONE thing the shrink guard could not
-    # see — it would have passed a store with every title missing.
     if name.endswith(".store"):
         return store_rows(path)
+    if name.endswith(".bin"):
+        return facets_rows(path)
     if not name.endswith(".json"):
         return None
     try:
@@ -156,6 +194,12 @@ def main():
             stored = old.get(key[: -len("File")] + "Records")
             now = count(new_meta, key, base)
             counts[key] = (stored, now)
+            # A blob that MUST be countable and is not: report it rather than skipping the guard for it.
+            # Uncountable used to mean unguarded, so a truncated store — or one with a wrong magic —
+            # published with no record check at all, which is the silent pass this script exists to close.
+            if now is None and key in MUST_COUNT and new_meta.get(key):
+                print(f"{key}: {new_meta[key]} will not be read — it must be countable, and is not")
+                continue
             # No stamp on the published side means this is the first publish since the guard existed.
             if stored is None or now is None:
                 continue
@@ -171,11 +215,12 @@ def main():
                 if key == DENOMINATOR or stored is None or now is None:
                     continue
                 was, is_now = 100.0 * stored / was_total, 100.0 * now / now_total
-                if was - is_now > COVERAGE_DROP:
+                if was > 0 and is_now / was < COVERAGE_RATIO:
                     print(
                         f"{key}: coverage {was:.1f}% -> {is_now:.1f}% of {DENOMINATOR} "
                         f"({stored}/{was_total} -> {now}/{now_total}); "
-                        f"more than {COVERAGE_DROP:.1f} points"
+                        f"kept {100.0 * is_now / was:.1f}% of its share, floor is "
+                        f"{100.0 * COVERAGE_RATIO:.0f}%"
                     )
         return
 

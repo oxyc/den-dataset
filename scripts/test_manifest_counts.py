@@ -75,6 +75,12 @@ def write_json(path, doc):
         json.dump(doc, f)
 
 
+def write_facets(path, n):
+    """A DFI2 facets blob header — magic plus a u32 count, as `build-facets-bin.py` writes it."""
+    with open(path, "wb") as f:
+        f.write(b"DFI2" + struct.pack("<I", n))
+
+
 def write_records(path, n):
     """A blob in the `{"records": [...]}` shape `count()` reads, with `n` of them."""
     write_json(path, {"records": [{"tmdbId": i} for i in range(n)]})
@@ -156,7 +162,8 @@ class Coverage(unittest.TestCase):
             self.assertIn("100.0% -> 90.9%", report)
 
     def test_coverage_tolerates_ordinary_churn(self):
-        """A guard that fires on normal movement gets switched off. A point of drift must pass."""
+        """A guard that fires on normal movement gets switched off. Both grow, the blob a shade
+        slower: 100% -> 99.3% coverage, which keeps 99.3% of its share and must pass."""
         with tempfile.TemporaryDirectory() as dir:
             write_records(os.path.join(dir, "labels-a.json"), 40000)
             write_records(os.path.join(dir, "facets-a.json"), 40000)
@@ -165,7 +172,7 @@ class Coverage(unittest.TestCase):
             run(["--stamp", meta, dir])
 
             write_records(os.path.join(dir, "labels-b.json"), 40400)
-            write_records(os.path.join(dir, "facets-b.json"), 40000)  # 99.0%, one point down
+            write_records(os.path.join(dir, "facets-b.json"), 40100)  # grew, but a shade slower
             next_meta = os.path.join(dir, "next.json")
             write_json(next_meta, {"labelsFile": "labels-b.json", "plotFacetsFile": "facets-b.json"})
             self.assertEqual(run(["--compare", meta, next_meta, dir]), "")
@@ -189,6 +196,28 @@ class Coverage(unittest.TestCase):
             report = run(["--compare", meta, next_meta, dir])
             self.assertNotIn("metadataFile", report, "a new key has nothing to be compared against")
 
+    def test_a_low_coverage_blob_is_held_to_the_same_standard(self):
+        """Why the threshold is a RATIO and not points of the whole corpus.
+
+        A blob that is never rebuilt loses `c*g/(1+g)` POINTS when the corpus grows by `g`, so the points
+        it loses scale with its own coverage. plot-facets really sits at 13.85%: across the real
+        38,532 -> 44,531 repass an untouched blob drops 1.87 points, which a 2-point rule waves through
+        while the blob covers a seventh of what it did. As a fraction of its own share it is the same
+        86.5% whatever `c` is."""
+        with tempfile.TemporaryDirectory() as dir:
+            write_records(os.path.join(dir, "labels-a.json"), 38532)
+            write_records(os.path.join(dir, "facets-a.json"), 5336)  # 13.85%
+            meta = os.path.join(dir, "meta.json")
+            write_json(meta, {"labelsFile": "labels-a.json", "plotFacetsFile": "facets-a.json"})
+            run(["--stamp", meta, dir])
+
+            write_records(os.path.join(dir, "labels-b.json"), 44531)
+            next_meta = os.path.join(dir, "next.json")
+            write_json(next_meta, {"labelsFile": "labels-b.json", "plotFacetsFile": "facets-a.json"})
+            report = run(["--compare", meta, next_meta, dir])
+            self.assertIn("plotFacetsFile", report, "1.87 points, but it kept only 86.5% of its share")
+            self.assertIn("kept 86.5%", report)
+
     def test_the_store_may_cover_more_than_the_labels(self):
         """The store is the union of facts and the pass, so it holds MORE rows than the labels and reads
         above 100%. The guard watches for a fall, not for a ceiling."""
@@ -204,6 +233,49 @@ class Coverage(unittest.TestCase):
             next_meta = os.path.join(dir, "next.json")
             write_json(next_meta, {"labelsFile": "labels-b.json", "storeFile": "den-def.store"})
             self.assertEqual(run(["--compare", meta, next_meta, dir]), "")
+
+    def test_facets_bin_is_counted_from_its_own_header(self):
+        """The blob the guard was NAMED for. It is binary, so a json-only reader skipped it entirely and
+        could never have produced a line about the 999 titles it fell behind."""
+        with tempfile.TemporaryDirectory() as dir:
+            write_facets(os.path.join(dir, "facets.bin"), 38532)
+            self.assertEqual(mc.count({"facetsFile": "facets.bin"}, "facetsFile", dir), 38532)
+            self.assertIn("facetsFile", mc.COUNTED)
+
+    def test_the_real_999_title_case_is_caught(self):
+        """facets.bin at parity, then the corpus gains 999 titles and it is carried forward untouched."""
+        with tempfile.TemporaryDirectory() as dir:
+            write_records(os.path.join(dir, "labels-a.json"), 37533)
+            write_facets(os.path.join(dir, "facets.bin"), 37533)
+            meta = os.path.join(dir, "meta.json")
+            write_json(meta, {"labelsFile": "labels-a.json", "facetsFile": "facets.bin"})
+            run(["--stamp", meta, dir])
+
+            write_records(os.path.join(dir, "labels-b.json"), 38532)
+            next_meta = os.path.join(dir, "next.json")
+            write_json(next_meta, {"labelsFile": "labels-b.json", "facetsFile": "facets.bin"})
+            report = run(["--compare", meta, next_meta, dir])
+            self.assertNotIn("records lost", report, "it lost nothing — that is why counts missed it")
+            self.assertIn("facetsFile", report)
+
+    def test_an_unreadable_store_is_reported_not_skipped(self):
+        """Uncountable used to mean unguarded. A truncated store published with no record check at all,
+        and `storeSha256` cannot help: --stamp-meta computes it from the bytes just written, so a
+        wrongly-written store is self-consistently wrong."""
+        with tempfile.TemporaryDirectory() as dir:
+            write_records(os.path.join(dir, "labels-a.json"), 40000)
+            write_store(os.path.join(dir, "den-abc.store"), 47618)
+            meta = os.path.join(dir, "meta.json")
+            write_json(meta, {"labelsFile": "labels-a.json", "storeFile": "den-abc.store"})
+            run(["--stamp", meta, dir])
+
+            with open(os.path.join(dir, "den-bad.store"), "wb") as fh:
+                fh.write(b"DENSTOR1")  # magic, then nothing
+            next_meta = os.path.join(dir, "next.json")
+            write_json(next_meta, {"labelsFile": "labels-a.json", "storeFile": "den-bad.store"})
+            report = run(["--compare", meta, next_meta, dir])
+            self.assertIn("storeFile", report)
+            self.assertIn("must be countable", report)
 
 
 if __name__ == "__main__":
