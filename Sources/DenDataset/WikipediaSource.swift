@@ -338,13 +338,25 @@ public struct WikipediaSource: Sendable {
     /// does not, and comparing the raw strings makes a vocabulary that largely DOES line up look like it
     /// shares nothing: mean overlap with TMDB measured 0.01 before this strip and 0.40 after.
     public static func strippedGenre(_ label: String) -> String {
-        let media = ["film", "movie", "television series", "tv series", "series", "anime"]
+        // Longest first, so "television series" is taken whole before "series" can bite into it.
+        // `television program`, `television` and `anime and manga` were missing, which left
+        // `reality television`, `crime fiction` and their kin unmatched against a TMDB vocabulary that
+        // does contain them: 38 genre Q-ids across 1,014 references, unmapped for want of a suffix.
+        let media = ["television program", "television series", "anime and manga", "tv series",
+                     "television", "series", "movie", "anime", "film"]
         var s = label.lowercased().trimmingCharacters(in: .whitespaces)
         var changed = true
         while changed {
             changed = false
             for word in media where s.hasSuffix(" " + word) {
                 s.removeLast(word.count + 1)
+                s = s.trimmingCharacters(in: .whitespaces)
+                changed = true
+            }
+            // `fiction` only when something survives it AND the whole phrase is not itself a genre —
+            // otherwise "science fiction" becomes "science", which is not a TMDB genre and not a thing.
+            if !changed, s.hasSuffix(" fiction"), s != "science fiction", s.count > " fiction".count + 1 {
+                s.removeLast(" fiction".count)
                 s = s.trimmingCharacters(in: .whitespaces)
                 changed = true
             }

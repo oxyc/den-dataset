@@ -533,12 +533,22 @@ def main():
         media_key = "tv" if key.startswith("tv:") else "movie"
         row_genres = []
         for q in facts.get("genres") or []:
-            mapped = (genre_map.get(q) or {}).get(media_key) if isinstance(q, str) else q
-            if isinstance(mapped, int) and mapped not in row_genres:
-                row_genres.append(mapped)
-            elif isinstance(q, str) and q not in genre_map:
+            if not isinstance(q, str):
+                if isinstance(q, int) and q not in row_genres:
+                    row_genres.append(q)
+                continue
+            entry = genre_map.get(q)
+            if entry is None:
                 unresolved["genre"] += 1
-        genres.append(row_genres)
+                continue
+            # One Wikidata genre can be several TMDB genres — "romantic comedy" is Comedy AND Romance,
+            # and TMDB itself tags La La Land with four. A single int per media type can only ever keep
+            # one of them, so a list is accepted here and a bare int treated as a list of one.
+            mapped = entry.get(media_key) if isinstance(entry, dict) else entry
+            for value in (mapped if isinstance(mapped, list) else [mapped]):
+                if isinstance(value, int) and value not in row_genres:
+                    row_genres.append(value)
+        genres.append(sorted(row_genres))
         countries.append([strings.id(c) for c in facts.get("countries") or []])
         languages.append([strings.id(x) for x in facts.get("languages") or []])
         aliases.append([strings.id(a) for a in (t.get("aliases") or []) if a])
