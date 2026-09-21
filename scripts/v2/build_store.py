@@ -25,6 +25,7 @@ import hashlib
 import json
 import struct
 import sys
+from datetime import date
 from collections import defaultdict
 
 FORMAT_VERSION = 1
@@ -40,6 +41,26 @@ FACET_AXES = ("era", "setting", "scope", "ending", "pacing", "chronology",
 SCORE_AXES = ("intensity", "humour", "emotional_weight", "complexity")
 SCORE_SECTION = {"intensity": "score_intensity", "humour": "score_humour",
                  "emotional_weight": "score_weight", "complexity": "score_complexity"}
+# Every Wikidata list field, kept whole. The store deliberately does NOT choose which of these a reader
+# will want: facts-slim froze the field set its reader parsed at the time, and `screenwriters`,
+# `composers` and `cinematographers` then sat in the file unread for months — the last two being exactly
+# the "who made it feel like this" credits a people-led row needs. We paid to scrape them; they ship.
+# corpus field -> section base name. Section names cap at 16 bytes, so the long ones are abbreviated
+# HERE, once, rather than silently truncated at write time.
+ENTITY_LISTS = {
+    "cast": "cast",
+    "broadcaster": "broadcasters",
+    "composers": "composers",
+    "cinematographers": "dops",
+    "distributors": "distributors",
+    "productionCompanies": "companies",
+    "narrativeLocations": "locations",
+    "mainSubjects": "subjects",
+    "instanceOf": "instance_of",
+    "basedOn": "based_on",
+}
+# The two applicability questions, and the audience Nouls from the delta pass.
+APPLICABILITY = ("validity", "narrative_applicability")
 # `world` is the max of these, as `build_rail_facets.py` defines it.
 FANTASTICAL = [f"theme__{k}" for k in (
     "vampire", "werewolf_monster", "zombie", "superhero", "time_travel", "cyberpunk",
@@ -49,6 +70,10 @@ FANTASTICAL = [f"theme__{k}" for k in (
 U32_NONE = 0xFFFFFFFF
 I16_NONE = -0x8000
 I32_NONE = -0x80000000
+SCORE_NONE = 0xFFFF   # distinct from a genuine 0.00
+EPOCH = date(1970, 1, 1)
+PRECISION = {"day": 0, "month": 1, "year": 2, "decade": 3, "century": 4}
+PRECISION_NONE = 0xFF
 
 
 class Strings:
@@ -87,14 +112,51 @@ def hundredths(value, what, key):
     return scaled
 
 
-def twentieths(value, what, key):
-    """A 0..4 score as u8 twentieths — u8 hundredths would overflow at 2.56."""
+def score_hundredths(value, what, key):
+    """A 0..4 score as u16 hundredths.
+
+    This was u8 twentieths, reasoning that hundredths overflow a u8 at 2.56. True, and the wrong
+    conclusion: the corpus scores ARE hundredths — 401 distinct values, 0.00 to 4.00 in steps of 0.01 — so
+    twentieths silently rounded 94,498 of 190,116 values, 49.7% of them, Game of Thrones losing all four
+    axes. The answer to "does not fit in u8" is a wider integer, not a coarser unit. u16 costs 381 KB of a
+    124 MB file.
+
+    It also refuses more than two decimals, which the twentieths version did not — and that omission is
+    precisely why the loss shipped: the same check existed six lines away and was not applied here.
+    """
     if value is None:
-        return 0
+        return SCORE_NONE
     f = float(value)
     if f != f or f < 0.0 or f > 4.0:
         sys.exit(f"{key}: {what} is {value} — outside the 0..4 score range")
-    return min(200, round(f * 50))
+    scaled = round(f * 100)
+    if abs(f * 100 - scaled) > 1e-9:
+        sys.exit(f"{key}: {what} is {value}, which has more than two decimals — storing it would round "
+                 f"silently. Fix the producer, or widen the field deliberately.")
+    return scaled
+
+
+def days_since_epoch(value, key):
+    """`{"date": "2007-01-20", "precision": "day"}` → (days, precision code).
+
+    The corpus stores a dated fact as an object, not an int. Reading it with `isinstance(v, int)` left
+    `released` at i32::MIN on all 47,618 rows — 46,765 of which have a date — and nothing noticed, because
+    a column of sentinels is structurally perfect.
+    """
+    if not isinstance(value, dict):
+        return I32_NONE, PRECISION_NONE
+    text = value.get("date")
+    if not isinstance(text, str) or not text:
+        return I32_NONE, PRECISION_NONE
+    code = PRECISION.get(value.get("precision"), PRECISION_NONE)
+    try:
+        parts = text.lstrip("+-").split("-")
+        year = int(parts[0]) * (-1 if text.startswith("-") else 1)
+        month = int(parts[1]) if len(parts) > 1 and parts[1] != "00" else 1
+        day = int(parts[2]) if len(parts) > 2 and parts[2] != "00" else 1
+        return (date(year, month, day) - EPOCH).days, code
+    except (ValueError, IndexError, OverflowError):
+        sys.exit(f"{key}: released date {text!r} is not a date this writer understands")
 
 
 def labelled(entries, strings, what, key):
@@ -109,6 +171,30 @@ def labelled(entries, strings, what, key):
             continue
         out.append((strings.id(label), hundredths(conf, f"{what} confidence", key) if conf else 0))
     return out
+
+
+def read_vectors(path, expected_rows, what):
+    """The blob, and where row 0 starts.
+
+    The base used to be inferred as `len(blob) - rows * DIMS`. That is the same arithmetic the file
+    already answers: both `.bin` files carry an 8-byte header stating rows and dims. Inferring it meant a
+    file whose length disagreed with the labels count produced a plausible non-zero base and shifted every
+    single vector by a constant — undetectable downstream, because each row still contains real numbers.
+    Read what the file says, and refuse it when it disagrees.
+    """
+    with open(path, "rb") as fh:
+        blob = fh.read()
+    if len(blob) < 8:
+        sys.exit(f"{path}: {len(blob)} bytes, too short to be a vector blob")
+    rows, dims = struct.unpack("<II", blob[:8])
+    if dims != DIMS:
+        sys.exit(f"{path}: header says {dims} dims, this store stores {DIMS}")
+    if rows != expected_rows:
+        sys.exit(f"{path}: header says {rows} rows, but {what} lists {expected_rows}. The blob and its "
+                 f"label order must be the same generation — they align positionally.")
+    if len(blob) != 8 + rows * dims:
+        sys.exit(f"{path}: {len(blob)} bytes for {rows} x {dims}, expected {8 + rows * dims}")
+    return blob, 8
 
 
 def corpus_rows(path):
@@ -167,19 +253,33 @@ class Sections:
         self.widths[name] = width
         self.order.append(name)
 
-    def put_raw(self, name, blob, width):
+    def put_raw(self, name, blob, width, expect=None):
+        """`expect` is the element count, not bytes — a dense R x K section must say what K is."""
+        if expect is not None and len(blob) != expect * width:
+            sys.exit(f"section {name}: {len(blob)} bytes, expected {expect} x {width}")
+        if not blob and expect != 0:
+            sys.exit(f"section {name} is empty — an empty section is well formed and says nothing, "
+                     f"which is how genres shipped at zero bytes past every check")
         self.blocks[name] = bytes(blob)
         self.widths[name] = width
         self.order.append(name)
 
-    def put_list(self, name, fmt, width, per_row):
-        """A values array plus offsets of len(rows)+1 — an empty list is a zero-width span."""
+    def put_list(self, name, fmt, width, per_row, allow_empty=False):
+        """A values array plus offsets of len(rows)+1 — an empty list is a zero-width span.
+
+        The offsets array being the right length proves nothing about the values array: `genres_v` was
+        0 bytes beside a perfectly correct 47,619-entry offsets array, and that combination is a valid,
+        entirely empty section. A values array of zero is fatal unless the caller says it may be.
+        """
         flat, offsets = [], [0]
         for row in per_row:
             flat.extend(row)
             offsets.append(len(flat))
         if len(offsets) != self.rows + 1:
             sys.exit(f"section {name}: {len(offsets)} offsets, expected {self.rows + 1}")
+        if not flat and not allow_empty:
+            sys.exit(f"section {name}_v holds no values for {self.rows} rows — the field is missing from "
+                     f"the source or its type is not what this writer expects")
         self.put(f"{name}_v", fmt, flat, width)
         self.put(f"{name}_o", "I", offsets, 4)
 
@@ -195,6 +295,8 @@ class Sections:
             offsets.append(len(ids))
         if len(offsets) != self.rows + 1:
             sys.exit(f"section {name}: {len(offsets)} offsets, expected {self.rows + 1}")
+        if not ids:
+            sys.exit(f"section {name}_v holds no values for {self.rows} rows")
         self.put(f"{name}_v", "I", ids, 4)
         self.put(f"{name}_c", "B", confs, 1)
         self.put(f"{name}_o", "I", offsets, 4)
@@ -204,11 +306,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--entities", required=True)
+    ap.add_argument("--facts", required=True,
+                    help="facts-<ver>.json — for genreMap, and to assert the row count")
+    ap.add_argument("--metadata", required=True,
+                    help="metadata-<ver>.json — the cards: title, posterPath, year")
     ap.add_argument("--vectors", required=True, help="vectors-bge-m3.bin")
     ap.add_argument("--vector-labels", required=True, help="labels-t02.json — the row order the vectors align to")
     ap.add_argument("--premise-vectors")
     ap.add_argument("--premise-labels")
-    ap.add_argument("--facets-bin", help="facets.bin, for vote counts")
     ap.add_argument("--dataset-version", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -221,9 +326,24 @@ def main():
 
     entities = read_json(args.entities)
 
+    # genreMap turns Wikidata genre Q-ids into TMDB genre ids, per media type. Without it the `genres`
+    # section shipped as ZERO bytes: `isinstance(g, int)` is false for every "Q842256", so all 99,216
+    # values were dropped and the empty section passed every check.
+    facts_blob = read_json(args.facts)
+    genre_map = facts_blob.get("genreMap") or {}
+    facts_records = len(facts_blob.get("records") or [])
+    if not genre_map:
+        sys.exit(f"{args.facts} has no genreMap — the genres section would ship empty")
+
+    # Cards come from the metadata sidecar, which is where title/posterPath/year actually live. Reading
+    # them off `facts` left card_year and card_poster at their sentinels on all 47,618 rows: the keys
+    # simply do not exist there, and a column of sentinels looks perfect from the outside.
+    cards = labels_by_key(args.metadata, "metadata")
+
     # Vector rows come from the labels file the .bin aligns to, positionally. Nothing else knows the order.
     print("reading vector row order …", file=sys.stderr)
-    plot_order = list(labels_by_key(args.vector_labels, "vector labels"))
+    labels_source = labels_by_key(args.vector_labels, "vector labels")
+    plot_order = list(labels_source)
     plot_row = {k: i for i, k in enumerate(plot_order)}
     premise_row = {}
     if args.premise_labels:
@@ -235,6 +355,7 @@ def main():
     # silently. That is the failure this whole store exists to make impossible. u32 everywhere.
     strings = Strings()
     noul_names, critique_names, technique_names = set(), set(), set()
+    depicts_names, audience_names = set(), set()
     for key in keys:
         r = rows[key]
         labels = r.get("labels") or {}
@@ -248,13 +369,23 @@ def main():
         noul_names.update((r.get("nouls") or {}).keys())
         critique_names.update((r.get("critique") or {}).keys())
         technique_names.update((r.get("technique") or {}).keys())
+        depicts_names.update((r.get("depicts") or {}).keys())
+        audience_names.update((r.get("audience") or {}).keys())
+        for name in APPLICABILITY:
+            choice = (r.get("applicability") or {}).get(name)
+            if isinstance(choice, dict) and choice.get("choice"):
+                strings.add(choice["choice"])
         facts = r.get("facts") or {}
+        for kind in facts.get("basedOnKind") or []:
+            strings.add(kind)
         t = facts.get("titles") or {}
         for name in (t.get("en"), t.get("orig")):
             strings.add(name)
         for alias in t.get("aliases") or []:
             strings.add(alias)
-        strings.add(facts.get("posterPath"))
+        card_pre = cards.get(key) or {}
+        strings.add(card_pre.get("title"))
+        strings.add(card_pre.get("posterPath"))
         imdb = facts.get("imdbId")
         strings.add(imdb[0] if isinstance(imdb, list) and imdb else imdb)
         for c in facts.get("countries") or []:
@@ -264,7 +395,9 @@ def main():
     noul_names = sorted(noul_names)
     critique_names = sorted(critique_names)
     technique_names = sorted(technique_names)
-    for name in noul_names + critique_names + technique_names:
+    depicts_names = sorted(depicts_names)
+    audience_names = sorted(audience_names)
+    for name in noul_names + critique_names + technique_names + depicts_names + audience_names:
         strings.add(name)
     for qid, ent in entities.items():
         strings.add((ent.get("en") if isinstance(ent, dict) else ent) or qid)
@@ -276,10 +409,17 @@ def main():
     ent_qids = sorted(int(q[1:]) for q in entities if q.startswith("Q") and q[1:].isdigit())
     ent_index = {q: i for i, q in enumerate(ent_qids)}
 
-    def ent_id(qid):
+    unresolved = defaultdict(int)
+
+    def ent_id(qid, what=None):
+        """An entity index, or None — counted, never silently discarded. 2,680 franchise references were
+        dropped here without a word because the entity table does not contain franchise entities."""
         if not isinstance(qid, str) or not qid.startswith("Q") or not qid[1:].isdigit():
             return None
-        return ent_index.get(int(qid[1:]))
+        found = ent_index.get(int(qid[1:]))
+        if found is None and what:
+            unresolved[what] += 1
+        return found
 
     sec = Sections(n)
     noul_id = {name: i for i, name in enumerate(noul_names)}
@@ -300,10 +440,15 @@ def main():
     scores = {a: [] for a in SCORE_AXES}
     world, critique, technique = [], bytearray(), bytearray()
     noul_rows = []
-    makers, cast, broadcasters, genres, countries, languages, aliases = [], [], [], [], [], [], []
-    imdb, released, runtime, franchise = [], [], [], []
+    makers, genres, countries, languages, aliases = [], [], [], [], []
+    imdb, released, released_prec, runtime, franchise = [], [], [], [], []
+    ended, ended_prec, episodes, seasons, has_vector = [], [], [], [], []
+    ent_lists = {field: [] for field in ENTITY_LISTS}
+    based_kind = []
+    applic_v, applic_c = [], bytearray()
+    depicts, audience = bytearray(), bytearray()
     orig_lang = []
-    with_labels = with_premise = 0
+    with_labels = with_premise = with_cards = 0
 
     for key in keys:
         r = rows[key]
@@ -314,10 +459,13 @@ def main():
         if r.get("premiseLabels"):
             with_premise += 1
         t = facts.get("titles") or {}
-        card_title.append(strings.id(t.get("en") or t.get("orig")))
-        card_poster.append(strings.id(facts.get("posterPath")))
-        year = facts.get("year")
-        card_year.append(int(year) if isinstance(year, int) else I16_NONE)
+        card = cards.get(key) or {}
+        card_title.append(strings.id(card.get("title") or t.get("en") or t.get("orig")))
+        card_poster.append(strings.id(card.get("posterPath")))
+        year = card.get("year")
+        card_year.append(int(year) if isinstance(year, int) and -32767 <= year <= 32767 else I16_NONE)
+        if card:
+            with_cards += 1
 
         primary.append(strings.id(labels.get("primaryGenre")))
         subgenres.append(labelled(labels.get("subgenres"), strings, "subgenre", key))
@@ -336,7 +484,7 @@ def main():
         sc = r.get("scores") or {}
         for axis in SCORE_AXES:
             entry = sc.get(axis)
-            scores[axis].append(twentieths((entry or {}).get("score"), f"score {axis}", key))
+            scores[axis].append(score_hundredths((entry or {}).get("score"), f"score {axis}", key))
 
         nouls = r.get("nouls") or {}
         worst = 0
@@ -356,33 +504,67 @@ def main():
         tech = r.get("technique") or {}
         for name in technique_names:
             technique.append(hundredths((tech.get(name) or {}).get("noul"), f"technique {name}", key))
+        dep = r.get("depicts") or {}
+        for name in depicts_names:
+            depicts.append(hundredths((dep.get(name) or {}).get("noul"), f"depicts {name}", key))
+        aud = r.get("audience") or {}
+        for name in audience_names:
+            audience.append(hundredths((aud.get(name) or {}).get("noul"), f"audience {name}", key))
+        applic = r.get("applicability") or {}
+        for name in APPLICABILITY:
+            entry = applic.get(name)
+            if isinstance(entry, dict) and entry.get("choice"):
+                applic_v.append(strings.id(entry["choice"]))
+                applic_c.append(hundredths(entry.get("confidence"), f"{name} confidence", key))
+            else:
+                applic_v.append(U32_NONE)
+                applic_c.append(0)
 
         # makers = directors ∪ creators ∪ screenwriters. Screenwriters were shipped and dropped by the
         # reader for months: 67.2% coverage feeding the rail's heaviest weight.
         seen, row_makers = set(), []
         for field in ("directors", "creators", "screenwriters"):
             for q in facts.get(field) or []:
-                i = ent_id(q)
+                i = ent_id(q, "maker")
                 if i is not None and i not in seen:
                     seen.add(i)
                     row_makers.append(i)
         makers.append(row_makers)
-        cast.append([i for i in (ent_id(q) for q in facts.get("cast") or []) if i is not None])
-        broadcasters.append([i for i in (ent_id(q) for q in facts.get("broadcaster") or []) if i is not None])
-        genres.append([g for g in facts.get("genres") or [] if isinstance(g, int)])
+        media_key = "tv" if key.startswith("tv:") else "movie"
+        row_genres = []
+        for q in facts.get("genres") or []:
+            mapped = (genre_map.get(q) or {}).get(media_key) if isinstance(q, str) else q
+            if isinstance(mapped, int) and mapped not in row_genres:
+                row_genres.append(mapped)
+            elif isinstance(q, str) and q not in genre_map:
+                unresolved["genre"] += 1
+        genres.append(row_genres)
         countries.append([strings.id(c) for c in facts.get("countries") or []])
         languages.append([strings.id(x) for x in facts.get("languages") or []])
         aliases.append([strings.id(a) for a in (t.get("aliases") or []) if a])
 
         raw_imdb = facts.get("imdbId")
         imdb.append(strings.id(raw_imdb[0] if isinstance(raw_imdb, list) and raw_imdb else raw_imdb))
-        rel = facts.get("released") or facts.get("started")
-        released.append(int(rel) if isinstance(rel, int) else I32_NONE)
+        days, prec = days_since_epoch(facts.get("released") or facts.get("started"), key)
+        released.append(days)
+        released_prec.append(prec)
         mins = facts.get("runtimeMinutes")
         runtime.append(min(65535, int(mins)) if isinstance(mins, int) and mins > 0 else 0)
         fr = facts.get("franchise")
         fr = fr[0] if isinstance(fr, list) and fr else fr
-        franchise.append(ent_id(fr) if ent_id(fr) is not None else U32_NONE)
+        fr_id = ent_id(fr, "franchise")
+        franchise.append(fr_id if fr_id is not None else U32_NONE)
+        for field in ENTITY_LISTS:
+            ent_lists[field].append(
+                [i for i in (ent_id(q, field) for q in facts.get(field) or []) if i is not None])
+        based_kind.append([strings.id(k) for k in facts.get("basedOnKind") or [] if k])
+        end_days, end_prec = days_since_epoch(facts.get("ended"), key)
+        ended.append(end_days)
+        ended_prec.append(end_prec)
+        eps, sns = facts.get("episodes"), facts.get("seasons")
+        episodes.append(min(65535, int(eps)) if isinstance(eps, int) and eps > 0 else 0)
+        seasons.append(min(65535, int(sns)) if isinstance(sns, int) and sns > 0 else 0)
+        has_vector.append(1 if facts.get("hasVector") else 0)
         langs = facts.get("languages") or []
         orig_lang.append(strings.id(langs[0]) if langs else U32_NONE)
 
@@ -394,26 +576,39 @@ def main():
     sec.put_labelled_list("mood", moods)
     sec.put("animated", "B", animated, 1, expect=n)
     sec.put("facet_v", "I", facet_v, 4, expect=n * len(FACET_AXES))
-    sec.put_raw("facet_c", facet_c, 1)
+    sec.put_raw("facet_c", facet_c, 1, expect=n * len(FACET_AXES))
     for axis in SCORE_AXES:
-        sec.put(SCORE_SECTION[axis], "B", scores[axis], 1, expect=n)
+        sec.put(SCORE_SECTION[axis], "H", scores[axis], 2, expect=n)
     sec.put("world", "B", world, 1, expect=n)
     sec.put_list("noul_k", "B", 1, [[k for k, _ in row] for row in noul_rows])
     sec.put_list("noul_v", "B", 1, [[v for _, v in row] for row in noul_rows])
-    sec.put("noul_names", "I", [strings.id(x) for x in noul_names], 4)
-    sec.put_raw("critique", critique, 1)
-    sec.put("critique_names", "I", [strings.id(x) for x in critique_names], 4)
-    sec.put_raw("technique", technique, 1)
-    sec.put("technique_names", "I", [strings.id(x) for x in technique_names], 4)
+    sec.put("noul_names", "I", [strings.id(x) for x in noul_names], 4, expect=len(noul_names))
+    sec.put_raw("critique", critique, 1, expect=n * len(critique_names))
+    sec.put("critique_names", "I", [strings.id(x) for x in critique_names], 4, expect=len(critique_names))
+    sec.put_raw("technique", technique, 1, expect=n * len(technique_names))
+    sec.put("technique_names", "I", [strings.id(x) for x in technique_names], 4, expect=len(technique_names))
+    sec.put_raw("depicts", depicts, 1, expect=n * len(depicts_names))
+    sec.put("depicts_names", "I", [strings.id(x) for x in depicts_names], 4, expect=len(depicts_names))
+    sec.put_raw("audience", audience, 1, expect=n * len(audience_names))
+    sec.put("audience_names", "I", [strings.id(x) for x in audience_names], 4, expect=len(audience_names))
     sec.put_list("makers", "I", 4, makers)
-    sec.put_list("cast", "I", 4, cast)
-    sec.put_list("broadcasters", "I", 4, broadcasters)
+    for field, section in ENTITY_LISTS.items():
+        sec.put_list(section, "I", 4, ent_lists[field])
+    sec.put_list("based_kind", "I", 4, based_kind)
     sec.put_list("genres", "I", 4, genres)
     sec.put_list("countries", "I", 4, countries)
     sec.put_list("languages", "I", 4, languages)
     sec.put_list("alias_titles", "I", 4, aliases)
     sec.put("imdb", "I", imdb, 4, expect=n)
     sec.put("released", "i", released, 4, expect=n)
+    sec.put("released_prec", "B", released_prec, 1, expect=n)
+    sec.put("ended", "i", ended, 4, expect=n)
+    sec.put("ended_prec", "B", ended_prec, 1, expect=n)
+    sec.put("episodes", "H", episodes, 2, expect=n)
+    sec.put("seasons", "H", seasons, 2, expect=n)
+    sec.put("has_vector", "B", has_vector, 1, expect=n)
+    sec.put("applic_v", "I", applic_v, 4, expect=n * len(APPLICABILITY))
+    sec.put_raw("applic_c", applic_c, 1, expect=n * len(APPLICABILITY))
     sec.put("runtime", "H", runtime, 2, expect=n)
     sec.put("franchise", "I", franchise, 4, expect=n)
     sec.put("orig_lang", "I", orig_lang, 4, expect=n)
@@ -423,7 +618,7 @@ def main():
     for row in makers:
         for i in row:
             credits[i] += 1
-    for row in cast:
+    for row in ent_lists["cast"]:
         for i in row:
             credits[i] += 1
     ent_name, ent_tmdb = [], []
@@ -434,10 +629,11 @@ def main():
         ent_name.append(strings.id(ent.get("en") or by_num[num]))
         tmdb = ent.get("tmdbPersonId")
         ent_tmdb.append(int(tmdb) if isinstance(tmdb, str) and tmdb.isdigit() else U32_NONE)
-    sec.put("ent_qid", "I", ent_qids, 4)
-    sec.put("ent_name", "I", ent_name, 4)
-    sec.put("ent_tmdb", "I", ent_tmdb, 4)
-    sec.put("ent_credits", "I", credits, 4)
+    entity_count = len(ent_qids)
+    sec.put("ent_qid", "I", ent_qids, 4, expect=entity_count)
+    sec.put("ent_name", "I", ent_name, 4, expect=entity_count)
+    sec.put("ent_tmdb", "I", ent_tmdb, 4, expect=entity_count)
+    sec.put("ent_credits", "I", credits, 4, expect=entity_count)
 
     # The inverted maker index: 355 KB that turns a per-request linear scan of every record into a lookup.
     by_maker = defaultdict(list)
@@ -445,21 +641,17 @@ def main():
         for i in row:
             by_maker[i].append(row_i)
     maker_ent = sorted(by_maker)
-    sec.put("maker_ent", "I", maker_ent, 4)
+    sec.put("maker_ent", "I", maker_ent, 4, expect=len(maker_ent))
     flat, offsets = [], [0]
     for i in maker_ent:
         flat.extend(by_maker[i])
         offsets.append(len(flat))
-    sec.put("maker_rows_v", "I", flat, 4)
-    sec.put("maker_rows_o", "I", offsets, 4)
+    sec.put("maker_rows_v", "I", flat, 4, expect=len(flat))
+    sec.put("maker_rows_o", "I", offsets, 4, expect=len(maker_ent) + 1)
 
     # Vectors, re-ordered from their own row order into ours. A row with no vector is zeroed.
     print("reading vectors …", file=sys.stderr)
-    with open(args.vectors, "rb") as fh:
-        plot_blob = fh.read()
-    plot_base = len(plot_blob) - len(plot_order) * DIMS
-    if plot_base < 0:
-        sys.exit(f"{args.vectors}: {len(plot_blob)} bytes for {len(plot_order)} rows of {DIMS}")
+    plot_blob, plot_base = read_vectors(args.vectors, len(plot_order), args.vector_labels)
     plot = bytearray(n * DIMS)
     plot_hits = 0
     for out_i, key in enumerate(keys):
@@ -467,34 +659,54 @@ def main():
         if src is None:
             continue
         start = plot_base + src * DIMS
-        plot[out_i * DIMS:(out_i + 1) * DIMS] = plot_blob[start:start + DIMS]
+        row = plot_blob[start:start + DIMS]
+        if len(row) != DIMS:
+            sys.exit(f"{key}: plot vector row {src} is {len(row)} bytes, not {DIMS}")
+        plot[out_i * DIMS:(out_i + 1) * DIMS] = row
         plot_hits += 1
-    sec.put_raw("vec_plot", plot, 1)
+    sec.put_raw("vec_plot", plot, 1, expect=n * DIMS)
 
     premise = bytearray(n * DIMS)
     has_premise = [0] * n
     premise_hits = 0
     if args.premise_vectors and premise_row:
-        with open(args.premise_vectors, "rb") as fh:
-            pblob = fh.read()
-        pbase = len(pblob) - len(premise_row) * DIMS
+        pblob, pbase = read_vectors(args.premise_vectors, len(premise_row), args.premise_labels)
         for out_i, key in enumerate(keys):
             src = premise_row.get(key)
             if src is None:
                 continue
             start = pbase + src * DIMS
-            premise[out_i * DIMS:(out_i + 1) * DIMS] = pblob[start:start + DIMS]
+            row = pblob[start:start + DIMS]
+            if len(row) != DIMS:
+                sys.exit(f"{key}: premise vector row {src} is {len(row)} bytes, not {DIMS}")
+            premise[out_i * DIMS:(out_i + 1) * DIMS] = row
             has_premise[out_i] = 1
             premise_hits += 1
-    sec.put_raw("vec_premise", premise, 1)
+    sec.put_raw("vec_premise", premise, 1, expect=n * DIMS)
     sec.put("vec_premise_has", "B", has_premise, 1, expect=n)
 
     # ---- the asserts that make a silent miss impossible -------------------------------------------
-    if with_labels < n * 0.5:
-        sys.exit(f"only {with_labels} of {n} rows carry labels — the corpus join is wrong, not the data")
-    if plot_hits < n * 0.5:
-        sys.exit(f"only {plot_hits} of {n} rows matched a plot vector — the row order is wrong")
+    # Compared against the artifacts themselves. A 50% threshold would have passed a join that lost
+    # 23,000 rows, and "more than half worked" is not a standard anything here should meet.
+    for what, got, want, source in (
+        ("rows", n, facts_records, args.facts),
+        ("labels", with_labels, len(labels_source), args.vector_labels),
+        ("cards", with_cards, len(cards), args.metadata),
+        ("plot vectors", plot_hits, len(plot_order), args.vectors),
+        ("premise vectors", premise_hits, len(premise_row), args.premise_labels),
+    ):
+        if got != want:
+            sys.exit(f"{what}: {got} in the store, {want} in {source} — they must agree exactly")
+    # Unresolved references, named and counted. A reference the entity table cannot resolve is dropped —
+    # that is unavoidable when the table is short — but dropping it WITHOUT SAYING SO is how 2,680
+    # franchise links disappeared into a section that looked perfectly well formed.
+    if unresolved:
+        print("unresolved entity references (dropped):", file=sys.stderr)
+        for what, count in sorted(unresolved.items(), key=lambda kv: -kv[1]):
+            print(f"  {what:14} {count}", file=sys.stderr)
+
     print(json.dumps({"titles": n, "withLabels": with_labels, "withPremiseLabels": with_premise,
+                      "withCards": with_cards, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
                       "entities": len(ent_qids), "strings": len(ordered_strings),
                       "sections": len(sec.order)}, indent=1), file=sys.stderr)
