@@ -445,11 +445,28 @@ def main():
             for alias in ent.get("aliases") or []:
                 strings.add(alias)
 
+    # Every Q-id any record REFERS to, so the entity table can cover all of them — see below.
+    referenced = set()
+    for row in rows.values():
+        facts_row = row.get("facts") or {}
+        for field in ("directors", "creators", "screenwriters", *ENTITY_LISTS):
+            for q in facts_row.get(field) or []:
+                if isinstance(q, str) and q.startswith("Q") and q[1:].isdigit():
+                    referenced.add(int(q[1:]))
+    known = {int(q[1:]) for q in entities if q.startswith("Q") and q[1:].isdigit()}
+    for num in referenced - known:
+        strings.add(f"Q{num}")
+
     ordered_strings = strings.freeze()
     print(f"  {len(ordered_strings)} strings", file=sys.stderr)
 
     # Entity ids: the sorted Q-id numbers. Everything referring to a person or company uses this index.
-    ent_qids = sorted(int(q[1:]) for q in entities if q.startswith("Q") and q[1:].isdigit())
+    #
+    # The UNION of the entity table and every Q-id a record refers to. 1,236 references (0.76%) name
+    # something the table does not describe, and interning against the table alone dropped them — a cast
+    # member nobody can name still connects two titles, and the rail counts that overlap by id without
+    # ever needing the name. It is also what made 2,680 of 3,019 franchise references unresolvable.
+    ent_qids = sorted(known | referenced)
     ent_index = {q: i for i, q in enumerate(ent_qids)}
 
     unresolved = defaultdict(int)
@@ -586,10 +603,20 @@ def main():
             if entry is None:
                 unresolved["genre"] += 1
                 continue
-            # One Wikidata genre can be several TMDB genres — "romantic comedy" is Comedy AND Romance,
-            # and TMDB itself tags La La Land with four. A single int per media type can only ever keep
-            # one of them, so a list is accepted here and a bare int treated as a list of one.
-            mapped = entry.get(media_key) if isinstance(entry, dict) else entry
+            # The FILM mapping, falling back to the series one — `genre.movie.or(genre.tv)`, which is
+            # what den-atlas has always done, and the reader then folds a composite into its film parts.
+            #
+            # Taking the media-specific mapping instead looked more faithful and lost information: TMDB's
+            # series genres are COMPOSITES (10765 "Sci-Fi & Fantasy", 10759 "Action & Adventure"), so
+            # several distinct Wikidata genres collapse into one. Measured over the corpus it changed
+            # 1,943 series and was a strict LOSS for 607 of them — Chilling Adventures of Sabrina went
+            # from Drama/Horror/Fantasy to Drama/Sci-Fi&Fantasy, dropping Horror outright, and Scooby-Doo
+            # lost Horror the same way. It also emitted composite ids that the clients' hide rules and
+            # /recommend do not speak, since both work in film genres.
+            #
+            # One Wikidata genre can still be several TMDB genres — "romantic comedy" is Comedy AND
+            # Romance — so a list is accepted and a bare int treated as a list of one.
+            mapped = (entry.get("movie") or entry.get("tv")) if isinstance(entry, dict) else entry
             for value in (mapped if isinstance(mapped, list) else [mapped]):
                 if isinstance(value, int) and value not in row_genres:
                     row_genres.append(value)
@@ -696,9 +723,12 @@ def main():
     ent_name, ent_tmdb, ent_alias = [], [], []
     by_num = {int(q[1:]): q for q in entities if q.startswith("Q") and q[1:].isdigit()}
     for num in ent_qids:
-        ent = entities[by_num[num]]
-        ent = ent if isinstance(ent, dict) else {"en": ent}
-        ent_name.append(strings.id(ent.get("en") or by_num[num]))
+        # An entity the table does not describe: referenced by a record but with no entry. Its Q-id
+        # stands in as its name — it still connects the titles that credit it, which is what the rail
+        # and the cast overlap actually read.
+        raw = entities.get(by_num.get(num, f"Q{num}"))
+        ent = raw if isinstance(raw, dict) else ({"en": raw} if raw else {})
+        ent_name.append(strings.id(ent.get("en") or f"Q{num}"))
         tmdb = ent.get("tmdbPersonId")
         ent_tmdb.append(int(tmdb) if isinstance(tmdb, str) and tmdb.isdigit() else U32_NONE)
         # The OTHER names a person goes by. People search indexes these as well as the `en` name —
