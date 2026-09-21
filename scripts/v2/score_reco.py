@@ -23,7 +23,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from index_io import load_plot_index, load_premise_v1_index, Index, read_blob  # noqa: E402
+from index_io import load_plot_index, load_premise_v1_index, Index, rows_for  # noqa: E402
 from reco_metrics import evaluate, compare  # noqa: E402
 from split import half  # noqa: E402
 
@@ -39,10 +39,7 @@ def load_extra(spec):
         keys = json.load(fh)
     if isinstance(keys, dict):
         keys = keys.get('keys') or keys.get('ids')
-    vectors, count, _ = read_blob(vec_path)
-    if count != len(keys):
-        raise SystemExit(f'{name}: blob has {count} rows, key file has {len(keys)}')
-    return Index(keys, vectors, name)
+    return Index(keys, rows_for(vec_path, keys, name), name)
 
 
 def arm_recommendations(index, seeds, k, mask):

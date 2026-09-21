@@ -29,6 +29,9 @@ import sys
 from datetime import date
 from collections import defaultdict
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import vector_blob  # noqa: E402  — beside this file; the blob layout, shared with the migration
+
 FORMAT_VERSION = 1
 MAGIC = b"DENSTOR1"
 ENDIAN_CHECK = 0x01020304
@@ -235,28 +238,31 @@ def labelled(entries, strings, what, key):
     return out
 
 
-def read_vectors(path, expected_rows, what):
-    """The blob, and where row 0 starts.
+def read_vectors(path, declared, what):
+    """`(blob, base, row_of_key)` — the file, where row 0 starts, and which row each title owns.
 
-    The base used to be inferred as `len(blob) - rows * DIMS`. That is the same arithmetic the file
-    already answers: both `.bin` files carry an 8-byte header stating rows and dims. Inferring it meant a
-    file whose length disagreed with the labels count produced a plausible non-zero base and shifted every
-    single vector by a constant — undetectable downstream, because each row still contains real numbers.
-    Read what the file says, and refuse it when it disagrees.
+    The row order used to come from `what`: a separate `labels-*.json` whose record order the blob was
+    assumed to match. That assumption could not be checked, only relied on — regenerate the labels file
+    with a different record order and every vector moves onto the wrong title, in a file that still loads
+    and still returns real numbers for everything.
+
+    A `DENVEC02` blob names its own rows, so the join is by key and the ordering assumption is gone. What
+    replaces it is a check that can actually fail: the blob's key set must equal the key set `what`
+    declares. A blob and a labels file from different generations now disagree loudly here instead of
+    shifting the corpus silently.
     """
-    with open(path, "rb") as fh:
-        blob = fh.read()
-    if len(blob) < 8:
-        sys.exit(f"{path}: {len(blob)} bytes, too short to be a vector blob")
-    rows, dims = struct.unpack("<II", blob[:8])
+    count, dims, keys, blob, base = vector_blob.read(path)
     if dims != DIMS:
         sys.exit(f"{path}: header says {dims} dims, this store stores {DIMS}")
-    if rows != expected_rows:
-        sys.exit(f"{path}: header says {rows} rows, but {what} lists {expected_rows}. The blob and its "
-                 f"label order must be the same generation — they align positionally.")
-    if len(blob) != 8 + rows * dims:
-        sys.exit(f"{path}: {len(blob)} bytes for {rows} x {dims}, expected {8 + rows * dims}")
-    return blob, 8
+    declared = set(declared)
+    found = set(keys)
+    if found != declared:
+        missing, extra = sorted(declared - found)[:3], sorted(found - declared)[:3]
+        sys.exit(f"{path}: {count} vectors keyed for {len(found)} titles, but {what} declares "
+                 f"{len(declared)} — {len(declared - found)} declared titles have no vector "
+                 f"(e.g. {missing}) and {len(found - declared)} vectors name a title it does not "
+                 f"(e.g. {extra}). The blob and its labels file must be the same generation.")
+    return blob, base, {k: i for i, k in enumerate(keys)}
 
 
 def corpus_rows(path):
@@ -376,18 +382,21 @@ def main():
                     help="facts-<ver>.json — for genreMap, and to assert the row count")
     ap.add_argument("--metadata", required=True,
                     help="metadata-<ver>.json — the cards: title, posterPath, year")
-    ap.add_argument("--vectors", required=True, help="vectors-bge-m3.bin")
-    ap.add_argument("--vector-labels", required=True, help="labels-t02.json — the row order the vectors align to")
-    ap.add_argument("--premise-vectors", help="vectors-premise.bin")
+    ap.add_argument("--vectors", required=True, help="vectors-bge-m3.bin (DENVEC02: it names its own rows)")
+    ap.add_argument("--vector-labels", required=True,
+                    help="labels-t02.json — the PLOT pass's key set. No longer the vectors' row order: "
+                         "the blob carries its own keys, and this is what that key column is checked "
+                         "against. Still a build input, for the two cross-checks only an independent "
+                         "record of the pass can make — that the blob covers exactly the titles the pass "
+                         "labelled, and that the corpus's `labels` field covers them too.")
+    ap.add_argument("--premise-vectors", help="vectors-premise.bin (DENVEC02)")
     ap.add_argument("--premise-labels", required=True,
-                    help="labels-premise.json — the row order vectors-premise.bin aligns to, and the "
-                         "premise pass's key set. Nothing else records that order, so this stays a BUILD "
-                         "input after it stops being a published artifact. The premise LABELS themselves "
-                         "come from the corpus `premiseLabels` field, which consolidate_corpus.py joined "
-                         "from this same file. REQUIRED since the label sections became the union of both "
-                         "passes: the corpus supplies the premise labels either way, so without this the "
-                         "count assert compares a union against the plot artifact alone and fails naming "
-                         "the wrong file.")
+                    help="labels-premise.json — the PREMISE pass's key set, checked the same way. The "
+                         "premise LABELS themselves come from the corpus `premiseLabels` field, which "
+                         "consolidate_corpus.py joined from this same file. REQUIRED since the label "
+                         "sections became the union of both passes: the corpus supplies the premise "
+                         "labels either way, so without this the count assert compares a union against "
+                         "the plot artifact alone and fails naming the wrong file.")
     ap.add_argument("--enriched",
                     help="the enriched/ batch directory, for TMDB vote counts. Without it the `votes` "
                          "section is all zeros and atlas cannot order a browse row by popularity.")
@@ -425,15 +434,13 @@ def main():
     # simply do not exist there, and a column of sentinels looks perfect from the outside.
     cards = labels_by_key(args.metadata, "metadata")
 
-    # Vector rows come from the labels file the .bin aligns to, positionally. Nothing else knows the order.
-    print("reading vector row order …", file=sys.stderr)
+    # Which titles each PASS labelled. Not the vector row order — the blobs carry their own keys — but the
+    # independent record the corpus's `labels` / `premiseLabels` fields are counted against below.
+    print("reading the label artifacts …", file=sys.stderr)
     labels_source = labels_by_key(args.vector_labels, "vector labels")
-    plot_order = list(labels_source)
-    plot_row = {k: i for i, k in enumerate(plot_order)}
     premise_labels_source = {}
     if args.premise_labels:
         premise_labels_source = labels_by_key(args.premise_labels, "premise labels")
-    premise_row = {k: i for i, k in enumerate(premise_labels_source)}
     # The titles SOME pass labelled, from the two artifacts rather than from the corpus — the count the
     # store's label sections are asserted against below. Counting the corpus field would be asserting the
     # corpus against itself.
@@ -837,9 +844,9 @@ def main():
     sec.put("maker_rows_v", "I", flat, 4, expect=len(flat))
     sec.put("maker_rows_o", "I", offsets, 4, expect=len(maker_ent) + 1)
 
-    # Vectors, re-ordered from their own row order into ours. A row with no vector is zeroed.
+    # Vectors, re-ordered from their own row order into ours by KEY. A row with no vector is zeroed.
     print("reading vectors …", file=sys.stderr)
-    plot_blob, plot_base = read_vectors(args.vectors, len(plot_order), args.vector_labels)
+    plot_blob, plot_base, plot_row = read_vectors(args.vectors, labels_source, args.vector_labels)
     plot = bytearray(n * DIMS)
     has_plot_row = [0] * n
     plot_hits = 0
@@ -859,8 +866,10 @@ def main():
     premise = bytearray(n * DIMS)
     has_premise = [0] * n
     premise_hits = 0
-    if args.premise_vectors and premise_row:
-        pblob, pbase = read_vectors(args.premise_vectors, len(premise_row), args.premise_labels)
+    premise_row = {}
+    if args.premise_vectors and premise_labels_source:
+        pblob, pbase, premise_row = read_vectors(args.premise_vectors, premise_labels_source,
+                                                 args.premise_labels)
         for out_i, key in enumerate(keys):
             src = premise_row.get(key)
             if src is None:
@@ -889,8 +898,10 @@ def main():
         ("labelled titles", with_labels, len(labelled_keys),
          " ∪ ".join(p for p in (args.vector_labels, args.premise_labels) if p)),
         ("cards", with_cards, len(cards), args.metadata),
-        ("plot vectors", plot_hits, len(plot_order), args.vectors),
-        ("premise vectors", premise_hits, len(premise_row), args.premise_labels),
+        # Against the BLOB's own key column now, not a sidecar's record count: every vector the file
+        # carries must have landed on a row of the store.
+        ("plot vectors", plot_hits, len(plot_row), args.vectors),
+        ("premise vectors", premise_hits, len(premise_row), args.premise_vectors or args.premise_labels),
     ):
         if got != want:
             sys.exit(f"{what}: {got} in the store, {want} in {source} — they must agree exactly")

@@ -22,7 +22,11 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import vector_blob  # noqa: E402
+
 BUILD_STORE = os.path.join(HERE, "build_store.py")
+MIGRATE = os.path.join(HERE, "migrate_vector_blob.py")
 DIMS = 1024
 
 
@@ -135,21 +139,15 @@ class ReadBack:
         return [(self.text(ids[i]), confs[i]) for i in range(offsets[row], offsets[row + 1])]
 
 
-class PremiseOnlyTitlesKeepTheirLabels(unittest.TestCase):
-    """A title labelled by the PREMISE pass and not the plot pass must carry its labels.
+class StoreFixture:
+    """A two-title corpus and the inputs to build a store from it.
 
-    The store's label sections were written from the corpus `labels` field alone — the plot pass's output —
-    while `premiseLabels` sat beside it, read only to increment a counter that was never asserted on. Three
-    real titles are labelled from their premise and never from a plot (movie:51870 *Father and Sons*,
-    movie:121329 *Two Sons of Ringo*, tv:42680 *Sítio do Picapau Amarelo*), so the store answered no
-    primary genre, no subgenres and no moods for them where the legacy blobs answered all three — and they
-    are in the premise index, which is exactly where a reader asks.
-
-    This builds the case directly rather than through den-spec's fixture: that fixture is the byte-for-byte
-    format contract three implementations are held to, so adding a title to it would be a format change.
+    Built directly rather than through den-spec's fixture: that fixture is the byte-for-byte format
+    contract three implementations are held to, so adding a title to it would be a format change.
     """
 
-    # movie:1 fills every list section the writer refuses to ship empty; movie:2 is the case under test.
+    # movie:1 fills every list section the writer refuses to ship empty; movie:2 is labelled by the
+    # premise pass alone.
     TITLES = [
         {
             "key": "movie:1", "mediaType": "movie", "tmdbId": 1,
@@ -178,8 +176,15 @@ class PremiseOnlyTitlesKeepTheirLabels(unittest.TestCase):
         },
     ]
 
-    def build(self, out_dir, titles=None):
+    def build(self, out_dir, titles=None, plot_keys=("movie:1",), premise_keys=("movie:2",),
+              plot_labels=None, premise_labels=None, write_plot_vectors=None):
+        """`*_keys` are the blob's OWN key column; `*_labels` the labels artifact's records, which
+        default to the same thing. Passing them apart is how the key-set assert is exercised;
+        `write_plot_vectors` swaps in a writer of another format."""
         titles = self.TITLES if titles is None else titles
+        plot_keys, premise_keys = list(plot_keys), list(premise_keys)
+        plot_labels = plot_keys if plot_labels is None else list(plot_labels)
+        premise_labels = premise_keys if premise_labels is None else list(premise_labels)
 
         def dump(name, value):
             path = os.path.join(out_dir, name)
@@ -191,11 +196,11 @@ class PremiseOnlyTitlesKeepTheirLabels(unittest.TestCase):
             return {"records": [{"mediaType": k.split(":")[0], "tmdbId": int(k.split(":")[1])}
                                 for k in keys]}
 
-        def vectors(path, count, fill):
-            with open(path, "wb") as fh:
-                fh.write(struct.pack("<II", count, DIMS))
-                for i in range(count):
-                    fh.write(bytes((fill + i + j) % 256 for j in range(DIMS)))
+        def vectors(path, keys, fill):
+            rows = bytearray()
+            for i in range(len(keys)):
+                rows.extend(bytes((fill + i + j) % 256 for j in range(DIMS)))
+            vector_blob.write(path, keys, bytes(rows), DIMS)
             return path
 
         corpus = os.path.join(out_dir, "corpus.jsonl.gz")
@@ -219,14 +224,26 @@ class PremiseOnlyTitlesKeepTheirLabels(unittest.TestCase):
                  {"mediaType": "movie", "tmdbId": 1, "title": "Alpha", "year": 1999},
                  {"mediaType": "movie", "tmdbId": 2, "title": "Beta", "year": 2001}]}),
              # The plot pass labelled movie:1 only; the premise pass labelled movie:2 only.
-             "--vectors", vectors(os.path.join(out_dir, "plot.bin"), 1, 7),
-             "--vector-labels", dump("plot-labels.json", rows_file(["movie:1"])),
-             "--premise-vectors", vectors(os.path.join(out_dir, "premise.bin"), 1, 200),
-             "--premise-labels", dump("premise-labels.json", rows_file(["movie:2"])),
+             "--vectors", (write_plot_vectors or vectors)(os.path.join(out_dir, "plot.bin"), plot_keys, 7),
+             "--vector-labels", dump("plot-labels.json", rows_file(plot_labels)),
+             "--premise-vectors", vectors(os.path.join(out_dir, "premise.bin"), premise_keys, 200),
+             "--premise-labels", dump("premise-labels.json", rows_file(premise_labels)),
              "--dataset-version", "test", "--out", store],
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, f"build_store failed:\n{result.stderr}")
         return ReadBack(store), result.stderr
+
+
+class PremiseOnlyTitlesKeepTheirLabels(StoreFixture, unittest.TestCase):
+    """A title labelled by the PREMISE pass and not the plot pass must carry its labels.
+
+    The store's label sections were written from the corpus `labels` field alone — the plot pass's output —
+    while `premiseLabels` sat beside it, read only to increment a counter that was never asserted on. Three
+    real titles are labelled from their premise and never from a plot (movie:51870 *Father and Sons*,
+    movie:121329 *Two Sons of Ringo*, tv:42680 *Sítio do Picapau Amarelo*), so the store answered no
+    primary genre, no subgenres and no moods for them where the legacy blobs answered all three — and they
+    are in the premise index, which is exactly where a reader asks.
+    """
 
     def test_the_premise_pass_labels_reach_the_store(self):
         with tempfile.TemporaryDirectory() as out:
@@ -285,6 +302,163 @@ class PremiseOnlyTitlesKeepTheirLabels(unittest.TestCase):
         self.assertIn("disagree", message)
         self.assertIn("primaryGenre", message)
         self.assertIn("movie:1", message)
+
+
+class TheBlobNamesItsOwnRows(StoreFixture, unittest.TestCase):
+    """The vectors are joined BY KEY, and the key sets are asserted.
+
+    v1 was `[i32 count][i32 dim][rows…]`: which title row *n* belonged to was recorded only in the order
+    a separate `labels-*.json` happened to list its records. Two files with the same count and different
+    orders produced a store that built cleanly and gave every title someone else's vector. That is why the
+    labels artifacts had to keep being BUILT after they stopped being PUBLISHED — purely as an order
+    oracle, and an oracle cannot fail, so it caught nothing.
+
+    """
+
+    # A deeper corpus, so "the order changed" is a thing that can be expressed at all. Two titles with
+    # one vector each cannot express it; three can.
+    THREE = [
+        dict(StoreFixture.TITLES[0]),
+        dict(StoreFixture.TITLES[1]),
+        {"key": "movie:3", "mediaType": "movie", "tmdbId": 3,
+         "facts": {"titles": {"en": "Gamma"}},
+         "labels": {"primaryGenre": "Comedy", "animated": False,
+                    "subgenres": [{"label": "Satire", "confidence": 0.8}],
+                    "moods": [{"label": "Wry", "confidence": 0.4}]}},
+    ]
+
+    def test_a_reordered_labels_file_no_longer_moves_the_vectors(self):
+        """THE bug. The labels artifact lists the same two titles in the other order; under the positional
+        join every vector swapped titles, silently. Under the key join the store is unchanged."""
+        plot = ["movie:1", "movie:3"]
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, self.THREE, plot_keys=plot, plot_labels=plot)
+            in_order = self.vector_rows(store)
+        with tempfile.TemporaryDirectory() as out:
+            # Same blob, same key column — only the labels file's record order is reversed.
+            store, _ = self.build(out, self.THREE, plot_keys=plot, plot_labels=list(reversed(plot)))
+            reversed_labels = self.vector_rows(store)
+        self.assertEqual(
+            in_order, reversed_labels,
+            "reversing the labels artifact changed which title holds which vector — the store is still "
+            "joining positionally, and a regenerated labels file silently reshuffles the whole index")
+        self.assertNotEqual(in_order["movie:1"], in_order["movie:3"],
+                            "the fixture must give the two titles different vectors, or this proves nothing")
+
+    def test_a_blob_whose_keys_are_not_the_labels_key_set_is_fatal(self):
+        """The check that replaces the assumption.
+
+        Deliberately built so every count still agrees: the plot pass labelled movie:1 and movie:3, the
+        artifact declares both, and the blob holds two rows — but its second row belongs to movie:2. Under
+        the positional join that is two rows against two records and the build went straight through,
+        handing movie:3 movie:2's vector. Only the key sets can see it.
+        """
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, self.THREE,
+                           plot_keys=["movie:1", "movie:2"], plot_labels=["movie:1", "movie:3"])
+        message = str(caught.exception)
+        self.assertIn("movie:3", message, "the refusal must name the title that has no vector")
+        self.assertIn("movie:2", message, "and the vector that names a title the artifact does not")
+
+    def test_a_v1_blob_is_refused_by_name(self):
+        """A blob from before the bump joins by nothing. Refusing it has to say so — a length error would
+        send someone looking for a corrupt file."""
+        def v1(path, keys, fill):
+            with open(path, "wb") as fh:
+                fh.write(struct.pack("<II", len(keys), DIMS))
+                for i in range(len(keys)):
+                    fh.write(bytes((fill + i + j) % 256 for j in range(DIMS)))
+            return path
+
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, write_plot_vectors=v1)
+        message = str(caught.exception)
+        self.assertIn("DENVEC02", message)
+        self.assertIn("migrate_vector_blob.py", message)
+
+    def vector_rows(self, store):
+        """`key -> its 1024 bytes` out of the built store."""
+        off, length = store.table["vec_plot"]
+        blob = store.blob[off:off + length]
+        return {k: blob[i * DIMS:(i + 1) * DIMS] for i, k in enumerate(store.keys())}
+
+
+class TheMigrationKeepsTheVectors(unittest.TestCase):
+    """`migrate_vector_blob.py` REWRITES a v1 blob; it never re-embeds one.
+
+    den-embed's output differs by build host — an arm64 laptop and the x86_64 box disagree on a mean of
+    457 of 1024 dims for the same text — so "regenerate it with keys" would replace a measured index with
+    a different one that looks identical from the outside. The rows must come through byte for byte.
+    """
+
+    KEYS = ["tv:10", "movie:1", "movie:2"]
+
+    def v1(self, path):
+        rows = bytearray()
+        for i in range(len(self.KEYS)):
+            rows.extend(bytes((i * 37 + j) % 256 for j in range(DIMS)))
+        with open(path, "wb") as fh:
+            fh.write(struct.pack("<II", len(self.KEYS), DIMS))
+            fh.write(rows)
+        return bytes(rows)
+
+    def labels(self, path, keys):
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"records": [{"mediaType": k.split(":")[0], "tmdbId": int(k.split(":")[1])}
+                                   for k in keys]}, fh)
+        return path
+
+    def run_migration(self, out, blob, labels, dest):
+        return subprocess.run([sys.executable, MIGRATE, "--blob", blob, "--labels", labels,
+                               "--out", dest], capture_output=True, text=True, cwd=out)
+
+    def test_the_vectors_are_byte_identical_and_the_keys_are_the_labels_order(self):
+        with tempfile.TemporaryDirectory() as out:
+            blob = os.path.join(out, "vectors.bin")
+            rows = self.v1(blob)
+            labels = self.labels(os.path.join(out, "labels.json"), self.KEYS)
+            dest = os.path.join(out, "vectors-v2.bin")
+            result = self.run_migration(out, blob, labels, dest)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            count, dims, keys, migrated, base = vector_blob.read(dest)
+            self.assertEqual(keys, self.KEYS, "the key column is the labels file's record order — the "
+                                              "order the positional join used, and the last time it is read")
+            self.assertEqual(count, len(self.KEYS))
+            self.assertEqual(dims, DIMS)
+            self.assertEqual(migrated[base:], rows, "the vectors changed — this must rewrite, not re-embed")
+            self.assertEqual(len(migrated), len(rows) + 16 + 8 * len(self.KEYS))
+            # The original is untouched: the migration writes a new file, it does not convert in place.
+            with open(blob, "rb") as fh:
+                self.assertEqual(fh.read()[8:], rows)
+
+            report = json.loads(result.stdout)
+            self.assertTrue(report["vectorsByteIdentical"])
+            self.assertEqual(report["vectorsSha256Before"], report["vectorsSha256After"])
+
+    def test_a_labels_file_of_another_generation_is_refused(self):
+        """The one thing the migration cannot check for itself is whether this labels file is the one the
+        blob was aligned to. A differing COUNT is the part it can see, and it refuses rather than pads."""
+        with tempfile.TemporaryDirectory() as out:
+            blob = os.path.join(out, "vectors.bin")
+            self.v1(blob)
+            labels = self.labels(os.path.join(out, "labels.json"), self.KEYS[:2])
+            result = self.run_migration(out, blob, labels, os.path.join(out, "v2.bin"))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("refusing to guess", result.stderr)
+
+    def test_migrating_an_already_migrated_blob_is_refused(self):
+        with tempfile.TemporaryDirectory() as out:
+            blob = os.path.join(out, "vectors.bin")
+            self.v1(blob)
+            labels = self.labels(os.path.join(out, "labels.json"), self.KEYS)
+            dest = os.path.join(out, "v2.bin")
+            self.assertEqual(self.run_migration(out, blob, labels, dest).returncode, 0)
+            again = self.run_migration(out, dest, labels, os.path.join(out, "v3.bin"))
+            self.assertNotEqual(again.returncode, 0)
+            self.assertIn("already", again.stderr)
 
 
 class StampsTheManifest(unittest.TestCase):

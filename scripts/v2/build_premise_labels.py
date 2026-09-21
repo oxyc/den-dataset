@@ -5,11 +5,10 @@
       --labels out-repass/labels-t02.json --blob out-premise-v2/vectors/vectors-premise-v2.bin \
       --out out-repass/labels-premise.json
 
-The premise index is a separate vector space from the plot index and carries its own row order. Nothing in
-the blob records that order — `index_io.py` says it plainly: "Row order is NOT in the blob — it comes from
-the sidecar that was written beside it. The plot index is ordered by `labels-t02.json` records; the premise
-index by [its ids file]. Getting that pairing wrong produces an index that loads cleanly and returns
-nonsense."
+The premise index is a separate vector space from the plot index and carries its own row order. A
+`DENVEC02` blob records that order itself, one u64 key per row; the blobs that predate it do not, and their
+order lives only in the ids file written beside them. Pairing the wrong sidecar with the wrong blob
+produces an index that loads cleanly and returns nonsense — which is why the keys moved into the file.
 
 So this is the sidecar for that blob: record *i* here describes row *i* there, and the order is taken from
 the ids file rather than re-derived, because re-deriving it is the mistake.
@@ -22,14 +21,18 @@ now exists and the row can carry real labels instead of being absent.
 
 ## Checks
 
-The header count is read from the blob and asserted against the ids file — the one pairing error that is
-cheap to catch and fatal to miss. A missing record is refused rather than skipped: dropping one would shift
-every row after it by one, which is precisely the silent misalignment above.
+The header count is read from the blob and asserted against the ids file, and where the blob names its own
+rows the ids file must BE that order — the one pairing error that is cheap to catch and fatal to miss. A
+missing record is refused rather than skipped: dropping one would shift every row after it by one, which
+is precisely the silent misalignment above.
 """
 import argparse
 import json
-import struct
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import vector_blob  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--ids", required=True, help="premise-v2-ids.json — the blob's row order")
@@ -46,11 +49,13 @@ store = json.load(open(args.labels, encoding="utf-8"))
 records = {f"{r['mediaType']}:{r['tmdbId']}": r for r in store["records"]}
 
 if args.blob:
-    with open(args.blob, "rb") as fh:
-        count, dim = struct.unpack("<ii", fh.read(8))
+    count, _, blob_keys, _, _ = vector_blob.read(args.blob, allow_legacy=True)
     if count != len(ids):
         sys.exit(f"refusing: {args.blob} holds {count} rows but {args.ids} names {len(ids)} — "
                  f"one of the two is from a different build")
+    # A DENVEC02 blob names its rows outright, which turns the count check into an identity check.
+    if blob_keys is not None and blob_keys != list(ids):
+        sys.exit(f"refusing: {args.blob} names its own rows and they are not {args.ids}'s order")
 
 missing = [k for k in ids if k not in records]
 if missing:

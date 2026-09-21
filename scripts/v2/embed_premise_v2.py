@@ -37,6 +37,9 @@ import time
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import vector_blob  # noqa: E402
+
 
 def compose(tags):
     """Identical to merge_premise_tags.compose — the document is the tags, space separated."""
@@ -44,12 +47,10 @@ def compose(tags):
 
 
 def read_blob(path):
-    with open(path, "rb") as fh:
-        count, dim = struct.unpack("<ii", fh.read(8))
-        raw = fh.read()
-    if len(raw) != count * dim:
-        sys.exit(f"{path}: header says {count}x{dim}, got {len(raw)} bytes")
-    return count, dim, raw
+    """`(count, dim, keys or None, rows)`. The base blob predates `DENVEC02` and may still be a v1 file
+    with no key column, so this accepts both — and says which it got, rather than assuming."""
+    count, dim, keys, blob, base = vector_blob.read(path, allow_legacy=True)
+    return count, dim, keys, blob[base:]
 
 
 def embed(url, texts, retries=4):
@@ -88,10 +89,16 @@ args = ap.parse_args()
 
 tags = json.load(open(args.tags, encoding="utf-8"))["tags"]
 v1 = json.load(open(args.v1_tags, encoding="utf-8"))["tags"]
-base_count, dim, base_raw = read_blob(args.base_vectors)
+base_count, dim, blob_keys, base_raw = read_blob(args.base_vectors)
 base_keys = json.load(open(args.base_keys, encoding="utf-8"))
 if len(base_keys) != base_count:
     sys.exit(f"base sidecar disagrees: {base_count} vectors, {len(base_keys)} keys")
+# A DENVEC02 base names its own rows. Where it does, the sidecar is a second opinion, and the two
+# disagreeing means one of them is from another generation — which is exactly what the key column exists
+# to catch, so it is fatal rather than a preference.
+if blob_keys is not None and blob_keys != base_keys:
+    sys.exit(f"{args.base_vectors} names its own rows and they are not {args.base_keys}'s order — "
+             f"the two are different generations")
 base_at = {k: i for i, k in enumerate(base_keys)}
 
 # Reusable: in the base blob AND the string the base was built from is the string we want now.
@@ -135,14 +142,14 @@ for start in range(0, len(todo), args.batch):
 
 os.makedirs(args.out_dir, exist_ok=True)
 vec_path = os.path.join(args.out_dir, "vectors-premise-v2.bin")
-with open(vec_path, "wb") as fh:
-    fh.write(struct.pack("<ii", len(keys), dim))
-    for k in keys:
-        if k in fresh:
-            fh.write(struct.pack("<%db" % dim, *fresh[k]))
-        else:
-            i = base_at[k]
-            fh.write(base_raw[i * dim:(i + 1) * dim])
+rows = bytearray()
+for k in keys:
+    if k in fresh:
+        rows.extend(struct.pack("<%db" % dim, *fresh[k]))
+    else:
+        i = base_at[k]
+        rows.extend(base_raw[i * dim:(i + 1) * dim])
+vector_blob.write(vec_path, keys, bytes(rows), dim)
 json.dump(keys, open(os.path.join(args.out_dir, "premise-v2-ids.json"), "w"), indent=0)
 
 print(json.dumps({

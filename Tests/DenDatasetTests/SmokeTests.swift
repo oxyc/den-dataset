@@ -75,11 +75,17 @@ final class SmokeTests: XCTestCase {
         let vectorsPath = outDir.appendingPathComponent("vectors-e02.bin")
         XCTAssertTrue(FileManager.default.fileExists(atPath: vectorsPath.path), "FNV artifact name is vectors-e02.bin")
         let vectorsData = try Data(contentsOf: vectorsPath)
-        let count = vectorsData.subdata(in: 0..<4).withUnsafeBytes { Int32(littleEndian: $0.load(as: Int32.self)) }
-        let dim = vectorsData.subdata(in: 4..<8).withUnsafeBytes { Int32(littleEndian: $0.load(as: Int32.self)) }
-        XCTAssertEqual(count, 3, "blob header count == records")
-        XCTAssertEqual(dim, 384, "FNV fallback embedding dimension")
-        XCTAssertEqual(vectorsData.count, 8 + Int(count) * Int(dim), "header + count*dim int8 rows")
+        let blob = try VectorBlob.decode(vectorsData)
+        XCTAssertEqual(blob.count, 3, "blob header count == records")
+        XCTAssertEqual(blob.dim, 384, "FNV fallback embedding dimension")
+        XCTAssertEqual(vectorsData.count, blob.rowsBase + blob.count * blob.dim,
+                       "header + keys + count*dim int8 rows")
+        // And each row is named by the title it belongs to, so the labels artifact is no longer the only
+        // record of which vector is whose.
+        XCTAssertEqual(blob.keys.sorted(),
+                       artifact.records.map { VectorBlob.key(mediaType: $0.mediaType, tmdbId: $0.tmdbId) }
+                           .sorted(),
+                       "the blob names the same titles the labels artifact does")
 
         // dataset.meta.json — the manifest the Rust server reads.
         let metaPath = outDir.appendingPathComponent("dataset.meta.json")

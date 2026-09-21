@@ -12,17 +12,20 @@ today's service against the shipped v1 blob would measure the embedder, not the 
 `--source v1` re-embeds v1's frozen tag strings through whatever service this run uses, and
 that is the v1 arm any v1-vs-v2 claim must cite.
 
-Output is the same format `finalize` writes: [int32 count][int32 dim] + count x dim int8,
-plus a JSON key list in row order. Written to NEW paths — nothing here overwrites v1.
+Output is the same format `finalize` writes: a `DENVEC02` blob, which carries its own keys.
+The JSON key list beside it is kept for the scripts that read it, but the blob no longer
+depends on it. Written to NEW paths — nothing here overwrites v1.
 """
 import argparse
 import json
 import os
-import struct
 import sys
 import time
 import urllib.error
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import vector_blob  # noqa: E402
 
 V2 = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'
 ROOT = '/Users/cindy/Projects/Personal/den-dataset/out-t02'
@@ -77,13 +80,13 @@ def embed_all(texts, url, chunk, retries=4):
     return vectors
 
 
-def write_blob(path, vectors, dim):
-    with open(path, 'wb') as fh:
-        fh.write(struct.pack('<ii', len(vectors), dim))
-        for v in vectors:
-            if len(v) != dim:
-                raise SystemExit(f'vector of length {len(v)}, expected {dim}')
-            fh.write(bytes((x & 0xFF) for x in v))
+def write_blob(path, keys, vectors, dim):
+    rows = bytearray()
+    for v in vectors:
+        if len(v) != dim:
+            raise SystemExit(f'vector of length {len(v)}, expected {dim}')
+        rows.extend(bytes((x & 0xFF) for x in v))
+    vector_blob.write(path, keys, bytes(rows), dim)
 
 
 def main():
@@ -159,7 +162,7 @@ def main():
     vectors = embed_all(texts, args.url, args.chunk)
     dim = len(vectors[0])
     blob = os.path.join(args.out_dir, f'vectors-{args.label}.bin')
-    write_blob(blob, vectors, dim)
+    write_blob(blob, keys, vectors, dim)
     with open(os.path.join(args.out_dir, f'keys-{args.label}.json'), 'w', encoding='utf-8') as fh:
         json.dump(keys, fh)
     meta = {'label': args.label, 'source': args.source, 'count': len(keys), 'dims': dim,

@@ -1658,7 +1658,7 @@ enum Commands {
         // Guard the mixed-embedder / mislabel footgun: every vector must share ONE length, and it must match the
         // dimension the --embedding-version label implies (bge-m3 = 1024, fnv/e02 = 384). A store assembled with
         // two embedders, or a blob labelled bge-m3 but holding 384-dim FNV content, would otherwise ship a
-        // corrupt/lying artifact that the app's `data.count == 8 + count*dim` check silently drops to recipes.
+        // corrupt/lying artifact, which a reader's length check can only reject wholesale, never explain.
         let dimsSeen = Set(vectors.map(\.count))
         guard dimsSeen.count == 1, let dim = dimsSeen.first, dim > 0 else {
             throw ToolError(message: "vectors have non-uniform length \(dimsSeen.sorted()) — a mixed-embedder "
@@ -1697,7 +1697,14 @@ enum Commands {
         }
         let labelsPath = Layout.labelsArtifact(outDir, taxonomyVersion)
         let vectorsPath = Layout.vectorsArtifact(outDir, embeddingVersion)
-        let vectorsData = vectorsBlob(vectors)
+        // Each row named by its title, from the record it was zipped with. The blob used to be the matrix
+        // alone, leaving the labels artifact as the only record of which row was whose — so the artifact
+        // had to keep being built after it stopped being published, purely as an order oracle, and a
+        // regenerated labels file with a different record order would have moved every vector onto the
+        // wrong title with nothing able to notice.
+        let vectorsData = try VectorBlob.encode(
+            keys: records.map { VectorBlob.key(mediaType: $0.mediaType, tmdbId: $0.tmdbId) },
+            vectors: vectors)
         try FileIO.write(labelsBlob, to: labelsPath)
         try FileIO.write(vectorsData, to: vectorsPath)
 
@@ -1870,18 +1877,31 @@ enum Commands {
 
         let labels: LabelsArtifact = try JSON.read(labelsPath)
         let blob = try Data(contentsOf: URL(fileURLWithPath: vectorsPath))
-        guard blob.count >= 8 else { throw ToolError(message: "vectors blob too small") }
-        let count = Int(blob.withUnsafeBytes { Int32(littleEndian: $0.loadUnaligned(fromByteOffset: 0, as: Int32.self)) })
-        let dim = Int(blob.withUnsafeBytes { Int32(littleEndian: $0.loadUnaligned(fromByteOffset: 4, as: Int32.self)) })
-        guard count == labels.records.count, dim > 0, blob.count == 8 + count * dim else {
-            throw ToolError(message: "vectors blob (\(count)×\(dim)) doesn't match labels (\(labels.records.count))")
+        let decoded: VectorBlob.Decoded
+        do { decoded = try VectorBlob.decode(blob) } catch {
+            throw ToolError(message: "\(vectorsPath): \(error)")
+        }
+        let count = decoded.count
+        let dim = decoded.dim
+        // The blob names its rows, so this is an identity check rather than a count check: purity is
+        // reported per label, and a blob whose rows belong to other titles than the ones this labels file
+        // describes would report a clean-looking purity for clusters built from the wrong vectors.
+        let labelKeys = labels.records.map { VectorBlob.key(mediaType: $0.mediaType, tmdbId: $0.tmdbId) }
+        guard decoded.keys == labelKeys else {
+            let mismatch = zip(decoded.keys, labelKeys).enumerated().first { $0.element.0 != $0.element.1 }
+            throw ToolError(message: "\(vectorsPath) (\(count)×\(dim)) names different titles than "
+                + "\(labelsPath) (\(labels.records.count) records)"
+                + (mismatch.map { ": row \($0.offset) is \(VectorBlob.mediaType(of: $0.element.0)):"
+                    + "\(VectorBlob.tmdbId(of: $0.element.0)) in the blob and "
+                    + "\(VectorBlob.mediaType(of: $0.element.1)):\(VectorBlob.tmdbId(of: $0.element.1)) "
+                    + "in the labels" } ?? ""))
         }
 
         // Unit-normalized Doubles once: k-means runs `iterations × k × count` dot products, so paying the
         // conversion per access would dominate the run.
         var rows = [[Double]](repeating: [], count: count)
         blob.withUnsafeBytes { raw in
-            let base = raw.baseAddress!.advanced(by: 8).assumingMemoryBound(to: Int8.self)
+            let base = raw.baseAddress!.advanced(by: decoded.rowsBase).assumingMemoryBound(to: Int8.self)
             for i in 0..<count {
                 var v = [Double](repeating: 0, count: dim)
                 var norm = 0.0
@@ -2120,17 +2140,6 @@ func isAnime(_ title: EnrichedTitle) -> Bool {
 func confidenceBucket(_ confidence: Double) -> String {
     let low = (confidence * 10).rounded(.down) / 10
     return String(format: "%.1f-%.1f", low, low + 0.1)
-}
-
-func vectorsBlob(_ vectors: [[Int8]]) -> Data {
-    var data = Data()
-    let dim = vectors.first?.count ?? 0
-    var count = Int32(vectors.count).littleEndian
-    var dimension = Int32(dim).littleEndian
-    withUnsafeBytes(of: &count) { data.append(contentsOf: $0) }
-    withUnsafeBytes(of: &dimension) { data.append(contentsOf: $0) }
-    for row in vectors { data.append(contentsOf: row.map { UInt8(bitPattern: $0) }) }
-    return data
 }
 
 /// Bridge the async embedder to the synchronous assemble loop (HashingEmbedder is pure CPU; no await needed
