@@ -6,7 +6,7 @@ derived from sources with their own terms. A single repository licence would mis
 | asset | licence | why |
 |---|---|---|
 | everything in `scripts/`, `Sources/`, `Tests/` | MIT | ours |
-| `data/*.json` — premise tags, eval rulers, corpus ids, alias decisions | MIT | LLM output and our own derivations over text we do not redistribute |
+| `data/*.json` — premise tags, eval rulers, corpus ids, alias decisions | MIT — but read the note below on the premise tags | LLM output and our own derivations over text we do not redistribute |
 | `data/plots-sidecar-v1.json` | MIT | hashes and lengths; carries no source text |
 | release `articles-<date>` — Wikipedia article text | **CC BY-SA 4.0** | it IS Wikipedia text |
 | release `data-latest` — labels, vectors, facts, the store | MIT for the derivations; see below | derived signals, not redistributed source text |
@@ -26,6 +26,22 @@ This is why the prose is not in git. `data/wikipedia-plots-v1.jsonl.gz` used to 
 here, in a public repository whose only licence file says MIT — which is not a licence Wikipedia text can
 be offered under. It is now published on its own tag, under its own terms, with the attribution fields the
 licence asks for.
+
+## The premise tags, and why MIT is a judgement rather than a fact
+
+`data/premise-tags-v1.json` and `-v2.json` are short structural descriptors — four to twelve hyphenated
+phrases per title — generated per-title from Wikipedia plot summaries, which are CC BY-SA 4.0. Whether an
+abstractive description of a text is a derivative work of it is not settled by anything we can point at.
+
+The argument for MIT: the spec that produced them forbade proper nouns and genre words, so a tag names a
+STRUCTURE rather than reproducing expression; no plot text survives into the output; and the same
+reasoning applies to an embedding, which nobody treats as a derivative work. The argument against: they
+could not exist without the source, and they are produced per-title rather than as a corpus-wide
+statistic.
+
+We take the first view. It is stated here as a position rather than a fact so that anyone relying on it
+can weigh it, and so that the CC BY-SA text itself — which is unambiguous — is not confused with it.
+`vectors-premise.bin`, being embeddings of those tags, follows the same reasoning at one further remove.
 
 ## TMDB
 
