@@ -34,6 +34,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # den-spec holds the store-v1 fixture. This repo WRITES that format, and the round-trip test below
+      # rebuilds the fixture with the real writer and requires it byte-identical — so without den-spec
+      # that test fails rather than skips, the same way den-core's and den-atlas's readers do.
+      - uses: actions/checkout@v7
+        with:
+          repository: oxyc/den-spec
+          path: den-spec-checkout
       - name: Parse under dash
         run: |
           for f in scripts/*.sh scripts/lib/*.sh; do
@@ -55,6 +62,13 @@ jobs:
           # The auditor is included deliberately: it is the only thing standing between a corrupted bundle
           # and a published dataset, and the pass it audits cost $20.47 and will not be run again.
           python3 -m unittest scripts/v2/test_facets.py scripts/v2/test_combined.py scripts/v2/test_audit_combined.py
+      # The publish path. Nothing tested any of it until now, and it is the half that decides what the box
+      # is allowed to serve: the store writer against den-spec's fixture, and the record-count guard that
+      # refuses a silent shrink.
+      - name: The publisher's guards
+        run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py
+        env:
+          DEN_SPEC_DIR: ${{ github.workspace }}/den-spec-checkout
 
   ci-ok:
     # One required status check. `always()` so a skipped job does not fail branch protection.
