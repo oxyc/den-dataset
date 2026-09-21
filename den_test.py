@@ -32,12 +32,16 @@ class Listing(unittest.TestCase):
     def test_stages_answers_what_runs_in_what_order_and_what_it_touches(self):
         result = den("stages")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("1. store", result.stdout)
-        for line in ("corpus", "premise_labels", "scripts/v2/build_store.py"):
+        # The order, and that it is the real one: the corpus is joined before the store is built from it.
+        self.assertIn("1. corpus", result.stdout)
+        self.assertIn("2. store", result.stdout)
+        self.assertLess(result.stdout.index("1. corpus"), result.stdout.index("2. store"))
+        for line in ("premise_labels", "scripts/v2/build_store.py", "scripts/v2/consolidate_corpus.py"):
             self.assertIn(line, result.stdout)
         # The optional input is marked as such: "the writer needs this" and "the writer can do without
-        # it" are different answers to the same question.
+        # it" are different answers to the same question. So is a flag that takes a set of shards.
         self.assertIn("(optional)", result.stdout)
+        self.assertIn("(every shard)", result.stdout)
 
 
 class Dispatch(unittest.TestCase):

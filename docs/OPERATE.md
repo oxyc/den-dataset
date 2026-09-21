@@ -228,6 +228,14 @@ $BIN finalize --out-dir out
 #    correctly, so both consumers accept it and never re-sync — the new titles render with no poster forever.
 $BIN metadata --out-dir out
 
+# 7a. The CORPUS — the source of truth the store is built from, joining the pass shards, the facts and
+#     both label sets into one inspectable JSONL plus its entity sidecar. It was never written down here,
+#     which is the problem oxyc/den-dataset#27 is about; it is a stage now, so the shards come from the
+#     declared glob rather than from three paths retyped, and a missing one is a refusal.
+./den stage corpus --out-dir out --dataset-version <ver> --expect <titles>
+#     `--expect` is the guard that refuses a short run. Use `--set combined=<path>` (repeat it) to point
+#     at a pass written under another run's name.
+
 # 7b. The STORE — the only artifact that publishes (oxyc/den#113). Everything above is an INPUT to it: it
 #     carries facts, labels, cards, facets, rail facets, the entity table, alias titles and both vector
 #     matrices as sections, and den-atlas mmaps it. `--stamp-meta` is what DECLARES it; without that flag

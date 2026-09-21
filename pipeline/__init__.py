@@ -13,13 +13,15 @@ The rule that keeps this honest: a module under `pipeline/` that nothing in `STA
 `guards/reachable.py` fails CI on one, because `scripts/v2/` is what happens when that rule is written
 down and not enforced.
 """
-from .contract import Artifact, Context, StageError, load, registry, validate  # noqa: F401
+from .contract import (Artifact, Binding, Context, StageError, bind, load,  # noqa: F401
+                       registry, validate)
 
-#: The pipeline, in the order it runs.
+#: The pipeline, in the order it runs. The corpus is joined first because the store is built from it —
+#: that ordering is the whole reason `store` can stop naming a producer for its own input.
 #:
-#: Short because the port is one stage in. The rest — worklist, fetch, corpus, classify, embed, publish —
-#: still live under `scripts/`, run from `docs/OPERATE.md`, and join here one at a time (oxyc/den-dataset#27).
-STAGES = ("store",)
+#: Short because the port is two stages in. The rest — worklist, fetch, classify, embed, publish — still
+#: live under `scripts/`, run from `docs/OPERATE.md`, and join here one at a time (oxyc/den-dataset#27).
+STAGES = ("corpus", "store")
 
 
 def stage(name):
@@ -39,11 +41,11 @@ def declared():
     """Every artifact the pipeline names, inputs and outputs, in stage order."""
     out = []
     for module in stages():
-        out.extend(module.INPUTS)
-        out.extend(module.OUTPUTS)
+        for entry in tuple(module.INPUTS) + tuple(module.OUTPUTS):
+            out.append(bind(entry).artifact)
     return tuple(out)
 
 
 def producers():
-    """`{artifact name: (producer, how, dedicated)}` — the derived producer registry."""
-    return registry(declared())
+    """`{artifact name: (producer, how, dedicated)}` — the producer registry, derived from `STAGES`."""
+    return registry(stages())

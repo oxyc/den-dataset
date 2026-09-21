@@ -10,7 +10,9 @@ Options (both run forms):
     --out-dir DIR                  where artifacts are read and written  (default: out)
     --dataset-version VER          the version the filenames carry       (required)
     --stamp-meta PATH              the manifest to declare the outputs in
-    --set NAME=PATH                point one artifact at a path outright, repeatable
+    --expect N                     the title count the corpus join is held to
+    --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
+                                   NAME to name every shard of a set
 
 The work is in `pipeline/`: `pipeline/__init__.py` holds the order, and each stage module holds its own
 inputs and outputs. Anything this file grows beyond argument parsing belongs there instead.
@@ -25,26 +27,44 @@ import pipeline  # noqa: E402
 
 
 def describe():
-    """The pipeline, printed. The answer to all three questions the tree used to need a search for."""
+    """The pipeline, printed. The answer to all three questions the tree used to need a search for.
+
+    The producer column is the derived registry, not a field on the artifact: for anything the pipeline
+    builds it names the stage's own rule, so the listing and the guard cannot disagree.
+    """
+    producers = pipeline.producers()
     for number, module in enumerate(pipeline.stages(), start=1):
         print(f"{number}. {module.NAME}")
         for role, declared in (("reads ", module.INPUTS), ("writes", module.OUTPUTS)):
-            for artifact in declared:
-                optional = "" if artifact.required else "  (optional)"
+            for entry in (pipeline.bind(e) for e in declared):
+                artifact = entry.artifact
+                note = "" if artifact.required else "  (optional)"
+                if artifact.shards:
+                    note += "  (every shard)"
                 print(f"     {role}  {artifact.name:<16} {artifact.filename:<32} "
-                      f"{artifact.producer}{optional}")
+                      f"{producers[artifact.name][0]}{note}")
     return 0
 
 
 def context(args):
+    """A run's paths and settings.
+
+    A NAME given to `--set` twice becomes the list of shards under one flag, so a pass written under
+    another run's name can be pointed at without renaming its files.
+    """
     overrides = {}
     for pair in args.set:
         if "=" not in pair:
             raise pipeline.StageError(f"--set wants NAME=PATH, got {pair!r}")
         name, path = pair.split("=", 1)
-        overrides[name] = path
+        if name in overrides:
+            seen = overrides[name]
+            overrides[name] = ([*seen, path] if isinstance(seen, list) else [seen, path])
+        else:
+            overrides[name] = path
     return pipeline.Context(out_dir=args.out_dir, dataset_version=args.dataset_version,
-                            overrides=overrides, stamp_meta=args.stamp_meta or "")
+                            overrides=overrides, stamp_meta=args.stamp_meta or "",
+                            expect=args.expect)
 
 
 def execute(module, ctx):
@@ -63,6 +83,7 @@ def main(argv=None):
         sub.add_argument("--out-dir", default="out")
         sub.add_argument("--dataset-version", required=True)
         sub.add_argument("--stamp-meta")
+        sub.add_argument("--expect", type=int, help="the title count the corpus join is held to")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
         return sub
 
