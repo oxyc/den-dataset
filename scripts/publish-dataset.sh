@@ -210,6 +210,13 @@ python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
 # elsewhere, and carried forward by every publish since.
 python3 "$(dirname "$0")/check-producers.py" "$meta" "$DIR"
 
+# DEAD-GENERATION GUARD. Every guard above asks whether a blob is present, parseable, owned and the right
+# size. None of them asks whether it belongs to THIS generation. The producer stamps the version into the
+# filename, so a blob nobody rebuilt keeps the old one and is declared beside current artifacts while
+# every other check passes — which is how `plot-facets-c85c707b0b18.json` came to be served under
+# datasetVersion 5b1c3213b6a1.
+python3 "$(dirname "$0")/check-filename-version.py" "$meta"
+
 # SHAPE GUARD. A producer can exist, be committed, be run correctly — and still emit a shape its consumer
 # cannot read. One entity carrying `"aliases": "Adrian Anthony Lester"` where atlas types Vec<String> made a
 # 27 MB facts file unparseable at its first entity; atlas does not partially load one, so it dropped the
