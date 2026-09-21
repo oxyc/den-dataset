@@ -51,12 +51,18 @@ PRODUCERS = {
     "premiseVectorsFile": ("scripts/v2/embed_tags.py", "scripts/v2/embed_tags.py", True),
     "metadataFile": ("Sources/taxonomy-backfill/main.swift", "taxonomy-backfill metadata", False),
     "factsFile": ("Sources/taxonomy-backfill/main.swift", "taxonomy-backfill facts", False),
-    "factsSlimFile": ("scripts/build-facts-slim.py", "scripts/build-facts-slim.py", True),
     "facetsFile": ("scripts/build-facets-bin.py", "scripts/build-facets-bin.py", True),
-    "plotFacetsFile": ("scripts/v2/aggregate_facets.py", "scripts/v2/aggregate_facets.py", True),
-    "railFacetsFile": ("scripts/v2/build_rail_facets.py", "scripts/v2/build_rail_facets.py", True),
     "storeFile": ("scripts/v2/build_store.py", "scripts/v2/build_store.py --stamp-meta", True),
 }
+
+# `factsSlimFile`, `plotFacetsFile` and `railFacetsFile` were registered here until the store carried what
+# they held. Their entries went with their producers: an entry naming a script this repo no longer has is a
+# guard that fails on a key nothing publishes, and `test_check_producers.py` asserts every registered
+# producer is a real tracked file — so a stale entry breaks the test rather than protecting anything.
+#
+# `factsFile` stays. Its producer is `taxonomy-backfill facts`, which is the same binary that makes labels,
+# vectors and metadata, and the key is merely unpublished — not unbuildable. The loop below only visits keys
+# the manifest actually names, so the entry costs nothing and covers a generation that publishes facts again.
 
 # Keys that name a DERIVED copy of another blob (the gzips publish-dataset.sh writes). They inherit their
 # source's producer, so registering them separately would be noise.

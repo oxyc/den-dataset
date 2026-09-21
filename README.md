@@ -73,7 +73,8 @@ confidence — so a later ranker can use a signal this one did not anticipate wi
 ```
 
 `scores`, `technique`, `depicts` and `audience` are computed by the model passes and were **never
-published** before this file — `build_rail_facets.py` dropped them. The four `scores` axes (intensity,
+published** before this file — the rail-facets producer dropped them (it is deleted; the store carries
+them now). The four `scores` axes (intensity,
 humour, emotional weight, complexity) are the closest thing the dataset has to a register signal.
 
 **The main index carries no TMDB Content.** It was rebuilt in September 2026: the embedded document has no

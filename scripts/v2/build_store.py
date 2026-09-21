@@ -62,7 +62,8 @@ ENTITY_LISTS = {
 }
 # The two applicability questions, and the audience Nouls from the delta pass.
 APPLICABILITY = ("validity", "narrative_applicability")
-# `world` is the max of these, as `build_rail_facets.py` defines it.
+# `world` is the max of these. The definition came from the rail-facets producer, which this file
+# replaced and which is deleted — so this list is now the only place it is written down.
 FANTASTICAL = [f"theme__{k}" for k in (
     "vampire", "werewolf_monster", "zombie", "superhero", "time_travel", "cyberpunk",
     "dystopian_post_apocalyptic", "folk_horror")] + [f"subgenre__{k}" for k in (

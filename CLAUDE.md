@@ -29,7 +29,8 @@ Never delete one to save space without asking, and never assume "it's in git".
 The premise index shipped for months while 999 of its tag strings lived only in a gitignored directory
 (#13). A rebuild from a fresh checkout came up short, and the failure looked like a regression to a state
 someone had already fixed. Committed sources now: `data/premise-tags-v2.json` (44,531, complete),
-`data/premise-tags-v1.json` (37,533, kept because `vectors-premise.bin` is aligned to its exact strings).
+`data/premise-tags-v1.json` (37,533, kept as the v1 generation's record — **not** because a vector blob is
+aligned to it; the alignment note below corrects exactly that claim, and this line used to make it).
 
 **`out-premise-999/tags.json` is no longer irreplaceable.** All 999 of its keys are present in
 `data/premise-tags-v2.json` — verified by set comparison, 0 missing. `build_premise_worklist.py` used to
