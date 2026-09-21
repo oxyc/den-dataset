@@ -616,7 +616,11 @@ def main():
     sec.put("ended_prec", "B", ended_prec, 1, expect=n)
     sec.put("episodes", "H", episodes, 2, expect=n)
     sec.put("seasons", "H", seasons, 2, expect=n)
-    sec.put("has_vector", "B", has_vector, 1, expect=n)
+    # `facts_has_vector` is the FACTS field of that name — a scrape-time claim about whether a
+    # vector was expected. It is NOT "this row has a plot vector": 9,010 rows carry a real
+    # vector while this reads 0, and 3 read 1 with none. It sat two entries from
+    # `vec_premise_has`, which does mean what it says, under a name that invited the confusion.
+    sec.put("facts_has_vec", "B", has_vector, 1, expect=n)
     sec.put("applic_v", "I", applic_v, 4, expect=n * len(APPLICABILITY))
     sec.put_raw("applic_c", applic_c, 1, expect=n * len(APPLICABILITY))
     sec.put("runtime", "H", runtime, 2, expect=n)
@@ -663,6 +667,7 @@ def main():
     print("reading vectors …", file=sys.stderr)
     plot_blob, plot_base = read_vectors(args.vectors, len(plot_order), args.vector_labels)
     plot = bytearray(n * DIMS)
+    has_plot_row = [0] * n
     plot_hits = 0
     for out_i, key in enumerate(keys):
         src = plot_row.get(key)
@@ -673,6 +678,7 @@ def main():
         if len(row) != DIMS:
             sys.exit(f"{key}: plot vector row {src} is {len(row)} bytes, not {DIMS}")
         plot[out_i * DIMS:(out_i + 1) * DIMS] = row
+        has_plot_row[out_i] = 1
         plot_hits += 1
     sec.put_raw("vec_plot", plot, 1, expect=n * DIMS)
 
@@ -694,6 +700,8 @@ def main():
             premise_hits += 1
     sec.put_raw("vec_premise", premise, 1, expect=n * DIMS)
     sec.put("vec_premise_has", "B", has_premise, 1, expect=n)
+    # The plain question, answerable without scanning 1024 bytes for a non-zero.
+    sec.put("vec_plot_has", "B", has_plot_row, 1, expect=n)
 
     # ---- the asserts that make a silent miss impossible -------------------------------------------
     # Compared against the artifacts themselves. A 50% threshold would have passed a join that lost
