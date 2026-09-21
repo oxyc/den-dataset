@@ -19,3 +19,4 @@ __pycache__/
 # there is no history to recover them from. Same reason as out-*/: derived data, gigabytes, regenerable
 # in principle but expensive. See CLAUDE.md.
 legacy/
+data/wikipedia-plots-v1.jsonl.gz

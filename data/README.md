@@ -14,21 +14,30 @@ Wikipedia; premise tags are LLM output over Wikipedia text; facts are Wikidata.
 
 | file | what it is | cost to rebuild |
 |---|---|---|
-| `wikipedia-plots-v1.jsonl.gz` | 38,460 Wikipedia plot summaries, one JSON object per line | ~38k live article fetches |
+| `plots-sidecar-v1.json` | 38,460 plot IDENTITIES — `plotSHA`, length, shipped — and no prose | ~38k live article fetches |
 | `premise-tags-v1.json` | 37,533 titles × 4–12 structural premise tags | a full LLM pass over every plot |
 | `premise-tags-v1.SPEC.md` | the prompt that produced them | — |
 | `corpus-ids.json` | the id set the v2 corpus was built over | cheap, but pins what "the corpus" meant |
 | `eval/reco-cases.json` | 6,000 co-rating cases (nPMI), the recommendation ruler | a full co-rating derivation |
 | `eval/triplets-*.json` | LLM-judged similarity triplets at 1/2/3 blind passes | several blind LLM judging passes |
 
-## `wikipedia-plots-v1.jsonl.gz`
+## `plots-sidecar-v1.json`
 
-One object per line: `key` (`mediaType:tmdbId`), `tmdbId`, `mediaType`, `title`, `year`, `plot`,
-`plotChars`, `plotSHA`, `shipped`.
+One row per title: `key` (`mediaType:tmdbId`), `plotChars`, `plotSHA`, `shipped`.
 
-`plotSHA` is what makes this useful beyond archival — it identifies the exact plot text a vector was built
-from, so a corpus can be checked for drift without refetching. `shipped` records whether the title made the
-published index.
+`plotSHA` is the part that was ever useful beyond archival — it identifies the exact plot text a vector was
+built from, so a corpus can be checked for drift without refetching. `shipped` records whether the title
+made the published index.
+
+**The prose itself is no longer in git.** `wikipedia-plots-v1.jsonl.gz` held 38,460 verbatim Wikipedia plot
+summaries, 39 MB, in a PUBLIC repository carrying no licence. Wikipedia text is CC BY-SA 4.0: it may be
+redistributed, but only with attribution and ShareAlike, which an unlicensed repo does not provide. The
+sidecar keeps every field anything actually reads, at 3.5 MB, and carries no copyrightable text at all.
+
+The file is untracked rather than purged from history. Rewriting a public repo's history breaks every
+clone and every SHA quoted in a doc or an issue, and GitHub keeps the old objects reachable regardless — so
+a rewrite would cost a great deal and remove nothing. Republishing it under its own licence is oxyc/den#113
+§4.2.
 
 Plot lengths are wildly skewed: median 2,515 chars, p90 4,329, max **53,299**. The long tail is mostly
 long-running series whose Wikipedia "plot" is a season-by-season recap. Anything that truncates should know
