@@ -14,6 +14,8 @@ rather than shipping TMDB overviews, and embeddings come from the **`den-embed`*
 - [`docs/LESSONS.md`](docs/LESSONS.md) — what this pipeline has taught the hard way, and why the procedure
   is shaped the way it is. Read before changing how classification or tagging works.
 - [`data/README.md`](data/README.md) — the committed tags, plots and evaluation rulers.
+- [`LICENSES.md`](LICENSES.md) — **per asset**, because they differ: the code is MIT, and the Wikipedia
+  article text is CC BY-SA 4.0 and published on its own tag.
 
 This file is reference: what the artifacts are and what is in them.
 
