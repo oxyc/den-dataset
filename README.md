@@ -172,8 +172,14 @@ out-dir; `publish-dataset.sh` prunes their keys out of the manifest.
 
 - `labels-<tax>.json` — the derived labels (no raw TMDB text; asserted). Also what the publish-time quality
   gate scores against the golden set — it reads this file by name, not from the manifest.
-- `vectors-bge-m3.bin` — `[int32 count][int32 dim]` little-endian header + `count × dim` int8 rows (dim 1024
-  for the bge-m3 build; `--embedding-version` overrides the label for an FNV run).
+- `vectors-bge-m3.bin` — a `DENVEC02` blob: magic, little-endian `[u32 count][u32 dim]`, a `u64` key per row
+  (`(media << 32) | tmdbId`, media 0 = movie), then `count × dim` int8 rows (dim 1024 for the bge-m3 build;
+  `--embedding-version` overrides the label for an FNV run). The keys are the format's point: row order used
+  to live only in `labels-<tax>.json`'s record order, so a regenerated labels file moved every vector onto
+  the wrong title with nothing able to see it. Layout and rationale: `Sources/DenDataset/VectorBlob.swift`
+  and `scripts/v2/vector_blob.py`. An older blob is converted, never re-embedded, by
+  `scripts/v2/migrate_vector_blob.py` — den-embed's output differs by build host, so re-running it changes
+  the values and not just the layout.
 - `dataset.meta.json` — the manifest the server reads (dataset version, hashes, byte counts, timestamps).
 - `report.json` — coverage + primary-genre distribution + confidence histogram.
 

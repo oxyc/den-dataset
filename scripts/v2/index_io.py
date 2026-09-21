@@ -1,30 +1,43 @@
 #!/usr/bin/env python3
 """Load the shipped int8 vector blobs and answer top-k queries against them.
 
-Blob format (as `finalize` writes it): little-endian [int32 count][int32 dim] then
-count x dim int8 rows, quantized int8-symmetric-x127 from L2-normalized floats.
+Blob format: see `vector_blob.py`. A `DENVEC02` blob names its own rows; the v1 blobs this
+file was written against do not, and take their row order from the sidecar written beside
+them — `labels-t02.json` records for the plot index, `premise-tags-wip/premise-ids.json` for
+the premise index. Getting that pairing wrong produces an index that loads cleanly and returns
+nonsense, which is why both are asserted against the header count.
 
-Row order is NOT in the blob — it comes from the sidecar that was written beside it. The
-plot index is ordered by `labels-t02.json` records; the premise index by
-`premise-tags-wip/premise-ids.json`. Getting that pairing wrong produces an index that
-loads cleanly and returns nonsense, which is why both are asserted against the header count.
+This still opens the OLD out-t02 blobs, so it reads either format; where the blob names its own
+rows, those win over the sidecar and a disagreement is fatal.
 """
 import json
 import os
+import sys
 
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import vector_blob  # noqa: E402
 
 ROOT = '/Users/cindy/Projects/Personal/den-dataset/out-t02'
 
 
 def read_blob(path):
-    with open(path, 'rb') as fh:
-        header = np.frombuffer(fh.read(8), dtype='<i4')
-        count, dim = int(header[0]), int(header[1])
-        raw = np.frombuffer(fh.read(), dtype=np.int8)
-    if raw.size != count * dim:
-        raise ValueError(f'{path}: header says {count}x{dim} = {count * dim} bytes, got {raw.size}')
-    return raw.reshape(count, dim), count, dim
+    """`(rows, count, dim, keys or None)` — `keys` is None for a v1 blob."""
+    count, dim, keys, blob, base = vector_blob.read(path, allow_legacy=True)
+    raw = np.frombuffer(blob, dtype=np.int8, count=count * dim, offset=base)
+    return raw.reshape(count, dim), count, dim, keys
+
+
+def rows_for(path, sidecar_keys, what):
+    """The int8 rows, with the sidecar order checked against whatever the blob itself says."""
+    rows, count, _, blob_keys = read_blob(path)
+    if count != len(sidecar_keys):
+        raise ValueError(f'{what} blob has {count} rows, its sidecar has {len(sidecar_keys)}')
+    if blob_keys is not None and blob_keys != list(sidecar_keys):
+        raise ValueError(f'{path} names its own rows and they are not the sidecar order — '
+                         f'the two are different generations')
+    return rows
 
 
 class Index:
@@ -77,9 +90,7 @@ def load_plot_index():
     with open(os.path.join(ROOT, 'labels-t02.json'), encoding='utf-8') as fh:
         records = json.load(fh)['records']
     keys = [f"{r.get('mediaType', 'movie')}:{r['tmdbId']}" for r in records]
-    vectors, count, _ = read_blob(os.path.join(ROOT, 'vectors-bge-m3.bin'))
-    if count != len(keys):
-        raise ValueError(f'plot blob has {count} rows, labels-t02 has {len(keys)} records')
+    vectors = rows_for(os.path.join(ROOT, 'vectors-bge-m3.bin'), keys, 'plot')
     return Index(keys, vectors, 'plot')
 
 
@@ -96,7 +107,5 @@ def load_premise_v1_index():
     with open(os.path.join(ROOT, 'premise-tags-wip', 'premise-ids.json'), encoding='utf-8') as fh:
         bare = json.load(fh)
     keys = [f"{media_of[i]}:{i}" for i in bare]
-    vectors, count, _ = read_blob(os.path.join(ROOT, 'vectors-premise.bin'))
-    if count != len(keys):
-        raise ValueError(f'premise blob has {count} rows, premise-ids has {len(keys)}')
+    vectors = rows_for(os.path.join(ROOT, 'vectors-premise.bin'), keys, 'premise')
     return Index(keys, vectors, 'premise-v1')

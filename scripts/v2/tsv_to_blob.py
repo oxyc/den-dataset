@@ -5,9 +5,9 @@ The embed runs on the homelab box because the published den-embed image cannot r
 Apple Silicon Mac (no AVX2 under emulation — see scripts/v2/README.md), and it writes a
 resumable TSV rather than a binary so a killed run can append.
 
-Output is exactly what `finalize` writes: little-endian [int32 count][int32 dim] then
-count x dim int8 rows, plus a JSON key list in row order. Written to NEW paths under
-`v2/vectors/` — nothing here touches the shipped v1 blobs.
+Output is exactly what `finalize` writes: a `DENVEC02` blob, which carries its own keys.
+The JSON key list beside it is kept for the scripts that read it, but the blob no longer
+depends on it. Written to NEW paths under `v2/vectors/`.
 
 Rows are ordered by the key file if one is given, so two arms can be built in the same order
 and compared row-for-row; otherwise by first appearance, which is the embed order.
@@ -15,8 +15,10 @@ and compared row-for-row; otherwise by first appearance, which is the embed orde
 import argparse
 import json
 import os
-import struct
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import vector_blob  # noqa: E402
 
 
 def main():
@@ -73,10 +75,10 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
     blob = os.path.join(args.out_dir, f'vectors-{args.label}.bin')
-    with open(blob, 'wb') as fh:
-        fh.write(struct.pack('<ii', len(keys), dim))
-        for k in keys:
-            fh.write(bytes(x & 0xFF for x in vectors[k]))
+    rows = bytearray()
+    for k in keys:
+        rows.extend(bytes(x & 0xFF for x in vectors[k]))
+    vector_blob.write(blob, keys, bytes(rows), dim)
     with open(os.path.join(args.out_dir, f'keys-{args.label}.json'), 'w', encoding='utf-8') as fh:
         json.dump(keys, fh)
 

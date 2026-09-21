@@ -8,9 +8,10 @@ The Dark Knight among them.
 
 Two things make this worth doing carefully rather than quickly:
 
-  * Row order is NOT in the blob. It comes from the sidecar written beside it — `premise-ids.json` for the
-    premise index. Pair the wrong sidecar with the wrong blob and you get an index that loads cleanly and
-    returns nonsense, which is exactly the failure this repo has shipped before.
+  * Row order is not in the INPUTS. These are out-t02 blobs, written before `DENVEC02`, so their order
+    comes from the sidecar beside them — `premise-ids.json` for the premise index. Pair the wrong sidecar
+    with the wrong blob and you get an index that loads cleanly and returns nonsense, which is exactly the
+    failure this repo has shipped before. The blob this writes is `DENVEC02` and names its own rows.
   * The published sidecar is a list of BARE tmdbIds, and this corpus contains ids that are both a film and a
     series. The fill keys are `mediaType:tmdbId`. Collapsing them to bare ids to match the old sidecar would
     reintroduce the collision, so the merge is refused if a fill id collides with an existing one.
@@ -22,17 +23,17 @@ and refuses on any mismatch; nothing is published by this script.
 """
 import json
 import os
-import struct
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "v2"))
+import vector_blob  # noqa: E402
 
 
 def read_blob(path):
-    with open(path, "rb") as fh:
-        count, dim = struct.unpack("<ii", fh.read(8))
-        raw = fh.read()
-    if len(raw) != count * dim:
-        sys.exit(f"{path}: header says {count}x{dim} = {count * dim} bytes, got {len(raw)}")
-    return count, dim, raw
+    """`(count, dim, keys or None, rows)`. The out-t02 blobs this reads predate `DENVEC02` and carry no
+    key column, so both formats are accepted — and which one it got is returned, never assumed."""
+    count, dim, keys, blob, base = vector_blob.read(path, allow_legacy=True)
+    return count, dim, keys, blob[base:]
 
 
 def main():
@@ -40,8 +41,8 @@ def main():
     dest = sys.argv[2] if len(sys.argv) > 2 else "out-premise-merged"
     os.makedirs(dest, exist_ok=True)
 
-    base_count, dim, base_raw = read_blob(os.path.join(root, "vectors-premise.bin"))
-    fill_count, fill_dim, fill_raw = read_blob(os.path.join(root, "v2/vectors/vectors-coverage-fill.bin"))
+    base_count, dim, _, base_raw = read_blob(os.path.join(root, "vectors-premise.bin"))
+    fill_count, fill_dim, _, fill_raw = read_blob(os.path.join(root, "v2/vectors/vectors-coverage-fill.bin"))
     if dim != fill_dim:
         sys.exit(f"dimension mismatch: premise {dim} vs fill {fill_dim} — different embedders, refusing")
 
@@ -80,10 +81,7 @@ def main():
 
     merged_count = base_count + fill_count
     out_blob = os.path.join(dest, "vectors-premise.bin")
-    with open(out_blob, "wb") as fh:
-        fh.write(struct.pack("<ii", merged_count, dim))
-        fh.write(base_raw)
-        fh.write(fill_raw)
+    vector_blob.write(out_blob, [f"{m}:{t}" for m, t in merged_pairs], base_raw + fill_raw, dim)
 
     by_key = {(r["mediaType"], r["tmdbId"]): r for r in rows}
     plot = json.load(open(os.path.join(root, "labels-t02.json")))
@@ -102,8 +100,9 @@ def main():
         shape["taxonomyVersion"] = labels["taxonomyVersion"]
     json.dump(shape, open(os.path.join(dest, "labels-premise.json"), "w"), separators=(",", ":"))
 
-    check_count, check_dim, check_raw = read_blob(out_blob)
+    check_count, check_dim, check_keys, check_raw = read_blob(out_blob)
     ok = (check_count == merged_count and check_dim == dim
+          and check_keys == [f"{m}:{t}" for m, t in merged_pairs]
           and check_raw[: base_count * dim] == base_raw
           and check_raw[base_count * dim:] == fill_raw)
     print(json.dumps({"merged": merged_count, "was": base_count, "added": fill_count,

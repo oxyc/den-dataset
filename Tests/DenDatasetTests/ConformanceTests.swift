@@ -2,8 +2,9 @@ import XCTest
 @testable import DenDataset
 
 /// The artifact FORMAT is the only coupling to the app, so lock it: the labels JSON encodes with sorted keys
-/// and round-trips, and the vectors blob is `[int32 count][int32 dim]` little-endian followed by the int8
-/// rows. (The smoke test additionally reads the REAL binary the tool wrote — this asserts the contract shape.)
+/// and round-trips, and the vectors blob is `DENVEC02`, a little-endian count and dim, a u64 key per row,
+/// then the int8 rows. (The smoke test additionally reads the REAL binary the tool wrote — this asserts the
+/// contract shape.)
 final class ConformanceTests: XCTestCase {
     func testLabelsArtifactEncodesSortedAndRoundTrips() throws {
         let records = [
@@ -34,40 +35,30 @@ final class ConformanceTests: XCTestCase {
         XCTAssertEqual(decoded.count, 2)
     }
 
-    func testVectorBlobHeaderIsLittleEndianAndRoundTrips() throws {
-        let vectors: [[Int8]] = [
-            [127, -127, 0, 42],
-            [-1, 2, -3, 4],
-            [0, 0, 0, 0],
+    func testVectorBlobLayoutIsMagicCountDimKeysRows() throws {
+        // The REAL writer, not a copy of it. This file used to hold its own transcription of the tool's
+        // `vectorsBlob`, and asserted the format against that — so it went on passing after the writer
+        // moved, having verified only that the copy still agreed with itself.
+        let keys: [UInt64] = [
+            VectorBlob.key(mediaType: "movie", tmdbId: 603),
+            VectorBlob.key(mediaType: "movie", tmdbId: 155),
+            VectorBlob.key(mediaType: "tv", tmdbId: 155),
         ]
-        let blob = Self.vectorsBlob(vectors)
+        let vectors: [[Int8]] = [[127, -127, 0, 42], [-1, 2, -3, 4], [0, 0, 0, 0]]
+        let blob = try VectorBlob.encode(keys: keys, vectors: vectors)
 
-        // Header: [int32 count][int32 dim] little-endian.
-        XCTAssertEqual(blob.count, 8 + vectors.count * 4)
-        let count = blob.subdata(in: 0..<4).withUnsafeBytes { Int32(littleEndian: $0.load(as: Int32.self)) }
-        let dim = blob.subdata(in: 4..<8).withUnsafeBytes { Int32(littleEndian: $0.load(as: Int32.self)) }
-        XCTAssertEqual(count, 3)
-        XCTAssertEqual(dim, 4)
+        XCTAssertEqual(blob.prefix(8), Data("DENVEC02".utf8), "the magic leads, so a v1 blob cannot pass")
+        XCTAssertEqual(blob.count, 16 + keys.count * 8 + vectors.count * 4)
+        let decoded = try VectorBlob.decode(blob)
+        XCTAssertEqual(decoded.count, 3)
+        XCTAssertEqual(decoded.dim, 4)
+        XCTAssertEqual(decoded.keys, keys, "each row is named by its title, in row order")
 
-        // Payload round-trips: each row is `dim` signed bytes.
-        var offset = 8
+        // Payload round-trips: each row is `dim` signed bytes, after the key column.
+        var offset = decoded.rowsBase
         for expected in vectors {
-            let row = blob.subdata(in: offset..<offset + 4).map { Int8(bitPattern: $0) }
-            XCTAssertEqual(row, expected)
+            XCTAssertEqual(blob.subdata(in: offset..<offset + 4).map { Int8(bitPattern: $0) }, expected)
             offset += 4
         }
-    }
-
-    /// Mirrors the tool's `vectorsBlob` byte-for-byte (the tool's copy lives in the executable target). The
-    /// smoke test cross-checks that the real binary the CLI produces has this exact header.
-    static func vectorsBlob(_ vectors: [[Int8]]) -> Data {
-        var data = Data()
-        let dim = vectors.first?.count ?? 0
-        var count = Int32(vectors.count).littleEndian
-        var dimension = Int32(dim).littleEndian
-        withUnsafeBytes(of: &count) { data.append(contentsOf: $0) }
-        withUnsafeBytes(of: &dimension) { data.append(contentsOf: $0) }
-        for row in vectors { data.append(contentsOf: row.map { UInt8(bitPattern: $0) }) }
-        return data
     }
 }

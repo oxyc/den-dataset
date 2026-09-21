@@ -168,13 +168,15 @@ class AdvertisedCounts(unittest.TestCase):
 class Consistency(unittest.TestCase):
     """Is the manifest internally TRUE right now — a different question from whether a blob moved."""
 
-    LIVE = {  # the manifest exactly as it was published, before the fix
+    # The manifest exactly as it was published, before the fix — with the two vector sizes carried
+    # forward to DENVEC02 (16 + rows x (8 + dims)), which is what those blobs are now.
+    LIVE = {
         "labelsFile": "labels-t02.json", "count": 47539, "labelsRecords": 47539,
-        "vectorsFile": "vectors-bge-m3.bin", "dims": 1024, "vectorsBytes": 48679944,
+        "vectorsFile": "vectors-bge-m3.bin", "dims": 1024, "vectorsBytes": 49060264,
         "premiseLabelsFile": "labels-premise.json",
         "premiseCount": 38532, "premiseLabelsRecords": 44531,
         "premiseVectorsFile": "vectors-premise.bin",
-        "premiseDims": 1024, "premiseVectorsBytes": 45599752,
+        "premiseDims": 1024, "premiseVectorsBytes": 45956008,
     }
     COUNTS = {"labelsFile": 47539, "premiseLabelsFile": 44531}
 
@@ -197,9 +199,19 @@ class Consistency(unittest.TestCase):
         self.assertTrue(any("premise vectors" in f for f in found), found)
 
     def test_the_plot_index_is_consistent_in_the_real_manifest(self):
-        """The control. 48,679,944 = 8 + 47,539 x 1024, so the plot half must NOT fire — a check that
-        flags a healthy artifact gets switched off."""
+        """The control. 49,060,264 = 16 + 47,539 x (8 + 1024), so the plot half must NOT fire — a check
+        that flags a healthy artifact gets switched off."""
         self.assertFalse(any("plot vectors" in f for f in mc.inconsistencies(self.LIVE, self.COUNTS)))
+
+    def test_the_row_count_is_solved_for_the_layout_rather_than_assumed(self):
+        """The two layouts differ by 8 bytes a row, so reading one as the other misreports the count by
+        under a percent — a number wrong enough to matter and close enough to look like a real
+        disagreement. Each is solved exactly, and a size that is neither is said so."""
+        self.assertEqual(mc.vector_rows(16 + 47539 * (8 + 1024), 1024), (47539, "DENVEC02"))
+        self.assertEqual(mc.vector_rows(8 + 47539 * 1024, 1024), (47539, "v1"))
+        self.assertEqual(mc.vector_rows(48679945, 1024), (None, None))
+        found = mc.inconsistencies(dict(self.LIVE, vectorsBytes=48679945), self.COUNTS)
+        self.assertTrue(any("not a whole number of rows" in f for f in found), found)
 
     def test_metadata_left_behind_by_a_dropped_key_is_caught(self):
         """Dropping a key leaves its metadata. The Step-3 publish removed `railFacetsFile` and its gz

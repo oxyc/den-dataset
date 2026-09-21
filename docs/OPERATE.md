@@ -222,7 +222,8 @@ for `out-t02-cc0b`. They apply to that store and no other. For any other store:
 4. **Then sweep the cap** on the long titles, holding the shape fixed. `assertDocFits` caps it at 3596, so
    the answer is an integer in (0, 3596].
 5. **Compare exact bytes**, from the store's own `index/vectors.jsonl` against the shipped
-   `vectors-bge-m3.bin` (8-byte header, then row-major int8, row *i* = `labels-t02.json.records[i]`). Judge
+   `vectors-bge-m3.bin` (a `DENVEC02` blob: 16-byte header, a u64 key per row, then row-major int8 — look
+   the row up BY KEY, `(media << 32) | tmdbId`, rather than by position in `labels-t02.json`). Judge
    on byte equality only: adjacent caps sit at cosine 0.95–0.98, which reads as "about right" and is wrong
    in every byte.
 

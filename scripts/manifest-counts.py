@@ -89,8 +89,28 @@ DENOMINATOR = "storeFile"
 # why not. Nothing is behind it today: the store is the only published artifact (see DENOMINATOR).
 COVERAGE_RATIO = 0.98
 
-# A vector blob is an 8-byte header then `rows * dims` int8s, so its row count is arithmetic.
-VECTOR_HEADER = 8
+# A vector blob's row count is arithmetic from its size — see `vector_rows`.
+VECTOR_LAYOUTS = (
+    # (name, header bytes, bytes per row). DENVEC02 carries a u64 key per row before the rows themselves.
+    ("DENVEC02", 16, 8),
+    # The blobs that predate the key column. Still readable here because a manifest can outlive a format.
+    ("v1", 8, 0),
+)
+
+
+def vector_rows(size, dims):
+    """`(rows, layout)` for a vector blob of `size` bytes at `dims`, or `(None, None)`.
+
+    Solved for each layout rather than assumed, because assuming the wrong one misreports the row count by
+    under a percent — close enough to read as a real-but-small disagreement instead of as the wrong sum.
+    DENVEC02 is tried first: it is what everything writes now, and the two sizes can coincide (a 127-row
+    keyed blob and a 128-row v1 blob are both 131,080 bytes at 1024 dims).
+    """
+    for name, header, per_row in VECTOR_LAYOUTS:
+        stride = dims + per_row
+        if size >= header and (size - header) % stride == 0:
+            return (size - header) // stride, name
+    return None, None
 
 
 def store_rows(path):
@@ -174,8 +194,8 @@ def inconsistencies(meta, counts):
     44,531 and `vectors-premise.bin` was 44,531 rows. Nothing counted it, because nothing models it, so
     `ManifestMerge` carried it forward from whenever the premise index was first published.
 
-    A vector blob is `8 + rows * dims` bytes, so its row count is checkable from the manifest alone — no
-    need to read 45 MB to know it disagrees with the labels beside it.
+    A vector blob is `16 + rows * (8 + dims)` bytes, so its row count is checkable from the manifest alone
+    — no need to read 45 MB to know it disagrees with the labels beside it.
     """
     out = []
 
@@ -212,8 +232,13 @@ def inconsistencies(meta, counts):
         dims, size = meta.get(dims_key), meta.get(size_key)
         if not dims or not size:
             continue
-        claim(label, (size - VECTOR_HEADER) // dims, meta.get(rows_key),
-              f"{rows_key} (blob is {size} bytes at {dims} dims)")
+        rows, layout = vector_rows(size, dims)
+        if rows is None:
+            out.append(f"{label}: {size} bytes at {dims} dims is not a whole number of rows in any "
+                       f"vector blob layout — the manifest describes something that is not one")
+            continue
+        claim(label, rows, meta.get(rows_key),
+              f"{rows_key} (blob is {size} bytes at {dims} dims, {layout})")
     return out
 
 
