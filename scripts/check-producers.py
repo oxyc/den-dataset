@@ -111,8 +111,8 @@ UNMANIFESTED = (
 # `(producer, how, dedicated)` shape as PRODUCERS, and reusing those entries where there is one.
 #
 # This closes the narrowing the comment above describes. The loop over the manifest sees `storeFile` and
-# nothing else, so the store's inputs — labels, vectors, metadata, facts, the corpus, the enriched
-# batches — are built but not declared, and a store built from a STALE input published clean: every
+# nothing else, so the store's inputs — labels, vectors, facts and the corpus — are built but not
+# declared, and a store built from a STALE input published clean: every
 # guard passed, and none of them was looking at the thing that had not been rebuilt.
 #
 # Moving them into UNMANIFESTED was the other option and it is worse. Those entries carry no `dedicated`
@@ -136,10 +136,6 @@ STORE_INPUTS = {
     "vector_labels": PRODUCERS["labelsFile"],
     "premise_vectors": PRODUCERS["premiseVectorsFile"],
     "premise_labels": PRODUCERS["premiseLabelsFile"],
-    # The enriched batch directory, where the vote counts come from — `facets.bin` fell 9,007 titles
-    # behind the corpus carrying exactly these. Not dedicated: `enrich` is one subcommand of the binary
-    # that also writes labels, vectors, metadata and facts.
-    "enriched": ("Sources/taxonomy-backfill/main.swift", "taxonomy-backfill enrich", False),
 }
 
 _build_store = None
@@ -149,8 +145,7 @@ def build_store():
     """`build_store.py` as a module, for its input digest.
 
     Imported rather than reimplemented: "what this input hashes to" having two definitions is precisely
-    the drift this file exists to refuse, and the directory case — the enriched batches, digested over a
-    listing in batch-number order — is a rule only one of the two copies would keep.
+    the drift this file exists to refuse.
     """
     global _build_store
     if _build_store is None:

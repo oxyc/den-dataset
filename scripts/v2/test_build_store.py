@@ -564,65 +564,8 @@ class RecordsWhatItRead(StoreFixture, unittest.TestCase):
         # The three that are not inputs: where it writes, what it calls the generation, what it stamps.
         self.assertEqual(parsed - {"out", "dataset_version", "stamp_meta"}, set(bs.INPUT_ARGS))
 
-    def test_a_directory_input_is_digested_in_batch_number_order(self):
-        """The enriched batches have no single file, so the digest is over their listing — and in
-        BATCH-NUMBER order, the same rule `read_votes` uses to decide which batch wins. Lexicographic
-        order puts `batch-10` before `batch-2`, so a lexicographic digest would depend on how many
-        digits a batch id happens to have."""
-        bs = build_store_module()
-        with tempfile.TemporaryDirectory() as dir:
-            enriched = os.path.join(dir, "enriched")
-            os.makedirs(enriched)
-            bodies = {"batch-2.json": '[{"a":1}]', "batch-10.json": '[{"b":2}]'}
-            for name, body in bodies.items():
-                with open(os.path.join(enriched, name), "w") as fh:
-                    fh.write(body)
-
-            digest, size, _ = bs.input_digest(enriched)
-            self.assertEqual(size, sum(len(b) for b in bodies.values()))
-
-            listing = hashlib.sha256()
-            for name in ("batch-2.json", "batch-10.json"):
-                listing.update(
-                    f"{name} {hashlib.sha256(bodies[name].encode()).hexdigest()}\n".encode())
-            self.assertEqual(digest, listing.hexdigest())
-
-            # And it MOVES when a batch is rewritten — a directory whose digest ignored its contents
-            # would be a record that cannot notice the thing it exists to notice.
-            with open(os.path.join(enriched, "batch-2.json"), "w") as fh:
-                fh.write('[{"a":99}]')
-            self.assertNotEqual(bs.input_digest(enriched)[0], digest)
-
-
 if __name__ == "__main__":
     unittest.main()
-
-
-class VotesAreNotSilentlyZero(unittest.TestCase):
-    """A whole column of zero votes is a missing `--enriched`, not a corpus of unknowns.
-
-    `sec.put("votes", …, expect=n)` is a ROW-COUNT assert and 47,618 zeros satisfy it, so nothing saw
-    this. atlas orders every browse row by `ln(votes)`, so the symptom is a corpus that sorts by tmdbId —
-    *La Job* (tv:5) beside *Game of Thrones*, which is oxyc/den-dataset#22 one level up from the blob it
-    was first found in. The store records its inputs now, but an input never PASSED is recorded as
-    nothing, so the ownership guard cannot see this one either.
-    """
-
-    def test_an_all_zero_column_at_corpus_scale_is_refused(self):
-        complaint = build_store_module().votes_are_missing([0] * (build_store_module().VOTES_REQUIRED_ABOVE + 1))
-        self.assertIsNotNone(complaint, "an all-zero column above the bound must be refused")
-        self.assertIn("--enriched", complaint, "the message must say what to pass")
-
-    def test_one_real_vote_is_enough(self):
-        """It refuses a column that is ENTIRELY zero. A corpus where obscure titles have no votes is not
-        the failure — reading no vote counts at all is."""
-        votes = [0] * build_store_module().VOTES_REQUIRED_ABOVE + [7]
-        self.assertIsNone(build_store_module().votes_are_missing(votes))
-
-    def test_a_small_fixture_with_no_votes_is_fine(self):
-        """The bound exists so the synthetic fixtures — here and in den-spec — need no flag declaring
-        they have no vote data."""
-        self.assertIsNone(build_store_module().votes_are_missing([0, 0]))
 
 
 def choice(value, probabilities, confidence=0.9):
@@ -933,10 +876,11 @@ class EverySectionDeclaresWhereItsBytesCameFrom(StoreFixture, unittest.TestCase)
         When it goes, this set is empty and the store carries identifiers only."""
         mod = build_store_module()
         vendor = {name for name, source in mod.PROVENANCE.items() if source in mod.VENDOR_SOURCES}
-        self.assertEqual(vendor, {"votes"})
+        self.assertEqual(vendor, set(), "no section may carry a vendor's content")
+        self.assertEqual(mod.VENDOR_ALLOWED, set(), "and nothing is permitted to")
         self.assertEqual(mod.PROVENANCE["card_title"], "wikidata", "the label, not the TMDB title")
         self.assertEqual(mod.PROVENANCE["card_year"], "wikidata", "the release date, not the TMDB year")
-        self.assertEqual(vendor, mod.VENDOR_ALLOWED)
+        self.assertNotIn("votes", mod.PROVENANCE, "the vote count is joined at read time, not stored")
         self.assertNotIn("imdb", vendor, "an id is a join key, not content")
         self.assertNotIn("keys", vendor)
 
@@ -951,9 +895,10 @@ class EverySectionDeclaresWhereItsBytesCameFrom(StoreFixture, unittest.TestCase)
 
     def test_an_allowlist_entry_for_a_column_that_is_gone_stops_the_build(self):
         """So removing a vendor column is two deliberate edits — the PROVENANCE entry and the allowlist
-        entry — rather than one that leaves a permission behind."""
+        entry — rather than one that leaves a permission behind. The allowlist is empty now, so the
+        case is made by putting an entry back for a section that no longer exists."""
         with tempfile.TemporaryDirectory() as out:
-            writer = self.mutated(out, 'mod.PROVENANCE["votes"] = "ours"')
+            writer = self.mutated(out, 'mod.VENDOR_ALLOWED = {"votes"}')
             with self.assertRaises(AssertionError) as caught:
                 self.build(out, build_store=writer)
         message = str(caught.exception)
@@ -1003,10 +948,9 @@ class ProseCannotEnterTheDictionary(StoreFixture, unittest.TestCase):
 class ThePosterPathIsNotPublished(StoreFixture, unittest.TestCase):
     """`card_poster` held a TMDB poster path for 47,534 rows of a public release asset.
 
-    It is the one card column with no argument for keeping it: den-edge's `/metadata/title/query`
-    batches posters 100 titles to a request, and den-atlas's Stremio metas already carry a metahub
-    `poster` URL beside `posterPath`. `card_title` and `card_year` still ship — they need a Wikidata
-    replacement first, which is the rest of oxyc/den#118.
+    It is the one card column with no replacement at all: den-edge's `/metadata/title/query` batches
+    posters 100 titles to a request, and den-atlas's Stremio metas already carry a metahub `poster` URL
+    beside `posterPath`. `card_title` and `card_year` still ship, from Wikidata now.
     """
 
     def test_the_store_has_no_poster_section(self):
@@ -1019,15 +963,16 @@ class ThePosterPathIsNotPublished(StoreFixture, unittest.TestCase):
         self.assertIn("card_title", store.table, "the other two card columns are not this change's")
         self.assertIn("card_year", store.table)
 
-    def test_the_poster_path_does_not_even_reach_the_dictionary(self):
-        """The metadata sidecar carries one for every row. Dropping the section while still interning
-        the strings would leave the paths in the published bytes, reachable by anyone who reads the
-        dictionary — which is redistribution just the same."""
+    def test_no_artwork_reference_reaches_the_dictionary(self):
+        """Dropping a section while still interning its strings leaves them in the published bytes,
+        reachable by anyone who reads the dictionary — which is redistribution just the same. The
+        writer takes no poster input at all now, so this watches the dictionary itself rather than one
+        removed argument: any `/…jpg` here would mean a path arrived through some other field."""
         with tempfile.TemporaryDirectory() as out:
             store, _ = self.build(out)
         interned = {store.text(i) for i in range(len(store.str_off) - 1)}
-        self.assertNotIn("/alpha.jpg", interned)
-        self.assertNotIn("/beta.jpg", interned)
+        paths = [s for s in interned if s and s.startswith("/") and s.endswith(".jpg")]
+        self.assertEqual(paths, [], "an artwork path is in the store's string table")
         self.assertIn("Alpha", interned, "the title still ships; only the artwork reference is gone")
 
 
