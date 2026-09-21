@@ -262,6 +262,26 @@ class Coverage(unittest.TestCase):
             write_json(next_meta, {"labelsFile": "labels-b.json", "plotFacetsFile": "facets-b.json"})
             self.assertEqual(run(["--compare", meta, next_meta, dir]), "")
 
+    def test_the_threshold_is_2_041_percent_growth(self):
+        """Pin the number the docstring quotes, because it is what an operator plans a publish around and
+        it is derived (`1/(1+g) < 0.98`), not chosen. Just under must pass; just over must fire."""
+        for growth, expect_fire in ((0.0200, False), (0.0210, True)):
+            with tempfile.TemporaryDirectory() as dir:
+                base = 47539
+                write_records(os.path.join(dir, "labels-a.json"), base)
+                write_records(os.path.join(dir, "facets-a.json"), base)
+                meta = os.path.join(dir, "meta.json")
+                write_json(meta, {"labelsFile": "labels-a.json", "plotFacetsFile": "facets-a.json"})
+                run(["--stamp", meta, dir])
+
+                grown = int(base * (1 + growth))
+                write_records(os.path.join(dir, "labels-b.json"), grown)
+                next_meta = os.path.join(dir, "next.json")
+                write_json(next_meta, {"labelsFile": "labels-b.json", "plotFacetsFile": "facets-a.json"})
+                report = run(["--compare", meta, next_meta, dir])
+                fired = "plotFacetsFile" in report
+                self.assertEqual(fired, expect_fire, f"growth {growth:.2%} -> {report!r}")
+
     def test_a_key_with_no_published_baseline_is_not_scored(self):
         """Coverage cannot be satisfied by renaming: a key the published manifest never stamped is
         skipped entirely rather than compared against a number it did not earn."""

@@ -74,6 +74,12 @@ DENOMINATOR = "labelsFile"
 # plot-facets actually sits — it needs 16.9%, and across the real 38,532 → 44,531 repass a completely
 # un-rebuilt plot-facets blob drops 1.87 points and passes. A blob covering under 2% of the corpus could
 # never trip a 2-point rule even by going to zero. As a ratio the threshold is the same for all of them.
+#
+# THE NUMBER AN OPERATOR NEEDS: an un-rebuilt blob keeps `1/(1+g)` of its share when the labels grow by
+# `g`, so it trips as soon as the labels grow by more than **2.041%**. From today's 47,539 that is any
+# publish past 48,510, about +971 titles — and it fires for EVERY blob behind the labels at once, which
+# today means `facetsFile` (81.1%), `premiseLabelsFile` (93.7%) and `plotFacetsFile` (11.2%). A publish
+# that grows the corpus meaningfully therefore has to rebuild all three, or say why not.
 COVERAGE_RATIO = 0.98
 
 # A vector blob is an 8-byte header then `rows * dims` int8s, so its row count is arithmetic.

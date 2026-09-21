@@ -26,6 +26,16 @@ record-count guard's problem, not this one.
 
 The version is matched as `-<12 hex>` immediately before a suffix, which is the shape the producer emits.
 A looser search for any 12-hex run would match a filename that merely contains one.
+
+**What this cannot do.** The exemption is derived from the NAME, so republishing a stale blob without its
+version — `plot-facets.json` — makes it permanently exempt. Nothing else would see it either: its record
+count never moves, and coverage only catches it once the corpus grows past the 2.041% in
+`manifest-counts.py`. This guard is a tripwire for the ordinary case (a blob not rebuilt keeps its old
+name), not a defence against someone routing around it.
+
+There is also no `DEN_ALLOW_DROPPING_BLOBS` escape here, unlike the record-count and ownership guards.
+That is deliberate — a blob from a dead generation is not a judgement call — but it means a stale blob
+BLOCKS publishing until it is rebuilt or its key is dropped.
 """
 import json
 import re
