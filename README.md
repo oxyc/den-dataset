@@ -325,12 +325,17 @@ across every generation (`bge-m3`, `1024`). `vectorEpoch` is meant to move when 
 `1` across generations that return different vectors. `embedderRuntime` records only den-embed's own crate
 version, which does not change when what is underneath it does.
 
-The only sound check is to re-embed a sample of a blob and compare bytes; `scripts/v2/embed_premise_v2.py`
-does that before reusing anything and refuses on mismatch.
+The only sound check is to embed something whose answer is already known and compare bytes.
+[`data/embed-canary.json`](data/embed-canary.json) is that: a handful of fixed texts and the exact int8
+vectors den-embed is supposed to return for them. `scripts/v2/embed_canary.py` verifies them, every path
+that writes a vector runs it before opening its output, and the verified identity is published in
+`dataset.meta.json` as `embeddingSpace` — so a dataset names the space it is in instead of leaving it to be
+inferred from a version that cannot express one. The check names no cause, which is the point: the two
+differences that have actually bitten were both diagnosed as something else first.
 
-**The live index and live queries are NOT aligned today** — measured cost 6.3/10 top-10 overlap, and the
-cause is the build host, not a version. Current state and what to do: `docs/OPERATE.md` "The alignment
-rule". Evidence: oxyc/den-dataset#21. Not restated here, so there is one copy to keep true.
+**The live index and live queries are NOT aligned today** — measured cost 6.3/10 top-10 overlap. Current
+state and what to do: `docs/OPERATE.md` "The alignment rule". Evidence: oxyc/den-dataset#21. Not restated
+here, so there is one copy to keep true.
 
 What the gate still cannot see is the **doc shape** and the **plot cap**. The shipped index is the CC0 lean
 shape (`embed-corpus --doc-facts`), and its cap is recorded nowhere. Both differ silently from what a plain

@@ -24,7 +24,8 @@ final class ManifestTests: XCTestCase {
                                labelsGzFile: "g", labelsSha256: "a", labelsBytes: 1, vectorsSha256: "b",
                                vectorsBytes: 2, builtAt: "t", lastModifiedHttp: "h",
                                metadataFile: "m", metadataSha256: "ms", metadataBytes: 3,
-                               embedderRuntime: "den-embed/3.0.0", embedderMaxTokens: 512)
+                               embedderRuntime: "den-embed/3.0.0", embedderMaxTokens: 512,
+                               embeddingSpace: "canary-v1:abc")
         let encoded = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(full))
         let keys = Set(try XCTUnwrap(encoded as? [String: Any]).keys)
 
@@ -39,6 +40,10 @@ final class ManifestTests: XCTestCase {
             "premiseVectorsFile": "vectors-premise.bin",
             "metadataFile": "metadata-OLD.json",           // owned, and the new meta omits it
             "embedderRuntime": "den-embed/2.9.0",
+            // The space the PREVIOUS corpus was verified in. A run that did not verify one must publish
+            // no space at all — inheriting this would make a dataset name a space nothing measured it in,
+            // which is worse than saying nothing.
+            "embeddingSpace": "canary-v1:0000",
         ])
         let fresh = try JSONEncoder().encode(meta())
 
@@ -49,6 +54,7 @@ final class ManifestTests: XCTestCase {
         XCTAssertEqual(result["premiseVectorsFile"] as? String, "vectors-premise.bin")
         XCTAssertNil(result["metadataFile"])
         XCTAssertNil(result["embedderRuntime"])
+        XCTAssertNil(result["embeddingSpace"], "an embedding space must never be inherited")
     }
 
     /// `namingSidecar` is a hand-written 20-argument copy, and it is the ONE place the CodingKeys

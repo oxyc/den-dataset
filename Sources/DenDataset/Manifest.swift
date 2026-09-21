@@ -30,6 +30,12 @@ public struct DatasetMeta: Codable {
     // the Rust rewrite's token cap. Absent means a corpus built before this was recorded.
     public let embedderRuntime: String?
     public let embedderMaxTokens: Int?
+    // The embedding SPACE, as `<canarySet>:<digest>` — see `EmbedSpaceCanary`. The three fields above
+    // describe the service that was asked; this one describes what it answered. They are not the same
+    // claim, and only this one can be compared by something that never saw the build: a consumer embeds
+    // the same committed texts through its own den-embed and gets the same string, or it does not. Absent
+    // means the corpus was built before the canary existed, or by an embed path that does not run it.
+    public let embeddingSpace: String?
 
     /// Declared explicitly so `ownedKeys` cannot fall behind the struct.
     ///
@@ -44,7 +50,7 @@ public struct DatasetMeta: Codable {
         case labelsFile, vectorsFile, labelsGzFile, labelsSha256, labelsBytes, vectorsSha256, vectorsBytes
         case builtAt, lastModifiedHttp
         case metadataFile, metadataSha256, metadataBytes
-        case embedderRuntime, embedderMaxTokens
+        case embedderRuntime, embedderMaxTokens, embeddingSpace
     }
 
     public init(datasetVersion: String, taxonomyVersion: String, embeddingModel: String, dims: Int,
@@ -52,7 +58,8 @@ public struct DatasetMeta: Codable {
                 labelsGzFile: String, labelsSha256: String, labelsBytes: Int, vectorsSha256: String,
                 vectorsBytes: Int, builtAt: String, lastModifiedHttp: String,
                 metadataFile: String? = nil, metadataSha256: String? = nil, metadataBytes: Int? = nil,
-                embedderRuntime: String? = nil, embedderMaxTokens: Int? = nil) {
+                embedderRuntime: String? = nil, embedderMaxTokens: Int? = nil,
+                embeddingSpace: String? = nil) {
         self.datasetVersion = datasetVersion; self.taxonomyVersion = taxonomyVersion
         self.embeddingModel = embeddingModel; self.dims = dims; self.count = count
         self.quantization = quantization; self.labelsFile = labelsFile; self.vectorsFile = vectorsFile
@@ -62,6 +69,7 @@ public struct DatasetMeta: Codable {
         self.metadataFile = metadataFile; self.metadataSha256 = metadataSha256
         self.metadataBytes = metadataBytes
         self.embedderRuntime = embedderRuntime; self.embedderMaxTokens = embedderMaxTokens
+        self.embeddingSpace = embeddingSpace
     }
 
     /// A copy naming a metadata sidecar. `metadata` patches an existing manifest rather than rebuilding it.
@@ -72,7 +80,8 @@ public struct DatasetMeta: Codable {
                     labelsSha256: labelsSha256, labelsBytes: labelsBytes, vectorsSha256: vectorsSha256,
                     vectorsBytes: vectorsBytes, builtAt: builtAt, lastModifiedHttp: lastModifiedHttp,
                     metadataFile: file, metadataSha256: sha256, metadataBytes: bytes,
-                    embedderRuntime: embedderRuntime, embedderMaxTokens: embedderMaxTokens)
+                    embedderRuntime: embedderRuntime, embedderMaxTokens: embedderMaxTokens,
+                    embeddingSpace: embeddingSpace)
     }
 
     /// The keys this struct is authoritative for — including when it omits one. Everything else in the file

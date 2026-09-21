@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Embed composed documents on whichever den-embed serves live queries, and write the index store.
 
-  scripts/v2/embed_docs.py --docs docs.jsonl --out-dir out --url http://den-embed:8080
+  scripts/v2/embed_docs.py --docs docs.jsonl --out-dir out --url http://den-embed:8080 \
+      --canary data/embed-canary.json
 
 Input is `embed-corpus --dump-docs` output: one `{"key": "movie:11", "doc": "…"}` per line. Output is the
 same pair of append-only stores `embed-corpus` writes — `labels.jsonl` is NOT written here (the caller
@@ -33,6 +34,11 @@ built from the file's own row order below and every row carries its `key`.
 
 Append-only, and an existing `vectors.jsonl` is read first so a killed run continues where it stopped. A
 long embed WILL be interrupted; re-reading 38k lines costs a second and re-embedding them costs an hour.
+
+That resume is also why the canary below runs on EVERY invocation and not only the first: the box rebuilds
+den-embed weekly, so a run resumed after a redeploy would append to the same file from a service nobody
+re-checked. `--canary` must be mounted alongside this script when it runs in a container (see
+`docs/OPERATE.md`), because the whole point is that it travels with the code that writes the vectors.
 """
 import argparse
 import json
@@ -43,6 +49,9 @@ import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import embed_canary  # noqa: E402
 
 
 def embed(url, texts, retries=4):
@@ -72,6 +81,9 @@ ap.add_argument("--out-dir", required=True)
 ap.add_argument("--url", required=True)
 ap.add_argument("--batch", type=int, default=7)
 ap.add_argument("--workers", type=int, default=1)
+ap.add_argument("--canary", default=None,
+                help="the known-answer file for the embedding space (default: data/embed-canary.json "
+                     "beside this checkout; pass it explicitly when running from a container)")
 args = ap.parse_args()
 
 os.makedirs(args.out_dir, exist_ok=True)
@@ -101,6 +113,14 @@ print(json.dumps({"docs": len(rows), "alreadyDone": len(done), "embedder": healt
 if health.get("max_tokens", 0) < 1024:
     sys.exit(f"refusing: den-embed reports max_tokens={health.get('max_tokens')}, which truncates a corpus "
              f"document. See den-dataset/docs/OPERATE.md 'The alignment rule'.")
+
+# Before the append handle is opened, so a service that has moved produces no rows rather than rows in a
+# second space. A partially-written store loads, ranks, and is wrong; an absent one is merely absent.
+# The verified space is recorded beside the vectors so `import_box_vectors.py` can carry it into the index
+# dir and `finalize` can stamp it into dataset.meta.json.
+space = embed_canary.gate(args.url, canary=args.canary,
+                          record=os.path.join(args.out_dir, "embedding-space.json"))
+print(f"  embedding space: {space}", file=sys.stderr)
 
 t0 = time.time()
 written = 0

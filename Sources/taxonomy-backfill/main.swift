@@ -1286,13 +1286,43 @@ enum Commands {
                 + " — or start a fresh --out-dir.")
         case .matches:
             try assertDocFits(plotCap: plotCap, embedder: now)
+            try await verifyEmbeddingSpace(outDir: outDir, client: client)
             return now
         case .firstUse:
             try assertDocFits(plotCap: plotCap, embedder: now)
+            try await verifyEmbeddingSpace(outDir: outDir, client: client)
             try FileIO.ensureParent(path)
             try JSON.writePretty(now, to: path)
             return now
         }
+    }
+
+    /// The known-answer test, run before this command writes its first vector, and recorded where
+    /// `finalize` will find it.
+    ///
+    /// It sits AFTER the embedder gate deliberately. On a service upgrade "this would mix two embedders
+    /// into one corpus" is the finding that matters and names the store that is at risk; leading with the
+    /// canary would report the same event as an anonymous space change. The canary's job is the case the
+    /// gate cannot see — a service whose `/health` is identical and whose numbers are not.
+    static func verifyEmbeddingSpace(outDir: String, client: DenEmbedClient) async throws {
+        let canary = EmbedSpaceCanary.defaultPath()
+        guard FileManager.default.fileExists(atPath: canary) else {
+            throw ToolError(message: "no embedding canary at \(canary), so nothing can say which space "
+                + "this service embeds into. Run from the repo root, or point DEN_EMBED_CANARY at "
+                + "data/embed-canary.json.")
+        }
+        let stamp: EmbedSpaceCanary.Stamp
+        do {
+            stamp = try await EmbedSpaceCanary.verify(
+                path: canary, client: client,
+                url: DenEmbedClient.defaultBaseURL().absoluteString) { line in
+                    FileHandle.standardError.write(Data("  \(line)\n".utf8))
+                }
+        } catch let failure as EmbedSpaceCanary.Failure {
+            throw ToolError(message: failure.description)
+        }
+        try FileIO.ensureParent(Layout.embeddingSpace(outDir))
+        try JSON.writePretty(stamp, to: Layout.embeddingSpace(outDir))
     }
 
     /// The same guard for how the document is composed, which `recordEmbedder` cannot see.
@@ -1685,6 +1715,24 @@ enum Commands {
                 + "\(dim)-dim — refusing to ship a manifest that would misdescribe them.")
         }
 
+        // Written by whichever embed path verified the known-answer canary — `embed-corpus` here, or
+        // `scripts/v2/embed_docs.py` on the box by way of `import_box_vectors.py --embed-space`. Absent
+        // for a store built before the canary existed, which is carried as an absent manifest key rather
+        // than a guess: naming a space this run did not verify is the failure the canary exists to stop.
+        var embeddingSpace: String? = nil
+        if FileManager.default.fileExists(atPath: Layout.embeddingSpace(outDir)) {
+            // Loudly, like the identity above: a malformed file would otherwise drop the space from the
+            // manifest and say nothing, which looks exactly like a store that never had one.
+            do {
+                let stamp: EmbedSpaceCanary.Stamp = try JSON.read(Layout.embeddingSpace(outDir))
+                embeddingSpace = stamp.spaceId
+            } catch {
+                throw ToolError(message: "\(Layout.embeddingSpace(outDir)) is unreadable (\(error)) — it "
+                    + "records the embedding space this store's vectors are in, so shipping without it "
+                    + "would publish a corpus that cannot say which space it belongs to")
+            }
+        }
+
         let taxonomyVersion = Taxonomy.current.version
         let labels = LabelsArtifact(taxonomyVersion: taxonomyVersion, records: records)
         let labelsBlob = try JSON.encodeSorted(labels)
@@ -1732,7 +1780,8 @@ enum Commands {
             builtAt: DateFmt.iso8601(now),
             lastModifiedHttp: DateFmt.rfc1123(now),
             embedderRuntime: embedder?.runtime,
-            embedderMaxTokens: embedder?.maxTokens)
+            embedderMaxTokens: embedder?.maxTokens,
+            embeddingSpace: embeddingSpace)
         try JSON.writeMeta(meta, to: Layout.datasetMeta(outDir))
 
         var report = RunReport()
@@ -2453,6 +2502,7 @@ enum Layout {
     static func enrichedBatch(_ dir: String, _ id: Int) -> String { join(dir, "enriched/batch-\(id).json") }
     static func escalateBatch(_ dir: String, _ id: Int) -> String { join(dir, "escalate/batch-\(id).json") }
     static func embedderIdentity(_ dir: String) -> String { join(dir, "index/embedder.json") }
+    static func embeddingSpace(_ dir: String) -> String { join(dir, "index/embedding-space.json") }
     static func compositionIdentity(_ dir: String) -> String { join(dir, "index/composition.json") }
     static func votesDir(_ dir: String) -> String { join(dir, "votes") }
     static func votePass(_ dir: String, _ id: Int, _ pass: Int) -> String { join(dir, "votes/batch-\(id)-pass\(pass).json") }
