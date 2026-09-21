@@ -6,6 +6,10 @@ out/
 .swiftpm/
 out-vecnow*/
 out-*/
+# No trailing slash, so a SYMLINK is covered too. `out-t02` is a symlink to `legacy/out-t02`, and git
+# treats a symlink as a file, so the pattern above never matched it — it sat untracked in every status,
+# one `git add .` away from committing a link to gigabytes of derived data.
+out-*
 __pycache__/
 
 # TMDB detail-response cache (TMDBCache) — large, machine-local, regenerable.
