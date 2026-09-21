@@ -43,6 +43,9 @@ HEADER_BYTES = 64
 ENTRY_BYTES = 32
 ALIGN = 8
 DIMS = 1024
+#: Above this many rows, an all-zero `votes` column is a missing `--enriched`, not a corpus of unknowns.
+#: Below it, a synthetic fixture with no vote data is ordinary and says nothing.
+VOTES_REQUIRED_ABOVE = 1000
 
 FACET_AXES = ("era", "setting", "scope", "ending", "pacing", "chronology",
               "continuity", "conflict", "ensemble", "tone", "timespan", "archetype")
@@ -208,6 +211,29 @@ def build_inputs(args):
         sha, size, mtime = input_digest(path)
         out.append({"arg": arg, "path": path, "sha256": sha, "bytes": size, "mtime": mtime})
     return out
+
+
+def votes_are_missing(votes):
+    """The complaint when a `votes` column is entirely zero at corpus scale, else `None`.
+
+    A zero vote count is a real answer for an obscure title; a whole COLUMN of zeros is not. It is what
+    an omitted `--enriched` produces, and `sec.put("votes", …, expect=n)` cannot see it — a row-count
+    assert is satisfied by 47,618 zeros. atlas orders every browse row by `ln(votes)`, so the symptom is
+    a corpus that sorts by tmdbId: *La Job* (tv:5) beside *Game of Thrones*, which is
+    oxyc/den-dataset#22 one level up from the blob it was first found in.
+
+    The store records its inputs now, but an input never PASSED is recorded as nothing — `store_inputs`
+    skips a falsy path — so the ownership guard cannot see this one either. It is checked here, where
+    the column is in hand.
+
+    Bounded to real-corpus scale so the synthetic fixtures (here and in den-spec) need no flag declaring
+    they have no vote data. Below the bound an all-zero column says nothing; above it, it is a missing
+    argument.
+    """
+    if len(votes) > VOTES_REQUIRED_ABOVE and not any(votes):
+        return (f"votes: all {len(votes)} rows are zero — every browse row would sort by tmdbId. Pass "
+                f"--enriched so the vote counts are read, or say why a corpus this size has none.")
+    return None
 
 
 def read_votes(enriched_dir):
@@ -828,6 +854,20 @@ def main():
     sec.put("card_title", "I", card_title, 4, expect=n)
     sec.put("card_poster", "I", card_poster, 4, expect=n)
     sec.put("card_year", "h", card_year, 2, expect=n)
+    # A vote count of zero is a real answer for an obscure title; a whole COLUMN of zeros is not. It is
+    # what `--enriched` omitted produces, and the row-count assert below cannot see it — `expect=n` is
+    # satisfied by 47,618 zeros. atlas orders every browse row by `ln(votes)`, so the symptom would be a
+    # corpus that sorts by tmdbId: *La Job* (tv:5) beside *Game of Thrones*, exactly the failure
+    # oxyc/den-dataset#22 is about, one level up from the blob it was first seen in.
+    #
+    # The store records its inputs now, but an input never passed is recorded as nothing, so the
+    # ownership guard cannot see this one either. Checked here, where the column is in hand.
+    # Bounded to real-corpus scale, not to any store: a handful of synthetic titles legitimately have no
+    # votes, and the fixtures that build them (here and in den-spec) should not have to carry a flag
+    # saying so. At a thousand rows an all-zero column is not a corpus, it is a missing argument.
+    votes_complaint = votes_are_missing(votes)
+    if votes_complaint:
+        sys.exit(votes_complaint)
     sec.put("votes", "I", votes, 4, expect=n)
     sec.put("primary_genre", "I", primary, 4, expect=n)
     sec.put_labelled_list("subgenre", subgenres)
