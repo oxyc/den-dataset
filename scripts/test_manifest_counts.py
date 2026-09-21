@@ -169,9 +169,11 @@ class Consistency(unittest.TestCase):
     """Is the manifest internally TRUE right now — a different question from whether a blob moved."""
 
     LIVE = {  # the manifest exactly as it was published, before the fix
-        "count": 47539, "labelsRecords": 47539,
-        "dims": 1024, "vectorsBytes": 48679944,
+        "labelsFile": "labels-t02.json", "count": 47539, "labelsRecords": 47539,
+        "vectorsFile": "vectors-bge-m3.bin", "dims": 1024, "vectorsBytes": 48679944,
+        "premiseLabelsFile": "labels-premise.json",
         "premiseCount": 38532, "premiseLabelsRecords": 44531,
+        "premiseVectorsFile": "vectors-premise.bin",
         "premiseDims": 1024, "premiseVectorsBytes": 45599752,
     }
     COUNTS = {"labelsFile": 47539, "premiseLabelsFile": 44531}
@@ -198,6 +200,23 @@ class Consistency(unittest.TestCase):
         """The control. 48,679,944 = 8 + 47,539 x 1024, so the plot half must NOT fire — a check that
         flags a healthy artifact gets switched off."""
         self.assertFalse(any("plot vectors" in f for f in mc.inconsistencies(self.LIVE, self.COUNTS)))
+
+    def test_metadata_left_behind_by_a_dropped_key_is_caught(self):
+        """Dropping a key leaves its metadata. The Step-3 publish removed `railFacetsFile` and its gz
+        twin and left `railFacetsSha256`/`railFacetsBytes` describing a file no longer named or shipped —
+        nothing reads them and nothing cleans them, so they would be merged forward forever."""
+        found = mc.inconsistencies(
+            {"labelsFile": "l.json", "labelsBytes": 10,
+             "railFacetsSha256": "abc", "railFacetsBytes": 49897524}, {})
+        self.assertEqual(len(found), 2, found)
+        self.assertTrue(all("railFacets" in f for f in found))
+
+    def test_a_complete_key_set_is_not_flagged(self):
+        """The control: every `*Sha256`/`*Bytes`/`*Records` whose `*File` is present must pass, or this
+        fires on every healthy manifest and gets switched off."""
+        self.assertEqual(mc.inconsistencies(
+            {"labelsFile": "l.json", "labelsSha256": "a", "labelsBytes": 1, "labelsRecords": 1,
+             "storeFile": "s.store", "storeRecords": 2, "maxBatchId": 173}, {}), [])
 
     def test_a_missing_number_is_not_a_mismatch(self):
         self.assertEqual(mc.inconsistencies({"count": 10}, {}), [])

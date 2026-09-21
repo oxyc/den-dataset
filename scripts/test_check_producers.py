@@ -126,6 +126,22 @@ class Corpus(unittest.TestCase):
                 os.chdir(cwd)
             self.assertEqual(code, 0, err)
 
+    def test_an_ABSENT_corpus_is_reported_rather_than_passing_silently(self):
+        """The one way this loop could pass while asserting nothing: an empty glob. It matters because a
+        tidied or freshly-built out-dir is exactly when the corpus goes missing, so the guard would go
+        quiet at the moment the tree stops holding the source of truth."""
+        with tempfile.TemporaryDirectory() as dir:
+            touch(dir, "labels-t02.json")
+            cwd = os.getcwd()
+            os.chdir(REPO)
+            try:
+                code, err = run({}, dir)
+            finally:
+                os.chdir(cwd)
+            self.assertEqual(code, 0, "absent is a warning, not a refusal — a publish dir may predate it")
+            self.assertIn("corpus-*.jsonl.gz", err)
+            self.assertIn("not checked", err)
+
     def test_a_missing_corpus_producer_is_reported(self):
         """Proved by running from a directory where the producer path does not resolve, which is what a
         deleted or renamed script looks like to this check."""

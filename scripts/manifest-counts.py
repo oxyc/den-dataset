@@ -170,6 +170,18 @@ def inconsistencies(meta, counts):
         if claimed is not None and actual is not None and claimed != actual:
             out.append(f"{label}: manifest says {claimed}, {why} says {actual}")
 
+    # A `<x>Sha256` or `<x>Bytes` whose `<x>File` is gone. Dropping a key leaves its metadata behind —
+    # the Step-3 publish removed `railFacetsFile` and `railFacetsGzFile` and left `railFacetsSha256` and
+    # `railFacetsBytes` describing a file no longer named or shipped. Nothing reads them and nothing
+    # cleans them: the gz pass pops only the `GzFile` twin, the filename guard iterates `*File` only, and
+    # `ManifestMerge` carries unowned keys forward forever. So they accumulate, each one a claim about an
+    # artifact that is not there.
+    named = {k[: -len("File")] for k in meta if k.endswith("File")}
+    for key in sorted(meta):
+        for suffix in ("Sha256", "Bytes", "Records"):
+            if key.endswith(suffix) and key[: -len(suffix)] not in named:
+                out.append(f"{key}: describes {key[: -len(suffix)]}File, which the manifest does not name")
+
     claim("count", meta.get("count"), counts.get("labelsFile"), "labelsFile")
     claim("premiseCount", meta.get("premiseCount"), counts.get("premiseLabelsFile"), "premiseLabelsFile")
     # Spelled out rather than built from a prefix: `f"{prefix}dims"` gives `premisedims`, which no

@@ -124,13 +124,25 @@ def main():
     # The artifacts no manifest key names. Same question — "does anything in this repo build it" — asked
     # of the out-dir directly, because the manifest cannot answer it for a separately-tagged release.
     for pattern, producer, how in UNMANIFESTED:
-        for artifact in sorted(glob.glob(os.path.join(out_dir, pattern))):
+        found = sorted(glob.glob(os.path.join(out_dir, pattern)))
+        if not found:
+            # Nothing matched. The registry says this out-dir SHOULD hold one, and an empty glob is the
+            # one way this loop could pass while asserting nothing — which is what it did before this
+            # branch existed. It matters because the corpus is the source of truth, and a tidied or
+            # freshly-built out-dir is exactly when it goes missing.
+            warnings.append(f"{pattern}: nothing in {out_dir} matches, so its producer ({producer}) was "
+                            f"not checked. A publish dir should hold one; build it with: {how}")
+            continue
+        for artifact in found:
             name = os.path.basename(artifact)
             if not os.path.exists(producer):
                 problems.append(f"{name}: its producer {producer} does not exist (build it with: {how})")
             elif not tracked(producer):
                 problems.append(f"{name}: its producer {producer} is not tracked by git — commit it, or "
                                 f"the next machine cannot rebuild it")
+            elif os.path.getmtime(producer) > os.path.getmtime(artifact):
+                warnings.append(f"{name}: {producer} was edited after this artifact was built, so it may "
+                                f"have been built by an older version of the rule. Re-run: {how}")
 
     for warning in warnings:
         print(f"warning: {warning}", file=sys.stderr)
