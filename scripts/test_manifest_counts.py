@@ -75,6 +75,11 @@ def write_json(path, doc):
         json.dump(doc, f)
 
 
+def write_records(path, n):
+    """A blob in the `{"records": [...]}` shape `count()` reads, with `n` of them."""
+    write_json(path, {"records": [{"tmdbId": i} for i in range(n)]})
+
+
 def run(argv):
     """`main()` with these arguments, returning what it printed."""
     import contextlib
@@ -123,6 +128,81 @@ class StampAndCompare(unittest.TestCase):
             write_store(os.path.join(dir, "den-def.store"), 47700)
             next_meta = os.path.join(dir, "next.json")
             write_json(next_meta, {"storeFile": "den-def.store"})
+            self.assertEqual(run(["--compare", meta, next_meta, dir]), "")
+
+
+class Coverage(unittest.TestCase):
+    """A blob's records as a share of the labels — the question an absolute count cannot answer."""
+
+    def test_a_blob_nobody_rebuilt_is_caught_although_it_lost_nothing(self):
+        """The failure that has actually happened twice here. The corpus grows; one blob is carried
+        forward untouched. Its own count never drops, so `now < stored` is false for it — and it covers
+        less of the dataset with every publish."""
+        with tempfile.TemporaryDirectory() as dir:
+            write_records(os.path.join(dir, "labels-a.json"), 40000)
+            write_records(os.path.join(dir, "facets-a.json"), 40000)
+            meta = os.path.join(dir, "meta.json")
+            write_json(meta, {"labelsFile": "labels-a.json", "plotFacetsFile": "facets-a.json"})
+            run(["--stamp", meta, dir])
+
+            # Labels grew to 44,000; the facets blob is the SAME FILE, never rebuilt.
+            write_records(os.path.join(dir, "labels-b.json"), 44000)
+            next_meta = os.path.join(dir, "next.json")
+            write_json(next_meta, {"labelsFile": "labels-b.json", "plotFacetsFile": "facets-a.json"})
+            report = run(["--compare", meta, next_meta, dir])
+
+            self.assertNotIn("records lost", report, "nothing shrank — that is the whole point")
+            self.assertIn("plotFacetsFile", report)
+            self.assertIn("100.0% -> 90.9%", report)
+
+    def test_coverage_tolerates_ordinary_churn(self):
+        """A guard that fires on normal movement gets switched off. A point of drift must pass."""
+        with tempfile.TemporaryDirectory() as dir:
+            write_records(os.path.join(dir, "labels-a.json"), 40000)
+            write_records(os.path.join(dir, "facets-a.json"), 40000)
+            meta = os.path.join(dir, "meta.json")
+            write_json(meta, {"labelsFile": "labels-a.json", "plotFacetsFile": "facets-a.json"})
+            run(["--stamp", meta, dir])
+
+            write_records(os.path.join(dir, "labels-b.json"), 40400)
+            write_records(os.path.join(dir, "facets-b.json"), 40000)  # 99.0%, one point down
+            next_meta = os.path.join(dir, "next.json")
+            write_json(next_meta, {"labelsFile": "labels-b.json", "plotFacetsFile": "facets-b.json"})
+            self.assertEqual(run(["--compare", meta, next_meta, dir]), "")
+
+    def test_a_key_with_no_published_baseline_is_not_scored(self):
+        """Coverage cannot be satisfied by renaming: a key the published manifest never stamped is
+        skipped entirely rather than compared against a number it did not earn."""
+        with tempfile.TemporaryDirectory() as dir:
+            write_records(os.path.join(dir, "labels-a.json"), 40000)
+            write_records(os.path.join(dir, "facets-a.json"), 40000)
+            meta = os.path.join(dir, "meta.json")
+            write_json(meta, {"labelsFile": "labels-a.json", "plotFacetsFile": "facets-a.json"})
+            run(["--stamp", meta, dir])
+            with open(meta) as fh:
+                self.assertIn("plotFacetsRecords", json.load(fh))
+
+            # The same data moved under a different key: no baseline, so no comparison at all.
+            write_records(os.path.join(dir, "facets-b.json"), 1000)
+            next_meta = os.path.join(dir, "next.json")
+            write_json(next_meta, {"labelsFile": "labels-a.json", "metadataFile": "facets-b.json"})
+            report = run(["--compare", meta, next_meta, dir])
+            self.assertNotIn("metadataFile", report, "a new key has nothing to be compared against")
+
+    def test_the_store_may_cover_more_than_the_labels(self):
+        """The store is the union of facts and the pass, so it holds MORE rows than the labels and reads
+        above 100%. The guard watches for a fall, not for a ceiling."""
+        with tempfile.TemporaryDirectory() as dir:
+            write_records(os.path.join(dir, "labels-a.json"), 47539)
+            write_store(os.path.join(dir, "den-abc.store"), 47618)
+            meta = os.path.join(dir, "meta.json")
+            write_json(meta, {"labelsFile": "labels-a.json", "storeFile": "den-abc.store"})
+            run(["--stamp", meta, dir])
+
+            write_records(os.path.join(dir, "labels-b.json"), 47600)
+            write_store(os.path.join(dir, "den-def.store"), 47700)
+            next_meta = os.path.join(dir, "next.json")
+            write_json(next_meta, {"labelsFile": "labels-b.json", "storeFile": "den-def.store"})
             self.assertEqual(run(["--compare", meta, next_meta, dir]), "")
 
 

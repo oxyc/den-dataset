@@ -12,6 +12,17 @@ baseline; `--compare` reads the published manifest's stamps and prints any blob 
 
     manifest-counts.py --stamp   <meta.json> <out-dir>
     manifest-counts.py --compare <published-meta.json> <meta.json> <out-dir>
+
+## Why an absolute count is not enough
+
+`--compare` also watches COVERAGE — a blob's records as a share of `labelsRecords`. An absolute count only
+falls when rows are lost; it does not move at all when a blob is simply never rebuilt while the corpus
+grows around it. That is the failure that has happened twice here: `facets.bin` fell 999 titles behind the
+corpus, and `facts-slim` kept shipping a field set frozen years earlier. Both were generated once, carried
+forward by every publish since, and passed every shrink check because their own counts never dropped.
+
+Coverage cannot be satisfied by renaming a key either: a renamed key has no published baseline, so it is
+reported as new rather than silently starting over at whatever it happens to be.
 """
 import json
 import os
@@ -31,6 +42,16 @@ COUNTED = (
 )
 
 STORE_MAGIC = b"DENSTOR1"
+
+# Coverage is measured against the labels, which are the closest thing the pipeline has to "the titles the
+# corpus knows". The store deliberately holds MORE than this — it is the union of facts and the pass — so
+# its coverage reads above 100%. That is fine: the guard watches for a FALL, not for a ceiling.
+DENOMINATOR = "labelsFile"
+
+# Percentage points a blob's coverage may fall before the publish is refused. A real rebuild moves coverage
+# by fractions of a point; 2 points is about 950 titles at the current corpus size, which is far past any
+# honest churn and well inside the 999 titles facets.bin silently fell behind.
+COVERAGE_DROP = 2.0
 
 
 def store_rows(path):
@@ -130,14 +151,32 @@ def main():
     if mode == "--compare":
         old = json.load(open(sys.argv[2]))
         new_meta, base = json.load(open(sys.argv[3])), sys.argv[4]
+        counts = {}
         for key in COUNTED:
             stored = old.get(key[: -len("File")] + "Records")
             now = count(new_meta, key, base)
+            counts[key] = (stored, now)
             # No stamp on the published side means this is the first publish since the guard existed.
             if stored is None or now is None:
                 continue
             if now < stored:
                 print(f"{key}: {stored} -> {now}  ({stored - now} records lost)")
+
+        # COVERAGE, as a share of the labels. Checked after the absolute counts because it answers a
+        # different question: not "did this blob lose rows" but "did it keep up with the corpus". A blob
+        # nobody rebuilt holds its count exactly while every other artifact grows past it.
+        was_total, now_total = counts.get(DENOMINATOR, (None, None))
+        if was_total and now_total:
+            for key, (stored, now) in counts.items():
+                if key == DENOMINATOR or stored is None or now is None:
+                    continue
+                was, is_now = 100.0 * stored / was_total, 100.0 * now / now_total
+                if was - is_now > COVERAGE_DROP:
+                    print(
+                        f"{key}: coverage {was:.1f}% -> {is_now:.1f}% of {DENOMINATOR} "
+                        f"({stored}/{was_total} -> {now}/{now_total}); "
+                        f"more than {COVERAGE_DROP:.1f} points"
+                    )
         return
 
     sys.exit(f"unknown mode {mode}")

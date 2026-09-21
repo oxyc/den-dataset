@@ -190,10 +190,12 @@ fi
 if [ "$have_published" -eq 1 ]; then
   shrunk="$(python3 "$(dirname "$0")/manifest-counts.py" --compare "$published_meta" "$meta" "$DIR")"
   if [ -n "$shrunk" ]; then
-    echo "error: a published blob would LOSE records:" >&2
+    echo "error: a published blob would lose records, or fall behind the corpus:" >&2
     echo "$shrunk" | sed 's/^/       /' >&2
-    echo "       A file can stay declared and still lose rows; this is the check for that." >&2
-    echo "       If the shrink is deliberate, set DEN_ALLOW_DROPPING_BLOBS=1." >&2
+    echo "       A file can stay declared and still lose rows — and it can keep every row it has while" >&2
+    echo "       the corpus grows past it, which is how facets.bin fell 999 titles behind. Both are" >&2
+    echo "       checked here; a 'coverage' line is the second kind." >&2
+    echo "       If it is deliberate, set DEN_ALLOW_DROPPING_BLOBS=1." >&2
     [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
   fi
 fi
