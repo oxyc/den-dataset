@@ -13,6 +13,7 @@ section order, an unsorted dictionary, a float rounded differently — fails her
 """
 import gzip
 import hashlib
+import importlib.util
 import json
 import os
 import struct
@@ -58,6 +59,14 @@ def spec_or_fail(*parts):
 def sha256(path):
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
+
+
+def build_store_module():
+    """`build_store.py` as a module — its filename is not an importable module name."""
+    spec = importlib.util.spec_from_file_location("build_store", BUILD_STORE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class FixtureRoundTrip(unittest.TestCase):
@@ -143,7 +152,9 @@ class StoreFixture:
     """A two-title corpus and the inputs to build a store from it.
 
     Built directly rather than through den-spec's fixture: that fixture is the byte-for-byte format
-    contract three implementations are held to, so adding a title to it would be a format change.
+    contract three implementations are held to, so adding a title to it would be a format change. The
+    cases below it are about what the writer DOES — which pass's labels reach the store, what it records
+    about its inputs — not about the layout.
     """
 
     # movie:1 fills every list section the writer refuses to ship empty; movie:2 is labelled by the
@@ -177,10 +188,11 @@ class StoreFixture:
     ]
 
     def build(self, out_dir, titles=None, plot_keys=("movie:1",), premise_keys=("movie:2",),
-              plot_labels=None, premise_labels=None, write_plot_vectors=None):
+              plot_labels=None, premise_labels=None, write_plot_vectors=None, stamp=None):
         """`*_keys` are the blob's OWN key column; `*_labels` the labels artifact's records, which
         default to the same thing. Passing them apart is how the key-set assert is exercised;
-        `write_plot_vectors` swaps in a writer of another format."""
+        `write_plot_vectors` swaps in a writer of another format. `stamp` asks the writer to record
+        what it read into that manifest."""
         titles = self.TITLES if titles is None else titles
         plot_keys, premise_keys = list(plot_keys), list(premise_keys)
         plot_labels = plot_keys if plot_labels is None else list(plot_labels)
@@ -228,7 +240,8 @@ class StoreFixture:
              "--vector-labels", dump("plot-labels.json", rows_file(plot_labels)),
              "--premise-vectors", vectors(os.path.join(out_dir, "premise.bin"), premise_keys, 200),
              "--premise-labels", dump("premise-labels.json", rows_file(premise_labels)),
-             "--dataset-version", "test", "--out", store],
+             "--dataset-version", "test", "--out", store,
+             *(["--stamp-meta", stamp] if stamp else [])],
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, f"build_store failed:\n{result.stderr}")
         return ReadBack(store), result.stderr
@@ -494,6 +507,74 @@ class StampsTheManifest(unittest.TestCase):
             self.assertNotIn(
                 "storeGzFile", stamped, "the store is mmap'd; a compressed twin cannot be mapped"
             )
+
+
+class RecordsWhatItRead(StoreFixture, unittest.TestCase):
+    """`--stamp-meta` records WHAT THE BUILD READ, as `storeInputs`.
+
+    oxyc/den#113's remaining gap. `data-latest` carries one blob, so the manifest names one blob, so
+    `check-producers.py` — which walks the manifest's keys — checks one blob. The labels, vectors,
+    metadata, facts and corpus the store is built FROM are still produced and no longer declared, and a
+    store built from a stale one of them published with every guard green. This record is the only thing
+    that can see them, so it has to name every input and hash it truthfully.
+    """
+
+    def test_the_stamped_manifest_records_what_the_build_read(self):
+        with tempfile.TemporaryDirectory() as out:
+            meta = os.path.join(out, "dataset.meta.json")
+            with open(meta, "w") as fh:
+                json.dump({"datasetVersion": "test"}, fh)
+            self.build(out, stamp=meta)
+            with open(meta) as fh:
+                record = json.load(fh)["storeInputs"]
+
+            self.assertEqual(
+                sorted(e["arg"] for e in record),
+                sorted(a for a in build_store_module().INPUT_ARGS if a != "enriched"),
+                "every input this build was given must be recorded (it is given all but --enriched)")
+            for entry in record:
+                self.assertEqual(entry["sha256"], sha256(entry["path"]),
+                                 f"{entry['arg']} was recorded as bytes it does not hold")
+                self.assertEqual(entry["bytes"], os.path.getsize(entry["path"]))
+                self.assertEqual(entry["mtime"], int(os.path.getmtime(entry["path"])))
+
+    def test_every_input_the_parser_accepts_is_one_the_record_names(self):
+        """The record is only worth anything if it is COMPLETE. A `--foo` added to the parser and not to
+        INPUT_ARGS is an input the store reads, nothing records, and no producer owns — which is the gap
+        this record was written to close, reopened one argument at a time."""
+        bs = build_store_module()
+        parsed = {a.dest for a in bs.build_parser()._actions} - {"help"}
+        # The three that are not inputs: where it writes, what it calls the generation, what it stamps.
+        self.assertEqual(parsed - {"out", "dataset_version", "stamp_meta"}, set(bs.INPUT_ARGS))
+
+    def test_a_directory_input_is_digested_in_batch_number_order(self):
+        """The enriched batches have no single file, so the digest is over their listing — and in
+        BATCH-NUMBER order, the same rule `read_votes` uses to decide which batch wins. Lexicographic
+        order puts `batch-10` before `batch-2`, so a lexicographic digest would depend on how many
+        digits a batch id happens to have."""
+        bs = build_store_module()
+        with tempfile.TemporaryDirectory() as dir:
+            enriched = os.path.join(dir, "enriched")
+            os.makedirs(enriched)
+            bodies = {"batch-2.json": '[{"a":1}]', "batch-10.json": '[{"b":2}]'}
+            for name, body in bodies.items():
+                with open(os.path.join(enriched, name), "w") as fh:
+                    fh.write(body)
+
+            digest, size, _ = bs.input_digest(enriched)
+            self.assertEqual(size, sum(len(b) for b in bodies.values()))
+
+            listing = hashlib.sha256()
+            for name in ("batch-2.json", "batch-10.json"):
+                listing.update(
+                    f"{name} {hashlib.sha256(bodies[name].encode()).hexdigest()}\n".encode())
+            self.assertEqual(digest, listing.hexdigest())
+
+            # And it MOVES when a batch is rewritten — a directory whose digest ignored its contents
+            # would be a record that cannot notice the thing it exists to notice.
+            with open(os.path.join(enriched, "batch-2.json"), "w") as fh:
+                fh.write('[{"a":99}]')
+            self.assertNotEqual(bs.input_digest(enriched)[0], digest)
 
 
 if __name__ == "__main__":

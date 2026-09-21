@@ -74,6 +74,23 @@ class Registry(unittest.TestCase):
         finally:
             os.chdir(cwd)
 
+    def test_every_store_input_producer_exists_and_is_tracked(self):
+        cwd = os.getcwd()
+        os.chdir(REPO)
+        try:
+            for arg, (producer, how, _) in cp.STORE_INPUTS.items():
+                self.assertTrue(os.path.exists(producer), f"{arg}: {producer} is registered and missing")
+                self.assertTrue(cp.tracked(producer), f"{arg}: {producer} is not tracked by git")
+        finally:
+            os.chdir(cwd)
+
+    def test_the_registry_covers_every_input_the_store_records(self):
+        """The record and the registry have to name the same set. An input `build_store.py` records with
+        no entry here is an input nothing owns — which is the gap this closes, reopened one argument at a
+        time — and an entry here for an argument that no longer exists is a registration protecting
+        nothing."""
+        self.assertEqual(set(cp.STORE_INPUTS), set(cp.build_store().INPUT_ARGS))
+
     def test_the_store_and_the_corpus_are_registered(self):
         """Both were unowned until recently: the store had no entry at all, and the corpus is published on
         its own tag so no manifest key names it."""
@@ -155,6 +172,107 @@ class Corpus(unittest.TestCase):
                 os.chdir(cwd)
             self.assertEqual(code, 1)
             self.assertIn("consolidate_corpus.py", err)
+
+
+class StoreInputs(unittest.TestCase):
+    """What the store was built FROM.
+
+    `data-latest` carries one blob, so the manifest names one blob, so the loop above checks one blob.
+    The labels, vectors, metadata, facts, corpus and enriched batches the store is built from are still
+    produced — they are just no longer declared — and until the store recorded them, a store built from
+    an input its producer had outgrown published with every guard green.
+    """
+
+    INPUT = "labels-premise.json"
+
+    def entry(self, dir, **over):
+        """A truthful `storeInputs` entry for a real file, unless a test makes it lie."""
+        path = touch(dir, self.INPUT, '{"records":[]}')
+        sha, size, mtime = cp.build_store().input_digest(path)
+        return {**{"arg": "premise_labels", "path": path, "sha256": sha, "bytes": size, "mtime": mtime},
+                **over}
+
+    def meta(self, entries):
+        return {"storeFile": "den-aaaaaaaaaaaa.store", "storeInputs": entries}
+
+    def check(self, dir, meta):
+        """`main()` from the repo root, which is where the publisher runs it."""
+        cwd = os.getcwd()
+        os.chdir(REPO)
+        try:
+            return run(meta, dir)
+        finally:
+            os.chdir(cwd)
+
+    def test_an_input_that_changed_since_the_build_is_refused(self):
+        """THE FAILURE. Re-run the labelling producer, do not rebuild the store, publish: the store is
+        now a generation behind an input that is sitting right there, and nothing said so."""
+        with tempfile.TemporaryDirectory() as dir:
+            entry = self.entry(dir)
+            touch(dir, self.INPUT, '{"records":[{"tmdbId":1,"mediaType":"movie"}]}')
+            code, err = self.check(dir, self.meta([entry]))
+            self.assertEqual(code, 1)
+            self.assertIn("not built from the inputs in this tree", err)
+            self.assertIn(entry["sha256"][:12], err, "a refusal has to name both sides")
+
+    def test_the_refusal_has_a_deliberate_override_of_its_own(self):
+        """Not DEN_ALLOW_UNOWNED_ARTIFACTS: that one means "I meant to publish an artifact nothing
+        builds", which is a different decision from "I meant to publish a store built from an input that
+        has since moved"."""
+        with tempfile.TemporaryDirectory() as dir:
+            entry = self.entry(dir)
+            touch(dir, self.INPUT, '{"records":[{"tmdbId":1,"mediaType":"movie"}]}')
+            os.environ["DEN_ALLOW_STALE_STORE_INPUTS"] = "1"
+            try:
+                code, err = self.check(dir, self.meta([entry]))
+            finally:
+                del os.environ["DEN_ALLOW_STALE_STORE_INPUTS"]
+            self.assertEqual(code, 0, err)
+            self.assertIn("not built from the inputs in this tree", err, "allowed, but still announced")
+
+    def test_an_input_older_than_its_producer_is_flagged(self):
+        """The same question the loop above asks of a published artifact, one level down: a producer
+        edited after the input means the input was made by an older version of the rule, and the store
+        carries it. Answered against the RECORDED mtime, so it works with the input absent."""
+        with tempfile.TemporaryDirectory() as dir:
+            code, err = self.check(dir, self.meta([self.entry(dir, mtime=0)]))
+            self.assertEqual(code, 0, "stale is a warning here, as it is for a published artifact")
+            self.assertIn("build-premise-tags.py was edited after this input was made", err)
+
+    def test_an_input_the_tree_no_longer_holds_is_reported_rather_than_skipped(self):
+        """A publish dir may hold only the store and the manifest — that is the point of the cutover —
+        so an absent input is expected, not a fault. It is also the one way this loop could pass while
+        checking nothing, so it says so."""
+        with tempfile.TemporaryDirectory() as dir:
+            entry = self.entry(dir)
+            os.remove(entry["path"])
+            code, err = self.check(dir, self.meta([entry]))
+            self.assertEqual(code, 0)
+            self.assertIn("not in this tree", err)
+
+    def test_a_store_with_no_record_at_all_says_so(self):
+        """A store built before this existed. A refusal would block every publish until someone rebuilt
+        135 MB, which is how a guard gets switched off; a silence would leave the gap exactly as it was."""
+        with tempfile.TemporaryDirectory() as dir:
+            code, err = self.check(dir, {"storeFile": "den-aaaaaaaaaaaa.store"})
+            self.assertEqual(code, 0)
+            self.assertIn("records no storeInputs", err)
+
+    def test_an_input_no_producer_is_registered_for_is_refused(self):
+        with tempfile.TemporaryDirectory() as dir:
+            code, err = self.check(dir, self.meta([self.entry(dir, arg="mystery")]))
+            self.assertEqual(code, 1)
+            self.assertIn("no producer registered", err)
+
+    def test_an_unchanged_input_is_not_a_finding(self):
+        """So the refusals above mean something. Nothing has moved: the record describes the file, and
+        the producer is older than it."""
+        with tempfile.TemporaryDirectory() as dir:
+            entry = self.entry(dir)
+            code, err = self.check(dir, self.meta([entry]))
+            self.assertEqual(code, 0, err)
+            self.assertNotIn("not built from the inputs", err)
+            self.assertNotIn("was edited after this input", err)
 
 
 if __name__ == "__main__":

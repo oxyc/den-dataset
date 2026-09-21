@@ -22,7 +22,14 @@ nobody has thought of yet is dropped by default, and the publisher prints every 
 
 Keys that are not blob claims are left alone: `datasetVersion`, `taxonomyVersion`, `embeddingModel`,
 `dims`, `count`, `quantization`, `builtAt`, `lastModifiedHttp`, `embedderRuntime`, `embedderMaxTokens`,
-`maxBatchId`, `signature`. They describe the dataset, not a file. The corpus is not in here at all — it
+`maxBatchId`, `signature`, `storeInputs`. They describe the dataset, not a file.
+
+`storeInputs` is the one to be careful with: it is `build_store.py`'s record of what it read, and it is
+the ONLY thing holding the store's (unpublished, undeclared) inputs to a producer — so a shape that made
+the suffix rule drop it would reopen oxyc/den#113's gap silently. It is a list under a name ending in
+none of BLOB_SUFFIXES, which is why it survives; `test_prune_manifest.py` pins that.
+
+The corpus is not in here at all — it
 ships under its own `corpus-<ver>` tag, deliberately outside the serving manifest, because
 `fetch-dataset.sh` pulls every `*File` key and the box would download 44 MB it never reads.
 
