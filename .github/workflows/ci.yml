@@ -78,6 +78,14 @@ jobs:
         run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py scripts/test_prune_manifest.py scripts/v2/test_consolidate_corpus.py scripts/test_eval_taxonomy.py scripts/v2/test_embed_canary.py
         env:
           DEN_SPEC_DIR: ${{ github.workspace }}/den-spec-checkout
+      # The pipeline skeleton (oxyc/den-dataset#27): the stage contract, the artifact catalogue the
+      # producer registry is derived from, the store stage against the writer it wraps, and `den`.
+      #
+      # `guards/reachable_test.py` is the one that matters over time. `scripts/v2/` exists because
+      # "delete what nothing runs" was a habit, and a habit loses to a branch someone might come back
+      # to; this fails the build on a module under `pipeline/` that no stage reaches.
+      - name: The pipeline
+        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/store_test.py guards/reachable_test.py den_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The
       # guards above are the pieces; this is whether the script wires them up — that it refuses a wrong
       # hash, a missing blob, a dropped key, a shrunk count and a blob from a dead generation, and that

@@ -239,6 +239,10 @@ python3 scripts/v2/build_store.py \
     --premise-vectors out/vectors-premise.bin --premise-labels out/labels-premise.json \
     --dataset-version <ver> \
     --out out/den-<ver>.store --stamp-meta out/dataset.meta.json
+#     `./den stage store --out-dir out --dataset-version <ver> --stamp-meta out/dataset.meta.json` runs
+#     the same writer with the same arguments, built from `pipeline/store.py`'s declaration rather than
+#     retyped — `pipeline/store_test.py` holds the two to the same bytes. It is the first stage behind
+#     the single entry point (oxyc/den-dataset#27); everything else here is still typed by hand.
 #     No --metadata and no --enriched: the card's title and year come from the corpus's own `facts`
 #     (`titles.en` and `released`), the poster path is not published, and the vote count is gone — a
 #     browse row is ordered by IMDb's public ratings dump, which den-atlas joins on `imdb` at run time

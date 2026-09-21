@@ -42,24 +42,37 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
 
-# manifest key -> (producer, how to run it, is the producer DEDICATED to this artifact?).
+sys.path.insert(0, REPO)
+import pipeline  # noqa: E402  — the stage declarations this file's registries are derived from
+
+# WHERE THESE REGISTRIES COME FROM.
 #
-# ADDING A PUBLISHED ARTIFACT MEANS ADDING A LINE HERE. That is the whole point: the registry is what makes
-# "nothing builds this" a failure rather than something discovered months later.
+# They used to be written out here by hand, and that is what went wrong: a registry nothing executes is a
+# copy, and a copy drifts. `STORE_INPUTS` listed `metadata` after the store stopped reading it, then
+# `enriched` after that stopped too — twice in one day, each caught by a test rather than by the guard.
+#
+# So the entries below are read off `pipeline/artifacts.py`, where each artifact is declared once, beside
+# the stage that reads or writes it. The declaration is not descriptive: `pipeline/store.py` builds the
+# writer's command line out of it. An entry that has drifted from what actually runs therefore fails at an
+# argument parser, not here, and there is no second list left to forget.
 #
 # The third field gates the staleness warning only. `main.swift` holds the whole tool, so it is edited for
 # reasons that have nothing to do with any one blob — warning on it would fire constantly and teach everyone
 # to ignore the check, which is how a guard dies.
+DECLARED = {a.name: a for a in pipeline.declared()}
+
+# manifest key -> (producer, how to run it, is the producer DEDICATED to this artifact?).
+#
+# ADDING A PUBLISHED ARTIFACT MEANS DECLARING IT. For anything the pipeline handles that is an entry in
+# `pipeline/artifacts.py` carrying a `manifest_key`; the two below are the remainder — artifacts of stages
+# not ported yet (oxyc/den-dataset#27), which is why they are still spelled out. Each moves into the
+# catalogue with the stage that builds it, and this dict shrinks to the merge.
 PRODUCERS = {
-    "labelsFile": ("Sources/taxonomy-backfill/main.swift", "taxonomy-backfill finalize", False),
-    "premiseLabelsFile": ("scripts/build-premise-tags.py", "scripts/build-premise-tags.py", True),
-    "vectorsFile": ("Sources/taxonomy-backfill/main.swift", "taxonomy-backfill finalize", False),
-    "premiseVectorsFile": ("scripts/v2/embed_tags.py", "scripts/v2/embed_tags.py", True),
     "metadataFile": ("Sources/taxonomy-backfill/main.swift", "taxonomy-backfill metadata", False),
-    "factsFile": ("Sources/taxonomy-backfill/main.swift", "taxonomy-backfill facts", False),
     "facetsFile": ("scripts/build-facets-bin.py", "scripts/build-facets-bin.py", True),
-    "storeFile": ("scripts/v2/build_store.py", "scripts/v2/build_store.py --stamp-meta", True),
+    **{a.manifest_key: a.registration() for a in DECLARED.values() if a.manifest_key},
 }
 
 # `factsSlimFile`, `plotFacetsFile` and `railFacetsFile` were registered here until the store carried what
@@ -67,9 +80,10 @@ PRODUCERS = {
 # guard that fails on a key nothing publishes, and `test_check_producers.py` asserts every registered
 # producer is a real tracked file — so a stale entry breaks the test rather than protecting anything.
 #
-# `factsFile` stays. Its producer is `taxonomy-backfill facts`, which is the same binary that makes labels,
-# vectors and metadata, and the key is merely unpublished — not unbuildable. The loop below only visits keys
-# the manifest actually names, so the entry costs nothing and covers a generation that publishes facts again.
+# `factsFile` stays, now as the `manifest_key` on the `facts` entry in `pipeline/artifacts.py`. Its producer
+# is `taxonomy-backfill facts`, which is the same binary that makes labels, vectors and metadata, and the key
+# is merely unpublished — not unbuildable. The loop below only visits keys the manifest actually names, so
+# the entry costs nothing and covers a generation that publishes facts again.
 #
 # WHAT THIS GUARD NOW SEES, AND WHAT IT DOES NOT. `publish-dataset.sh` prunes the manifest down to the
 # store (oxyc/den#113), so the only registered key the loop visits is `storeFile` — plus the corpus below,
@@ -86,11 +100,6 @@ PRODUCERS = {
 # registering them separately would be noise.
 DERIVED_SUFFIXES = ("GzFile",)
 
-# The corpus pair's producer, named once because it is registered twice: as the UNMANIFESTED artifact an
-# out-dir may hold, and as the store input `storeInputs` names. Two spellings of one path is how a
-# registry drifts.
-CORPUS_PRODUCER = ("scripts/v2/consolidate_corpus.py", "scripts/v2/consolidate_corpus.py", True)
-
 # Published artifacts that NO manifest key names, matched by filename instead.
 #
 # The loop below only sees keys in `dataset.meta.json`, so an artifact published on its own tag is
@@ -99,16 +108,19 @@ CORPUS_PRODUCER = ("scripts/v2/consolidate_corpus.py", "scripts/v2/consolidate_c
 # serving manifest is not the fix: `fetch-dataset.sh` pulls every `*File` key, so the box would download
 # 44 MB of corpus it never reads.
 #
+# The glob comes from the declared filename with the version wild, so the pattern searched for here and
+# the name the pipeline writes cannot disagree.
+#
 # (glob, producer, how to run it)
-UNMANIFESTED = (
-    ("corpus-*.jsonl.gz",) + CORPUS_PRODUCER[:2],
-    ("corpus-*-entities.json.gz",) + CORPUS_PRODUCER[:2],
+UNMANIFESTED = tuple(
+    (DECLARED[name].glob(), DECLARED[name].producer, DECLARED[name].how)
+    for name in ("corpus", "entities")
 )
 
 # ---- what the STORE was built FROM -------------------------------------------------------------------
 #
 # `build_store.py` argument -> the producer that builds what it points at, in the same
-# `(producer, how, dedicated)` shape as PRODUCERS, and reusing those entries where there is one.
+# `(producer, how, dedicated)` shape as PRODUCERS.
 #
 # This closes the narrowing the comment above describes. The loop over the manifest sees `storeFile` and
 # nothing else, so the store's inputs — labels, vectors, facts and the corpus — are built but not
@@ -119,6 +131,11 @@ UNMANIFESTED = (
 # flag and `main.swift` produces four of them, so every publish would warn about a file edited for
 # reasons that have nothing to do with any one artifact — which is how a guard dies.
 #
+# It is the STORE STAGE's declared inputs, verbatim. `pipeline/store.py` hands the writer exactly these
+# and `pipeline/store_test.py` holds them against `build_store.INPUT_ARGS`, so the set here is the set
+# the writer reads, by construction rather than by remembering — that was `metadata` and `enriched`,
+# registered as store inputs after the writer had stopped taking them.
+#
 # What is asked of each recorded input, in `check_store_inputs` below:
 #
 #   * its BYTES, against the record — a store built from an input that has since changed is not built
@@ -126,17 +143,7 @@ UNMANIFESTED = (
 #   * its PRODUCER, against the RECORDED mtime — question 2 above, asked one level down. Recorded rather
 #     than read off the file, so it is still answerable in a publish dir holding only the store and the
 #     manifest. A warning, for the same reason question 2 is.
-STORE_INPUTS = {
-    "corpus": CORPUS_PRODUCER,
-    "entities": CORPUS_PRODUCER,
-    "facts": PRODUCERS["factsFile"],
-    # No `metadata`: the TMDB sidecar is no longer a store input (oxyc/den#118). It is still BUILT and
-    # still in PRODUCERS, because other things read it — it just does not reach the store any more.
-    "vectors": PRODUCERS["vectorsFile"],
-    "vector_labels": PRODUCERS["labelsFile"],
-    "premise_vectors": PRODUCERS["premiseVectorsFile"],
-    "premise_labels": PRODUCERS["premiseLabelsFile"],
-}
+STORE_INPUTS = {a.name: a.registration() for a in pipeline.stage("store").INPUTS}
 
 _build_store = None
 
@@ -197,8 +204,8 @@ def check_store_inputs(meta, out_dir):
         if registered is None:
             problems.append(
                 f"{name}: no producer registered. The store reads it and nothing here says how to build "
-                f"it, so nothing will rebuild it when its own inputs change — add it to STORE_INPUTS in "
-                f"scripts/check-producers.py.")
+                f"it, so nothing will rebuild it when its own inputs change — declare it in "
+                f"pipeline/artifacts.py and name it in pipeline/store.py's INPUTS.")
             continue
 
         producer, how, dedicated = registered
