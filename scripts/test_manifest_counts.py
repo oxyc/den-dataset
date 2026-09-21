@@ -112,7 +112,8 @@ class StampAndCompare(unittest.TestCase):
             write_json(meta, {"storeFile": "den-abc.store"})
 
             run(["--stamp", meta, dir])
-            published = json.load(open(meta))
+            with open(meta) as fh:
+                published = json.load(fh)
             self.assertEqual(published["storeRecords"], 47618, "the stamp comes from the header, not the meta")
 
             # The next generation, 7,618 titles short — a join that missed, which is the failure this

@@ -127,7 +127,8 @@ def count(meta, key, base):
     if not name.endswith(".json"):
         return None
     try:
-        doc = json.load(open(path))
+        with open(path) as f:
+            doc = json.load(f)
     except Exception:
         # A blob we cannot parse is not this script's problem to report — the sha check will catch it.
         return None
@@ -173,7 +174,8 @@ def main():
     mode = sys.argv[1]
     if mode == "--stamp":
         meta_path, base = sys.argv[2], sys.argv[3]
-        meta = json.load(open(meta_path))
+        with open(meta_path) as f:
+            meta = json.load(f)
         for key in COUNTED:
             n = count(meta, key, base)
             if n is not None:
@@ -187,8 +189,11 @@ def main():
         return
 
     if mode == "--compare":
-        old = json.load(open(sys.argv[2]))
-        new_meta, base = json.load(open(sys.argv[3])), sys.argv[4]
+        with open(sys.argv[2]) as f:
+            old = json.load(f)
+        with open(sys.argv[3]) as f:
+            new_meta = json.load(f)
+        base = sys.argv[4]
         counts = {}
         for key in COUNTED:
             stored = old.get(key[: -len("File")] + "Records")
