@@ -275,6 +275,76 @@ fi
 # Stamp the counts for next time, whether or not there was anything to compare against.
 python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
 
+# GROUNDING GUARD (oxyc/den-dataset#16). Every check above asks whether the right rows arrived, in the right
+# shape, from the right producer, for this generation. None of them asks whether a row is about the title it
+# is filed under.
+#
+# 1,066 titles in the shipped generation are grounded on a Wikipedia article that also grounds another title
+# — five of them on the Wuthering Heights NOVEL, whose literary criticism is not the plot of any adaptation.
+# They get that article's labels, facets and premise, so they are described by a story they do not tell. The
+# cause is the source-work fallback in `regroundOnWikipedia` keeping the longest of [own article, P144 source
+# work]: one novel outweighs every adaptation's own article, so all of them inherit it. `check-plot-
+# invariants.py` documents the mechanism and what it deliberately does not check.
+#
+# WARNS on the standing count and REFUSES an increase, which is the record-count guard's shape rather than
+# the identity guard's: an absolute floor of zero would refuse every publish over a defect that has already
+# shipped, and a gate like that gets switched off — the reasoning `check-plot-invariants.py` was written with
+# and the same one the quality gate below still runs under. What must not happen silently is the number
+# going UP, because the only thing that makes it worse is a re-ground, and #27 proposes running one daily.
+#
+# `maxBatchId` is stamped just above, so the census is bounded to the batches this publish can actually see
+# rather than to a live directory that keeps growing.
+plot_guard=0
+if [ -d "$DIR/enriched" ]; then
+  plot_labels="$DIR/labels-$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1])).get("taxonomyVersion") or "")
+' "$meta").json"
+  if [ -f "$plot_labels" ]; then
+    # Absent on the published side means this is the first publish since the guard existed: census only,
+    # and the stamp below gives the NEXT one something to ratchet against.
+    baseline=""
+    if [ "$have_published" -eq 1 ]; then
+      baseline="$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1])).get("sharedPlotArticleTitles", ""))
+' "$published_meta")"
+    fi
+    plot_args=(--enriched-dir "$DIR/enriched" --labels "$plot_labels" --stamp-meta "$meta")
+    max_batch="$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1])).get("maxBatchId", ""))
+' "$meta")"
+    [ -n "$max_batch" ] && plot_args+=(--max-batch-id "$max_batch")
+    [ -n "$baseline" ] && plot_args+=(--shared-plot-baseline "$baseline")
+    python3 "$(dirname "$0")/check-plot-invariants.py" "${plot_args[@]}" || plot_guard=$?
+    # 2 is the regression; 1 is the pre-existing plot/labels mismatch this script has always reported.
+    if [ "$plot_guard" -eq 2 ]; then
+      if [ -n "${DEN_ALLOW_SHARED_PLOTS:-}" ]; then
+        echo "shared-article grounding regressed deliberately: ${DEN_ALLOW_SHARED_PLOTS}"
+        python3 - "$meta" "$DEN_ALLOW_SHARED_PLOTS" <<'PY'
+import json, sys
+meta_path, reason = sys.argv[1], sys.argv[2]
+meta = json.load(open(meta_path))
+# In the manifest, so the release itself says its grounding got worse and why. A later reader comparing
+# two generations' counts would otherwise find an unexplained jump and no record of who accepted it.
+meta["sharedPlotArticlesWaived"] = reason
+json.dump(meta, open(meta_path, "w"), indent=1, sort_keys=True)
+PY
+      else
+        echo "       Nothing uploaded." >&2
+        exit 1
+      fi
+    fi
+  else
+    echo "grounding guard: SKIPPED — $plot_labels is not in $DIR. The labels are no longer published, but" >&2
+    echo "                 they are still the store's input and scope the census to what shipped." >&2
+  fi
+else
+  echo "grounding guard: SKIPPED — no $DIR/enriched. plotArticle lives only in the enriched batches, so" >&2
+  echo "                 the census cannot be taken from a publish dir that does not carry them." >&2
+fi
+
 # OWNERSHIP GUARD. Every published artifact must have a producer committed in this repo. The record-count
 # guard above catches a blob that LOSES rows; it cannot see one that was never rebuilt at all, because its
 # count simply never moves. That is the failure that has now happened twice: facets.bin fell 999 titles behind

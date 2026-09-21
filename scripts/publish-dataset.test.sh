@@ -497,6 +497,117 @@ else
 fi
 teardown
 
+# --- grounding: a title's plot must be about that title ----------------------------------------------
+#
+# oxyc/den-dataset#16. 1,066 titles in the shipped generation are grounded on a Wikipedia article that
+# also grounds another title, so they carry that work's labels, facets and premise. The standing count
+# warns — an absolute floor of zero would refuse every publish over a defect that has already shipped —
+# but an INCREASE is refused, because the only thing that makes it worse is a re-ground and #27 proposes
+# running one daily.
+
+# An enriched tree grounding `$1` titles on one shared article, plus one title on its own.
+write_enriched() {
+  mkdir -p "$DIR/enriched"
+  python3 - "$DIR/enriched/batch-1.json" "$1" <<'PY'
+import json, sys
+path, shared = sys.argv[1], int(sys.argv[2])
+rows = [{"tmdbId": i + 1, "mediaType": "movie", "title": f"Wuthering Heights {i}", "hasWikiPlot": True,
+         "overview": "the novel", "plotArticle": "Wuthering Heights", "plotLanguage": "en"}
+        for i in range(shared)]
+rows.append({"tmdbId": 900, "mediaType": "movie", "title": "Solaris", "hasWikiPlot": True,
+             "overview": "its own plot", "plotArticle": "Solaris", "plotLanguage": "en"})
+with open(path, "w") as fh:
+    json.dump(rows, fh)
+PY
+}
+
+setup
+write_meta
+write_enriched 2
+publish_baseline
+if run_publish; then
+  # The count is stamped even on a clean publish — it is what the NEXT one ratchets against.
+  if grep -q '"sharedPlotArticleTitles": 2' "$DIR/dataset.meta.json"; then
+    ok "the shared-article count is stamped into the manifest as the next publish's baseline"
+  else
+    bad "no shared-article count was stamped: $(tail -3 "$WORK/out.log")"
+  fi
+  grep -q "another title : 2" "$WORK/out.log" \
+    && ok "the standing violation is censused on every publish rather than staying invisible" \
+    || bad "the census did not run: $(tail -5 "$WORK/out.log")"
+else
+  bad "a standing violation blocked the publish: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
+# The regression. The published manifest says 2; this tree grounds 3 titles on the one article.
+setup
+write_meta
+write_enriched 2
+publish_baseline
+python3 - "$PUBLISHED_META" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+meta["sharedPlotArticleTitles"] = 2
+json.dump(meta, open(sys.argv[1], "w"))
+PY
+write_enriched 3
+if run_publish; then
+  bad "grounding got worse and it published anyway"
+else
+  if grep -q "REGRESSED" "$WORK/err.log" && grep -q "Nothing uploaded" "$WORK/err.log"; then
+    ok "a grounding regression is refused before anything is uploaded"
+  else
+    bad "refused, but not for the grounding: $(tail -3 "$WORK/err.log")"
+  fi
+  # A guard that refuses must name both sides and say what to do.
+  grep -q "'Wuthering Heights'" "$WORK/out.log" \
+    && ok "the refusal names the shared article and the titles on it" \
+    || bad "the refusal did not name the article"
+  grep -q "DEN_ALLOW_SHARED_PLOTS" "$WORK/err.log" \
+    && ok "and says how to proceed deliberately" \
+    || bad "the refusal offered no way forward"
+  [ ! -s "$UPLOADS" ] \
+    && ok "and nothing reached the release" \
+    || bad "a refused publish still uploaded $(tr '\n' ' ' < "$UPLOADS")"
+fi
+teardown
+
+# The override, which must state a reason and is recorded in the manifest.
+setup
+write_meta
+write_enriched 2
+publish_baseline
+python3 - "$PUBLISHED_META" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+meta["sharedPlotArticleTitles"] = 2
+json.dump(meta, open(sys.argv[1], "w"))
+PY
+write_enriched 3
+if DEN_ALLOW_SHARED_PLOTS="re-grounded the Brontë cluster on purpose" run_publish; then
+  grep -q "sharedPlotArticlesWaived" "$DIR/dataset.meta.json" \
+    && ok "an accepted regression is recorded in the manifest, with its reason" \
+    || bad "the override published but left no record of why"
+else
+  bad "the override did not let a deliberate regression through: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
+# An out-dir with no enriched tree. `plotArticle` lives only there, so the census cannot be taken — that
+# must SKIP loudly, not refuse, or every publish from a dir that carries only the store would be blocked.
+setup
+write_meta
+publish_baseline
+if run_publish; then
+  grep -q "grounding guard: SKIPPED" "$WORK/err.log" \
+    && ok "a publish dir with no enriched tree skips the census and says so" \
+    || bad "it published with no word about the skipped census"
+else
+  bad "a missing enriched tree was treated as a refusal: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
 echo ""
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
