@@ -11,8 +11,11 @@ writer promises deterministic output (dictionaries sorted before ids are assigne
 that promise is what makes a content hash meaningful. Anything that perturbs a single byte — a changed
 section order, an unsorted dictionary, a float rounded differently — fails here.
 """
+import gzip
 import hashlib
+import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -20,6 +23,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BUILD_STORE = os.path.join(HERE, "build_store.py")
+DIMS = 1024
 
 
 def spec_dir():
@@ -89,6 +93,176 @@ class FixtureRoundTrip(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 digests.append(sha256(os.path.join(out, "store-v1.store")))
         self.assertEqual(digests[0], digests[1], "two runs of the writer disagree byte-for-byte")
+
+
+class ReadBack:
+    """The bits of a store this file needs to assert on — the section table, and a row's labels.
+
+    Deliberately not a general reader: den-core and den-atlas are the readers, and a third one here would
+    be a third place the layout can drift. It parses the table and four sections, nothing else.
+    """
+
+    def __init__(self, path):
+        with open(path, "rb") as fh:
+            self.blob = fh.read()
+        count, self.rows = struct.unpack("<II", self.blob[24:32])
+        self.table = {}
+        for i in range(count):
+            at = 64 + i * 32
+            name, off, length, _ = struct.unpack("<16sQII", self.blob[at:at + 32])
+            self.table[name.rstrip(b"\0").decode()] = (off, length)
+        self.str_off = self.ints("str_off")
+        off, length = self.table["strings"]
+        self.str_blob = self.blob[off:off + length]
+
+    def ints(self, name, fmt="I", width=4):
+        off, length = self.table[name]
+        return list(struct.unpack(f"<{length // width}{fmt}", self.blob[off:off + length]))
+
+    def text(self, ident):
+        if ident == 0xFFFFFFFF:
+            return None
+        return self.str_blob[self.str_off[ident]:self.str_off[ident + 1]].decode("utf-8")
+
+    def keys(self):
+        return [f"{'movie' if k >> 32 == 0 else 'tv'}:{k & 0xFFFFFFFF}" for k in self.ints("keys", "Q", 8)]
+
+    def labelled(self, name, row):
+        """`[(label, confidence)]` for one row of a labelled list section."""
+        offsets = self.ints(f"{name}_o")
+        ids = self.ints(f"{name}_v")
+        confs = self.ints(f"{name}_c", "B", 1)
+        return [(self.text(ids[i]), confs[i]) for i in range(offsets[row], offsets[row + 1])]
+
+
+class PremiseOnlyTitlesKeepTheirLabels(unittest.TestCase):
+    """A title labelled by the PREMISE pass and not the plot pass must carry its labels.
+
+    The store's label sections were written from the corpus `labels` field alone — the plot pass's output —
+    while `premiseLabels` sat beside it, read only to increment a counter that was never asserted on. Three
+    real titles are labelled from their premise and never from a plot (movie:51870 *Father and Sons*,
+    movie:121329 *Two Sons of Ringo*, tv:42680 *Sítio do Picapau Amarelo*), so the store answered no
+    primary genre, no subgenres and no moods for them where the legacy blobs answered all three — and they
+    are in the premise index, which is exactly where a reader asks.
+
+    This builds the case directly rather than through den-spec's fixture: that fixture is the byte-for-byte
+    format contract three implementations are held to, so adding a title to it would be a format change.
+    """
+
+    # movie:1 fills every list section the writer refuses to ship empty; movie:2 is the case under test.
+    TITLES = [
+        {
+            "key": "movie:1", "mediaType": "movie", "tmdbId": 1,
+            "facts": {
+                "titles": {"en": "Alpha", "orig": "Alfa", "aliases": ["Alpha One"]},
+                "genres": ["Q1"], "countries": ["US"], "languages": ["EN"],
+                "directors": ["Q100"], "cast": ["Q101"], "broadcaster": ["Q102"],
+                "composers": ["Q103"], "cinematographers": ["Q104"], "distributors": ["Q105"],
+                "productionCompanies": ["Q106"], "narrativeLocations": ["Q107"],
+                "mainSubjects": ["Q108"], "instanceOf": ["Q109"], "basedOn": ["Q110"],
+                "basedOnKind": ["book"],
+            },
+            "labels": {"primaryGenre": "Drama", "animated": False,
+                       "subgenres": [{"label": "Prison", "confidence": 0.7}],
+                       "moods": [{"label": "Bleak", "confidence": 0.55}]},
+            "premiseLabels": None,
+            "nouls": {"theme__epic": {"noul": 0.9}},
+        },
+        {
+            "key": "movie:2", "mediaType": "movie", "tmdbId": 2,
+            "facts": {"titles": {"en": "Beta"}},
+            "labels": None,
+            "premiseLabels": {"primaryGenre": "Western", "animated": False,
+                              "subgenres": [{"label": "Road Movie", "confidence": 0.5}],
+                              "moods": [{"label": "Campy", "confidence": 0.6}]},
+        },
+    ]
+
+    def build(self, out_dir, titles=None):
+        titles = self.TITLES if titles is None else titles
+
+        def dump(name, value):
+            path = os.path.join(out_dir, name)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(value, fh, sort_keys=True)
+            return path
+
+        def rows_file(keys):
+            return {"records": [{"mediaType": k.split(":")[0], "tmdbId": int(k.split(":")[1])}
+                                for k in keys]}
+
+        def vectors(path, count, fill):
+            with open(path, "wb") as fh:
+                fh.write(struct.pack("<II", count, DIMS))
+                for i in range(count):
+                    fh.write(bytes((fill + i + j) % 256 for j in range(DIMS)))
+            return path
+
+        corpus = os.path.join(out_dir, "corpus.jsonl.gz")
+        with open(corpus, "wb") as raw:
+            with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as fh:
+                for row in titles:
+                    fh.write((json.dumps(row, sort_keys=True) + "\n").encode())
+
+        store = os.path.join(out_dir, "test.store")
+        result = subprocess.run(
+            [sys.executable, BUILD_STORE,
+             "--corpus", corpus,
+             # Q100 carries an alias: `ent_alias_v` is one of the sections the writer refuses to ship empty.
+             "--entities", dump("entities.json", dict(
+                 {f"Q{q}": {"en": f"Name {q}"} for q in range(100, 111)},
+                 Q100={"en": "Name 100", "aliases": ["Nom 100"]})),
+             "--facts", dump("facts.json", {"genreMap": {"Q1": {"movie": 18}},
+                                            "records": [{"mediaType": t["mediaType"], "tmdbId": t["tmdbId"]}
+                                                        for t in titles]}),
+             "--metadata", dump("metadata.json", {"records": [
+                 {"mediaType": "movie", "tmdbId": 1, "title": "Alpha", "year": 1999},
+                 {"mediaType": "movie", "tmdbId": 2, "title": "Beta", "year": 2001}]}),
+             # The plot pass labelled movie:1 only; the premise pass labelled movie:2 only.
+             "--vectors", vectors(os.path.join(out_dir, "plot.bin"), 1, 7),
+             "--vector-labels", dump("plot-labels.json", rows_file(["movie:1"])),
+             "--premise-vectors", vectors(os.path.join(out_dir, "premise.bin"), 1, 200),
+             "--premise-labels", dump("premise-labels.json", rows_file(["movie:2"])),
+             "--dataset-version", "test", "--out", store],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, f"build_store failed:\n{result.stderr}")
+        return ReadBack(store), result.stderr
+
+    def test_the_premise_pass_labels_reach_the_store(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, stderr = self.build(out)
+            self.assertEqual(store.keys(), ["movie:1", "movie:2"])
+            row = store.keys().index("movie:2")
+
+            primary = store.ints("primary_genre")
+            self.assertEqual(
+                store.text(primary[row]), "Western",
+                "movie:2 was labelled by the premise pass alone and the store holds no primary genre "
+                "for it — the label sections are being written from the plot pass only.")
+            self.assertEqual(store.labelled("subgenre", row), [("Road Movie", 50)])
+            self.assertEqual(store.labelled("mood", row), [("Campy", 60)])
+
+            # And the plot pass's title is untouched: the union adds, it does not replace.
+            plot_row = store.keys().index("movie:1")
+            self.assertEqual(store.text(primary[plot_row]), "Drama")
+            self.assertEqual(store.labelled("subgenre", plot_row), [("Prison", 70)])
+            self.assertEqual(store.labelled("mood", plot_row), [("Bleak", 55)])
+
+            summary = json.loads(stderr[stderr.index("{"):stderr.rindex("}") + 1])
+            self.assertEqual(summary["withLabels"], 2, "both titles are labelled, by one pass or the other")
+            self.assertEqual(summary["withPlotLabels"], 1)
+            self.assertEqual(summary["withPremiseLabels"], 1)
+
+    def test_a_label_artifact_the_store_does_not_cover_is_fatal(self):
+        """The assert that makes the union's own miss loud. A title the premise pass labelled but the
+        corpus never carried is the same silent drop in the other direction, and a count that matched only
+        the plot artifact would not see it."""
+        # The premise artifact still names movie:2; the corpus row for it no longer carries the labels.
+        stripped = [dict(t, premiseLabels=None) if t["key"] == "movie:2" else t for t in self.TITLES]
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, stripped)
+        self.assertIn("labelled titles", str(caught.exception))
 
 
 class StampsTheManifest(unittest.TestCase):
