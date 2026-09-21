@@ -208,6 +208,42 @@ if [ "$have_published" -eq 1 ]; then
   fi
 fi
 
+# IDENTITY GUARD. A `datasetVersion` must name ONE store, forever.
+#
+# It already failed to. Two different stores shipped as `den-5b1c3213b6a1.store` under datasetVersion
+# 5b1c3213b6a1 with the same `builtAt` — 131,159,594 bytes (539beddf…) and then 135,146,098 (caa915c6…).
+# Nothing caught it and nothing could: `check-filename-version.py` compares the version in the filename to
+# the version in the manifest, and both agreed; `den-atlas check`'s mixed-generation test asks whether the
+# artifacts share a datasetVersion, and they did. Every guard we had keyed on the identifier, and the
+# identifier was the thing that had stopped being unique.
+#
+# The consequence is that a rollback cannot name what it restores, and a backup cannot prove it holds the
+# generation it claims. With the store as the ONLY artifact, that identifier is the only handle anything
+# has on it.
+#
+# So: republishing a version whose store bytes changed is refused. A changed store is a new generation and
+# wants a new version. Deliberately NOT behind DEN_ALLOW_DROPPING_BLOBS — that flag is for a deliberate
+# shrink, and there is no such thing as a deliberate silent identity collision.
+if [ "$have_published" -eq 1 ]; then
+  json_key() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' "$1" "$2"; }
+  was_version="$(json_key "$published_meta" datasetVersion)"
+  now_version="$(json_key "$meta" datasetVersion)"
+  was_store="$(json_key "$published_meta" storeSha256)"
+  now_store="$(json_key "$meta" storeSha256)"
+  # Both sides must actually NAME a store. A manifest with no `storeSha256` at all is a dropped key, not a
+  # collision, and the guard above reports that far more usefully than "a different store" would.
+  if [ -n "$was_version" ] && [ "$was_version" = "$now_version" ] \
+     && [ -n "$was_store" ] && [ -n "$now_store" ] && [ "$was_store" != "$now_store" ]; then
+    echo "error: datasetVersion $now_version is already published with a DIFFERENT store." >&2
+    echo "       published:        $was_store" >&2
+    echo "       about to publish: $now_store" >&2
+    echo "       One version must name one store. Publishing this would leave two different artifacts" >&2
+    echo "       sharing an identifier — which is what every other guard here keys on, and it has" >&2
+    echo "       happened before, undetected. Rebuild with a new datasetVersion." >&2
+    exit 1
+  fi
+fi
+
 # Stamp the counts for next time, whether or not there was anything to compare against.
 python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
 

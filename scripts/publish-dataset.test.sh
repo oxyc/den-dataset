@@ -319,12 +319,67 @@ else
 fi
 teardown
 
+# --- one datasetVersion, one store ------------------------------------------------------------------
+#
+# This already happened and nothing saw it: two stores shipped as den-5b1c3213b6a1.store under
+# datasetVersion 5b1c3213b6a1 with the same builtAt — 131,159,594 bytes, then 135,146,098. Every guard
+# here keyed on the identifier, and the identifier was the thing that had stopped being unique. With the
+# store as the only artifact, a rollback cannot name what it restores if a version can mean two files.
+
+setup
+write_meta aaaaaaaaaaaa
+publish_baseline
+# Same version, same filename, different bytes — the exact shape that shipped.
+printf 'a different store' >> "$DIR/den-aaaaaaaaaaaa.store"
+python3 - "$DIR/dataset.meta.json" "$DIR/den-aaaaaaaaaaaa.store" <<'PY'
+import hashlib, json, os, sys
+meta = json.load(open(sys.argv[1]))
+meta["storeSha256"] = hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest()
+meta["storeBytes"] = os.path.getsize(sys.argv[2])
+json.dump(meta, open(sys.argv[1], "w"))
+PY
+if run_publish; then
+  bad "a second, different store published under a version that already names one"
+else
+  grep -q "already published with a DIFFERENT store" "$WORK/err.log" \
+    && ok "republishing a version whose store bytes changed is refused" \
+    || bad "refused, but not for the identity: $(tail -2 "$WORK/err.log")"
+fi
+teardown
+
+# --- and the override does NOT excuse it -------------------------------------------------------------
+#
+# DEN_ALLOW_DROPPING_BLOBS is for a deliberate shrink. There is no such thing as a deliberate silent
+# identity collision, so the identity guard is deliberately not behind it.
+
+setup
+write_meta aaaaaaaaaaaa
+publish_baseline
+printf 'a different store' >> "$DIR/den-aaaaaaaaaaaa.store"
+python3 - "$DIR/dataset.meta.json" "$DIR/den-aaaaaaaaaaaa.store" <<'PY'
+import hashlib, json, os, sys
+meta = json.load(open(sys.argv[1]))
+meta["storeSha256"] = hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest()
+meta["storeBytes"] = os.path.getsize(sys.argv[2])
+json.dump(meta, open(sys.argv[1], "w"))
+PY
+if DEN_ALLOW_DROPPING_BLOBS=1 PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" \
+     > "$WORK/out.log" 2> "$WORK/err.log"; then
+  bad "the override let a version publish a second, different store"
+else
+  ok "the override does not excuse an identity collision"
+fi
+teardown
+
 # --- the override is deliberate, not accidental -----------------------------------------------------
 
 setup
 write_meta aaaaaaaaaaaa 100
 publish_baseline
-write_meta aaaaaaaaaaaa 50
+# A NEW version, because a store with different records is a different store — which the identity guard
+# above now refuses to publish under the old one. That is the honest shape of a deliberate shrink: a new
+# generation that happens to hold fewer records, not a version quietly meaning two files.
+write_meta bbbbbbbbbbbb 50
 if DEN_ALLOW_DROPPING_BLOBS=1 PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" \
      > "$WORK/out.log" 2> "$WORK/err.log"; then
   ok "DEN_ALLOW_DROPPING_BLOBS=1 lets a deliberate shrink through"
