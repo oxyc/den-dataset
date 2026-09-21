@@ -579,3 +579,30 @@ class RecordsWhatItRead(StoreFixture, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VotesAreNotSilentlyZero(unittest.TestCase):
+    """A whole column of zero votes is a missing `--enriched`, not a corpus of unknowns.
+
+    `sec.put("votes", …, expect=n)` is a ROW-COUNT assert and 47,618 zeros satisfy it, so nothing saw
+    this. atlas orders every browse row by `ln(votes)`, so the symptom is a corpus that sorts by tmdbId —
+    *La Job* (tv:5) beside *Game of Thrones*, which is oxyc/den-dataset#22 one level up from the blob it
+    was first found in. The store records its inputs now, but an input never PASSED is recorded as
+    nothing, so the ownership guard cannot see this one either.
+    """
+
+    def test_an_all_zero_column_at_corpus_scale_is_refused(self):
+        complaint = build_store_module().votes_are_missing([0] * (build_store_module().VOTES_REQUIRED_ABOVE + 1))
+        self.assertIsNotNone(complaint, "an all-zero column above the bound must be refused")
+        self.assertIn("--enriched", complaint, "the message must say what to pass")
+
+    def test_one_real_vote_is_enough(self):
+        """It refuses a column that is ENTIRELY zero. A corpus where obscure titles have no votes is not
+        the failure — reading no vote counts at all is."""
+        votes = [0] * build_store_module().VOTES_REQUIRED_ABOVE + [7]
+        self.assertIsNone(build_store_module().votes_are_missing(votes))
+
+    def test_a_small_fixture_with_no_votes_is_fine(self):
+        """The bound exists so the synthetic fixtures — here and in den-spec — need no flag declaring
+        they have no vote data."""
+        self.assertIsNone(build_store_module().votes_are_missing([0, 0]))
