@@ -180,6 +180,16 @@ def main():
             n = count(meta, key, base)
             if n is not None:
                 meta[key[: -len("File")] + "Records"] = n
+        # `premiseCount` is what the SERVED descriptor advertises to the app, and nothing in the pipeline
+        # wrote it: `DatasetMeta` does not model it, so `ManifestMerge` carried it forward from whenever
+        # the premise index was first published. Found live at 38,532 while the labels file and the vector
+        # blob both held 44,531 — the advertised number a generation behind the files it describes, which
+        # is this script's entire subject matter appearing in the one field it was not stamping.
+        #
+        # Derived here rather than merged, so it cannot drift again.
+        premise_rows = count(meta, "premiseLabelsFile", base)
+        if premise_rows is not None:
+            meta["premiseCount"] = premise_rows
         highest = highest_batch_id(base)
         if highest:
             meta["maxBatchId"] = highest

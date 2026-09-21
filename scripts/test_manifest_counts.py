@@ -138,6 +138,33 @@ class StampAndCompare(unittest.TestCase):
             self.assertEqual(run(["--compare", meta, next_meta, dir]), "")
 
 
+class AdvertisedCounts(unittest.TestCase):
+    """`premiseCount` is what the served descriptor tells the app. Nothing in the pipeline wrote it —
+    `DatasetMeta` does not model it, so it was merged forward from whenever the premise index was first
+    published. Found live at 38,532 while the labels file and the vector blob both held 44,531."""
+
+    def test_premise_count_is_derived_from_the_labels_file(self):
+        with tempfile.TemporaryDirectory() as dir:
+            write_records(os.path.join(dir, "labels-premise.json"), 44531)
+            meta = os.path.join(dir, "meta.json")
+            # The stale value, exactly as it was live.
+            write_json(meta, {"premiseLabelsFile": "labels-premise.json", "premiseCount": 38532})
+            run(["--stamp", meta, dir])
+            with open(meta) as fh:
+                stamped = json.load(fh)
+            self.assertEqual(stamped["premiseCount"], 44531, "the advertised count must follow the file")
+            self.assertEqual(stamped["premiseLabelsRecords"], 44531)
+
+    def test_no_premise_labels_leaves_the_key_alone(self):
+        """A dataset shipping no premise index must not have the key invented or zeroed for it."""
+        with tempfile.TemporaryDirectory() as dir:
+            meta = os.path.join(dir, "meta.json")
+            write_json(meta, {"labelsFile": "absent.json"})
+            run(["--stamp", meta, dir])
+            with open(meta) as fh:
+                self.assertNotIn("premiseCount", json.load(fh))
+
+
 class Coverage(unittest.TestCase):
     """A blob's records as a share of the labels — the question an absolute count cannot answer."""
 
