@@ -364,6 +364,26 @@ def build_inputs(args):
     return out
 
 
+def title_imdb_id(raw):
+    """The `tt…` id for a title, or `None` for anything else IMDb numbers.
+
+    IMDb's id space is namespaced by prefix and Wikidata's P345 is not checked against it, so a title can
+    arrive carrying a person (`nm19818812`) or an event (`ev0000003`). Two rows do. Stored, they read as a
+    title id to anything that trusts the column.
+
+    That column is now a JOIN KEY: den-atlas ranks browse rows by joining IMDb's public `title.ratings`
+    on it, so a wrong-namespace id is a row that can never match and is indistinguishable from a title
+    IMDb has no rating for. A prefix check is the whole fix, and it belongs here rather than in the
+    reader, because every reader would otherwise have to repeat it.
+    """
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    return raw if raw.startswith("tt") and raw[2:].isdigit() else None
+
+
 def votes_are_missing(votes):
     """The complaint when a `votes` column is entirely zero at corpus scale, else `None`.
 
@@ -863,8 +883,7 @@ def main():
             strings.add(alias)
         card_pre = cards.get(key) or {}
         strings.add(card_pre.get("title"))
-        imdb = facts.get("imdbId")
-        strings.add(imdb[0] if isinstance(imdb, list) and imdb else imdb)
+        strings.add(title_imdb_id(facts.get("imdbId")))
         for c in facts.get("countries") or []:
             strings.add(c)
         for lang in facts.get("languages") or []:
@@ -1114,8 +1133,7 @@ def main():
                 row_titles.append(ident)
         aliases.append(row_titles)
 
-        raw_imdb = facts.get("imdbId")
-        imdb.append(strings.id(raw_imdb[0] if isinstance(raw_imdb, list) and raw_imdb else raw_imdb))
+        imdb.append(strings.id(title_imdb_id(facts.get("imdbId"))))
         days, prec = days_since_epoch(facts.get("released") or facts.get("started"), key)
         released.append(days)
         released_prec.append(prec)

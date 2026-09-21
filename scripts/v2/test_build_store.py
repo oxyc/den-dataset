@@ -1032,3 +1032,26 @@ class ThePosterPathIsNotPublished(StoreFixture, unittest.TestCase):
         self.assertNotIn("/alpha.jpg", interned)
         self.assertNotIn("/beta.jpg", interned)
         self.assertIn("Alpha", interned, "the title still ships; only the artwork reference is gone")
+
+
+class OnlyATitleIdReachesTheImdbColumn(unittest.TestCase):
+    """IMDb's id space is namespaced by prefix and Wikidata's P345 is not checked against it.
+
+    Two corpus rows carry an id from the wrong namespace — `ev0000003` (an event) and `nm19818812` (a
+    person) — and stored verbatim they read as title ids. den-atlas now joins IMDb's public
+    `title.ratings` on this column to rank browse rows, so a wrong-namespace id is a row that can never
+    match and cannot be told apart from a title IMDb has no rating for.
+    """
+
+    def test_a_person_or_event_id_is_not_a_title_id(self):
+        mod = build_store_module()
+        for wrong in ("nm19818812", "ev0000003", "co0000123", "tt", "ttabc", "", "  ", None, 12345):
+            self.assertIsNone(mod.title_imdb_id(wrong), f"{wrong!r} was accepted as a title id")
+
+    def test_a_title_id_survives_however_it_is_wrapped(self):
+        mod = build_store_module()
+        self.assertEqual(mod.title_imdb_id("tt0000001"), "tt0000001")
+        self.assertEqual(mod.title_imdb_id(["tt0111161", "tt0000002"]), "tt0111161",
+                         "a list keeps its first entry, as the writer always has")
+        self.assertEqual(mod.title_imdb_id(" tt0111161 "), "tt0111161")
+        self.assertIsNone(mod.title_imdb_id([]))
