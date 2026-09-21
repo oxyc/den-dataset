@@ -45,9 +45,27 @@ can weigh it, and so that the CC BY-SA text itself — which is unambiguous — 
 
 ## TMDB
 
-Nothing here redistributes TMDB Content beyond posters, ids and titles. Enrichment prose is sourced from
-Wikipedia specifically so that rule can hold, and `scripts/v2/assert_compliance.py` proves from the batch
-files on disk that no TMDB prose reached a model. See `data/README.md`.
+The store is a **public** release asset on a public repo, so "redistribute" is literal here. What it
+carries that came from TMDB, named column by column:
+
+| column | rows | source |
+|---|---|---|
+| the key's `tmdbId` | 47,618 | TMDB |
+| `card_poster` | 47,534 | TMDB (a poster path) |
+| `card_title` | 47,618 | TMDB, with a Wikidata label as fallback |
+| `card_year` | 47,618 | TMDB |
+| `votes` | 47,547 | TMDB (`vote_count`) |
+
+Nothing else does. `genres` are Wikidata Q-ids mapped into TMDB's genre *id space* — the values are CC0
+and the vocabulary is TMDB's. No TMDB prose is redistributed at all: no overview, no tagline, no review.
+Enrichment prose is sourced from Wikipedia specifically so that holds, and
+`scripts/v2/assert_compliance.py` proves from the batch files on disk that no TMDB prose reached a model.
+See `data/README.md`.
+
+A rating *score* is never published, and a durable artifact is the reason: den-atlas draws the same line
+at `src/recommend.rs`, which scrubs vote fields out of replay files because they belong in a live request
+or a bounded cache, not in something kept. `votes` is the one column on the wrong side of that line, and
+oxyc/den#118 is where it is being settled.
 
 ## The derived signals
 
