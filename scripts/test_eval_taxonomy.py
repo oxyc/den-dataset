@@ -1,0 +1,185 @@
+"""`eval-taxonomy.py` — the only check that measures label QUALITY rather than plumbing.
+
+The maths is tested here against tiny synthetic sets, because CI has no `labels-t02.json`: it is a release
+asset, not a committed one. The real scoring runs in the publish path, where the out-dir holds it.
+
+Every test below is a way this check can LIE — score perfectly while measuring nothing, or score zero while
+the data is fine. A quality gate that can do either is worse than none, because it is believed.
+"""
+import importlib.util
+import json
+import os
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def load():
+    spec = importlib.util.spec_from_file_location("eval_taxonomy", os.path.join(HERE, "eval-taxonomy.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+ev = load()
+
+
+def golden(titles):
+    return {"taxonomyVersion": "t02", "titles": titles}
+
+
+def title(tmdb_id, primary, subgenres=(), themes=(), moods=()):
+    return {"tmdbId": tmdb_id, "mediaType": "movie", "title": f"T{tmdb_id}", "primaryGenre": primary,
+            "subgenres": list(subgenres), "themes": list(themes), "moods": list(moods)}
+
+
+def labels(rows):
+    """`(mediaType, tmdbId)` → record, in the PUBLISHED shape."""
+    return {("movie", r["tmdbId"]): r for r in rows}
+
+
+def record(tmdb_id, primary, subgenres=(), moods=()):
+    return {"tmdbId": tmdb_id, "mediaType": "movie", "primaryGenre": primary,
+            "subgenres": [{"label": l, "confidence": c} for l, c in subgenres],
+            "moods": [{"label": l, "confidence": c} for l, c in moods]}
+
+
+class Parsing(unittest.TestCase):
+    """The failure that actually happened on this file's first run.
+
+    The published shape is `{"label": …, "confidence": …}`. Reading it as a `[name, confidence]` pair takes
+    the dict's first key — `"confidence"` — as the label for every entry. Nothing matches, every family
+    scores 0.000, and the output is indistinguishable from a classifier that has completely collapsed.
+    """
+    def test_the_published_dict_shape_is_read(self):
+        self.assertEqual(ev.named([{"label": "Heist", "confidence": 0.9}], 0.0), {"Heist"})
+
+    def test_the_older_pair_and_bare_string_shapes_still_read(self):
+        self.assertEqual(ev.named([["Heist", 0.9]], 0.0), {"Heist"})
+        self.assertEqual(ev.named(["Heist"], 0.0), {"Heist"})
+
+    def test_a_confidence_floor_drops_the_labels_under_it(self):
+        entries = [{"label": "Heist", "confidence": 0.9}, {"label": "Caper", "confidence": 0.3}]
+        self.assertEqual(ev.named(entries, 0.5), {"Heist"})
+        self.assertEqual(ev.named(entries, 0.0), {"Heist", "Caper"})
+
+
+class Scoring(unittest.TestCase):
+    def test_a_perfect_prediction_scores_one(self):
+        g = golden([title(1, "Crime", subgenres=["Heist"], moods=["Tense"])])
+        l = labels([record(1, "Crime", subgenres=[("Heist", 0.9)], moods=[("Tense", 0.9)])])
+        counts, evaluated, missing = ev.evaluate(g, l)
+        self.assertEqual((evaluated, missing), (1, 0))
+        for family in ("primaryGenre", "subgenre", "mood"):
+            micro, macro, scored = ev.family_scores(counts[family], min_support=1)
+            self.assertEqual((micro, macro, scored), (1.0, 1.0, 1), family)
+
+    def test_themes_and_subgenres_are_scored_as_one_family(self):
+        """The published taxonomy folds themes into subgenres and has no `themes` field, so a golden theme
+        must be expected among the predicted subgenres — not counted as a miss."""
+        g = golden([title(1, "Crime", subgenres=["Heist"], themes=["Cyberpunk"])])
+        l = labels([record(1, "Crime", subgenres=[("Heist", 0.9), ("Cyberpunk", 0.8)])])
+        counts, _, _ = ev.evaluate(g, l)
+        micro, _, _ = ev.family_scores(counts["subgenre"], min_support=1)
+        self.assertEqual(micro, 1.0)
+
+    def test_a_missing_prediction_is_a_false_negative_not_a_skip(self):
+        g = golden([title(1, "Crime", moods=["Tense", "Bleak"])])
+        l = labels([record(1, "Crime", moods=[("Tense", 0.9)])])
+        counts, _, _ = ev.evaluate(g, l)
+        self.assertEqual(counts["mood"]["Bleak"], [0, 0, 1], "tp, fp, fn")
+
+    def test_a_title_absent_from_the_labels_is_counted_as_missing_not_wrong(self):
+        """A title the corpus does not hold has no prediction to be wrong about. Counting it as a failure
+        would make a SMALLER corpus score worse rather than cover less, which is the opposite of true."""
+        g = golden([title(1, "Crime"), title(2, "Drama")])
+        counts, evaluated, missing = ev.evaluate(g, labels([record(1, "Crime")]))
+        self.assertEqual((evaluated, missing), (1, 1))
+        micro, _, _ = ev.family_scores(counts["primaryGenre"], min_support=1)
+        self.assertEqual(micro, 1.0, "the one title it could score was right")
+
+
+class Support(unittest.TestCase):
+    def test_support_counts_golden_positives_not_predictions(self):
+        """Support is `tp + fn`. Using `tp + fp` would let a classifier that predicts a label EVERYWHERE
+        inflate its own support past the threshold and be scored on a label the golden set barely has."""
+        g = golden([title(i, "Crime") for i in range(1, 21)])
+        # "Heist" predicted on all 20, genuinely on none.
+        l = labels([record(i, "Crime", subgenres=[("Heist", 0.9)]) for i in range(1, 21)])
+        counts, _, _ = ev.evaluate(g, l)
+        _, _, scored = ev.family_scores(counts["subgenre"], min_support=10)
+        self.assertEqual(scored, 0, "20 false positives are not 20 support")
+
+    def test_a_sparse_label_is_dropped_before_it_swings_the_macro_mean(self):
+        g = golden([title(1, "Crime", moods=["Cozy"])] + [title(i, "Crime", moods=["Tense"])
+                                                          for i in range(2, 22)])
+        l = labels([record(1, "Crime", moods=[("Wrong", 0.9)])]
+                   + [record(i, "Crime", moods=[("Tense", 0.9)]) for i in range(2, 22)])
+        counts, _, _ = ev.evaluate(g, l)
+        _, macro, scored = ev.family_scores(counts["mood"], min_support=10)
+        self.assertEqual(scored, 1, "only Tense has 10+ golden positives")
+        self.assertEqual(macro, 1.0, "the 1-title Cozy miss does not halve the mean")
+
+
+class Vacuity(unittest.TestCase):
+    """The ways a gate certifies nothing while reporting success."""
+
+    def test_a_family_with_nothing_to_score_reports_zero_labels(self):
+        """With no labels above support, both F1s are vacuously 1.0 — every denominator is empty. The
+        caller turns a zero count into a FAILURE for exactly that reason; here we pin that it is visible."""
+        g = golden([title(1, "Crime")])
+        counts, _, _ = ev.evaluate(g, labels([record(1, "Crime")]))
+        micro, macro, scored = ev.family_scores(counts["mood"], min_support=10)
+        self.assertEqual((micro, macro, scored), (0.0, 0.0, 0))
+
+    def test_no_overlap_at_all_exits_rather_than_reporting_a_perfect_score(self):
+        g = golden([title(1, "Crime")])
+        with self.assertRaises(SystemExit):
+            ev.evaluate(g, labels([record(999, "Crime")]))
+
+
+class Gate(unittest.TestCase):
+    def _run(self, labels_rows, extra=()):
+        import contextlib, io, sys
+        with tempfile.TemporaryDirectory() as dir:
+            lpath = os.path.join(dir, "labels.json")
+            gpath = os.path.join(dir, "golden.json")
+            with open(lpath, "w") as fh:
+                json.dump({"taxonomyVersion": "t02", "records": labels_rows}, fh)
+            with open(gpath, "w") as fh:
+                json.dump(golden([title(i, "Crime", moods=["Tense"], subgenres=["Heist"])
+                                  for i in range(1, 31)]), fh)
+            argv = sys.argv
+            sys.argv = ["eval-taxonomy.py", lpath, "--golden", gpath, *extra]
+            err, out = io.StringIO(), io.StringIO()
+            try:
+                with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                    code = ev.main()
+            finally:
+                sys.argv = argv
+            return code, err.getvalue()
+
+    def test_good_labels_pass(self):
+        rows = [record(i, "Crime", subgenres=[("Heist", 0.9)], moods=[("Tense", 0.9)])
+                for i in range(1, 31)]
+        code, err = self._run(rows, extra=["--gate"])
+        self.assertEqual(code, 0, err)
+
+    def test_a_collapsed_family_fails_the_gate(self):
+        rows = [record(i, "Crime", subgenres=[("Heist", 0.9)], moods=[("Wrong", 0.9)])
+                for i in range(1, 31)]
+        code, err = self._run(rows, extra=["--gate"])
+        self.assertEqual(code, 1)
+        self.assertIn("mood", err)
+
+    def test_without_gate_a_failure_reports_but_does_not_block(self):
+        rows = [record(i, "Crime", subgenres=[("Heist", 0.9)], moods=[("Wrong", 0.9)])
+                for i in range(1, 31)]
+        code, err = self._run(rows)
+        self.assertEqual(code, 0)
+        self.assertIn("below their quality floors", err)
+
+
+if __name__ == "__main__":
+    unittest.main()

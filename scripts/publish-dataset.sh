@@ -245,6 +245,22 @@ for facts_key in factsFile factsSlimFile; do
   python3 "$(dirname "$0")/check-facts-schema.py" "$DIR/$facts_name"
 done
 
+# QUALITY GATE. Every check above asks whether the right number of records arrived in the right shape.
+# This one asks whether they are CORRECT: the committed golden set, scored against these labels, per label
+# family, against floors measured on the generation that set them.
+#
+# It moved here from the tvOS app (`ShippedDatasetEvalTests`), which scored the 45.8 MB index that app
+# bundled. oxyc/den#113 Phase 2 deletes that bundle, and the only quality signal in the whole system would
+# have gone with it as a side effect of a delivery change.
+#
+# Reported, not enforced, for now: the current labels' MOOD family is already under its floor
+# (micro .639 vs .640, macro .564 vs .580), so gating would block every publish over a regression that has
+# already shipped. Add --gate once that is resolved, which is the point of printing it every time.
+python3 "$(dirname "$0")/eval-taxonomy.py" "$DIR/$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1])).get("labelsFile") or "")
+' "$meta")" --golden "$(dirname "$0")/../data/eval/golden-large.json" || true
+
 if [ "$have_published" -eq 1 ]; then
   dropped="$(python3 -c '
 import json, sys
