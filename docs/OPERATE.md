@@ -187,12 +187,13 @@ python3 scripts/v2/build_store.py \
     --facts out/facts-<ver>.json \
     --vectors out/vectors-bge-m3.bin --vector-labels out/labels-t02.json \
     --premise-vectors out/vectors-premise.bin --premise-labels out/labels-premise.json \
-    --enriched out/enriched --dataset-version <ver> \
+    --dataset-version <ver> \
     --out out/den-<ver>.store --stamp-meta out/dataset.meta.json
-#     Without --enriched the `votes` section is all zeros and atlas cannot order a browse row by popularity.
-#     There is no --metadata: the card's title and year come from the corpus's own `facts` (`titles.en`
-#     and `released`), and the poster path is not published at all (oxyc/den#118). metadata-<ver>.json is
-#     still BUILT — other things read it — it is just no longer an input to the store.
+#     No --metadata and no --enriched: the card's title and year come from the corpus's own `facts`
+#     (`titles.en` and `released`), the poster path is not published, and the vote count is gone — a
+#     browse row is ordered by IMDb's public ratings dump, which den-atlas joins on `imdb` at run time
+#     (oxyc/den#118). Both metadata-<ver>.json and out/enriched are still BUILT and read by other things;
+#     they are simply no longer inputs to the store, which now reads no TMDB artifact at all.
 
 # 8. Publish — the moving `data-latest` GitHub release den-atlas fetches. Run it FROM THE REPO ROOT: the
 #    ownership guard resolves producer paths and `git ls-files` against the working directory. It uploads

@@ -50,10 +50,6 @@ HEADER_BYTES = 64
 ENTRY_BYTES = 32
 ALIGN = 8
 DIMS = 1024
-#: Above this many rows, an all-zero `votes` column is a missing `--enriched`, not a corpus of unknowns.
-#: Below it, a synthetic fixture with no vote data is ordinary and says nothing.
-VOTES_REQUIRED_ABOVE = 1000
-
 FACET_AXES = ("era", "setting", "scope", "ending", "pacing", "chronology",
               "continuity", "conflict", "ensemble", "tone", "timespan", "archetype")
 SCORE_AXES = ("intensity", "humour", "emotional_weight", "complexity")
@@ -108,7 +104,6 @@ PROVENANCE = {
     "str_off": "ours",
     "card_title": "wikidata",
     "card_year": "wikidata",
-    "votes": "tmdb",
     "primary_genre": "llm",
     "subgenre_v": "llm", "subgenre_c": "llm", "subgenre_o": "llm",
     "mood_v": "llm", "mood_c": "llm", "mood_o": "llm",
@@ -172,12 +167,13 @@ PROVENANCE = {
 VENDOR_SOURCES = {"tmdb"}
 
 #: The vendor-sourced sections the store may still carry. `card_title` and `card_year` have moved to
-#: Wikidata, so `votes` is the last one, and the README shows how to join IMDb's own public ratings dump
-#: on the `imdb` column instead. When it goes this set is empty and the store carries identifiers only.
+#: Wikidata and `votes` is gone, so this is EMPTY: the store carries identifiers and free facts, nothing
+#: a vendor licenses. It stays as a set rather than being deleted, because the check it feeds is what
+#: refuses the next column that tries.
 #:
 #: Removing a column is two edits — its PROVENANCE entry and its entry here — because an allowlist entry
 #: for a section that is no longer written is fatal too.
-VENDOR_ALLOWED = {"votes"}
+VENDOR_ALLOWED = set()
 
 #: The longest string the dictionary may hold, in bytes. Measured on the shipped store: 445,817 strings,
 #: longest 217 (a performer's full name), only 34 over 120 — a Peter Greenaway title at 190 is the next.
@@ -308,7 +304,7 @@ def score_hundredths(value, what, key):
 #: the year and the poster path, and the store now takes the first two from Wikidata and publishes no
 #: third. The writer reads no TMDB artifact at all.
 INPUT_ARGS = ("corpus", "entities", "facts", "vectors", "vector_labels",
-              "premise_vectors", "premise_labels", "enriched")
+              "premise_vectors", "premise_labels")
 
 
 def file_sha256(path):
@@ -321,26 +317,12 @@ def file_sha256(path):
 
 
 def input_digest(path):
-    """`(sha256, bytes, mtime)` for one build input — a file, or the enriched batch DIRECTORY.
+    """`(sha256, bytes, mtime)` for one build input.
 
-    A directory is digested over its LISTING: `"<name> <sha256>\\n"` per batch file, in batch-number
-    order, hashed. That is a content hash for a thing with no single file, and it moves when any batch is
-    added, removed or rewritten — which is exactly what the record has to notice. Batch-number order
-    rather than `sorted()`, for the same reason `read_votes` uses it: `batch-99` sorts after `batch-177`
-    lexicographically, so a lexicographic digest would depend on how many digits a batch id has.
+    Every input is a file now. It used to handle a DIRECTORY too, digested over its listing, because
+    `--enriched` named the batch tree the vote counts came from — and that tree is TMDB Content, which
+    left with the column (oxyc/den#118).
     """
-    if os.path.isdir(path):
-        names = sorted((n for n in os.listdir(path)
-                        if n.startswith("batch-") and n.endswith(".json")),
-                       key=lambda n: int(n[len("batch-"):-len(".json")]))
-        listing = hashlib.sha256()
-        total, newest = 0, 0
-        for name in names:
-            member = os.path.join(path, name)
-            listing.update(f"{name} {file_sha256(member)}\n".encode())
-            total += os.path.getsize(member)
-            newest = max(newest, int(os.path.getmtime(member)))
-        return listing.hexdigest(), total, newest
     return file_sha256(path), os.path.getsize(path), int(os.path.getmtime(path))
 
 
@@ -445,29 +427,6 @@ def title_imdb_id(raw):
     return raw if raw.startswith("tt") and raw[2:].isdigit() else None
 
 
-def votes_are_missing(votes):
-    """The complaint when a `votes` column is entirely zero at corpus scale, else `None`.
-
-    A zero vote count is a real answer for an obscure title; a whole COLUMN of zeros is not. It is what
-    an omitted `--enriched` produces, and `sec.put("votes", …, expect=n)` cannot see it — a row-count
-    assert is satisfied by 47,618 zeros. atlas orders every browse row by `ln(votes)`, so the symptom is
-    a corpus that sorts by tmdbId: *La Job* (tv:5) beside *Game of Thrones*, which is
-    oxyc/den-dataset#22 one level up from the blob it was first found in.
-
-    The store records its inputs now, but an input never PASSED is recorded as nothing — `store_inputs`
-    skips a falsy path — so the ownership guard cannot see this one either. It is checked here, where
-    the column is in hand.
-
-    Bounded to real-corpus scale so the synthetic fixtures (here and in den-spec) need no flag declaring
-    they have no vote data. Below the bound an all-zero column says nothing; above it, it is a missing
-    argument.
-    """
-    if len(votes) > VOTES_REQUIRED_ABOVE and not any(votes):
-        return (f"votes: all {len(votes)} rows are zero — every browse row would sort by tmdbId. Pass "
-                f"--enriched so the vote counts are read, or say why a corpus this size has none.")
-    return None
-
-
 def check_provenance(names):
     """Refuse a store whose sections are not exactly the ones `PROVENANCE` declares.
 
@@ -521,29 +480,6 @@ def prose_in_the_dictionary(ordered):
                 f"something that long is prose, and the store may not publish it. If a real name is "
                 f"genuinely this long, raise MAX_STRING_BYTES and say which one.")
     return None
-
-
-def read_votes(enriched_dir):
-    """`key -> voteCount`, from the enriched batches.
-
-    The same source and the same rule as `build-facets-bin.py`: BATCH-NUMBER order, last occurrence
-    winning, matching `finalize`'s de-dup and `EnrichedBatches.orderedNames`. `sorted()` on the names is
-    lexicographic — `batch-99.json` after `batch-177.json` — so the winner would depend on how many digits
-    a batch id happens to have, and 97 keys disagree about voteCount across batches.
-
-    Votes are why this exists: atlas orders every browse row by them, so a title without one sorts by
-    tmdbId and lands *La Job* (tv:5) next to Game of Thrones. `facets.bin` carried them and fell 9,007
-    titles behind the corpus; read from here the store has them for every title it holds.
-    """
-    if not enriched_dir:
-        return {}
-    votes = {}
-    names = [n for n in os.listdir(enriched_dir) if n.startswith("batch-") and n.endswith(".json")]
-    for name in sorted(names, key=lambda n: int(n[len("batch-"):-len(".json")])):
-        with open(os.path.join(enriched_dir, name), encoding="utf-8") as fh:
-            for d in json.load(fh):
-                votes[f"{d['mediaType']}:{d['tmdbId']}"] = int(d.get("voteCount") or 0)
-    return votes
 
 
 def days_since_epoch(value, key):
@@ -863,9 +799,6 @@ def build_parser():
                          "sections became the union of both passes: the corpus supplies the premise "
                          "labels either way, so without this the count assert compares a union against "
                          "the plot artifact alone and fails naming the wrong file.")
-    ap.add_argument("--enriched",
-                    help="the enriched/ batch directory, for TMDB vote counts. Without it the `votes` "
-                         "section is all zeros and atlas cannot order a browse row by popularity.")
     ap.add_argument("--dataset-version", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--stamp-meta",
@@ -888,10 +821,6 @@ def main():
     keys = sorted(rows, key=lambda k: ((0 if k.split(":", 1)[0] == "movie" else 1), int(k.split(":", 1)[1])))
     n = len(keys)
     print(f"  {n} titles", file=sys.stderr)
-
-    vote_counts = read_votes(args.enriched)
-    if args.enriched:
-        print(f"  {len(vote_counts)} vote counts", file=sys.stderr)
 
     entities = read_json(args.entities)
 
@@ -1045,7 +974,7 @@ def main():
     sec.put_raw("strings", blob, 1)
     sec.put("str_off", "I", offs, 4, expect=len(ordered_strings) + 1)
 
-    card_title, card_year, votes = [], [], []
+    card_title, card_year = [], []
     primary, subgenres, moods, animated = [], [], [], []
     facet_v, facet_c = [], bytearray()   # dense R x 12, axis order = FACET_AXES
     scores = {a: [] for a in SCORE_AXES}
@@ -1087,8 +1016,6 @@ def main():
         card_title.append(strings.id(name))
         year = release_year(facts.get("released") or facts.get("started"))
         card_year.append(int(year) if isinstance(year, int) and -32767 <= year <= 32767 else I16_NONE)
-        # u32, clamped: TMDB's largest is five figures, and a browse row only ever compares them.
-        votes.append(min(0xFFFFFFFF, max(0, vote_counts.get(key, 0))))
         if name:
             with_names += 1
 
@@ -1254,21 +1181,19 @@ def main():
 
     sec.put("card_title", "I", card_title, 4, expect=n)
     sec.put("card_year", "h", card_year, 2, expect=n)
-    # A vote count of zero is a real answer for an obscure title; a whole COLUMN of zeros is not. It is
-    # what `--enriched` omitted produces, and the row-count assert below cannot see it — `expect=n` is
-    # satisfied by 47,618 zeros. atlas orders every browse row by `ln(votes)`, so the symptom would be a
-    # corpus that sorts by tmdbId: *La Job* (tv:5) beside *Game of Thrones*, exactly the failure
-    # oxyc/den-dataset#22 is about, one level up from the blob it was first seen in.
+    # No `votes`. It was a TMDB vote count, and the store is a public release asset that may not carry a
+    # vendor's content (oxyc/den#118); the enriched batches it was read from are TMDB Content outright,
+    # so dropping the column drops the last TMDB artifact this writer touched.
     #
-    # The store records its inputs now, but an input never passed is recorded as nothing, so the
-    # ownership guard cannot see this one either. Checked here, where the column is in hand.
-    # Bounded to real-corpus scale, not to any store: a handful of synthetic titles legitimately have no
-    # votes, and the fixtures that build them (here and in den-spec) should not have to carry a flag
-    # saying so. At a thousand rows an all-zero column is not a corpus, it is a missing argument.
-    votes_complaint = votes_are_missing(votes)
-    if votes_complaint:
-        sys.exit(votes_complaint)
-    sec.put("votes", "I", votes, 4, expect=n)
+    # It is not a signal lost, it is a signal moved: den-atlas joins IMDb's own public
+    # `title.ratings.tsv.gz` on the `imdb` column at load and refreshes it daily, which covers 99.9% of
+    # the corpus against this column's 99.85%, correlates with it at Spearman 0.85, and is FRESHER than
+    # a number frozen at build time. It also brings an average rating, which no store ever carried.
+    #
+    # What the reader must have first, and does: a missing column here used to mean every browse row
+    # sorted by tmdbId with nothing logged — *La Job* (tv:5) beside *Game of Thrones*, which is
+    # oxyc/den-dataset#22. den-atlas reports `votes_unusable` on `/health` when neither source has a
+    # count, and `/ready` fails on it, so the silence is gone from the one place it mattered.
     sec.put("primary_genre", "I", primary, 4, expect=n)
     sec.put_labelled_list("subgenre", subgenres)
     sec.put_labelled_list("mood", moods)
