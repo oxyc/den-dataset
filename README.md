@@ -226,13 +226,54 @@ whenever content moves, which is what drives client re-sync.
 **`topCast` is only 4 names deep.** Any rule needing two shared cast members between titles returns
 essentially nothing outside a franchise.
 
-## The TMDB rule, in one place
+## The licence rule, in one place
 
-**Nothing TMDB-sourced ships except posters, ids and titles.** Everything else comes from Wikipedia (plot
-text), an LLM over that text (labels, premise tags), or Wikidata (facts).
+**The rule: the published store carries no third-party licensed content — only identifiers, and facts we
+or a free source produced.** Plot text comes from Wikipedia, labels and premise tags from an LLM over that
+text, and the facts from Wikidata.
 
-That rule is easy to break by accident because TMDB fields travel inside files whose names suggest
-otherwise. Two that have already caught people:
+**Not yet true, and tracked in oxyc/den#118.** Four columns still carry TMDB data — `card_title`,
+`card_poster`, `card_year` and `votes` — and are being replaced by Wikidata and the English Wikipedia
+article title, with the poster dropped. Until that lands, this section is the rule and the list is the
+exception; `LICENSES.md` names the four columns and their counts.
+
+The rule follows from one property of this artifact: **the store is a public release asset on a public
+repo**, so publishing it is redistribution to anyone, not use by us. Both catalogue licences we might have
+leaned on say the same thing about that:
+
+- **TMDB** — its terms define TMDb Content broadly and draw no distinction between a rating score and a
+  rating count.
+- **IMDb** — grants *"a limited, non-exclusive, **non-transferable, non-sublicenseable** license to access
+  and make personal and non-commercial use"*. Non-transferable is the operative word: we cannot hand our
+  licence to whoever downloads a release asset.
+
+So the choice between vendors never had to be made — neither one's data can live in a public artifact.
+What ships is the **IMDb id** for 99.96% of rows: an identifier, not content, and the join key below.
+
+### Popularity: bring your own, in one command
+
+Once `votes` is gone the store will carry no popularity column at all. For personal, non-commercial use
+you can join IMDb's own public dataset yourself — it is one file, and our `imdb` column is the key:
+
+```sh
+curl -sfLO https://datasets.imdbws.com/title.ratings.tsv.gz    # ~8.6 MB, 1.71 M rows, daily
+```
+
+`title.ratings.tsv.gz` is `tconst  averageRating  numVotes`. Join `tconst` against the store's `imdb`
+column and you have a vote count for **99.9%** of the corpus (47,562 of 47,618 rows matched on the
+2026-09-21 dump). It correlates with TMDB's count at Spearman **0.85** and orders browse rows slightly
+better — re-ranking the live rows by it keeps 7–9 of every top 10 and promotes *Heat*, *Chinatown* and
+*Amélie* over more recent titles.
+
+Doing the join yourself is what keeps you inside IMDb's licence and us inside ours: you hold your own copy
+under your own personal non-commercial use, and nothing licensed passes through this repo. Read
+[IMDb's terms](https://www.imdb.com/conditions) before relying on it; commercial use needs a licence from
+IMDb directly.
+
+### Where it breaks by accident
+
+A vendor's fields travel inside files whose names suggest otherwise, which is how the old, looser rule
+("nothing TMDB-sourced ships except posters, ids and titles") was broken twice without anyone noticing:
 
 - `overview` in the enriched batches is the **Wikipedia plot** when `hasWikiPlot` is true and the **TMDB
   overview** when it is false. Same field, two sources — which is why `assemble --require-wiki-plot` exists.
