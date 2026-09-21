@@ -50,8 +50,8 @@ class StoreCounting(unittest.TestCase):
         spec = os.environ.get("DEN_SPEC_DIR", os.path.join(HERE, "..", "..", "den-spec"))
         fixture = os.path.join(spec, "vectors", "store-v1.store")
         if not os.path.isfile(fixture):
-            if os.environ.get("DEN_SPEC_OPTIONAL"):
-                self.skipTest("den-spec absent and DEN_SPEC_OPTIONAL is set")
+            if os.environ.get("DEN_SPEC_OPTIONAL") == "1":
+                self.skipTest("den-spec absent and DEN_SPEC_OPTIONAL=1")
             self.fail(f"{fixture} not found — set DEN_SPEC_DIR, or DEN_SPEC_OPTIONAL=1 to skip on purpose")
         self.assertEqual(mc.store_rows(fixture), 3)
 

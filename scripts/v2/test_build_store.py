@@ -37,8 +37,9 @@ def spec_or_fail(*parts):
     path = os.path.join(spec_dir(), *parts)
     if os.path.isfile(path):
         return path
-    if os.environ.get("DEN_SPEC_OPTIONAL"):
-        raise unittest.SkipTest("den-spec absent and DEN_SPEC_OPTIONAL is set")
+    # `== "1"`, not truthiness: DEN_SPEC_OPTIONAL=0, set to turn skipping OFF, would otherwise turn it on.
+    if os.environ.get("DEN_SPEC_OPTIONAL") == "1":
+        raise unittest.SkipTest("den-spec absent and DEN_SPEC_OPTIONAL=1")
     raise AssertionError(
         f"{path} not found — this test checks build_store.py against the store-v1 contract and cannot "
         "do so without it. Check out den-spec beside this repo, set DEN_SPEC_DIR, or set "
