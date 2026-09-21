@@ -288,21 +288,25 @@ class Sections:
         self.widths[name] = width
         self.order.append(name)
 
-    def put_list(self, name, fmt, width, per_row, allow_empty=False):
+    def put_list(self, name, fmt, width, per_row, allow_empty=False, expect_rows=None):
         """A values array plus offsets of len(rows)+1 — an empty list is a zero-width span.
 
         The offsets array being the right length proves nothing about the values array: `genres_v` was
         0 bytes beside a perfectly correct 47,619-entry offsets array, and that combination is a valid,
         entirely empty section. A values array of zero is fatal unless the caller says it may be.
+
+        `expect_rows` for a list that is not per TITLE — the entity table has its own length, and
+        checking it against the title count would refuse a correct section.
         """
+        rows = self.rows if expect_rows is None else expect_rows
         flat, offsets = [], [0]
         for row in per_row:
             flat.extend(row)
             offsets.append(len(flat))
-        if len(offsets) != self.rows + 1:
-            sys.exit(f"section {name}: {len(offsets)} offsets, expected {self.rows + 1}")
+        if len(offsets) != rows + 1:
+            sys.exit(f"section {name}: {len(offsets)} offsets, expected {rows + 1}")
         if not flat and not allow_empty:
-            sys.exit(f"section {name}_v holds no values for {self.rows} rows — the field is missing from "
+            sys.exit(f"section {name}_v holds no values for {rows} rows — the field is missing from "
                      f"the source or its type is not what this writer expects")
         self.put(f"{name}_v", fmt, flat, width)
         self.put(f"{name}_o", "I", offsets, 4)
@@ -436,6 +440,10 @@ def main():
         strings.add(name)
     for qid, ent in entities.items():
         strings.add((ent.get("en") if isinstance(ent, dict) else ent) or qid)
+        # And every other name they go by — people search indexes those too.
+        if isinstance(ent, dict):
+            for alias in ent.get("aliases") or []:
+                strings.add(alias)
 
     ordered_strings = strings.freeze()
     print(f"  {len(ordered_strings)} strings", file=sys.stderr)
@@ -585,7 +593,15 @@ def main():
             for value in (mapped if isinstance(mapped, list) else [mapped]):
                 if isinstance(value, int) and value not in row_genres:
                     row_genres.append(value)
-        genres.append(sorted(row_genres))
+        # NOT sorted. The order is the genreMap's, and `/recommend` treats the first as the most
+        # significant when it names a title's genre — so sorting quietly renamed things: Jupiter
+        # Ascending went from Action to Adventure. Dedup preserving first-seen instead.
+        seen, ordered = set(), []
+        for g in row_genres:
+            if g not in seen:
+                seen.add(g)
+                ordered.append(g)
+        genres.append(ordered)
         countries.append([strings.id(c) for c in facts.get("countries") or []])
         languages.append([strings.id(x) for x in facts.get("languages") or []])
         aliases.append([strings.id(a) for a in (t.get("aliases") or []) if a])
@@ -597,10 +613,14 @@ def main():
         released_prec.append(prec)
         mins = facts.get("runtimeMinutes")
         runtime.append(min(65535, int(mins)) if isinstance(mins, int) and mins > 0 else 0)
+        # The raw Q-ID, not an entity index. The entity table holds almost no franchise entities —
+        # 2,680 of 3,019 references are unresolvable — so interning this dropped the franchise for
+        # seven titles in eight, silently. A Q-id needs no table to be useful: two titles sharing one
+        # are in the same series whether or not anything can name it.
         fr = facts.get("franchise")
         fr = fr[0] if isinstance(fr, list) and fr else fr
-        fr_id = ent_id(fr, "franchise")
-        franchise.append(fr_id if fr_id is not None else U32_NONE)
+        fr_num = int(fr[1:]) if isinstance(fr, str) and fr.startswith("Q") and fr[1:].isdigit() else None
+        franchise.append(fr_num if fr_num is not None else U32_NONE)
         for field in ENTITY_LISTS:
             ent_lists[field].append(
                 [i for i in (ent_id(q, field) for q in facts.get(field) or []) if i is not None])
@@ -673,7 +693,7 @@ def main():
     for row in ent_lists["cast"]:
         for i in row:
             credits[i] += 1
-    ent_name, ent_tmdb = [], []
+    ent_name, ent_tmdb, ent_alias = [], [], []
     by_num = {int(q[1:]): q for q in entities if q.startswith("Q") and q[1:].isdigit()}
     for num in ent_qids:
         ent = entities[by_num[num]]
@@ -681,11 +701,21 @@ def main():
         ent_name.append(strings.id(ent.get("en") or by_num[num]))
         tmdb = ent.get("tmdbPersonId")
         ent_tmdb.append(int(tmdb) if isinstance(tmdb, str) and tmdb.isdigit() else U32_NONE)
+        # The OTHER names a person goes by. People search indexes these as well as the `en` name —
+        # 64,075 of 162,812 entities have them, 118,958 in all — so a store without them answers
+        # "Michael James Vogel" with nothing while the JSON facts answered Mike Vogel.
+        #
+        # The strings, not hashes: the reader hashes them with `name_key`, which folds and normalises in
+        # a way this writer would have to reimplement, and a second copy of that algorithm is exactly the
+        # drift this format exists to prevent. They land in the shared dictionary, so the repeats cost
+        # nothing, and the reader drops them once its index is built.
+        ent_alias.append([strings.id(a) for a in (ent.get("aliases") or []) if a])
     entity_count = len(ent_qids)
     sec.put("ent_qid", "I", ent_qids, 4, expect=entity_count)
     sec.put("ent_name", "I", ent_name, 4, expect=entity_count)
     sec.put("ent_tmdb", "I", ent_tmdb, 4, expect=entity_count)
     sec.put("ent_credits", "I", credits, 4, expect=entity_count)
+    sec.put_list("ent_alias", "I", 4, ent_alias, expect_rows=entity_count)
 
     # The inverted maker index: 355 KB that turns a per-request linear scan of every record into a lookup.
     by_maker = defaultdict(list)
