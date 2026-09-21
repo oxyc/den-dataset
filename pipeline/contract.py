@@ -12,12 +12,23 @@ wrong:
   * the producer registry in `scripts/check-producers.py`, which used to be a second list kept by hand.
     That list drifted twice in one day — `metadata` stayed registered as a store input after the writer
     stopped reading it, then `enriched` did the same — and each time a test was the only thing that
-    noticed. There is no second list now: the registry is read off the artifacts the stages declare.
+    noticed. There is no second list now: the registry is read off the stages themselves.
 
 That is what "derivable" buys. A registry nothing executes is a copy waiting to rot; a registry derived
 from the declaration a stage runs on cannot say something the run does not.
+
+Two shapes here exist because the corpus stage needed them and the store stage did not:
+
+  * a **shard set** (`Artifact.shards`) — one flag the reader takes many times. `--combined` names three
+    files, and the eleven titles that went missing for a day went missing because a producer read one
+    shard of three. A stage cannot make that mistake with a set it does not know as a file.
+  * a **binding** (`Artifact.called`) — the flag ONE reader uses for a file the pipeline names something
+    else. `labels-t02.json` is `--vector-labels` to the store writer and `--labels` to the corpus join.
+    The file keeps one name, which is what `--set` and the registry key on; the word on the command line
+    belongs to whoever is reading.
 """
 import dataclasses
+import glob as globbing
 import importlib
 import os
 
@@ -32,28 +43,35 @@ class StageError(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class Artifact:
-    """One file a stage reads or writes, and the answer to "what builds this?".
+    """One file — or one set of shards — a stage reads or writes.
 
-    `producer`/`how`/`dedicated` are the registration `check-producers.py` asks for, declared HERE — at
-    the one place the artifact is named — rather than copied into a registry beside it. `dedicated` is
-    false for a producer that builds several artifacts (`taxonomy-backfill` builds four), because the
-    staleness warning is only meaningful for a producer edited FOR this artifact.
+    `producer`/`how`/`dedicated` are the registration `check-producers.py` asks for. `dedicated` is false
+    for a producer that builds several artifacts (`taxonomy-backfill` builds four), because the staleness
+    warning is only meaningful for a producer edited FOR this artifact.
+
+    `producer`/`how` are EMPTY for an artifact this pipeline produces. The stage that declares it in
+    `OUTPUTS` owns it, and names the rule it runs once, beside the code that runs it; `registry()` reads
+    the ownership off the order. They are filled in only for an input whose stage is not ported yet —
+    the seam, and it closes one artifact at a time as the stages land.
     """
 
-    #: What the stage that reads it calls it. For a store input this is the writer's argument name, so
-    #: `vector_labels` becomes `--vector-labels`.
+    #: What the whole pipeline calls this file: the key `--set` takes, and the key the producer registry
+    #: is built on. A reader that spells it differently on its own command line says so with `called`.
     name: str
-    #: The name it is written under, with `{version}` for the dataset version.
+    #: The name it is written under, with `{version}` for the dataset version. For a shard set, a glob.
     filename: str
-    #: Repo-relative path of the committed file whose rule builds it.
-    producer: str
+    #: Repo-relative path of the committed file whose rule builds it — for an artifact no stage produces.
+    producer: str = ""
     #: The command that rebuilds it, quoted in the refusal when it is missing or stale.
-    how: str
+    how: str = ""
     dedicated: bool = True
     #: The `dataset.meta.json` key that declares it, for the artifacts a publish announces.
     manifest_key: str = ""
     #: False for an input a stage can run without.
     required: bool = True
+    #: True for a SET of files carried by one repeated flag — the pass shards. `filename` is then a glob
+    #: and `Context.paths` resolves the whole set, so no stage can hand over one shard of three.
+    shards: bool = False
 
     def flag(self):
         """The command-line flag that names it."""
@@ -63,9 +81,36 @@ class Artifact:
         """The filename with the version wild — how a publish dir is searched for it."""
         return self.filename.format(version="*")
 
-    def registration(self):
-        """`(producer, how, dedicated)` — the shape `check-producers.py` registers."""
-        return (self.producer, self.how, self.dedicated)
+    def called(self, arg):
+        """This artifact, as one stage's command line names it. See `Binding`."""
+        return Binding(self, arg)
+
+
+@dataclasses.dataclass(frozen=True)
+class Binding:
+    """An artifact, plus the argument name ONE stage's reader uses for it.
+
+    Declared in that stage's `INPUTS`/`OUTPUTS` so the command line is still built from the declaration
+    and still dies at the reader's parser when the two disagree. The artifact keeps its own name, so the
+    registry, `--set` and every other stage go on seeing one file.
+    """
+
+    artifact: Artifact
+    #: The reader's argument name, e.g. `labels` for the file the pipeline calls `vector_labels`.
+    arg: str
+
+    @property
+    def name(self):
+        """The artifact's pipeline-wide name."""
+        return self.artifact.name
+
+    def flag(self):
+        return "--" + self.arg.replace("_", "-")
+
+
+def bind(entry):
+    """Any `INPUTS`/`OUTPUTS` entry as a binding — a bare `Artifact` is one the reader spells the same."""
+    return entry if isinstance(entry, Binding) else Binding(entry, entry.name)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -81,11 +126,32 @@ class Context:
     overrides: dict = dataclasses.field(default_factory=dict)
     #: The manifest to declare the outputs in. Without it a store is written and nothing names it.
     stamp_meta: str = ""
+    #: The title count a join is held to, when one is declared. The corpus join refuses a run that wrote
+    #: a different number, which is how a missing shard stops being a quieter corpus.
+    expect: int | None = None
 
     def path(self, artifact):
-        if artifact.name in self.overrides:
-            return self.overrides[artifact.name]
+        if artifact.shards:
+            raise StageError(f"{artifact.name} is a set of shards, not a file — ask for paths()")
+        override = self.overrides.get(artifact.name)
+        if isinstance(override, (list, tuple)):
+            raise StageError(f"{artifact.name} was pointed at {len(override)} paths and names one file")
+        if override is not None:
+            return override
         return os.path.join(self.out_dir, artifact.filename.format(version=self.dataset_version))
+
+    def paths(self, artifact):
+        """Every file a shard set names, sorted.
+
+        Resolved by the declared glob rather than by a list an operator types, so the set cannot be short
+        by one — the failure that took eleven titles out of a derived blob for a day. An override may
+        name the members outright, which is how a pass written under another run's name is pointed at.
+        """
+        override = self.overrides.get(artifact.name)
+        if override is not None:
+            return tuple(override) if isinstance(override, (list, tuple)) else (override,)
+        pattern = os.path.join(self.out_dir, artifact.filename.format(version=self.dataset_version))
+        return tuple(sorted(globbing.glob(pattern)))
 
     def require(self, artifact):
         """The input's path, or a refusal that names what builds it.
@@ -99,7 +165,31 @@ class Context:
             return path
         if not artifact.required:
             return None
-        raise StageError(f"{artifact.name}: {path} is missing. Build it with: {artifact.how}")
+        raise StageError(f"{artifact.name}: {path} is missing. Build it with: {how_to_build(artifact)}")
+
+    def require_all(self, artifact):
+        """Every member of a shard set, or a refusal naming what writes them."""
+        found = self.paths(artifact)
+        if found:
+            return found
+        pattern = artifact.filename.format(version=self.dataset_version)
+        raise StageError(f"{artifact.name}: nothing in {self.out_dir} matches {pattern}. "
+                         f"Build it with: {how_to_build(artifact)}")
+
+
+def how_to_build(artifact):
+    """The command that rebuilds this artifact, as the pipeline's order answers it.
+
+    Imported at call time rather than at module scope: `pipeline/__init__.py` imports this module, so the
+    loop only closes while a stage is running, by which point every stage is loaded. The lookup matters
+    because an artifact a stage produces carries no `how` of its own — the owning stage does.
+
+    An artifact the pipeline does not name falls back to its own `how`, so a stage run against a fixture
+    artifact still refuses with something useful rather than with a KeyError from the message-building.
+    """
+    from . import producers
+    registered = producers().get(artifact.name)
+    return registered[1] if registered else artifact.how
 
 
 def load(name):
@@ -115,15 +205,15 @@ def validate(module, name):
     The list in `pipeline/__init__.py` is what a reader is promised describes the pipeline. A name in it
     pointing at a module with no contract makes the list a lie in the one direction nothing else checks.
     """
-    for attribute in ("NAME", "INPUTS", "OUTPUTS", "run"):
+    for attribute in ("NAME", "PRODUCER", "HOW", "INPUTS", "OUTPUTS", "run"):
         if not hasattr(module, attribute):
             raise StageError(f"stage {name}: {module.__name__} declares no {attribute}")
     if module.NAME != name:
         raise StageError(f"stage {name}: {module.__name__} calls itself {module.NAME!r}")
     for field in ("INPUTS", "OUTPUTS"):
-        for artifact in getattr(module, field):
-            if not isinstance(artifact, Artifact):
-                raise StageError(f"stage {name}: {field} holds {artifact!r}, which is not an Artifact")
+        for entry in getattr(module, field):
+            if not isinstance(entry, (Artifact, Binding)):
+                raise StageError(f"stage {name}: {field} holds {entry!r}, which is not an Artifact")
     if not module.OUTPUTS:
         raise StageError(f"stage {name}: declares no OUTPUTS, so nothing downstream can name what it made")
     if not callable(module.run):
@@ -131,18 +221,42 @@ def validate(module, name):
     return module
 
 
-def registry(artifacts):
-    """`{name: (producer, how, dedicated)}` for a run of artifacts — the derived producer registry.
+def registry(modules):
+    """`{name: (producer, how, dedicated)}` for a run of stages — the producer registry, from the ORDER.
 
-    A name declared twice with two different producers is refused rather than resolved. Two spellings of
-    one artifact is how a registry drifts, and picking one silently is how the drift survives.
+    An artifact a stage OUTPUTS is owned by that stage: the rule is the script the stage runs, declared
+    once beside the code that runs it, so the registry cannot name a producer the run does not use. An
+    artifact only READ comes from a stage that is not ported yet and answers for itself, until that stage
+    lands and the ownership moves with it.
+
+    Two stages claiming one artifact is refused rather than resolved, and so is an artifact that both
+    names a producer and is produced here: a second answer is how a registry starts disagreeing with
+    itself, and picking one silently is how the disagreement survives.
     """
-    out = {}
-    for artifact in artifacts:
-        seen = out.get(artifact.name)
-        if seen is not None and seen != artifact.registration():
-            raise StageError(
-                f"artifact {artifact.name} is declared twice with different producers: {seen} and "
-                f"{artifact.registration()}. Declare it once and let both stages reference it.")
-        out[artifact.name] = artifact.registration()
+    out, owner = {}, {}
+    for module in modules:
+        for entry in module.OUTPUTS:
+            artifact = bind(entry).artifact
+            if artifact.producer:
+                raise StageError(
+                    f"artifact {artifact.name} names its own producer ({artifact.producer}) and is also "
+                    f"written by stage {module.NAME}. Clear the entry in pipeline/artifacts.py: the "
+                    f"stage that writes it is the answer.")
+            if artifact.name in owner:
+                raise StageError(f"artifact {artifact.name} is written by two stages: {owner[artifact.name]} "
+                                 f"and {module.NAME}")
+            owner[artifact.name] = module.NAME
+            out[artifact.name] = (module.PRODUCER, module.HOW, artifact.dedicated)
+
+    for module in modules:
+        for entry in module.INPUTS:
+            artifact = bind(entry).artifact
+            if artifact.name in out:
+                continue
+            if not artifact.producer:
+                raise StageError(
+                    f"artifact {artifact.name} is read by stage {module.NAME}, no stage writes it, and it "
+                    f"names no producer. Nothing would rebuild it when its own inputs change — which is "
+                    f"how facets.bin fell 999 titles behind.")
+            out[artifact.name] = (artifact.producer, artifact.how, artifact.dedicated)
     return out

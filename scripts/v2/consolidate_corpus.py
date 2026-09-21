@@ -9,8 +9,12 @@
       --facts out-repass/facts-5b1c3213b6a1.json \
       --labels out-repass/labels-t02.json \
       --premise-labels out-repass/labels-premise.json \
-      --expect 47529 \
+      --expect 47618 \
       --out out-repass/corpus-<version>.jsonl
+
+`./den stage corpus --out-dir out-repass --dataset-version <version> --expect 47618` runs the same join
+with the same arguments, built from `pipeline/corpus.py`'s declaration rather than retyped — the shard
+paths come from the declared glob, so the set cannot be short by one.
 
 ## Why this exists
 
@@ -109,7 +113,15 @@ def by_key(path, label):
     return out
 
 
-def main():
+#: The inputs this join reads, in the order the parser below declares them. `pipeline/corpus.py` builds
+#: the command line out of its own declaration and `pipeline/corpus_test.py` holds the two lists
+#: together, so an input can only be added or dropped in one place without something going red.
+INPUT_ARGS = ("combined", "delta", "facts", "labels", "premise_labels")
+
+
+def build_parser():
+    """The argument list, so a test can hold it against `INPUT_ARGS` and run a built command line
+    through the parser that will receive it rather than against a copy of it."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--combined", required=True, action="append", help="a shard of the corpus pass")
     ap.add_argument("--delta", required=True, action="append", help="a shard of the delta pass")
@@ -118,7 +130,11 @@ def main():
     ap.add_argument("--premise-labels")
     ap.add_argument("--expect", type=int, default=None, help="required title count")
     ap.add_argument("--out", required=True, help="written gzipped when it ends .gz")
-    args = ap.parse_args()
+    return ap
+
+
+def main():
+    args = build_parser().parse_args()
 
     print("reading facts …", file=sys.stderr)
     with open(args.facts, encoding="utf-8") as fh:

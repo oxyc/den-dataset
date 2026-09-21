@@ -18,9 +18,14 @@ import subprocess
 import sys
 
 from . import artifacts
-from .contract import REPO, StageError
+from .contract import REPO, StageError, bind
 
 NAME = "store"
+
+#: The rule this stage runs, repo-relative — the one spelling. `registry()` registers the store against
+#: it, so the producer the guard names is the file the stage executes.
+PRODUCER = "scripts/v2/build_store.py"
+HOW = "scripts/v2/build_store.py --stamp-meta"
 
 #: In the writer's own argument order, which `store_test.py` holds against `build_store.INPUT_ARGS`.
 INPUTS = (
@@ -35,7 +40,7 @@ INPUTS = (
 
 OUTPUTS = (artifacts.STORE,)
 
-WRITER = os.path.join(REPO, "scripts", "v2", "build_store.py")
+WRITER = os.path.join(REPO, PRODUCER)
 
 
 def argv(ctx):
@@ -45,10 +50,10 @@ def argv(ctx):
     one that is absent stops here, naming its producer — see `Context.require`.
     """
     command = [sys.executable, WRITER]
-    for artifact in INPUTS:
-        path = ctx.require(artifact)
+    for entry in (bind(e) for e in INPUTS):
+        path = ctx.require(entry.artifact)
         if path is not None:
-            command += [artifact.flag(), path]
+            command += [entry.flag(), path]
     # `--out` rather than `--store`: the writer names its output by role, not by artifact.
     command += ["--dataset-version", ctx.dataset_version, "--out", ctx.path(artifacts.STORE)]
     # Without this the store is written and no manifest names it, so `publish-dataset.sh` refuses it as

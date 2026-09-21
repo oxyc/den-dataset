@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Every file the pipeline reads or writes, declared once.
 
-One entry per artifact, naming the file and what builds it. A stage references the entries it reads and
-writes; nothing re-spells a path or a producer. `scripts/check-producers.py` reads its registry straight
-off these, so an artifact that is here and owned by nobody cannot exist — the entry IS the ownership.
+One entry per artifact, naming the file. A stage references the entries it reads and writes; nothing
+re-spells a path. `scripts/check-producers.py` reads its registry off the stages that name these, so an
+artifact reached by nobody cannot exist — being declared IS being owned.
 
-Producers outside `pipeline/` are the stages not ported yet. When a stage lands, the entry stays where it
-is and its `producer` moves to that stage's own module; the entry is the seam, so nothing else has to
-change at the same time. `artifacts_test.py` refuses an entry no stage names, which is the same attrition
-rule the modules are held to: a declaration nothing reaches is deleted, not kept for later.
+**An entry names a producer only while nothing here builds it.** Once a stage writes it, that stage is
+the answer and the fields are empty: `pipeline/corpus.py` runs the rule it is registered as, so the
+registry cannot name a script the run does not use. Entries that still carry a producer are the seam —
+the stages not ported yet (oxyc/den-dataset#27) — and each one empties when its stage lands.
+
+`artifacts_test.py` refuses an entry no stage names, which is the same attrition rule the modules are
+held to: a declaration nothing reaches is deleted, not kept for later.
 """
 from .contract import Artifact
 
@@ -16,19 +19,37 @@ from .contract import Artifact
 #: for reasons that have nothing to do with any one artifact — which is how a guard gets ignored to death.
 BACKFILL = "Sources/taxonomy-backfill/main.swift"
 
+#: The classify pass, in shards. Three of them today, named by the run that wrote them rather than by the
+#: dataset version — the pass owns that naming, and this is a glob so the set is whatever the pass left
+#: behind. Reading one shard of three is what took eleven titles out of a derived blob for a day; a stage
+#: that only knows the set cannot repeat it. Point `--set combined=…` at another run's shards.
+COMBINED = Artifact(
+    name="combined",
+    filename="combined-v1-r2*.jsonl",
+    producer="scripts/v2/run_combined.py",
+    how="scripts/v2/run_combined.py",
+    shards=True,
+)
+
+#: The second pass — the questions `combined-v1-r2` did not ask.
+DELTA = Artifact(
+    name="delta",
+    filename="delta-v1*.jsonl",
+    producer="scripts/v2/run_delta.py",
+    how="scripts/v2/run_delta.py",
+    shards=True,
+)
+
 CORPUS = Artifact(
     name="corpus",
     filename="corpus-{version}.jsonl.gz",
-    producer="scripts/v2/consolidate_corpus.py",
-    how="scripts/v2/consolidate_corpus.py",
 )
 
-#: The entity table, released beside the corpus under the same version and by the same producer.
+#: The entity table, written by the same join and unreadable apart from the corpus: the Q-ids in every
+#: row name entities that live here, once, rather than repeated 47,529 times.
 ENTITIES = Artifact(
     name="entities",
     filename="corpus-{version}-entities.json.gz",
-    producer="scripts/v2/consolidate_corpus.py",
-    how="scripts/v2/consolidate_corpus.py",
 )
 
 FACTS = Artifact(
@@ -82,9 +103,8 @@ PREMISE_LABELS = Artifact(
 STORE = Artifact(
     name="store",
     filename="den-{version}.store",
-    producer="scripts/v2/build_store.py",
-    how="scripts/v2/build_store.py --stamp-meta",
     manifest_key="storeFile",
 )
 
-CATALOGUE = (CORPUS, ENTITIES, FACTS, VECTORS, VECTOR_LABELS, PREMISE_VECTORS, PREMISE_LABELS, STORE)
+CATALOGUE = (COMBINED, DELTA, CORPUS, ENTITIES, FACTS, VECTORS, VECTOR_LABELS, PREMISE_VECTORS,
+             PREMISE_LABELS, STORE)

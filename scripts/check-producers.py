@@ -53,15 +53,19 @@ import pipeline  # noqa: E402  — the stage declarations this file's registries
 # copy, and a copy drifts. `STORE_INPUTS` listed `metadata` after the store stopped reading it, then
 # `enriched` after that stopped too — twice in one day, each caught by a test rather than by the guard.
 #
-# So the entries below are read off `pipeline/artifacts.py`, where each artifact is declared once, beside
-# the stage that reads or writes it. The declaration is not descriptive: `pipeline/store.py` builds the
-# writer's command line out of it. An entry that has drifted from what actually runs therefore fails at an
-# argument parser, not here, and there is no second list left to forget.
+# So the entries below are read off the pipeline's own ORDER. An artifact a stage writes is owned by that
+# stage, which names the rule it runs once, beside the code that runs it — so `corpus`'s producer here is
+# the script `pipeline/corpus.py` actually executes, not a field that could name a different one. An
+# artifact only read comes from a stage that is not ported yet and answers for itself in
+# `pipeline/artifacts.py`, until that stage lands. Either way the declaration is not descriptive:
+# `pipeline/store.py` and `pipeline/corpus.py` build their command lines out of it, so a declaration that
+# has drifted from what runs fails at an argument parser, not here, and there is no second list to forget.
 #
 # The third field gates the staleness warning only. `main.swift` holds the whole tool, so it is edited for
 # reasons that have nothing to do with any one blob — warning on it would fire constantly and teach everyone
 # to ignore the check, which is how a guard dies.
 DECLARED = {a.name: a for a in pipeline.declared()}
+REGISTRY = pipeline.producers()
 
 # manifest key -> (producer, how to run it, is the producer DEDICATED to this artifact?).
 #
@@ -72,7 +76,7 @@ DECLARED = {a.name: a for a in pipeline.declared()}
 PRODUCERS = {
     "metadataFile": ("Sources/taxonomy-backfill/main.swift", "taxonomy-backfill metadata", False),
     "facetsFile": ("scripts/build-facets-bin.py", "scripts/build-facets-bin.py", True),
-    **{a.manifest_key: a.registration() for a in DECLARED.values() if a.manifest_key},
+    **{a.manifest_key: REGISTRY[a.name] for a in DECLARED.values() if a.manifest_key},
 }
 
 # `factsSlimFile`, `plotFacetsFile` and `railFacetsFile` were registered here until the store carried what
@@ -113,7 +117,7 @@ DERIVED_SUFFIXES = ("GzFile",)
 #
 # (glob, producer, how to run it)
 UNMANIFESTED = tuple(
-    (DECLARED[name].glob(), DECLARED[name].producer, DECLARED[name].how)
+    (DECLARED[name].glob(), REGISTRY[name][0], REGISTRY[name][1])
     for name in ("corpus", "entities")
 )
 
@@ -136,6 +140,10 @@ UNMANIFESTED = tuple(
 # the writer reads, by construction rather than by remembering — that was `metadata` and `enriched`,
 # registered as store inputs after the writer had stopped taking them.
 #
+# Keyed by the WRITER's argument name, because that is what `--stamp-meta` records; the registry is keyed
+# by the artifact's pipeline-wide name. The two are the same word for every store input and are not
+# required to be — `labels-t02.json` is `--vector-labels` here and `--labels` to the corpus join.
+#
 # What is asked of each recorded input, in `check_store_inputs` below:
 #
 #   * its BYTES, against the record — a store built from an input that has since changed is not built
@@ -143,7 +151,8 @@ UNMANIFESTED = tuple(
 #   * its PRODUCER, against the RECORDED mtime — question 2 above, asked one level down. Recorded rather
 #     than read off the file, so it is still answerable in a publish dir holding only the store and the
 #     manifest. A warning, for the same reason question 2 is.
-STORE_INPUTS = {a.name: a.registration() for a in pipeline.stage("store").INPUTS}
+STORE_INPUTS = {b.arg: REGISTRY[b.name]
+                for b in (pipeline.bind(e) for e in pipeline.stage("store").INPUTS)}
 
 _build_store = None
 
