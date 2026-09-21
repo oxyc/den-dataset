@@ -71,7 +71,9 @@ PY
 # `labels-*.json` and `vectors-*.bin` already match the cc0 experimental index (labels-cc0.json,
 # vectors-cc0.bin). That is deliberate: its vectors align to ITS OWN label order, not the shipped one, so the
 # two must travel together or every title pairs with a stranger's vector.
-blobs=("$DIR"/facets*.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json "$DIR"/facts-*.json "$DIR"/facts-*.json.gz "$DIR"/plot-facets-*.json "$DIR"/plot-facets-*.json.gz "$DIR"/rail-facets-*.json "$DIR"/rail-facets-*.json.gz)
+# `den-*.store` — the one artifact den-atlas actually serves from (den-spec wire/store-v1). It has NO gz
+# twin and must never get one: atlas mmaps it, and a compressed file cannot be mapped.
+blobs=("$DIR"/facets*.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json "$DIR"/facts-*.json "$DIR"/facts-*.json.gz "$DIR"/plot-facets-*.json "$DIR"/plot-facets-*.json.gz "$DIR"/rail-facets-*.json "$DIR"/rail-facets-*.json.gz "$DIR"/den-*.store)
 [ ${#blobs[@]} -ge 3 ] || { echo "error: expected labels/vectors/gz/metadata in $DIR, found: ${blobs[*]:-none}" >&2; exit 1; }
 
 # What actually publishes: the files the manifest names, plus whatever else the globs found that it does
@@ -188,10 +190,12 @@ fi
 if [ "$have_published" -eq 1 ]; then
   shrunk="$(python3 "$(dirname "$0")/manifest-counts.py" --compare "$published_meta" "$meta" "$DIR")"
   if [ -n "$shrunk" ]; then
-    echo "error: a published blob would LOSE records:" >&2
+    echo "error: a published blob would lose records, or fall behind the corpus:" >&2
     echo "$shrunk" | sed 's/^/       /' >&2
-    echo "       A file can stay declared and still lose rows; this is the check for that." >&2
-    echo "       If the shrink is deliberate, set DEN_ALLOW_DROPPING_BLOBS=1." >&2
+    echo "       A file can stay declared and still lose rows — and it can keep every row it has while" >&2
+    echo "       the corpus grows past it, which is how facets.bin fell 999 titles behind. Both are" >&2
+    echo "       checked here; a 'coverage' line is the second kind." >&2
+    echo "       If it is deliberate, set DEN_ALLOW_DROPPING_BLOBS=1." >&2
     [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
   fi
 fi
@@ -305,23 +309,24 @@ while read -r name _sha; do
   upload_one "$DIR/$name" || exit 1
 done < "$manifest_files"
 
-# Anything else the globs found that the manifest does not name. Uploaded, but never verified, because
-# nothing declares a hash for them.
+# Anything the globs found that the manifest does not name is SKIPPED, not uploaded.
 #
-# Sidecars the manifest does not name are SKIPPED. `metadata` writes a new ~4.6 MB
-# metadata-<datasetVersion>.json per publish and nothing deletes the old one, so a long-lived out-dir
-# accumulates them and every run re-clobbered all of them. This removes the repeated UPLOAD cost only —
-# assets already on the release stay there, so the release itself still grows one per datasetVersion.
+# The manifest is the contract. A file it does not name has no declared hash, no record count, no producer
+# and no consumer: none of the guards above can see it, and nothing fetches it. Uploading it anyway grew
+# `data-latest` to 458 MB, of which 170 MB was a previous datasetVersion's facts/labels/metadata plus build
+# intermediates (facts-merged, facts-fields, facts-entities, facts-unversioned, labels-t02.pre-classify,
+# labels-t02.stamped). They were re-clobbered on every publish for as long as they sat in the out-dir.
+#
+# This was already the rule for metadata-*.json alone, for exactly this reason; it is now the rule for
+# everything. An artifact worth publishing is worth declaring — add it to the manifest and give it a
+# producer, and the guards will cover it.
+#
+# Assets already on the release are NOT removed by this (a publish only ever adds or clobbers). Clearing
+# the ones that predate this rule is a one-off, done by hand.
 for f in "${blobs[@]}"; do
   base="$(basename "$f")"
   grep -q "^$base " "$manifest_files" && continue
-  case "$base" in
-    metadata-*.json)
-      echo "  skipping $base (the manifest does not name it)"
-      continue ;;
-  esac
-  echo "→ $base (not named by the manifest)"
-  upload_one "$f" || exit 1
+  echo "  skipping $base (the manifest does not name it)"
 done
 
 # 4) VERIFY every file the meta names actually landed on the release, before publishing the meta.

@@ -26,8 +26,15 @@ it is validated against a real scrape rather than reasoned about.
 import argparse
 import json
 
-# WikipediaSource.strippedGenre's list, in its order.
-MEDIA = ["film", "movie", "television series", "tv series", "series", "anime"]
+# WikipediaSource.strippedGenre's list, in its order — LONGEST FIRST, so "television series" is taken
+# whole before "series" can bite into it.
+#
+# This is a second implementation of a rule that lives in Swift, and it drifted: it kept the original
+# six words for as long as the Swift side had eight, so the two disagreed on `reality television`,
+# `crime fiction` and 36 other genre labels while this file's docstring claimed it mirrored it exactly.
+# Change one, change both — or better, delete this one and read the Swift side's output.
+MEDIA = ["television program", "television series", "anime and manga", "tv series",
+         "television", "series", "movie", "anime", "film"]
 
 
 def stripped_genre(label):
@@ -40,6 +47,12 @@ def stripped_genre(label):
             if s.endswith(" " + word):
                 s = s[: -(len(word) + 1)].strip()
                 changed = True
+        # `fiction` only when something survives it, and never off a genre that ENDS in "science
+        # fiction" — "hard science fiction" is a real referenced genre and "hard science" is not.
+        if not changed and s.endswith(" fiction") and not s.endswith("science fiction") \
+                and len(s) > len(" fiction") + 1:
+            s = s[: -len(" fiction")].strip()
+            changed = True
     return "" if s in MEDIA else s
 
 

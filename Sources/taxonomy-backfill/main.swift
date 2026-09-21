@@ -756,10 +756,20 @@ enum Commands {
         // Resolve every Q-id that actually appears, once, into the shared `entities` map. Names come from the
         // label service with "en,mul" — Wikidata has moved proper names to `mul`, and asking for "en" alone
         // returns the bare Q-id, which is how Christopher Nolan went missing from the doc facts.
+        // BOTH shapes. A spec that is `single: true` collapses to `.string(qid)`, never `.list`, so a
+        // harvest that only walked lists never saw it: `franchise` is the one entity spec declared that
+        // way, and all 3,019 of its Q-ids went unlabelled for as long as this loop existed. The 68 that
+        // did resolve only did so because they happened to appear in some other field's list. Downstream,
+        // an unlabelled entity is silently dropped, so the column read as "almost no title has a
+        // franchise" rather than as a bug.
         var qids = Set<String>()
         for row in fields.values {
             for (_, value) in row {
-                if case .list(let items) = value { for i in items where i.hasPrefix("Q") { qids.insert(i) } }
+                switch value {
+                case .list(let items): for i in items where i.hasPrefix("Q") { qids.insert(i) }
+                case .string(let s) where s.hasPrefix("Q"): qids.insert(s)
+                default: break
+                }
             }
         }
         // Resolve ONLY names we do not already have, and persist them beside the fields. This pass ran over

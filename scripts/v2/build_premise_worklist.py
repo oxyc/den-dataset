@@ -12,9 +12,12 @@ sent and *what* they are shown, because both decide the bill and neither is reco
 
 Not the raw coverage gap. The Jev pass already judged every article, so the gap is filtered by what it found:
 
-- a title that already has tags is skipped — `data/premise-tags-v1.json` **and** `out-premise-999/tags.json`,
-  which is gitignored and holds 999 results that exist nowhere else. Missing it would regenerate work
-  already paid for (den-dataset#13).
+- a title that already has tags is skipped — BOTH committed tag files, `data/premise-tags-v1.json` and
+  `data/premise-tags-v2.json`, plus `out-premise-999/tags.json` when that gitignored directory happens to
+  be present. It used to be v1 plus that directory, required, on the belief that its 999 results existed
+  nowhere else; they are all in v2 (verified, 0 missing), so the hard exit is gone. Reading v2 as well is
+  not a no-op: it skips 5,999 more titles than v1 ∪ the extras did, which is correct — v2 is the complete
+  run — but it is a real change to the worklist, not just a portability fix (den-dataset#13).
 - `validity` must be `correct-screen-work`. A title grounded on the source novel would otherwise get premise
   tags describing the book — which is how six tmdbIds came to share Wuthering Heights (#16).
 - `narrative_applicability` must not be a non-narrative program. A talk or game show has no premise, and
@@ -44,16 +47,35 @@ import sys
 ROLE_KEEP = ("story-premise", "theme-subject")
 
 
+def keys_of(doc):
+    """The `mediaType:tmdbId` keys of a tags file, in either shape it is written in."""
+    if isinstance(doc, dict):
+        return set(doc.get("tags", doc))
+    return {f"{r['mediaType']}:{r['tmdbId']}" for r in doc}
+
+
 def load_have(root):
-    """Every title that already has premise tags, from both sources."""
-    have = set(json.load(open(os.path.join(root, "data/premise-tags-v1.json"), encoding="utf-8"))["tags"])
+    """Every title that already has premise tags.
+
+    Both COMMITTED tag files, plus `out-premise-999/tags.json` when it happens to be there.
+
+    That last one used to be required, with a hard exit calling it 999 results that exist nowhere else —
+    so a fresh checkout of this repo could not run this script at all. It is not true any more and may
+    never have been: all 999 of its keys are present in `data/premise-tags-v2.json`, which is committed.
+    Refusing to run over a file that is gitignored, unreproducible and redundant is three problems, and
+    the redundancy is the one that makes it safe to drop.
+    """
+    have = set()
+    for name in ("data/premise-tags-v1.json", "data/premise-tags-v2.json"):
+        path = os.path.join(root, name)
+        if not os.path.exists(path):
+            sys.exit(f"{name} is missing — it is committed, so this is a broken checkout, not a stale one")
+        with open(path, encoding="utf-8") as fh:
+            have |= keys_of(json.load(fh))
     extra_path = os.path.join(root, "out-premise-999/tags.json")
     if os.path.exists(extra_path):
-        extra = json.load(open(extra_path, encoding="utf-8"))
-        have |= set(extra) if isinstance(extra, dict) else {f"{r['mediaType']}:{r['tmdbId']}" for r in extra}
-    else:
-        sys.exit("out-premise-999/tags.json is missing — it is gitignored and holds 999 results that exist "
-                 "nowhere else; refusing to build a worklist that would regenerate them")
+        with open(extra_path, encoding="utf-8") as fh:
+            have |= keys_of(json.load(fh))
     return have
 
 
