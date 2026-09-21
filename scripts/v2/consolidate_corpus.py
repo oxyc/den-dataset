@@ -197,13 +197,18 @@ def main():
         sys.exit(f"{len(facts) - with_facts} facts records did not reach the corpus")
 
     # A join that silently misses is how `labels` was null on all 47,529 rows: the lookup returned a dict
-    # for every key and none of them matched. A join producing nothing is always a bug; assert a floor
-    # rather than trusting the shape.
-    for name, hits, source in (("labels", with_labels, args.labels),
-                               ("premiseLabels", with_premise, args.premise_labels)):
-        if source and hits < written * 0.5:
-            sys.exit(f"{name}: only {hits} of {written} rows matched {source} — the join is wrong, "
-                     f"not the data")
+    # for every key and none of them matched.
+    #
+    # Checked the way the facts are checked above — every record in the artifact must reach the corpus —
+    # rather than against a fraction of the rows written. A floor of half the corpus cannot see the case
+    # worth seeing: the premise pass covers 44,531 of 47,618 rows, so it could lose twenty thousand
+    # records and still clear `written * 0.5` with room to spare. The artifact's own count is the only
+    # number that knows how many there were meant to be.
+    for name, hits, source, artifact in (("labels", with_labels, args.labels, labels),
+                                         ("premiseLabels", with_premise, args.premise_labels, premise)):
+        if source and hits != len(artifact):
+            sys.exit(f"{name}: {len(artifact) - hits} of {len(artifact)} records in {source} did not "
+                     f"reach the corpus — the join is wrong, not the data")
 
     # The entity names the Q-ids refer to, beside the corpus rather than repeated 47,529 times in it.
     ents_path = out_path.replace(".jsonl", "-entities.json").replace(".gz", "") + (

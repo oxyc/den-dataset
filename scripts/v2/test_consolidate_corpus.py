@@ -145,8 +145,11 @@ class Joins(unittest.TestCase):
             self.assertEqual(sorted(cc.by_key(path, "labels")), ["movie:1", "tv:9"])
 
     def test_a_labels_join_that_mostly_misses_is_fatal(self):
-        """A join producing almost nothing is a bug in the join, not a corpus that lacks the data —
-        which is why the floor is asserted rather than the shape trusted."""
+        """A join producing almost nothing is a bug in the join, not a corpus that lacks the data.
+
+        The artifact names ten titles and the corpus holds ten; nine of its keys match nothing, so nine
+        records never arrive. Measured against the ARTIFACT, which is the only thing that knows how many
+        there were meant to be."""
         with tempfile.TemporaryDirectory() as dir:
             c, d = os.path.join(dir, "c.jsonl"), os.path.join(dir, "d.jsonl")
             f, l = os.path.join(dir, "f.json"), os.path.join(dir, "l.json")
@@ -154,10 +157,29 @@ class Joins(unittest.TestCase):
             write(c, [combined(i) for i in range(1, 11)])
             write(d, [])
             facts_file(f, [f"movie:{i}" for i in range(1, 11)])
-            labels_file(l, ["movie:1"])   # 1 of 10 — well under the floor
+            # Ten records, one of which matches a corpus key — a join that missed, not a small artifact.
+            labels_file(l, ["movie:1"] + [f"movie:{i}" for i in range(900, 909)])
             code, err = run(dir, [c], [d], f, l, out)
             self.assertEqual(code, 1)
-            self.assertIn("the join is wrong", err)
+            self.assertIn("did not reach the corpus", err)
+
+    def test_a_join_losing_records_while_clearing_the_old_half_the_corpus_floor_is_fatal(self):
+        """The case `hits < written * 0.5` could not see.
+
+        Six of the artifact's eleven records reach a ten-row corpus. Six clears half of ten, so the old
+        floor was satisfied while five records were lost in silence. In production the premise pass covers
+        44,531 of 47,618 rows and could shed twenty thousand records the same way."""
+        with tempfile.TemporaryDirectory() as dir:
+            c, d = os.path.join(dir, "c.jsonl"), os.path.join(dir, "d.jsonl")
+            f, l = os.path.join(dir, "f.json"), os.path.join(dir, "l.json")
+            out = os.path.join(dir, "corpus.jsonl")
+            write(c, [combined(i) for i in range(1, 11)])
+            write(d, [])
+            facts_file(f, [f"movie:{i}" for i in range(1, 11)])
+            labels_file(l, [f"movie:{i}" for i in range(1, 7)] + [f"movie:{i}" for i in range(900, 905)])
+            code, err = run(dir, [c], [d], f, l, out)
+            self.assertEqual(code, 1, f"expected a refusal, got {code}: {err}")
+            self.assertIn("5 of 11 records", err)
 
 
 class Shards(unittest.TestCase):
