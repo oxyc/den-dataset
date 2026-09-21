@@ -632,7 +632,24 @@ def main():
         genres.append(ordered)
         countries.append([strings.id(c) for c in facts.get("countries") or []])
         languages.append([strings.id(x) for x in facts.get("languages") or []])
-        aliases.append([strings.id(a) for a in (t.get("aliases") or []) if a])
+        # `en` and `orig` FIRST, then the aliases — the same three sources, in the same order, that the JSON
+        # reader chained (`den-atlas/src/facts.rs`: `t.en.chain(t.orig).chain(t.aliases)`).
+        #
+        # This wrote `aliases` alone until 2026-09-21, and it is a DIFFERENT field:
+        # `check-alias-collisions.py` treats `own_names = [orig, en]` as the set aliases are vetted against,
+        # so the two never overlap by construction. The names dropped were therefore exactly a title's own.
+        # atlas builds its display-title search index from these, so every title whose original name differs
+        # from its TMDB one stopped being findable by that name — "Gisaengchung" for Parasite. The
+        # record-by-record comparison could not see it: the names live in their own map, not on a record.
+        row_titles, taken = [], set()
+        for name in [t.get("en"), t.get("orig"), *(t.get("aliases") or [])]:
+            if not isinstance(name, str) or not name.strip():
+                continue
+            ident = strings.id(name)
+            if ident not in taken:
+                taken.add(ident)
+                row_titles.append(ident)
+        aliases.append(row_titles)
 
         raw_imdb = facts.get("imdbId")
         imdb.append(strings.id(raw_imdb[0] if isinstance(raw_imdb, list) and raw_imdb else raw_imdb))
