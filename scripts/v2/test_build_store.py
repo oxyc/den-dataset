@@ -91,5 +91,40 @@ class FixtureRoundTrip(unittest.TestCase):
         self.assertEqual(digests[0], digests[1], "two runs of the writer disagree byte-for-byte")
 
 
+class StampsTheManifest(unittest.TestCase):
+    """`--stamp-meta`. Without it the store is written and nothing names it: `publish-dataset.sh`
+    announces an unowned blob, `den-atlas` never sees a `storeFile`, and the rail falls back."""
+
+    def test_the_store_declares_itself(self):
+        import hashlib
+        import json
+
+        generator = spec_or_fail("tools", "store-fixture.py")
+        with tempfile.TemporaryDirectory() as out:
+            meta = os.path.join(out, "dataset.meta.json")
+            with open(meta, "w") as fh:
+                json.dump({"datasetVersion": "fixture", "labelsFile": "labels.json"}, fh)
+            result = subprocess.run(
+                [sys.executable, generator, "--build-store", BUILD_STORE, "--out-dir", out,
+                 "--", "--stamp-meta", meta],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            with open(meta) as fh:
+                stamped = json.load(fh)
+            with open(os.path.join(out, stamped["storeFile"]), "rb") as fh:
+                blob = fh.read()
+            self.assertEqual(stamped["storeBytes"], len(blob))
+            self.assertEqual(stamped["storeSha256"], hashlib.sha256(blob).hexdigest())
+            self.assertEqual(
+                stamped["labelsFile"], "labels.json", "stamping must not drop the keys already there"
+            )
+            self.assertNotIn(
+                "storeGzFile", stamped, "the store is mmap'd; a compressed twin cannot be mapped"
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

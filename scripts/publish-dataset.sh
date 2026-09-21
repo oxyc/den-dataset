@@ -71,7 +71,9 @@ PY
 # `labels-*.json` and `vectors-*.bin` already match the cc0 experimental index (labels-cc0.json,
 # vectors-cc0.bin). That is deliberate: its vectors align to ITS OWN label order, not the shipped one, so the
 # two must travel together or every title pairs with a stranger's vector.
-blobs=("$DIR"/facets*.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json "$DIR"/facts-*.json "$DIR"/facts-*.json.gz "$DIR"/plot-facets-*.json "$DIR"/plot-facets-*.json.gz "$DIR"/rail-facets-*.json "$DIR"/rail-facets-*.json.gz)
+# `den-*.store` — the one artifact den-atlas actually serves from (den-spec wire/store-v1). It has NO gz
+# twin and must never get one: atlas mmaps it, and a compressed file cannot be mapped.
+blobs=("$DIR"/facets*.bin "$DIR"/labels-*.json "$DIR"/vectors-*.bin "$DIR"/labels-*.json.gz "$DIR"/metadata-*.json "$DIR"/facts-*.json "$DIR"/facts-*.json.gz "$DIR"/plot-facets-*.json "$DIR"/plot-facets-*.json.gz "$DIR"/rail-facets-*.json "$DIR"/rail-facets-*.json.gz "$DIR"/den-*.store)
 [ ${#blobs[@]} -ge 3 ] || { echo "error: expected labels/vectors/gz/metadata in $DIR, found: ${blobs[*]:-none}" >&2; exit 1; }
 
 # What actually publishes: the files the manifest names, plus whatever else the globs found that it does

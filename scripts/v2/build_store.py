@@ -23,6 +23,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import os
 import struct
 import sys
 from datetime import date
@@ -316,6 +317,10 @@ def main():
     ap.add_argument("--premise-labels")
     ap.add_argument("--dataset-version", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--stamp-meta",
+                    help="dataset.meta.json to declare the store in (storeFile/Sha256/Bytes). Without "
+                         "this the store is written and nothing names it, so publish-dataset.sh "
+                         "announces it as an unowned blob and den-atlas never loads it.")
     args = ap.parse_args()
 
     print("reading the corpus …", file=sys.stderr)
@@ -759,8 +764,27 @@ def main():
     with open(args.out, "wb") as fh:
         fh.write(header)
         fh.write(payload)
+
+    # Declare it in the manifest, here, from the bytes just written.
+    #
+    # NOT a field on Swift's `DatasetMeta`: `namingSidecar` there enumerates every field by hand while
+    # `ownedKeys` comes from `CodingKeys`, so a new key with a default compiles, is treated as owned, and
+    # is silently dropped by the next `metadata` run. `ManifestMerge` carries unowned keys forward
+    # instead, which is why `maxBatchId` is stamped from a script too.
+    #
+    # No `storeGzFile`, ever: atlas MMAPS this file and a compressed one cannot be mapped.
+    if args.stamp_meta:
+        blob = open(args.out, "rb").read()
+        meta = read_json(args.stamp_meta)
+        meta["storeFile"] = os.path.basename(args.out)
+        meta["storeSha256"] = hashlib.sha256(blob).hexdigest()
+        meta["storeBytes"] = len(blob)
+        with open(args.stamp_meta, "w") as fh:
+            json.dump(meta, fh, indent=1)
+            fh.write("\n")
+
     print(json.dumps({"out": args.out, "bytes": HEADER_BYTES + len(payload),
-                      "formatVersion": FORMAT_VERSION}, indent=1))
+                      "formatVersion": FORMAT_VERSION, "stamped": bool(args.stamp_meta)}, indent=1))
 
 
 if __name__ == "__main__":
