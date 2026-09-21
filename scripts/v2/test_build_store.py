@@ -250,13 +250,8 @@ class StoreFixture:
              "--facts", dump("facts.json", {"genreMap": {"Q1": {"movie": 18}},
                                             "records": [{"mediaType": t["mediaType"], "tmdbId": t["tmdbId"]}
                                                         for t in titles]}),
-             # The sidecar carries `posterPath` and the store must not: it is a TMDB artwork reference,
-             # and `ThePosterPathIsNotPublished` asserts it gets no further than this input.
-             "--metadata", dump("metadata.json", {"records": [
-                 {"mediaType": "movie", "tmdbId": 1, "title": "Alpha", "posterPath": "/alpha.jpg",
-                  "year": 1999},
-                 {"mediaType": "movie", "tmdbId": 2, "title": "Beta", "posterPath": "/beta.jpg",
-                  "year": 2001}]}),
+             # No `--metadata`: the TMDB sidecar supplied the title, the year and the poster path, and the
+             # writer now takes the first two from the corpus's own `facts` and publishes no third.
              # The plot pass labelled movie:1 only; the premise pass labelled movie:2 only.
              "--vectors", (write_plot_vectors or vectors)(os.path.join(out_dir, "plot.bin"), plot_keys, 7),
              "--vector-labels", dump("plot-labels.json", rows_file(plot_labels)),
@@ -933,12 +928,14 @@ class EverySectionDeclaresWhereItsBytesCameFrom(StoreFixture, unittest.TestCase)
         self.assertIn("is not one of", str(caught.exception))
 
     def test_the_only_vendor_sourced_sections_are_the_ones_118_is_removing(self):
-        """The allowlist, held against the table. `card_title`, `card_year` and `votes` are what #118
-        has left to replace; everything else is Wikidata, Wikipedia, a model's answer over those, our
-        own bookkeeping, or an identifier. When the last of the three goes, this set is empty."""
+        """The allowlist, held against the table. `votes` is all #118 has left to replace; everything
+        else is Wikidata, Wikipedia, a model's answer over those, our own bookkeeping, or an identifier.
+        When it goes, this set is empty and the store carries identifiers only."""
         mod = build_store_module()
         vendor = {name for name, source in mod.PROVENANCE.items() if source in mod.VENDOR_SOURCES}
-        self.assertEqual(vendor, {"card_title", "card_year", "votes"})
+        self.assertEqual(vendor, {"votes"})
+        self.assertEqual(mod.PROVENANCE["card_title"], "wikidata", "the label, not the TMDB title")
+        self.assertEqual(mod.PROVENANCE["card_year"], "wikidata", "the release date, not the TMDB year")
         self.assertEqual(vendor, mod.VENDOR_ALLOWED)
         self.assertNotIn("imdb", vendor, "an id is a join key, not content")
         self.assertNotIn("keys", vendor)
@@ -1055,3 +1052,83 @@ class OnlyATitleIdReachesTheImdbColumn(unittest.TestCase):
                          "a list keeps its first entry, as the writer always has")
         self.assertEqual(mod.title_imdb_id(" tt0111161 "), "tt0111161")
         self.assertIsNone(mod.title_imdb_id([]))
+
+
+class TheCardIsNamedAndDatedFromWikidata(unittest.TestCase):
+    """`card_title` and `card_year` came from the TMDB metadata sidecar; they come from `facts` now.
+
+    Measured against the sidecar over the whole corpus before the swap: the title is exact for 88.86%,
+    the year agrees for 92.56%, and neither residual is a wrong answer — the titles are the other English
+    name a work goes by, and the years differ by one where Wikidata dates the festival premiere.
+    """
+
+    def test_the_english_label_is_preferred_then_the_original_then_an_alias(self):
+        mod = build_store_module()
+        self.assertEqual(mod.display_title({"en": "Heat", "orig": "Heat"}), "Heat")
+        self.assertEqual(mod.display_title({"orig": "Alfa", "aliases": ["Alpha One"]}), "Alfa")
+        self.assertEqual(mod.display_title({"aliases": ["Alpha One"]}), "Alpha One")
+        self.assertIsNone(mod.display_title({}), "no free name is not a name")
+        self.assertIsNone(mod.display_title(None))
+        self.assertIsNone(mod.display_title({"en": "   "}), "whitespace is not a name")
+
+    def test_a_wikipedia_disambiguator_is_stripped_and_a_real_parenthesis_is_not(self):
+        """The vocabulary exists because "strip any trailing (...)" would damage real names — TMDB
+        agrees with Wikidata that these four end the way they do."""
+        mod = build_store_module()
+        for label, want in (
+            ("Nausicaä of the Valley of the Wind (film)", "Nausicaä of the Valley of the Wind"),
+            ("Gamma (TV series)", "Gamma"),
+            ("Batman (serial)", "Batman"),
+            ("Die Feuerzangenbowle (1944 film)", "Die Feuerzangenbowle"),
+            ("Der Hauptmann (2017)", "Der Hauptmann"),
+            ("Live in Texas (Linkin Park album)", "Live in Texas"),
+            ("Tatort (Fernsehserie)", "Tatort"),
+        ):
+            self.assertEqual(mod.display_title({"en": label}), want)
+        for real in ("South Park (Not Suitable for Children)", "To Have (Or Not)", "Frontier(s)",
+                     "Everything You Always Wanted to Know About Sex* (*But Were Afraid to Ask)"):
+            self.assertEqual(mod.display_title({"en": real}), real, "a real name lost its ending")
+
+    def test_the_year_comes_off_the_date_text(self):
+        mod = build_store_module()
+        self.assertEqual(mod.release_year({"date": "1999-12-31", "precision": "day"}), 1999)
+        self.assertEqual(mod.release_year({"date": "2014", "precision": "year"}), 2014,
+                         "a year-precision fact still asserts its year")
+        self.assertEqual(mod.release_year({"date": "-0044-03-15"}), -44, "BCE stays negative")
+        for nothing in (None, {}, {"date": ""}, {"date": "not a date"}, "1999"):
+            self.assertIsNone(mod.release_year(nothing))
+
+
+class TheCardReadsBackFromTheCorpus(StoreFixture, unittest.TestCase):
+    """End to end on a real store, because the helpers above can pass while nothing calls them.
+
+    An earlier attempt to read the card off `facts` left `card_year` at its sentinel on all 47,618 rows
+    and every structural check passed, so this asserts the VALUES rather than the shape.
+    """
+
+    def test_the_name_and_year_come_from_facts_and_nothing_else_supplies_them(self):
+        titles = [
+            dict(self.TITLES[0], facts=dict(
+                self.TITLES[0]["facts"],
+                titles={"en": "Alpha (1999 film)", "orig": "Alfa"},
+                released={"date": "1999-12-31", "precision": "day"})),
+            dict(self.TITLES[1], facts=dict(
+                self.TITLES[1]["facts"], started={"date": "2014", "precision": "year"})),
+        ]
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, titles=titles)
+        names = [store.text(i) for i in store.ints("card_title")]
+        years = store.ints("card_year", "h", 2)
+        self.assertEqual(names, ["Alpha", "Beta"], "the disambiguator is off the card")
+        self.assertEqual(years, [1999, 2014], "a year-precision `started` still dates the card")
+        interned = {store.text(i) for i in range(len(store.str_off) - 1)}
+        self.assertIn("Alpha (1999 film)", interned, "search still matches the full label")
+
+    def test_a_row_with_no_free_name_gets_no_card(self):
+        """Five real rows have an empty `facts.titles`. They lose their card and drop out of browse and
+        search, which is the honest outcome: there is no name we are allowed to publish."""
+        nameless = {"key": "movie:3", "mediaType": "movie", "tmdbId": 3,
+                    "facts": {"titles": {}}, "labels": None, "premiseLabels": None}
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, titles=self.TITLES + [nameless])
+        self.assertEqual([store.text(i) for i in store.ints("card_title")], ["Alpha", "Beta", None])
