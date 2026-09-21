@@ -44,16 +44,35 @@ import sys
 ROLE_KEEP = ("story-premise", "theme-subject")
 
 
+def keys_of(doc):
+    """The `mediaType:tmdbId` keys of a tags file, in either shape it is written in."""
+    if isinstance(doc, dict):
+        return set(doc.get("tags", doc))
+    return {f"{r['mediaType']}:{r['tmdbId']}" for r in doc}
+
+
 def load_have(root):
-    """Every title that already has premise tags, from both sources."""
-    have = set(json.load(open(os.path.join(root, "data/premise-tags-v1.json"), encoding="utf-8"))["tags"])
+    """Every title that already has premise tags.
+
+    Both COMMITTED tag files, plus `out-premise-999/tags.json` when it happens to be there.
+
+    That last one used to be required, with a hard exit calling it 999 results that exist nowhere else —
+    so a fresh checkout of this repo could not run this script at all. It is not true any more and may
+    never have been: all 999 of its keys are present in `data/premise-tags-v2.json`, which is committed.
+    Refusing to run over a file that is gitignored, unreproducible and redundant is three problems, and
+    the redundancy is the one that makes it safe to drop.
+    """
+    have = set()
+    for name in ("data/premise-tags-v1.json", "data/premise-tags-v2.json"):
+        path = os.path.join(root, name)
+        if not os.path.exists(path):
+            sys.exit(f"{name} is missing — it is committed, so this is a broken checkout, not a stale one")
+        with open(path, encoding="utf-8") as fh:
+            have |= keys_of(json.load(fh))
     extra_path = os.path.join(root, "out-premise-999/tags.json")
     if os.path.exists(extra_path):
-        extra = json.load(open(extra_path, encoding="utf-8"))
-        have |= set(extra) if isinstance(extra, dict) else {f"{r['mediaType']}:{r['tmdbId']}" for r in extra}
-    else:
-        sys.exit("out-premise-999/tags.json is missing — it is gitignored and holds 999 results that exist "
-                 "nowhere else; refusing to build a worklist that would regenerate them")
+        with open(extra_path, encoding="utf-8") as fh:
+            have |= keys_of(json.load(fh))
     return have
 
 

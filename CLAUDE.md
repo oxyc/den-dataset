@@ -19,7 +19,7 @@ of enriched plot text, vectors, and LLM run outputs that cost real time and mone
 out-repass/enriched      the re-ground plots — the newest and best grounding
 out-t02/enriched         the older plots the live corpus was built from
 out-premise-v2/          the v2 premise run + its vectors
-out-premise-999/         999 tag strings that exist nowhere else (see #13)
+out-premise-999/         999 tags from the v2 run — now redundant, see below
 ```
 
 Never delete one to save space without asking, and never assume "it's in git".
@@ -30,6 +30,18 @@ The premise index shipped for months while 999 of its tag strings lived only in 
 (#13). A rebuild from a fresh checkout came up short, and the failure looked like a regression to a state
 someone had already fixed. Committed sources now: `data/premise-tags-v2.json` (44,531, complete),
 `data/premise-tags-v1.json` (37,533, kept because `vectors-premise.bin` is aligned to its exact strings).
+
+**`out-premise-999/tags.json` is no longer irreplaceable.** All 999 of its keys are present in
+`data/premise-tags-v2.json` — verified by set comparison, 0 missing. `build_premise_worklist.py` used to
+hard-exit without it, calling it results that exist nowhere else, so a fresh checkout could not run the
+script at all. It now reads both committed files and treats that directory as an optional extra.
+
+**`vectors-premise.bin` aligns to its own generation's `labels-premise.json` — not to a tags file.**
+Measured: `out-repass` is 45,599,752 bytes = 44,531 × 1024 + 8, matching premise-tags-v2's count; the last
+published generation (`out-publish`) is 39,456,776 = 38,532 rows, matching neither committed tags file but
+matching its own `labels-premise.json` exactly. So the row order to check a premise vector against is
+always the labels file shipped beside it. Any note claiming it is "aligned to v1" is reading the wrong
+pair.
 
 ## Embed where you serve
 

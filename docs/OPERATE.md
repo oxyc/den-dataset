@@ -95,10 +95,15 @@ already covered twice over — the `Themes:` clause precedes `Plot:` and is neve
 index (DT-H) is the primary "More Like This" signal, having beaten raw plot 12/8 on premise discrimination.
 
 **Re-embed `vectors-premise.bin` in the same pass.** It is bge-m3 too, so the epoch change applies to it
-identically, and the premise tag strings are frozen on disk — zero LLM cost. They are in TWO places:
-`out-t02/premise-tags-wip/` holds 37,314, and the 999 that closed the corpus gap live only in
-`out-premise-999/tags.json`, which is gitignored. Committed `data/premise-tags-v1.json` (37,533 rows) is
-therefore behind the shipped index; a re-embed on a fresh checkout would come up 999 short.
+identically, and the premise tag strings are frozen on disk — zero LLM cost. Embed from committed
+`data/premise-tags-v2.json` (44,531 rows), which is complete: all 999 tags that once lived only in the
+gitignored `out-premise-999/tags.json` are in it, verified by set comparison. This used to say a fresh
+checkout would come up 999 short. It would not, and `build_premise_worklist.py` no longer refuses to run
+without that directory.
+
+**Check the vector against the labels file beside it, not against a tags file.** `vectors-premise.bin` is
+aligned to its generation's `labels-premise.json`: `out-repass` is 44,531 rows, the last published
+generation 38,532. Neither number is `premise-tags-v1.json`'s 37,533.
 
 **Deploy the env with the corpus.** `maxTokens` is part of the embedder identity, so the serving box must
 run den-embed with `MAX_TOKENS=1024` permanently or the manifest and the service will disagree.

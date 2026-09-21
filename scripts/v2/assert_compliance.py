@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
 """Prove, from the batch files on disk, that no TMDB prose reached an LLM.
 
-STALE — reports false violations on the current enriched tree. `allowed` and `denied` (:46-62) are SETS
-filled by iterating every batch, so a key whose `hasWikiPlot` differs between batches lands in BOTH, and the
-test at :126 (`key in denied or key not in allowed`) then flags it. 505 keys disagree that way today, so a
-compliance failure here is currently evidence about batch bookkeeping, not about what reached an LLM.
-
-Fix by resolving each key ONCE before the check, in batch-number order with the last occurrence winning —
-the rule `finalize` and the live readers use (`EnrichedBatches.orderedNames`). Until then, do not read a
-failure from this script as a §1.C breach without checking whether the key is simply duplicated.
-
 The rule: only titles with `hasWikiPlot == true` may be sent to an AI application. The other
 19,255 enriched rows carry TMDB overview prose in the same `overview` field, and sending that
 is barred by TMDb §1.C. Every batch builder draws from the wiki-plot corpus, so the rule holds
@@ -30,10 +21,13 @@ import os
 import random
 import sys
 
-ROOT = '/Users/cindy/Projects/Personal/den-dataset/out-t02'
-V2 = os.path.join(ROOT, 'v2')
+# The enriched tree to prove compliance over. `--out-dir`, else DEN_OUT_DIR, else out-t02 beside the repo.
+# This was one developer's absolute home directory, in the script that is the §1.C compliance proof for a
+# PUBLIC repo — so nobody else could run the proof at all.
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEFAULT_ROOT = os.environ.get('DEN_OUT_DIR') or os.path.join(REPO, 'out-t02')
 
-def default_roots():
+def default_roots(v2):
     """Every `*/in/` directory under v2, discovered rather than listed.
 
     This was a hand-maintained list, and a hand-maintained list of things to check is a
@@ -46,28 +40,45 @@ def default_roots():
     phase now adds it to the gate by construction.
     """
     found = set()
-    for path in glob.glob(os.path.join(V2, '**', 'in'), recursive=True):
+    for path in glob.glob(os.path.join(v2, '**', 'in'), recursive=True):
         if os.path.isdir(path) and glob.glob(os.path.join(path, 'batch-*.json')):
             found.add(path)
     return sorted(found)
 
 
-def allowed_ids():
+def batch_order(name):
+    """Enriched batches in NUMERIC order. `sorted()` on the names puts batch-10 before batch-2."""
+    stem = name[len('batch-'):-len('.json')]
+    return (0, int(stem)) if stem.isdigit() else (1, stem)
+
+
+def allowed_ids(root):
     """Re-derived from the enriched records, not read back from the corpus file — a corpus
-    built with a broken filter would otherwise vouch for itself."""
-    allowed, denied, plots = set(), set(), {}
-    enriched = os.path.join(ROOT, 'enriched')
-    for name in sorted(os.listdir(enriched)):
+    built with a broken filter would otherwise vouch for itself.
+
+    Each key is resolved ONCE, last write winning, in batch-number order — the rule `finalize` and the
+    live readers use (`EnrichedBatches.orderedNames`). This used to fill two SETS while iterating, so a
+    title re-enriched into a later batch with a different `hasWikiPlot` landed in both `allowed` and
+    `denied`, and the check below (`key in denied or key not in allowed`) then reported it as a §1.C
+    violation. 505 keys disagreed that way, which made every failure this script produced evidence about
+    batch bookkeeping rather than about what reached a model — and a compliance check that cries wolf is
+    worse than none, because it teaches people to ignore it.
+    """
+    state, plots = {}, {}
+    enriched = os.path.join(root, 'enriched')
+    for name in sorted(os.listdir(enriched), key=batch_order):
         if not (name.startswith('batch-') and name.endswith('.json')):
             continue
         with open(os.path.join(enriched, name), encoding='utf-8') as fh:
             for rec in json.load(fh):
                 key = f"{rec['mediaType']}:{rec['tmdbId']}"
-                if rec.get('hasWikiPlot') is True:
-                    allowed.add(key)
+                state[key] = rec.get('hasWikiPlot') is True
+                if state[key]:
                     plots[key] = rec.get('overview') or ''
                 else:
-                    denied.add(key)
+                    plots.pop(key, None)
+    allowed = {k for k, ok in state.items() if ok}
+    denied = {k for k, ok in state.items() if not ok}
     return allowed, denied, plots
 
 
@@ -103,12 +114,17 @@ def references(item, truth=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--root', action='append', default=[])
+    ap.add_argument('--out-dir', default=DEFAULT_ROOT,
+                    help='the enriched tree to prove over (default: $DEN_OUT_DIR, else out-t02 in the repo)')
     ap.add_argument('--spot-check', type=int, default=30, help='batch files to verify plot text in')
     args = ap.parse_args()
-    roots = args.root or default_roots()
+    if not os.path.isdir(os.path.join(args.out_dir, 'enriched')):
+        sys.exit(f"{args.out_dir}/enriched does not exist — pass --out-dir or set DEN_OUT_DIR")
+    roots = args.root or default_roots(os.path.join(args.out_dir, 'v2'))
+    print(f'out-dir: {args.out_dir}', flush=True)
     print(f'phase directories discovered: {len(roots)}', flush=True)
 
-    allowed, denied, plots = allowed_ids()
+    allowed, denied, plots = allowed_ids(args.out_dir)
     print(f'enriched: {len(allowed)} hasWikiPlot=true, {len(denied)} false', flush=True)
 
     files = checked = 0
