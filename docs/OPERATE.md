@@ -184,12 +184,15 @@ $BIN metadata --out-dir out
 #     the file is written, no manifest names it, and the publish refuses.
 python3 scripts/v2/build_store.py \
     --corpus out/corpus-<ver>.jsonl.gz --entities out/corpus-<ver>-entities.json.gz \
-    --facts out/facts-<ver>.json --metadata out/metadata-<ver>.json \
+    --facts out/facts-<ver>.json \
     --vectors out/vectors-bge-m3.bin --vector-labels out/labels-t02.json \
     --premise-vectors out/vectors-premise.bin --premise-labels out/labels-premise.json \
     --enriched out/enriched --dataset-version <ver> \
     --out out/den-<ver>.store --stamp-meta out/dataset.meta.json
 #     Without --enriched the `votes` section is all zeros and atlas cannot order a browse row by popularity.
+#     There is no --metadata: the card's title and year come from the corpus's own `facts` (`titles.en`
+#     and `released`), and the poster path is not published at all (oxyc/den#118). metadata-<ver>.json is
+#     still BUILT — other things read it — it is just no longer an input to the store.
 
 # 8. Publish — the moving `data-latest` GitHub release den-atlas fetches. Run it FROM THE REPO ROOT: the
 #    ownership guard resolves producer paths and `git ls-files` against the working directory. It uploads

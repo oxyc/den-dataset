@@ -34,6 +34,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import struct
 import sys
 from datetime import date
@@ -105,8 +106,8 @@ PROVENANCE = {
     # references it. `prose_in_the_dictionary` is what bounds what can arrive here.
     "strings": "ours",
     "str_off": "ours",
-    "card_title": "tmdb",
-    "card_year": "tmdb",
+    "card_title": "wikidata",
+    "card_year": "wikidata",
     "votes": "tmdb",
     "primary_genre": "llm",
     "subgenre_v": "llm", "subgenre_c": "llm", "subgenre_o": "llm",
@@ -170,14 +171,13 @@ PROVENANCE = {
 #: which is the one thing both catalogue licences leave us.
 VENDOR_SOURCES = {"tmdb"}
 
-#: The vendor-sourced sections the store may still carry. Each is a column oxyc/den#118 is replacing —
-#: `card_title` and `card_year` with the Wikidata label and date, `votes` with nothing (the README shows
-#: how to join IMDb's own public ratings dump on the `imdb` column). When the last one goes this set is
-#: empty and the store carries identifiers only.
+#: The vendor-sourced sections the store may still carry. `card_title` and `card_year` have moved to
+#: Wikidata, so `votes` is the last one, and the README shows how to join IMDb's own public ratings dump
+#: on the `imdb` column instead. When it goes this set is empty and the store carries identifiers only.
 #:
 #: Removing a column is two edits — its PROVENANCE entry and its entry here — because an allowlist entry
 #: for a section that is no longer written is fatal too.
-VENDOR_ALLOWED = {"card_title", "card_year", "votes"}
+VENDOR_ALLOWED = {"votes"}
 
 #: The longest string the dictionary may hold, in bytes. Measured on the shipped store: 445,817 strings,
 #: longest 217 (a performer's full name), only 34 over 120 — a Peter Greenaway title at 190 is the next.
@@ -303,7 +303,11 @@ def score_hundredths(value, what, key):
 #: `check-producers.py` maps each entry to the producer that builds it — so adding an input here is what
 #: makes the new input owned and checked. `test_build_store.py` asserts this covers the parser's inputs
 #: and `test_check_producers.py` asserts every one of them has a producer.
-INPUT_ARGS = ("corpus", "entities", "facts", "metadata", "vectors", "vector_labels",
+#:
+#: `metadata` is gone from here because it is gone from the parser: the TMDB sidecar supplied the title,
+#: the year and the poster path, and the store now takes the first two from Wikidata and publishes no
+#: third. The writer reads no TMDB artifact at all.
+INPUT_ARGS = ("corpus", "entities", "facts", "vectors", "vector_labels",
               "premise_vectors", "premise_labels", "enriched")
 
 
@@ -362,6 +366,63 @@ def build_inputs(args):
         sha, size, mtime = input_digest(path)
         out.append({"arg": arg, "path": path, "sha256": sha, "bytes": size, "mtime": mtime})
     return out
+
+
+#: A trailing parenthetical that disambiguates rather than names, by the vocabulary the corpus actually
+#: uses. 18,476 titles across Wikidata labels and article names carry one; `(film)` alone accounts for
+#: 6,589, then `(TV series)`, `(<year> film)`, and the non-English equivalents Wikidata labels arrive in.
+#:
+#: A vocabulary rather than "strip any trailing (...)", because that would damage real names: TMDB agrees
+#: with Wikidata that *South Park (Not Suitable for Children)*, *To Have (Or Not)*, *Frontier(s)* and
+#: *Everything You Always Wanted to Know About Sex* (*But Were Afraid to Ask)* end the way they do.
+#:
+#: Its known limit: `Pilot (Our Girl)` keeps its parenthetical, because an episode disambiguated by the
+#: name of its series is not distinguishable by vocabulary from a title that ends in a parenthesis. 36 of
+#: 47,618 rows keep one this way.
+_DISAMBIGUATOR = re.compile(
+    r"^(?:\d{4}|\d{4}\s.*|.*\b(?:film|movie|tv|television|series|serial|mini-?series|special|programme|"
+    r"program|novel|album|song|video\s*game|play|anime|manga|franchise|soundtrack|short|documentary|"
+    r"episode|season|book|fernsehserie|pel[ií]cula|s[ée]rie|serie|filme|telenovela|drama)\b.*)$",
+    re.IGNORECASE,
+)
+_TRAILING_PAREN = re.compile(r"\s*\(([^()]*)\)\s*$")
+
+
+def display_title(titles):
+    """The name to draw on a card, from Wikidata — never from a catalogue vendor.
+
+    `titles.en` is the Wikidata English label and it answers 47,609 of 47,618 rows on its own; `orig` and
+    then the aliases catch the rest. Measured against the TMDB title this replaces, it is **exact for
+    88.86%** of the corpus.
+
+    The 11% that differ are not errors — they are the other English name a work goes by, and the free
+    source is frequently the better one: *9½ Weeks* for TMDB's *Nine 1/2 Weeks*, *Cry Wolf* for
+    *Cry_Wolf*, *Friday the 13th Part VI: Jason Lives* for *Jason Lives - Friday the 13th Part VI*. Only
+    **one** row in the residual is non-Latin, which was the risk worth measuring: a work people know by an
+    English name must not come back as its original-language one.
+
+    **Five rows have no free name at all** — `facts.titles` is empty for them (`movie:1110820`,
+    `movie:1300331`, `movie:1489931`, `tv:256150`, `tv:297492`; 0–45 votes, one of them unnamed in TMDB
+    too). They lose their card and drop out of browse and search, which is the honest outcome: we have no
+    name we are allowed to publish.
+
+    The Wikipedia article name is deliberately NOT a source here, though it names the work in English.
+    It is not in the corpus, so it would need a new writer input to reach 8 rows; and a title whose own
+    article was too thin is grounded on another work's article (oxyc/den-dataset#16), which would name
+    the novel rather than the film.
+    """
+    titles = titles or {}
+    candidates = [titles.get("en"), titles.get("orig")] + list(titles.get("aliases") or [])
+    for candidate in candidates:
+        if not isinstance(candidate, str) or not candidate.strip():
+            continue
+        name = candidate.strip()
+        found = _TRAILING_PAREN.search(name)
+        if found and _DISAMBIGUATOR.match(found.group(1).strip()):
+            name = name[: found.start()].strip()
+        if name:
+            return name
+    return None
 
 
 def title_imdb_id(raw):
@@ -506,6 +567,31 @@ def days_since_epoch(value, key):
         return (date(year, month, day) - EPOCH).days, code
     except (ValueError, IndexError, OverflowError):
         sys.exit(f"{key}: released date {text!r} is not a date this writer understands")
+
+
+def release_year(value):
+    """The year out of the same dated object `days_since_epoch` reads, or `None`.
+
+    Read off the date text rather than derived from the day count, so a pre-1970 title is not a negative
+    number to convert back, and a year-precision fact — which is most of what disagrees below — keeps the
+    only component it actually asserts.
+
+    This replaces a TMDB release year. Measured against it: the two agree for **92.56%** of the 46,702
+    rows that have both, and the dominant disagreement is by a single year (2,639 rows), which is the
+    festival premiere Wikidata dates against the general release TMDB dates. **835 rows have a TMDB year
+    and no Wikidata date**, and they lose the year off their card — the alternative was to keep
+    redistributing it.
+    """
+    if not isinstance(value, dict):
+        return None
+    text = value.get("date")
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        year = int(text.lstrip("+-").split("-")[0])
+    except (ValueError, IndexError):
+        return None
+    return -year if text.startswith("-") else year
 
 
 def row_applicability(row):
@@ -762,8 +848,6 @@ def build_parser():
     ap.add_argument("--entities", required=True)
     ap.add_argument("--facts", required=True,
                     help="facts-<ver>.json — for genreMap, and to assert the row count")
-    ap.add_argument("--metadata", required=True,
-                    help="metadata-<ver>.json — the cards: title, year")
     ap.add_argument("--vectors", required=True, help="vectors-bge-m3.bin (DENVEC02: it names its own rows)")
     ap.add_argument("--vector-labels", required=True,
                     help="labels-t02.json — the PLOT pass's key set. No longer the vectors' row order: "
@@ -820,15 +904,21 @@ def main():
     if not genre_map:
         sys.exit(f"{args.facts} has no genreMap — the genres section would ship empty")
 
-    # Cards come from the metadata sidecar, which is where title/year actually live. Reading them off
-    # `facts` left card_year at its sentinel on all 47,618 rows: the keys simply do not exist there, and
-    # a column of sentinels looks perfect from the outside.
+    # The card is built from `facts` — Wikidata — and the TMDB metadata sidecar is no longer read at all.
     #
-    # The sidecar also carries `posterPath`, which the store no longer publishes: it is a TMDB artwork
-    # reference, and a public release asset may not redistribute one. Readers get posters from
-    # den-edge's `/metadata/title/query` (100 titles a request) and from the `poster` URL den-atlas's
-    # Stremio metas already carry beside `posterPath`.
-    cards = labels_by_key(args.metadata, "metadata")
+    # An earlier attempt at this left `card_year` at its sentinel on all 47,618 rows and nobody saw it,
+    # which is why the keys below are the MEASURED ones rather than the plausible ones: `facts.titles.en`
+    # is populated for 99.98% of the corpus and `facts.released`/`facts.started` for 99.59%, whereas
+    # `facts.title` and `facts.year` — the names that failure reached for — do not exist. A column of
+    # sentinels looks perfect from the outside, so the guard below counts names against the corpus.
+    #
+    # What each column costs to move off TMDB, measured against the sidecar it replaces: the title is
+    # exact for 88.86% and the residual is the other English name a work goes by, not a foreign one; the
+    # year agrees for 92.56%, and disagrees by a single year on 2,639 rows where Wikidata dates the
+    # festival premiere and TMDB the general release. `card_poster` has no replacement and is simply
+    # gone — readers take posters from den-edge's `/metadata/title/query` and from the `poster` URL
+    # den-atlas's Stremio metas already carry.
+    namable = sum(1 for r in rows.values() if (r.get("facts") or {}).get("titles"))
 
     # Which titles each PASS labelled. Not the vector row order — the blobs carry their own keys — but the
     # independent record the corpus's `labels` / `premiseLabels` fields are counted against below.
@@ -881,8 +971,9 @@ def main():
             strings.add(name)
         for alias in t.get("aliases") or []:
             strings.add(alias)
-        card_pre = cards.get(key) or {}
-        strings.add(card_pre.get("title"))
+        # The display name is a STRIPPED form of one of the three above, so it is interned in its own
+        # right: `Batman (serial)` is in the dictionary for search, and `Batman` is what a card draws.
+        strings.add(display_title(t))
         strings.add(title_imdb_id(facts.get("imdbId")))
         for c in facts.get("countries") or []:
             strings.add(c)
@@ -968,7 +1059,7 @@ def main():
     applic_v, applic_c = [], bytearray()
     depicts, audience = bytearray(), bytearray()
     orig_lang = []
-    with_labels = with_plot_labels = with_premise = with_cards = 0
+    with_labels = with_plot_labels = with_premise = with_names = 0
     divergent = []
     # What the publication gates published and withheld, per axis — reported below and stamped into the
     # manifest. A gate that drops 42% of `ending` must say so in a number, not leave the next reader to
@@ -992,14 +1083,14 @@ def main():
         if fields:
             divergent.append((key, fields))
         t = facts.get("titles") or {}
-        card = cards.get(key) or {}
-        card_title.append(strings.id(card.get("title") or t.get("en") or t.get("orig")))
-        year = card.get("year")
+        name = display_title(t)
+        card_title.append(strings.id(name))
+        year = release_year(facts.get("released") or facts.get("started"))
         card_year.append(int(year) if isinstance(year, int) and -32767 <= year <= 32767 else I16_NONE)
         # u32, clamped: TMDB's largest is five figures, and a browse row only ever compares them.
         votes.append(min(0xFFFFFFFF, max(0, vote_counts.get(key, 0))))
-        if card:
-            with_cards += 1
+        if name:
+            with_names += 1
 
         primary.append(strings.id(labels.get("primaryGenre")))
         subgenres.append(labelled(labels.get("subgenres"), strings, "subgenre", key))
@@ -1326,7 +1417,10 @@ def main():
         # the plot count matched its artifact exactly while three titles held no labels at all.
         ("labelled titles", with_labels, len(labelled_keys),
          " ∪ ".join(p for p in (args.vector_labels, args.premise_labels) if p)),
-        ("cards", with_cards, len(cards), args.metadata),
+        # Names against the corpus, not against a sidecar: the count is taken from `rows`
+        # before the writing loop, so it proves the naming happened rather than agreeing with
+        # itself. A title whose `facts.titles` holds only blanks fails here.
+        ("named titles", with_names, namable, args.corpus),
         # Against the BLOB's own key column now, not a sidecar's record count: every vector the file
         # carries must have landed on a row of the store.
         ("plot vectors", plot_hits, len(plot_row), args.vectors),
@@ -1367,7 +1461,7 @@ def main():
 
     print(json.dumps({"titles": n, "withLabels": with_labels, "withPlotLabels": with_plot_labels,
                       "withPremiseLabels": with_premise,
-                      "withCards": with_cards, "unresolved": dict(sorted(unresolved.items())),
+                      "withNames": with_names, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
                       "entities": len(ent_qids), "strings": len(ordered_strings),
                       "sections": len(sec.order)}, indent=1), file=sys.stderr)

@@ -130,7 +130,8 @@ STORE_INPUTS = {
     "corpus": CORPUS_PRODUCER,
     "entities": CORPUS_PRODUCER,
     "facts": PRODUCERS["factsFile"],
-    "metadata": PRODUCERS["metadataFile"],
+    # No `metadata`: the TMDB sidecar is no longer a store input (oxyc/den#118). It is still BUILT and
+    # still in PRODUCERS, because other things read it — it just does not reach the store any more.
     "vectors": PRODUCERS["vectorsFile"],
     "vector_labels": PRODUCERS["labelsFile"],
     "premise_vectors": PRODUCERS["premiseVectorsFile"],
