@@ -15,20 +15,57 @@ baseline; `--compare` reads the published manifest's stamps and prints any blob 
 """
 import json
 import os
+import struct
 import sys
 
 # Only blobs whose row count is meaningful and cheap to read. Vectors are binary and already length-checked
 # against their labels by `finalize`; the gz variants are regenerated from the blobs they mirror.
-COUNTED = ("factsFile", "factsSlimFile", "plotFacetsFile", "metadataFile", "labelsFile", "premiseLabelsFile")
+COUNTED = (
+    "factsFile",
+    "factsSlimFile",
+    "plotFacetsFile",
+    "metadataFile",
+    "labelsFile",
+    "premiseLabelsFile",
+    "storeFile",
+)
+
+STORE_MAGIC = b"DENSTOR1"
+
+
+def store_rows(path):
+    """`row_count` from a store-v1 header, or None if this is not one.
+
+    den-spec `wire/store-v1.md`: 64-byte header, magic at 0, `row_count` a little-endian u32 at 28.
+
+    Read from the FILE rather than taken from `storeRecords` in the manifest beside it. The manifest's own
+    claim cannot validate the manifest — a stamp copied forward from the previous publish would satisfy the
+    shrink guard no matter what the store contained, which is the whole failure this script exists to catch.
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(32)
+    except OSError:
+        return None
+    if len(head) < 32 or head[:8] != STORE_MAGIC:
+        return None
+    return struct.unpack_from("<I", head, 28)[0]
 
 
 def count(meta, key, base):
     """Rows in the blob a manifest key names, or None when it cannot be counted cheaply."""
     name = meta.get(key)
-    if not name or not name.endswith(".json"):
+    if not name:
         return None
     path = os.path.join(base, name)
     if not os.path.exists(path):
+        return None
+    # The store is the one counted blob that is not JSON. This used to return None for anything not ending
+    # `.json`, so the artifact the whole serving path reads was the ONE thing the shrink guard could not
+    # see — it would have passed a store with every title missing.
+    if name.endswith(".store"):
+        return store_rows(path)
+    if not name.endswith(".json"):
         return None
     try:
         doc = json.load(open(path))
