@@ -22,6 +22,12 @@ each passed the guards in force at the time. A count that does not match its sou
 `--stamp-meta` also records WHAT IT READ — every input's path, sha256, size and mtime, as `storeInputs`
 in the manifest. See `build_inputs`: the inputs stopped being published artifacts, so they stopped being
 covered by the ownership guard, and this record is what `check-producers.py` holds them to.
+
+## What it publishes, which is not everything it reads
+
+Plot facets pass the FACETS-V2 publication gates before they reach a section — see `publishable`. The
+corpus collects every answer with its full distribution; this file decides which of them the one
+published artifact asserts. `--stamp-meta` records what each gate withheld, as `facetGates`.
 """
 import argparse
 import gzip
@@ -31,7 +37,7 @@ import os
 import struct
 import sys
 from datetime import date
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vector_blob  # noqa: E402  — beside this file; the blob layout, shared with the migration
@@ -72,6 +78,41 @@ ENTITY_LISTS = {
 }
 # The two applicability questions, and the audience Nouls from the delta pass.
 APPLICABILITY = ("validity", "narrative_applicability")
+
+# ---- the FACETS-V2 publication gates ---------------------------------------------------------------
+#
+# `scripts/v2/FACETS-V2.md` § "Publication gates": "The pilots support collection, not unconditional
+# argmax publication." The corpus is the collection — it keeps every answer with its full distribution,
+# so nothing here is unrecoverable and the store can be rebuilt with different thresholds in ~2 minutes.
+# The store is the PUBLICATION, and these are the conditions the spec puts on it.
+#
+# Why here and not in den-atlas: the store carries the argmax and one confidence byte per axis. The
+# runner-up probability, which clause 4's margin needs, and `validity`'s own distribution, which clause 2
+# needs, are NOT in the store and never were. A reader physically cannot apply this gate. Putting it in
+# the reader would also leave the one published artifact asserting things the spec says are not
+# publishable, which is the defect this exists to close.
+
+#: Clause 2 — "Publish plot facets only when `validity=correct-screen-work` has probability at least
+#: 0.80." The PROBABILITY, not the self-reported `confidence`: they are separate fields and differ.
+VALIDITY_MIN = 0.80
+#: Clause 4 — "require probability at least 0.70 and a top-minus-runner-up margin of at least 0.25".
+FACET_PROB_MIN = 0.70
+FACET_MARGIN_MIN = 0.25
+#: Clause 4 — "Exclude `does-not-apply` and `ending=unknown`". `does-not-apply` is excluded on every
+#: axis and is checked on its own below; this is the per-axis half. `unknown` is `ending`'s way of
+#: saying a work has not ended yet — a fact about the corpus, not an ending a viewer can browse to, and
+#: the largest published `ending` value in the live index at 8,858 titles, *Game of Thrones* included.
+NEVER_PUBLISHED = {("ending", "unknown")}
+#: Clause 3 — "Suppress plot facets for talk, variety, game, news, or reality programs without a bounded
+#: narrative." That is `narrative_applicability`'s own value for such a programme.
+NO_NARRATIVE = "non-narrative-program"
+#: Clause 3, second sentence — "Suppress archetype additionally for documentaries, anthologies,
+#: open-ended series, and multi-arc works", "from deterministic metadata/content type or a separate
+#: typed applicability result, not from archetype's own no-answer probability". `narrative_applicability`
+#: IS that separate typed result, and its remaining value is the one archetype may be published for.
+#: The spec's own counter-example — the documentary `Killer Inside: The Mind of Aaron Hernandez` at
+#: `downfall` 0.76 — is exactly a row this excludes and no confidence threshold would have.
+ARCHETYPE_REQUIRES = "bounded-fictional-narrative"
 # `world` is the max of these. The definition came from the rail-facets producer, which this file
 # replaced and which is deleted — so this list is now the only place it is written down.
 FANTASTICAL = [f"theme__{k}" for k in (
@@ -280,6 +321,65 @@ def days_since_epoch(value, key):
         return (date(year, month, day) - EPOCH).days, code
     except (ValueError, IndexError, OverflowError):
         sys.exit(f"{key}: released date {text!r} is not a date this writer understands")
+
+
+def row_applicability(row):
+    """`(validity probability, narrative_applicability choice)` — the two facts the gates judge against.
+
+    Both come from the `applicability` block, which the delta pass answers for every record. A row that
+    has no block at all reads as probability 0.0, which fails the validity clause and so publishes no
+    facets — the same answer as an explicit "this is not the right work", and the safe one.
+    """
+    applic = row.get("applicability") or {}
+    validity = applic.get("validity")
+    probability = 0.0
+    if isinstance(validity, dict):
+        probability = float((validity.get("probabilities") or {}).get("correct-screen-work") or 0.0)
+    narrative = applic.get("narrative_applicability")
+    return probability, (narrative.get("choice") if isinstance(narrative, dict) else None)
+
+
+def publishable(axis, facet, validity_probability, narrative):
+    """Whether one axis of one title may be PUBLISHED, and if not, which clause refused it.
+
+    Returns `(bool, reason)`. The clauses are FACETS-V2 § "Publication gates" 2-4, in the order written
+    there; the first failure is the reason, so the counts this produces partition the corpus.
+
+    Clause 1 — provenance — is not checked here. It is the bundle auditor's (`audit_combined_bundle.py`),
+    which has the manifests, and a record only reaches the corpus by passing it.
+
+    The margin is computed against the WHOLE distribution, `does-not-apply` included. Those values may
+    not be published, but they are still hypotheses the model weighed, and dropping them from the
+    comparison would inflate every margin by whatever mass sat on them.
+    """
+    if not isinstance(facet, dict):
+        return False, "absent"
+    choice = facet.get("choice")
+    if not choice:
+        return False, "absent"
+    if choice == "does-not-apply":
+        return False, "does-not-apply"
+    if (axis, choice) in NEVER_PUBLISHED:
+        return False, f"{axis}={choice}"
+    if validity_probability < VALIDITY_MIN:
+        return False, "validity<0.80"
+    if narrative == NO_NARRATIVE:
+        return False, "non-narrative-program"
+    if axis == "archetype" and narrative != ARCHETYPE_REQUIRES:
+        return False, f"archetype not-bounded ({narrative})"
+    probabilities = facet.get("probabilities")
+    if not isinstance(probabilities, dict) or choice not in probabilities:
+        # The distribution is what clause 4 is written against. A choice without one cannot be judged,
+        # and publishing it unjudged is the thing this function exists to stop.
+        return False, "no distribution"
+    top = float(probabilities[choice] or 0.0)
+    if top < FACET_PROB_MIN:
+        return False, "p<0.70"
+    ordered = sorted((float(v or 0.0) for v in probabilities.values()), reverse=True)
+    runner_up = ordered[1] if len(ordered) > 1 else 0.0
+    if top - runner_up < FACET_MARGIN_MIN:
+        return False, "margin<0.25"
+    return True, None
 
 
 def title_labels(row):
@@ -565,9 +665,14 @@ def main():
         strings.add(labels.get("primaryGenre"))
         for entry in (labels.get("subgenres") or []) + (labels.get("moods") or []):
             strings.add(entry.get("label") if isinstance(entry, dict) else entry)
+        # Interned under the SAME gate the write loop applies, so a value no row publishes never
+        # reaches the dictionary. Interning it anyway would leave a vocabulary in the store that no
+        # row uses, which reads from the outside as a value with zero titles rather than as one the
+        # gate withheld.
+        validity_probability, narrative = row_applicability(r)
         for axis in FACET_AXES:
             v = (r.get("facets") or {}).get(axis)
-            if isinstance(v, dict) and v.get("choice") and v["choice"] != "does-not-apply":
+            if publishable(axis, v, validity_probability, narrative)[0]:
                 strings.add(v["choice"])
         noul_names.update((r.get("nouls") or {}).keys())
         critique_names.update((r.get("critique") or {}).keys())
@@ -674,6 +779,11 @@ def main():
     orig_lang = []
     with_labels = with_plot_labels = with_premise = with_cards = 0
     divergent = []
+    # What the publication gates published and withheld, per axis — reported below and stamped into the
+    # manifest. A gate that drops 42% of `ending` must say so in a number, not leave the next reader to
+    # discover it as a coverage surprise.
+    facets_published = Counter()
+    facets_withheld = defaultdict(Counter)
 
     for key in keys:
         r = rows[key]
@@ -706,12 +816,23 @@ def main():
         moods.append(labelled(labels.get("moods"), strings, "mood", key))
         animated.append(1 if labels.get("animated") else 0)
 
+        # The FACETS-V2 publication gates. A value that does not clear them is written as absent —
+        # the SAME `U32_NONE` an axis the model declined gets, and deliberately so: both mean "this
+        # store makes no claim here", which is the only thing a reader may conclude from either. The
+        # store has one sentinel per axis and no room for a second without changing den-spec
+        # `wire/store-v1.md` and both readers, and no reader has a use for the distinction — a row
+        # must not list a title under `ending=tragic` because the model guessed tragic at 0.44.
+        # The corpus keeps the full answer and the reason, so nothing is lost, only unpublished.
+        validity_probability, narrative = row_applicability(r)
         for axis in FACET_AXES:
             v = (r.get("facets") or {}).get(axis)
-            if isinstance(v, dict) and v.get("choice") and v["choice"] != "does-not-apply":
+            ok, reason = publishable(axis, v, validity_probability, narrative)
+            if ok:
+                facets_published[axis] += 1
                 facet_v.append(strings.id(v["choice"]))
                 facet_c.append(hundredths(v.get("confidence"), f"facet {axis} confidence", key))
             else:
+                facets_withheld[axis][reason] += 1
                 facet_v.append(U32_NONE)
                 facet_c.append(0)
 
@@ -1042,6 +1163,20 @@ def main():
         for what, count in sorted(unresolved.items(), key=lambda kv: -kv[1]):
             print(f"  {what:14} {count}", file=sys.stderr)
 
+    # The gates, per axis, before the summary — published, withheld, and which clause did the refusing.
+    print("plot-facet publication gates (FACETS-V2 § Publication gates):", file=sys.stderr)
+    for axis in FACET_AXES:
+        kept = facets_published[axis]
+        why = ", ".join(f"{r}={c}" for r, c in facets_withheld[axis].most_common())
+        print(f"  {axis:12} {kept:6d}/{n} ({kept / n * 100:5.1f}%)  withheld: {why}", file=sys.stderr)
+
+    gate_report = {
+        "validityMin": VALIDITY_MIN, "probabilityMin": FACET_PROB_MIN, "marginMin": FACET_MARGIN_MIN,
+        "axes": {axis: {"published": facets_published[axis],
+                        "withheld": dict(sorted(facets_withheld[axis].items()))}
+                 for axis in FACET_AXES},
+    }
+
     print(json.dumps({"titles": n, "withLabels": with_labels, "withPlotLabels": with_plot_labels,
                       "withPremiseLabels": with_premise,
                       "withCards": with_cards, "unresolved": dict(sorted(unresolved.items())),
@@ -1105,6 +1240,11 @@ def main():
         # It is NOT a blob claim and must never become one: no `storeInputsFile`/`Sha256`/`Bytes`, or the
         # prune's keep-list would drop it and the publisher would stop seeing it.
         meta["storeInputs"] = inputs
+        # And what the publication gates withheld. Same reasoning as `storeInputs`: it describes the
+        # dataset rather than a file, so `prune-manifest.py` carries it forward, and it must never be
+        # given a `File`/`Sha256`/`Bytes` name or the prune's keep-list would drop it. Without this the
+        # only record of a 42% `ending` drop is a build log nobody kept.
+        meta["facetGates"] = gate_report
         with open(args.stamp_meta, "w") as fh:
             json.dump(meta, fh, indent=1)
             fh.write("\n")

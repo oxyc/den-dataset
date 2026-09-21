@@ -85,9 +85,14 @@ class FixtureRoundTrip(unittest.TestCase):
             self.assertEqual(
                 sha256(rebuilt),
                 sha256(committed),
-                "build_store.py no longer produces the committed fixture. Either the layout changed — in "
-                "which case this is a NEW format version (store-v2.md), not an edit to store-v1 — or the "
-                "writer lost its determinism.",
+                "build_store.py no longer produces the committed fixture. Three causes, and they want "
+                "different answers: the LAYOUT changed — in which case this is a new format version "
+                "(store-v2.md), not an edit to store-v1; the writer lost its DETERMINISM; or what the "
+                "writer CHOOSES TO PUBLISH changed, which is a content change at an unchanged layout "
+                "and is fixed by regenerating the fixture in den-spec, not by bumping the version. The "
+                "publication gates are the third kind: a fixture facet carrying no `probabilities` "
+                "cannot clear them, so den-spec's fixture records need the distributions the real "
+                "corpus always carries.",
             )
 
     def test_a_rebuild_is_byte_identical_to_itself(self):
@@ -139,6 +144,17 @@ class ReadBack:
 
     def keys(self):
         return [f"{'movie' if k >> 32 == 0 else 'tv'}:{k & 0xFFFFFFFF}" for k in self.ints("keys", "Q", 8)]
+
+    def facets(self, row, axes):
+        """`{axis: (value, confidence)}` for one row of the dense R x 12 facet columns.
+
+        `value` is None where the store makes no claim — an axis the model declined, and now also one
+        the publication gates withheld. They are the same sentinel on purpose; see `build_store.py`.
+        """
+        values = self.ints("facet_v")
+        confs = self.ints("facet_c", "B", 1)
+        at = row * len(axes)
+        return {axis: (self.text(values[at + i]), confs[at + i]) for i, axis in enumerate(axes)}
 
     def labelled(self, name, row):
         """`[(label, confidence)]` for one row of a labelled list section."""
@@ -606,3 +622,228 @@ class VotesAreNotSilentlyZero(unittest.TestCase):
         """The bound exists so the synthetic fixtures — here and in den-spec — need no flag declaring
         they have no vote data."""
         self.assertIsNone(build_store_module().votes_are_missing([0, 0]))
+
+
+def choice(value, probabilities, confidence=0.9):
+    """One typed Choice answer, shaped as the corpus carries it."""
+    return {"type": "choice", "choice": value, "confidence": confidence,
+            "probabilities": probabilities}
+
+
+def applicability(validity=1.0, narrative="bounded-fictional-narrative"):
+    """An `applicability` block: `validity`'s probability of `correct-screen-work`, and the typed
+    content-type answer the archetype gate reads."""
+    return {
+        "validity": choice("correct-screen-work",
+                           {"correct-screen-work": validity, "source-work": 1.0 - validity}),
+        "narrative_applicability": choice(narrative, {narrative: 1.0}),
+    }
+
+
+class PublicationGates(unittest.TestCase):
+    """`publishable()` against FACETS-V2 § "Publication gates" 2-4, clause by clause.
+
+    The store used to write every non-`does-not-apply` argmax with its confidence and no gate at all, so
+    `ending` shipped 8,858 titles whose published value was the literal string `unknown` and `archetype`
+    shipped 28,996 including documentaries. The spec has said since the pilot that the pilots "support
+    collection, not unconditional argmax publication".
+    """
+
+    def setUp(self):
+        self.mod = build_store_module()
+
+    def test_a_clean_answer_is_published(self):
+        """The gate must not simply empty the axis: a confident, well-separated answer still ships."""
+        ok, reason = self.mod.publishable(
+            "tone", choice("comic", {"comic": 0.9, "pulpy": 0.1}), 1.0, "bounded-fictional-narrative")
+        self.assertTrue(ok, f"a 0.90 answer must publish, refused as {reason}")
+
+    def test_probability_below_070_is_withheld(self):
+        """Clause 4: "require probability at least 0.70"."""
+        ok, reason = self.mod.publishable(
+            "tone", choice("comic", {"comic": 0.6, "pulpy": 0.4}), 1.0, "bounded-fictional-narrative")
+        self.assertFalse(ok)
+        self.assertEqual(reason, "p<0.70")
+
+    def test_the_probability_is_read_from_the_distribution_not_the_confidence(self):
+        """`confidence` is the model's self-report and `probabilities` is its distribution. They are
+        separate fields with different values — for movie:100 `ending` reads confidence 0.32 against a
+        0.40 probability — and clause 4 is written about the probability."""
+        answer = choice("comic", {"comic": 0.6, "pulpy": 0.4}, confidence=0.99)
+        ok, _ = self.mod.publishable("tone", answer, 1.0, "bounded-fictional-narrative")
+        self.assertFalse(ok, "a 0.99 self-report must not carry a 0.60 probability past the gate")
+
+    def test_a_thin_margin_is_withheld(self):
+        """Clause 4: "a top-minus-runner-up margin of at least 0.25".
+
+        Unreachable through the probability clause on a normalised distribution — at p>=0.70 the runner-up
+        is at most 0.30 — so it is tested directly. It stays because the spec states it and because a
+        distribution that does not sum to 1 (the runner is allowed 0.03 of slack) could still reach it.
+        """
+        ok, reason = self.mod.publishable(
+            "tone", choice("comic", {"comic": 0.8, "pulpy": 0.7}), 1.0, "bounded-fictional-narrative")
+        self.assertFalse(ok)
+        self.assertEqual(reason, "margin<0.25")
+
+    def test_the_margin_counts_does_not_apply_as_a_rival(self):
+        """`does-not-apply` may not be PUBLISHED, but it is still a hypothesis the model weighed.
+        Dropping it from the comparison would inflate the margin by whatever mass sat on it."""
+        ok, reason = self.mod.publishable(
+            "tone", choice("comic", {"comic": 0.8, "does-not-apply": 0.75}), 1.0,
+            "bounded-fictional-narrative")
+        self.assertFalse(ok)
+        self.assertEqual(reason, "margin<0.25")
+
+    def test_validity_below_080_withholds_the_axis(self):
+        """Clause 2: "Publish plot facets only when `validity=correct-screen-work` has probability at
+        least 0.80" — the article is about some other work, so its plot facets describe that one."""
+        ok, reason = self.mod.publishable(
+            "tone", choice("comic", {"comic": 0.99, "pulpy": 0.01}), 0.79, "bounded-fictional-narrative")
+        self.assertFalse(ok)
+        self.assertEqual(reason, "validity<0.80")
+
+    def test_a_non_narrative_programme_publishes_no_facets(self):
+        """Clause 3: "Suppress plot facets for talk, variety, game, news, or reality programs without a
+        bounded narrative"."""
+        for axis in ("tone", "ending", "archetype"):
+            ok, reason = self.mod.publishable(
+                axis, choice("comic", {"comic": 0.99, "pulpy": 0.01}), 1.0, "non-narrative-program")
+            self.assertFalse(ok, f"{axis} must be suppressed for a non-narrative programme")
+            self.assertEqual(reason, "non-narrative-program")
+
+    def test_ending_unknown_is_never_published(self):
+        """Clause 4: "Exclude `does-not-apply` and `ending=unknown`". `unknown` is the corpus saying a
+        work has not ended, which is not an ending a viewer can browse to — and it was the single
+        largest `ending` value in the live index at 8,858 titles."""
+        ok, reason = self.mod.publishable(
+            "ending", choice("unknown", {"unknown": 0.99, "happy": 0.01}), 1.0,
+            "bounded-fictional-narrative")
+        self.assertFalse(ok)
+        self.assertEqual(reason, "ending=unknown")
+        # …and `unknown` is excluded on `ending` alone, not as a global stopword.
+        ok, _ = self.mod.publishable(
+            "tone", choice("unknown", {"unknown": 0.99, "comic": 0.01}), 1.0,
+            "bounded-fictional-narrative")
+        self.assertTrue(ok, "the exclusion is `ending=unknown`, not every `unknown`")
+
+    def test_does_not_apply_is_never_published(self):
+        ok, reason = self.mod.publishable(
+            "tone", choice("does-not-apply", {"does-not-apply": 0.99, "comic": 0.01}), 1.0,
+            "bounded-fictional-narrative")
+        self.assertFalse(ok)
+        self.assertEqual(reason, "does-not-apply")
+
+    def test_archetype_needs_a_bounded_narrative(self):
+        """Clause 3: "Suppress archetype additionally for documentaries, anthologies, open-ended series,
+        and multi-arc works", read from "a separate typed applicability result, not from archetype's own
+        no-answer probability".
+
+        The spec's own case: it assigned the documentary `Killer Inside: The Mind of Aaron Hernandez` to
+        `downfall` at 0.76 "despite an explicit mandatory documentary exclusion. That is decisive: more
+        wording is not a publication guard." 0.76 clears every confidence threshold in the spec, so only
+        the content type refuses it.
+        """
+        downfall = choice("downfall", {"downfall": 0.76, "rise": 0.24})
+        for narrative in ("documentary-or-factual", "anthology", "open-or-multi-arc-narrative",
+                          "insufficient-evidence", None):
+            ok, reason = self.mod.publishable("archetype", downfall, 1.0, narrative)
+            self.assertFalse(ok, f"archetype must not publish for {narrative}")
+            self.assertIn("not-bounded", reason)
+        ok, _ = self.mod.publishable("archetype", downfall, 1.0, "bounded-fictional-narrative")
+        self.assertTrue(ok, "a bounded fictional narrative may carry an archetype")
+
+    def test_the_other_axes_survive_a_documentary(self):
+        """The archetype suppression is ADDITIONAL: a documentary still has a setting and an era."""
+        for axis in ("era", "setting", "tone"):
+            ok, _ = self.mod.publishable(
+                axis, choice("urban", {"urban": 0.95, "rural": 0.05}), 1.0, "documentary-or-factual")
+            self.assertTrue(ok, f"{axis} must survive a documentary")
+
+    def test_an_answer_with_no_distribution_cannot_be_judged(self):
+        """Clause 4 is written about a distribution. Publishing an answer that has none would be exactly
+        the unconditional argmax publication the gates exist to stop."""
+        ok, reason = self.mod.publishable(
+            "tone", {"type": "choice", "choice": "comic", "confidence": 0.99}, 1.0,
+            "bounded-fictional-narrative")
+        self.assertFalse(ok)
+        self.assertEqual(reason, "no distribution")
+
+    def test_a_row_with_no_applicability_block_publishes_nothing(self):
+        probability, narrative = self.mod.row_applicability({})
+        self.assertEqual(probability, 0.0)
+        self.assertIsNone(narrative)
+        ok, reason = self.mod.publishable(
+            "tone", choice("comic", {"comic": 0.99, "pulpy": 0.01}), probability, narrative)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "validity<0.80")
+
+
+class GatedFacetsReachTheStore(StoreFixture, unittest.TestCase):
+    """The gate in the WRITER: a withheld value must be absent from the built artifact.
+
+    A gate in den-atlas could not implement this one. The store carries an argmax and a single confidence
+    byte per axis — the runner-up probability clause 4 needs, and `validity`'s own distribution clause 2
+    needs, are not in it and never were. This proves the refusal lands in the bytes.
+    """
+
+    def titles(self):
+        """Two titles: a documentary whose every facet the model answered confidently, and a film whose
+        `tone` it guessed at 0.60."""
+        base = dict(self.TITLES[0])
+        base["applicability"] = applicability(narrative="documentary-or-factual")
+        base["facets"] = {
+            "setting": choice("urban", {"urban": 0.95, "rural": 0.05}),
+            "archetype": choice("downfall", {"downfall": 0.76, "rise": 0.24}),
+            "ending": choice("unknown", {"unknown": 0.9, "happy": 0.1}),
+        }
+        other = dict(self.TITLES[1])
+        other["applicability"] = applicability()
+        other["facets"] = {
+            "tone": choice("comic", {"comic": 0.6, "pulpy": 0.4}),
+            "era": choice("contemporary", {"contemporary": 0.97, "medieval": 0.03}),
+        }
+        return [base, other]
+
+    def test_the_store_carries_only_what_the_gates_published(self):
+        mod = build_store_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            store, stderr = self.build(tmp, titles=self.titles())
+        axes = mod.FACET_AXES
+        doc = store.facets(0, axes)
+        film = store.facets(1, axes)
+
+        self.assertEqual(doc["setting"][0], "urban", "a confident axis on a documentary still ships")
+        self.assertIsNone(doc["archetype"][0], "a documentary must carry no archetype")
+        self.assertIsNone(doc["ending"][0], "`ending=unknown` must never be published")
+        self.assertEqual(film["era"][0], "contemporary")
+        self.assertIsNone(film["tone"][0], "a 0.60 tone must not be published")
+
+        # A withheld cell is the SAME sentinel as an axis the model never answered — the store makes no
+        # claim either way, and it has one sentinel per axis. The confidence byte goes with it, so a
+        # reader cannot mistake a withheld cell for a published 0.
+        self.assertEqual(doc["archetype"], (None, 0))
+        self.assertEqual(doc["pacing"], (None, 0), "an axis with no answer reads identically")
+
+        # The withheld values must not be left in the string dictionary either: a vocabulary entry no
+        # row uses reads from the outside as a value with zero titles, not as one the gate withheld.
+        interned = {store.text(i) for i in range(len(store.str_off) - 1)}
+        self.assertNotIn("downfall", interned)
+        self.assertIn("urban", interned)
+
+        # And the build must SAY what it withheld, rather than leave it as a coverage surprise.
+        self.assertIn("publication gates", stderr)
+        self.assertIn("archetype", stderr)
+
+    def test_the_manifest_records_what_was_withheld(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stamp = os.path.join(tmp, "dataset.meta.json")
+            with open(stamp, "w", encoding="utf-8") as fh:
+                json.dump({}, fh)
+            self.build(tmp, titles=self.titles(), stamp=stamp)
+            with open(stamp, encoding="utf-8") as fh:
+                gates = json.load(fh)["facetGates"]
+        self.assertEqual(gates["probabilityMin"], 0.70)
+        self.assertEqual(gates["validityMin"], 0.80)
+        self.assertEqual(gates["axes"]["archetype"]["published"], 0)
+        self.assertEqual(gates["axes"]["setting"]["published"], 1)
+        self.assertIn("ending=unknown", gates["axes"]["ending"]["withheld"])
