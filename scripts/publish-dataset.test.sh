@@ -423,6 +423,65 @@ else
 fi
 teardown
 
+# --- a store built from an input that has since changed ----------------------------------------------
+#
+# The gap the store's input record closes (oxyc/den#113). `data-latest` carries one blob, so the manifest
+# names one blob, so the ownership guard checks one blob — while the labels, vectors, metadata, facts and
+# corpus the store is BUILT from are still produced and no longer declared. Re-run the labelling producer,
+# rebuild nothing, publish: the store is a generation behind a file sitting in the same directory, and
+# until now every guard here passed.
+
+setup
+write_meta
+# The out-dir already holds `vectors-bge-m3.bin` as an unmanifested input; record the store as having been
+# built from it, then change it, which is what re-running its producer looks like from here.
+recorded_sha="$(shasum -a 256 "$DIR/vectors-bge-m3.bin" | cut -d' ' -f1)"
+python3 - "$DIR/dataset.meta.json" "$DIR/vectors-bge-m3.bin" "$recorded_sha" <<'PY'
+import json, os, sys
+meta_path, vectors, sha = sys.argv[1:4]
+meta = json.load(open(meta_path))
+meta["storeInputs"] = [{"arg": "vectors", "path": vectors, "sha256": sha,
+                        "bytes": os.path.getsize(vectors), "mtime": int(os.path.getmtime(vectors))}]
+json.dump(meta, open(meta_path, "w"))
+PY
+publish_baseline
+printf 're-embedded' > "$DIR/vectors-bge-m3.bin"
+if run_publish; then
+  bad "a store built from a since-changed input published anyway"
+else
+  grep -q "not built from the inputs in this tree" "$WORK/err.log" \
+    && ok "a store whose recorded input has changed since the build is refused" \
+    || bad "refused, but not for the input: $(tail -3 "$WORK/err.log")"
+fi
+[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
+teardown
+
+# --- and the same store, published from a dir that no longer holds the input --------------------------
+#
+# The publish dir is allowed to hold only the store and the manifest — that is the point of the cutover —
+# so an input it cannot see must not be a refusal. It must also not be a silence: the record is then the
+# only evidence the store matches anything.
+
+setup
+write_meta
+python3 - "$DIR/dataset.meta.json" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+meta["storeInputs"] = [{"arg": "vectors", "path": "elsewhere/vectors-bge-m3.bin", "sha256": "ab" * 32,
+                        "bytes": 1, "mtime": 1}]
+json.dump(meta, open(sys.argv[1], "w"))
+PY
+publish_baseline
+rm "$DIR/vectors-bge-m3.bin"
+if run_publish; then
+  grep -q "not in this tree" "$WORK/err.log" \
+    && ok "an input the publish dir does not hold is announced as unchecked, not refused" \
+    || bad "it published but said nothing about the unchecked input"
+else
+  bad "an absent input was treated as a refusal: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
 # --- a directory that was never finalized ------------------------------------------------------------
 #
 # An explicit argument is taken at its word. Falling back to ./data when the NAMED directory has no

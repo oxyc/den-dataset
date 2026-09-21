@@ -18,6 +18,10 @@ recurring failure in this pipeline is a join that misses and returns something a
 from a derived blob for a day; 89 facts-only titles dropped by iterating the pass instead of joining;
 `labels` null on all 47,529 rows because a lookup fell through to the wrapper dict. Each was silent, and
 each passed the guards in force at the time. A count that does not match its source is fatal here.
+
+`--stamp-meta` also records WHAT IT READ — every input's path, sha256, size and mtime, as `storeInputs`
+in the manifest. See `build_inputs`: the inputs stopped being published artifacts, so they stopped being
+covered by the ownership guard, and this record is what `check-producers.py` holds them to.
 """
 import argparse
 import gzip
@@ -139,6 +143,71 @@ def score_hundredths(value, what, key):
         sys.exit(f"{key}: {what} is {value}, which has more than two decimals — storing it would round "
                  f"silently. Fix the producer, or widen the field deliberately.")
     return scaled
+
+
+#: Every argument that names a file or directory this READS. The record below is built from it, and
+#: `check-producers.py` maps each entry to the producer that builds it — so adding an input here is what
+#: makes the new input owned and checked. `test_build_store.py` asserts this covers the parser's inputs
+#: and `test_check_producers.py` asserts every one of them has a producer.
+INPUT_ARGS = ("corpus", "entities", "facts", "metadata", "vectors", "vector_labels",
+              "premise_vectors", "premise_labels", "enriched")
+
+
+def file_sha256(path):
+    """A file's hash, read in blocks — the inputs run to 135 MB and there is no reason to hold one."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def input_digest(path):
+    """`(sha256, bytes, mtime)` for one build input — a file, or the enriched batch DIRECTORY.
+
+    A directory is digested over its LISTING: `"<name> <sha256>\\n"` per batch file, in batch-number
+    order, hashed. That is a content hash for a thing with no single file, and it moves when any batch is
+    added, removed or rewritten — which is exactly what the record has to notice. Batch-number order
+    rather than `sorted()`, for the same reason `read_votes` uses it: `batch-99` sorts after `batch-177`
+    lexicographically, so a lexicographic digest would depend on how many digits a batch id has.
+    """
+    if os.path.isdir(path):
+        names = sorted((n for n in os.listdir(path)
+                        if n.startswith("batch-") and n.endswith(".json")),
+                       key=lambda n: int(n[len("batch-"):-len(".json")]))
+        listing = hashlib.sha256()
+        total, newest = 0, 0
+        for name in names:
+            member = os.path.join(path, name)
+            listing.update(f"{name} {file_sha256(member)}\n".encode())
+            total += os.path.getsize(member)
+            newest = max(newest, int(os.path.getmtime(member)))
+        return listing.hexdigest(), total, newest
+    return file_sha256(path), os.path.getsize(path), int(os.path.getmtime(path))
+
+
+def build_inputs(args):
+    """What this build READ: path, hash, size and mtime for every input argument.
+
+    The store's inputs stopped being published artifacts when `data-latest` went store-only
+    (oxyc/den#113), and the ownership guard went with them: `check-producers.py` walks the keys the
+    MANIFEST names, so once the manifest named only the store, a store built from a labels file its
+    producer had outgrown published perfectly clean. Every guard passed and none of them was looking at
+    the thing that was stale.
+
+    Recording it here is what puts them back in reach. `--stamp-meta` writes this into the manifest, so
+    the publisher can re-hash each input against the tree and ask `check-producers.py` about its
+    producer — and the mtime is recorded rather than read, so the producer question is still answerable
+    in a publish dir holding nothing but the store and the manifest.
+    """
+    out = []
+    for arg in INPUT_ARGS:
+        path = getattr(args, arg)
+        if not path:
+            continue
+        sha, size, mtime = input_digest(path)
+        out.append({"arg": arg, "path": path, "sha256": sha, "bytes": size, "mtime": mtime})
+    return out
 
 
 def read_votes(enriched_dir):
@@ -374,7 +443,9 @@ class Sections:
         self.put(f"{name}_o", "I", offsets, 4)
 
 
-def main():
+def build_parser():
+    """The argument list, so a test can hold it against `INPUT_ARGS` — an input the parser accepts and
+    the record does not know about is an input nothing checks."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--entities", required=True)
@@ -406,7 +477,16 @@ def main():
                     help="dataset.meta.json to declare the store in (storeFile/Sha256/Bytes). Without "
                          "this the store is written and nothing names it, so publish-dataset.sh "
                          "announces it as an unowned blob and den-atlas never loads it.")
-    args = ap.parse_args()
+    return ap
+
+
+def main():
+    args = build_parser().parse_args()
+
+    # BEFORE the build reads them, so the record describes the bytes this run was handed. Only when the
+    # record has somewhere to go: without `--stamp-meta` nothing would carry it, and hashing 400 MB of
+    # inputs to throw the answer away would slow every fixture build for nothing.
+    inputs = build_inputs(args) if args.stamp_meta else None
 
     print("reading the corpus …", file=sys.stderr)
     rows = {r["key"]: r for r in corpus_rows(args.corpus)}
@@ -974,12 +1054,24 @@ def main():
         meta["storeFile"] = os.path.basename(args.out)
         meta["storeSha256"] = hashlib.sha256(blob).hexdigest()
         meta["storeBytes"] = len(blob)
+        # WHAT IT WAS BUILT FROM, in the manifest rather than in the store or a sidecar.
+        #
+        # In the store would change den-spec `wire/store-v1.md`, the committed fixture and both readers —
+        # three repos, for a fact no reader of the store wants. In a sidecar it would be an undeclared
+        # file in the out-dir, which is the exact class of artifact every guard here exists to refuse.
+        # The manifest already travels with the store, is already stamped from here, and already survives
+        # `prune-manifest.py` (`storeInputs` is not shaped like a per-blob claim).
+        #
+        # It is NOT a blob claim and must never become one: no `storeInputsFile`/`Sha256`/`Bytes`, or the
+        # prune's keep-list would drop it and the publisher would stop seeing it.
+        meta["storeInputs"] = inputs
         with open(args.stamp_meta, "w") as fh:
             json.dump(meta, fh, indent=1)
             fh.write("\n")
 
     print(json.dumps({"out": args.out, "bytes": HEADER_BYTES + len(payload),
-                      "formatVersion": FORMAT_VERSION, "stamped": bool(args.stamp_meta)}, indent=1))
+                      "formatVersion": FORMAT_VERSION, "stamped": bool(args.stamp_meta),
+                      "inputs": len(inputs or ())}, indent=1))
 
 
 if __name__ == "__main__":

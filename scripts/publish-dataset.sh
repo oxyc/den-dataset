@@ -280,6 +280,14 @@ python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
 # count simply never moves. That is the failure that has now happened twice: facets.bin fell 999 titles behind
 # the corpus, and facts-slim kept shipping the field set atlas parsed years ago — both generated once,
 # elsewhere, and carried forward by every publish since.
+#
+# It also checks WHAT THE STORE WAS BUILT FROM. The prune above leaves one blob key, so the loop over the
+# manifest covers the store and nothing else — while the labels, vectors, metadata, facts, corpus and
+# enriched batches it reads are still built, just no longer declared. A store built from a stale one of
+# those passed every guard here. `build_store.py --stamp-meta` records each input's path, sha256, size
+# and mtime into `storeInputs`, and this re-hashes them against the tree (a changed input REFUSES, with
+# DEN_ALLOW_STALE_STORE_INPUTS=1 as the deliberate override) and holds each input's producer to the
+# recorded mtime (a warning, like the staleness warning above).
 python3 "$(dirname "$0")/check-producers.py" "$meta" "$DIR"
 
 # DEAD-GENERATION GUARD. Every guard above asks whether a blob is present, parseable, owned and the right

@@ -133,6 +133,16 @@ class PruneManifest(unittest.TestCase):
         answers must be the same one."""
         self.assertEqual(sorted(pm.retired(LIVE)), sorted(set(LIVE) - set(pruned(LIVE))))
 
+    def test_the_stores_record_of_its_inputs_survives(self):
+        """`storeInputs` is `build_store.py`'s record of what it read, and with the store's inputs no
+        longer declared it is the ONLY thing holding them to a producer. The suffix rule drops anything
+        shaped like a per-blob claim, so a key named `storeInputsFile` — or a rename to something ending
+        in Records — would prune it away and reopen oxyc/den#113's gap with no error anywhere."""
+        record = [{"arg": "corpus", "path": "out/corpus-5b1c3213b6a1.jsonl.gz",
+                   "sha256": "ab", "bytes": 1, "mtime": 2}]
+        after = pruned({**LIVE, "storeInputs": record})
+        self.assertEqual(after.get("storeInputs"), record)
+
     def test_an_already_pruned_manifest_is_unchanged(self):
         """Every publish prunes. The second one must be a no-op, not a slow erosion of the descriptor."""
         once = pruned(LIVE)
