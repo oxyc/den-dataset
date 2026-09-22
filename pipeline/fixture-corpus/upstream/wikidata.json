@@ -1,0 +1,90 @@
+{
+  "Q90000001": {
+    "tmdb": {"movie": 900001}, "enwiki": "The Lighthouse Ledger", "label": "The Lighthouse Ledger",
+    "aliases": ["Lighthouse Ledger"],
+    "claims": {
+      "P31": ["Q97000001"], "P345": ["tt9000001"], "P577": [{"time": "+2019-05-04T00:00:00Z", "precision": 11}],
+      "P57": ["Q91000001"], "P58": ["Q91000002"], "P161": ["Q91000003", "Q91000004"], "P136": ["Q92000001"],
+      "P495": ["Q96000001"], "P364": ["Q95000001"], "P272": ["Q91000008"], "P750": ["Q91000007"],
+      "P86": ["Q91000005"], "P344": ["Q91000006"], "P2047": ["104"], "P179": ["Q98000001"],
+      "P921": ["Q91000010"], "P144": ["Q93000001"], "P840": ["Q91000009"],
+      "P1476": [{"text": "The Lighthouse Ledger", "lang": "en"}]
+    }
+  },
+  "Q90000002": {
+    "tmdb": {"tv": 900001}, "enwiki": "Signal Lost (TV series)", "label": "Signal Lost",
+    "claims": {
+      "P31": ["Q97000002"], "P345": ["tt9000011"], "P580": [{"time": "+2020-01-10T00:00:00Z", "precision": 11}],
+      "P582": [{"time": "+2022-03-01T00:00:00Z", "precision": 11}], "P170": ["Q91000012"], "P161": ["Q91000013"],
+      "P136": ["Q92000002"], "P495": ["Q96000002"], "P364": ["Q95000001"], "P449": ["Q91000011"],
+      "P2437": ["2"], "P1113": ["16"], "P2047": ["48"]
+    }
+  },
+  "Q90000003": {
+    "tmdb": {"movie": 900002}, "sitelinks": {"fr": "Le Jardin d'hiver"}, "label": "The Winter Garden",
+    "claims": {
+      "P31": ["Q97000001"], "P345": ["tt9000002"], "P577": [{"time": "+2016-11-02T00:00:00Z", "precision": 11}],
+      "P57": ["Q91000014"], "P136": ["Q92000001"], "P495": ["Q96000003"], "P364": ["Q95000002"],
+      "P1476": [{"text": "Le Jardin d'hiver", "lang": "fr"}]
+    }
+  },
+  "Q90000004": {
+    "tmdb": {"movie": 900003}, "enwiki": "Quiet Harbour (film)", "label": "Quiet Harbour",
+    "claims": {
+      "P31": ["Q97000001"], "P345": ["tt9000003"], "P577": [{"time": "+2021-01-01T00:00:00Z", "precision": 9}],
+      "P57": ["Q91000015"], "P495": ["Q96000001"], "P364": ["Q95000001"]
+    }
+  },
+  "Q90000005": {
+    "tmdb": {"movie": 900004}, "enwiki": "Minor Footnote", "label": "Minor Footnote",
+    "claims": {"P31": ["Q97000001"], "P345": ["tt9000004"]}
+  },
+  "Q90000006": {
+    "tmdb": {"tv": 900005}, "sitelinks": {"ja": "東京ナイトリレー"}, "label": "Tokyo Night Relay",
+    "claims": {
+      "P31": ["Q97000002"], "P345": ["tt9000005"], "P580": [{"time": "+2018-04-07T00:00:00Z", "precision": 11}],
+      "P136": ["Q92000003"], "P495": ["Q96000004"], "P364": ["Q95000003"], "P449": ["Q91000016"],
+      "P1476": [{"text": "東京ナイトリレー", "lang": "ja"}]
+    }
+  },
+  "Q90000007": {
+    "tmdb": {"tv": 900006}, "enwiki": "Two Rivers (TV series)", "label": "Two Rivers",
+    "claims": {
+      "P31": ["Q97000002"], "P345": ["tt9000006"], "P580": [{"time": "+2015-09-01T00:00:00Z", "precision": 11}],
+      "P136": ["Q92000001"], "P495": ["Q96000005"], "P364": ["Q95000001"]
+    }
+  },
+
+  "Q91000001": {"label": "Mara Voss", "aliases": ["M. Voss"], "claims": {"P4985": ["5550001"]}},
+  "Q91000002": {"label": "Idris Thale"},
+  "Q91000003": {"label": "Juno Park"},
+  "Q91000004": {"label": "Tomas Reyes"},
+  "Q91000005": {"label": "Elin Sørby"},
+  "Q91000006": {"label": "Ravi Anand"},
+  "Q91000007": {"label": "Northlight Pictures"},
+  "Q91000008": {"label": "Saltmarsh Films"},
+  "Q91000009": {"label": "Skerry Point"},
+  "Q91000010": {"label": "lighthouse keeping"},
+  "Q91000011": {"label": "Channel Nine North"},
+  "Q91000012": {"label": "Priya Castell"},
+  "Q91000013": {"label": "Owen Marsh"},
+  "Q91000014": {"label": "Camille Arnaud"},
+  "Q91000015": {"label": "Dana Holt"},
+  "Q91000016": {"label": "Kōhaku Television"},
+  "Q92000001": {"label": "drama film"},
+  "Q92000002": {"label": "science fiction television series"},
+  "Q92000003": {"label": "mystery television series"},
+  "Q93000001": {"enwiki": "The Keeper's Book", "label": "The Keeper's Book", "claims": {"P31": ["Q97000004"]}},
+  "Q95000001": {"label": "English", "claims": {"P218": ["en"]}},
+  "Q95000002": {"label": "French", "claims": {"P218": ["fr"]}},
+  "Q95000003": {"label": "Japanese", "claims": {"P218": ["ja"]}},
+  "Q96000001": {"label": "United States", "claims": {"P297": ["US"]}},
+  "Q96000002": {"label": "United Kingdom", "claims": {"P297": ["GB"]}},
+  "Q96000003": {"label": "France", "claims": {"P297": ["FR"]}},
+  "Q96000004": {"label": "Japan", "claims": {"P297": ["JP"]}},
+  "Q96000005": {"label": "Australia", "claims": {"P297": ["AU"]}},
+  "Q97000001": {"label": "film"},
+  "Q97000002": {"label": "television series"},
+  "Q97000004": {"label": "novel"},
+  "Q98000001": {"label": "Ledger trilogy"}
+}
