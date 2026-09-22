@@ -80,15 +80,16 @@ class _Connections:
             pool = self._local.pool = {}
         return pool
 
-    def get(self, host, timeout):
+    def get(self, host, timeout, scheme="https"):
         pool = self._pool()
-        connection = pool.get(host)
+        connection = pool.get((scheme, host))
         if connection is None:
-            connection = pool[host] = http.client.HTTPSConnection(host, timeout=timeout)
+            kind = http.client.HTTPConnection if scheme == "http" else http.client.HTTPSConnection
+            connection = pool[(scheme, host)] = kind(host, timeout=timeout)
         return connection
 
-    def drop(self, host):
-        connection = self._pool().pop(host, None)
+    def drop(self, host, scheme="https"):
+        connection = self._pool().pop((scheme, host), None)
         if connection is not None:
             connection.close()
 
@@ -114,7 +115,7 @@ CONDITIONAL = ("If-None-Match", "If-Modified-Since")
 
 
 def request(host, path, params=None, method="GET", body=None, headers=None, timeout=TIMEOUT,
-            attempts=ATTEMPTS, received=None):
+            attempts=ATTEMPTS, received=None, scheme="https"):
     """One request, retried while the failure is transient. Returns the response body as bytes.
 
     `params` is encoded with `quote_via=quote`, so a `+` in an article title stays a plus. `urlencode`'s
@@ -125,6 +126,9 @@ def request(host, path, params=None, method="GET", body=None, headers=None, time
     `received`, when given, is a dict filled with the answer's `status`, `etag` and `last-modified`. A
     request that sent one of the `CONDITIONAL` headers returns an empty body on a 304, and `received` is
     how the caller tells "unchanged" from an empty file.
+
+    `scheme` is `http` only for den-embed, which is self-hosted on the LAN or a container port and speaks
+    no TLS. `host` may carry a port.
     """
     target = path
     if params:
@@ -133,18 +137,18 @@ def request(host, path, params=None, method="GET", body=None, headers=None, time
     sent = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     sent.update(headers or {})
 
-    url = f"https://{host}{path}"
+    url = f"{scheme}://{host}{path}"
     delay = BASE_DELAY
     for attempt in range(1, attempts + 1):
         last = attempt == attempts
         try:
-            connection = _connections.get(host, timeout)
+            connection = _connections.get(host, timeout, scheme)
             connection.request(method, target, body=body, headers=sent)
             response = connection.getresponse()
             payload = response.read()
         except (http.client.HTTPException, OSError) as transport:
             # A dead connection is the ordinary way a kept-open socket ends; drop it and ask again.
-            _connections.drop(host)
+            _connections.drop(host, scheme)
             if last:
                 raise HTTPError(0, url) from transport
             wait = None

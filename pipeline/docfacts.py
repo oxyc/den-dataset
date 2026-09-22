@@ -15,7 +15,7 @@ from zero each time is how a polite scrape turns into an impolite one. An id alr
 re-queried.
 
 **An id Wikidata states neither fact for is recorded EMPTY, not skipped.** Absent and empty mean different
-things one level up — `embed-corpus` reads an empty row as "no clause", while a missing key is a title the
+things one level up — the embed stage reads an empty row as "no clause", while a missing key is a title the
 scrape never reached — and recording the empty row is also what stops the resume re-querying it forever.
 
 **There is a cheaper path when the facts sidecar already exists.**

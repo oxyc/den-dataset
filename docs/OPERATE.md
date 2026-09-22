@@ -139,7 +139,7 @@ generation 38,532. Neither number is `premise-tags-v1.json`'s 37,533.
 **Deploy the env with the corpus.** `maxTokens` is part of the embedder identity, so the serving box must
 run den-embed with `MAX_TOKENS=1024` permanently or the manifest and the service will disagree.
 
-`embed-corpus` still refuses when a plot cap would not fit the service's token cap, because den-embed
+The embed stage still refuses a service whose token cap the pinned plot cap would not fit, because den-embed
 truncates server-side and says nothing. Its ceiling is 1024 tokens (peak RSS 1219 MB against a 1536 MB
 limit), so a longer cap needs both settings raised together.
 
@@ -197,36 +197,26 @@ python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --li
 ./den stage articles --out-dir out --dataset-version <ver>            # the whole article per grounded title
 ./den stage classify --out-dir out --dataset-version <ver> --plan     # then again without --plan
 
-# 4. embed-corpus — compose(facts + already-decided tags + Wikipedia plot) -> den-embed -> int8[1024];
+# 4. Embed — compose(genres + creators + already-decided tags + Wikipedia plot) -> den-embed -> int8[1024];
 #     append to the index store. Reads labels-t02.json, so run it after a classification pass that wrote
 #     labels (step 3a, or `scripts/v2/merge_classify_labels.py`), or to re-embed a corpus whose labels did
-#     not change. The flags must match out/index/composition.json or the run refuses — two doc
-#     shapes in one vector space is the failure that record exists to prevent.
+#     not change. The document shape — lean, no director clause, plot cap 3500 — is pinned in
+#     `pipeline/embed.py` and recorded in out/index/composition.json; a store that records another is
+#     refused, because two doc shapes in one vector space is the failure that record exists to prevent.
 #     First run in a fresh out-dir records the service's identity to out/index/embedder.json; later runs
 #     refuse if the service no longer matches it. An out-dir with a store but no embedder.json also refuses —
 #     what built it is unknown, and guessing is how the corpus/query drift went unnoticed in the first place.
-#     The same holds for out/index/composition.json, which records how the DOCUMENT was composed —
-#     docShape, dropDirector, plotCap. The embedder identity cannot see any of those, and they change the
-#     vector completely.
+#     Every run verifies the canary against the service before it appends a row, and records the verified
+#     space as out/index/embedding-space.json. It resumes, repairs a store torn by a kill, and takes
+#     `--pause-ms` and `--limit` for a long run (`scripts/embed-corpus-run.sh` segments one).
+#     `doc-facts.json` is two of the document's clauses and is required: `./den stage docfacts --out-dir
+#     out --dataset-version <ver>` (~770 SPARQL requests, resumable), or `scripts/v2/derive_doc_facts.py
+#     --facts out/facts-<ver>.json --out out/doc-facts.json` when a facts sidecar already exists.
 export DEN_EMBED_URL=http://127.0.0.1:8791     # default; set if the service is elsewhere
-#     `./den stage embed --out-dir out --dataset-version <ver>` runs exactly this, with the composition
-#     pinned rather than typed — `--doc-facts`, `--doc-drop-director` and `--plot-cap 3500` are what the
-#     shipped index was built with, and the stage checks the run's own index/composition.json against them
-#     afterwards, which is the proof that the composition asked for is the one recorded. (A misspelling is
-#     no longer a silently different document: embed-corpus refuses a flag it does not declare, and
-#     `--help` lists the ones it does.) It resumes the same way, adds `--pause-ms` and `--limit` for a long
-#     run, and refuses a run that recorded no verified space.
-#     `doc-facts.json` is two of the document's clauses — director and genre, from Wikidata — and without
-#     it the command composes the FULL shape instead, which is a different vector space with nothing in
-#     the output saying so. `./den stage embed` runs the scrape as its own stage first; by hand it is
-#     `./den stage docfacts --out-dir out --dataset-version <ver>` (~770 SPARQL requests, resumable), or
-#     `scripts/v2/derive_doc_facts.py --facts out/facts-<ver>.json --out out/doc-facts.json` when a facts
-#     sidecar already exists, which needs no requests at all.
-$BIN embed-corpus --out-dir out --labels out/labels-t02.json \
-    --doc-facts out/doc-facts.json --doc-drop-director --plot-cap 3500
+./den stage embed --out-dir out --dataset-version <ver>
 #     `--dump-docs <path>` writes the composed documents and embeds NOTHING, for embedding elsewhere — the
-#     arm64/x86_64 split means the documents travel to the serving box rather than the vectors coming back.
-#     It needs no embedder: gating it on one would mean standing up a service purely to write text.
+#     documents travel to the serving box rather than the vectors coming back. It needs no embedder: gating
+#     it on one would mean standing up a service purely to write text.
 
 # 4a. The other half of --dump-docs: embed the documents ON THE BOX, against the service that answers live
 #     queries. The canary is mounted alongside the script because it is the thing that decides whether any
@@ -323,17 +313,20 @@ cannot be known — and guessing writes the guess down as a fact. Recover it ins
 The shipped store's values are already established: **`{"docShape":"lean","dropDirector":true,"plotCap":3500}`**
 for `out-t02-cc0b`. They apply to that store and no other. For any other store:
 
+The embed stage composes that one shape and nothing else, so a probe composes its own documents with
+`pipeline/compose.py` — `capped_plot(plot, cap)`, and `lean(...)` with a `Directed by …` clause prepended
+for the director variant — and embeds them with `lib/denembed.embed_many`.
+
 1. **Pick probes.** ~10 titles whose plot is far longer than any candidate cap, that carry **no** Wikidata
    director (so the director flag cannot confound the cap), and that appear in exactly one batch. Plus 2
    short-plot titles that **do** carry a director — the cap cannot touch those, so they isolate the flag and
    double as a rig control.
-2. **Target them with a subset `--labels` file.** `--limit` is a counter, not a selector; it takes the first
-   N in read order. A `LabelsArtifact` holding only the probe records works — every other title is skipped
-   as `missingLabel`.
-3. **Settle the shape first**, at any cap, on the short-plot director titles: run with and without
-   `--doc-drop-director`. Exactly one matches.
-4. **Then sweep the cap** on the long titles, holding the shape fixed. `assertDocFits` caps it at 3596, so
-   the answer is an integer in (0, 3596].
+2. **Compose only the probes.** A labels file holding only the probe records works — every other title is
+   skipped as `missingLabel`.
+3. **Settle the shape first**, at any cap, on the short-plot director titles: with and without the director
+   clause. Exactly one matches.
+4. **Then sweep the cap** on the long titles, holding the shape fixed. At a 1024-token service the fit check
+   allows up to 3596, so the answer is an integer in (0, 3596].
 5. **Compare exact bytes**, from the store's own `index/vectors.jsonl` against the shipped
    `vectors-bge-m3.bin` (a `DENVEC02` blob: 16-byte header, a u64 key per row, then row-major int8 — look
    the row up BY KEY, `(media << 32) | tmdbId`, rather than by position in `labels-t02.json`). Judge

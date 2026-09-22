@@ -2,10 +2,11 @@
 # Build the bge-m3 vector corpus SAFELY (the "semantic vectors now" path). Safety layers:
 #   1. den-embed runs with a bounded per-request batch + token cap so a single request can't spike ONNX
 #      activation memory.
-#   2. embed-corpus streams enriched batches (one in memory at a time) + small --chunk requests + is RESUMABLE.
+#   2. the embed stage (`./den stage embed`) streams enriched batches (one in memory at a time), sends small
+#      requests, and is RESUMABLE.
 #   3. SEGMENTS: den-embed is restarted fresh every SEGMENT titles. ONNX Runtime's memory arena grows to its
 #      peak and never shrinks, so a long-lived process creeps up (this is what OOM'd the machine before).
-#      Restarting per segment reclaims it; embed-corpus resumes from its store, so no work is lost.
+#      Restarting per segment reclaims it; the stage resumes from its store, so no work is lost.
 #   4. WATCHDOG: a segment that dies (OOM/hang) is retried after a fresh restart.
 # Idempotent — safe to Ctrl-C and re-run.
 #
@@ -21,14 +22,15 @@
 # the whole retrieval design rests on (docs/OPERATE.md) — embedding the corpus with a hand-built binary and
 # serving queries from the image is precisely how it silently breaks.
 #
-# PLOT_CAP is set to fit MAX_TOKENS, and `embed-corpus` refuses outright if it does not — den-embed
-# truncates server-side and says nothing, so a document longer than the cap loses its tail invisibly.
+# The document shape — lean, no director clause, plot cap 3500 — is pinned in `pipeline/embed.py`, not
+# chosen here: anything else is a different vector space in the same store. The cap only fits at
+# MAX_TOKENS=1024, and the stage refuses a service that would truncate — den-embed cuts server-side and says
+# nothing, so a document longer than the cap loses its tail invisibly.
 #
-# DEFAULTS ARE 1024/3500, NOT 512/1500. The shipped corpus was embedded from uncapped plots (it predates
-# the commit that added capping by four hours, against the Python service, which had no token cap at all).
-# Plot is ~87% of the composed document, so the cap is most of what the vector sees. Per title: at 512
-# tokens ~61% of titles are truncated and keep ~73% of their plot; at 1024 only ~21% are, keeping ~97%.
-# The cost is wall-clock — max_request_tokens is 8192, so CHUNK drops to 7 and the run takes ~2-3x longer.
+# MAX_TOKENS DEFAULTS TO 1024, NOT 512. Plot is ~87% of the composed document, so the cap is most of what
+# the vector sees. Per title: at 512 tokens ~61% of titles are truncated and keep ~73% of their plot; at
+# 1024 only ~21% are, keeping ~97%. The cost is wall-clock — max_request_tokens is 8192, so the stage sends
+# 7 documents a request and the run takes ~2-3x longer.
 #
 # Do NOT summarise plots to fit a smaller budget: a ~1200-char summary compresses harder than the
 # truncation it replaces, cannot carry the proper nouns a dense retriever matches on, and is an
@@ -44,35 +46,22 @@ LABELS="${1:?usage: embed-corpus-run.sh <existing labels-t02.json>}"
 # NO default out-dir. It used to be `out-vecnow`, which is an abandoned partial store from the July OOM —
 # a bare re-run resumed into it and failed confusingly. Naming the destination is one word and removes a
 # whole class of "why did it write nothing".
-OUT_DIR="${OUT_DIR:?set OUT_DIR — a FRESH directory, e.g. OUT_DIR=out-t02-rebuild. Never out-t02: embed-corpus
+OUT_DIR="${OUT_DIR:?set OUT_DIR — a FRESH directory, e.g. OUT_DIR=out-t02-rebuild. Never out-t02: the stage
 skips titles already in the target store BEFORE recomposing, so pointing it at the live corpus reports
 \"written: 0\" and finalizes, discarding the entire point of the run.}"
 # Derived from the labels file's own directory rather than defaulted to `out/enriched`, which is a t01-era
 # directory that has not been the live enrichment data for two taxonomy generations.
 ENRICHED_DIR="${ENRICHED_DIR:-$(dirname "$LABELS")/enriched}"
-# Docs per /embed/batch request. Bounded by den-embed's max_request_tokens (8192) against MAX_TOKENS per
-# doc: 8192/1024 = 8, and 7 leaves a margin.
-#
 # There is deliberately NO MAX_BATCH passed to den-embed here. It reads like a server-side micro-batch and is not one
 # — den-embed's embed_many maps embed_one SERIALLY, so it bounds no memory whatsoever; it is purely a
 # rejection threshold, returning 413 when a request carries more texts than it allows. Setting it to 8 while
-# sending 15 docs meant every single request was rejected, and Transport treats 413 as definitive, so the
-# whole-corpus re-embed failed on its first flush having written nothing. MAX_TOKENS is the actual memory
-# bound, because inference is one document at a time.
-CHUNK="${CHUNK:-7}"
+# sending 15 docs meant every single request was rejected, and a 413 is definitive, so the whole-corpus
+# re-embed failed on its first flush having written nothing. MAX_TOKENS is the actual memory bound, because
+# inference is one document at a time.
 MAX_TOKENS="${MAX_TOKENS:-1024}"
-# The plot cap must fit MAX_TOKENS or den-embed truncates the document server-side and says nothing — see
-# `assertDocFits`, which refuses rather than letting that happen.
-PLOT_CAP="${PLOT_CAP:-3500}"
-# The document SHAPE, which is as much a part of the store's identity as the embedder is. The shipped index
-# is the CC0 lean shape with the director clause dropped; `index/composition.json` records it and both
-# `embed-corpus` and `assemble` now refuse a run that differs. Defaulted rather than optional, because the
-# previous default composed the FULL shape — which nothing ships, so this script was the one thing
-# guaranteed not to reproduce the index it exists to build.
+# Director and genre from Wikidata — two clauses of the document, and required: without them the document
+# is not the CC0 shape at all.
 DOC_FACTS="${DOC_FACTS:-out-t02-cc0/doc-facts.json}"
-# Any non-empty value means DROP. `DROP_DIRECTOR=0` would too, so the off switch is an EMPTY string.
-DROP_DIRECTOR="${DROP_DIRECTOR:-1}"
-[ "$DROP_DIRECTOR" = "0" ] && DROP_DIRECTOR=""
 SEGMENT="${SEGMENT:-5000}"            # titles per den-embed lifetime, then restart it fresh
 IMAGE="${DEN_EMBED_IMAGE:-ghcr.io/oxyc/den-embed:latest}"
 RUNTIME="${DEN_EMBED_RUNTIME:-podman}"
@@ -80,16 +69,15 @@ PORT="${DEN_EMBED_PORT:-8791}"
 NAME="den-embed-corpus-$$"
 # Under the out-dir, not /tmp: predictable world-writable paths, and the logs belong with the run anyway.
 EMBED_LOG="${EMBED_LOG:-$OUT_DIR/den-embed.log}"
-ERR_LOG="${ERR_LOG:-$OUT_DIR/embed-corpus.err}"
+ERR_LOG="${ERR_LOG:-$OUT_DIR/embed.err}"
 
 export DEN_EMBED_URL="http://127.0.0.1:$PORT"
 
 [ -f "$LABELS" ] || { echo "missing labels file: $LABELS"; exit 1; }
 [ -d "$ENRICHED_DIR" ] || { echo "no enriched dir at $ENRICHED_DIR — set ENRICHED_DIR"; exit 1; }
-# Up front, like the others: a missing doc-facts surfaces as a JSON read failure inside the retry loop
-# below, which would boot the 555 MB model once per attempt to reach the same answer.
-[ -z "$DOC_FACTS" ] || [ -f "$DOC_FACTS" ] \
-    || { echo "missing doc-facts file: $DOC_FACTS — set DOC_FACTS, or DOC_FACTS= for the full doc shape"; exit 1; }
+# Up front, like the others: a missing doc-facts is a refusal inside the retry loop below, which would boot
+# the 555 MB model once per attempt to reach the same answer.
+[ -f "$DOC_FACTS" ] || { echo "missing doc-facts file: $DOC_FACTS — set DOC_FACTS"; exit 1; }
 mkdir -p "$OUT_DIR"
 command -v "$RUNTIME" >/dev/null || { echo "no $RUNTIME on PATH — set DEN_EMBED_RUNTIME=docker"; exit 1; }
 # Checked UP FRONT, not when it is needed: the `metadata` step at the end calls TMDB, and a multi-hour
@@ -134,8 +122,6 @@ boot_embed() {
   return 1
 }
 
-swift build -c release >/dev/null || { echo "build failed"; exit 1; }
-BIN=.build/release/taxonomy-backfill
 trap stop_embed EXIT
 fails=0
 MAX_FAILS="${MAX_FAILS:-6}"
@@ -143,7 +129,7 @@ MAX_FAILS="${MAX_FAILS:-6}"
 
 for attempt in $(seq 1 200); do
   if ! boot_embed; then
-    # Counts against MAX_FAILS like any other failure. It did not, so the cap bounded only embed-corpus's
+    # Counts against MAX_FAILS like any other failure. It did not, so the cap bounded only the embed pass's
     # own refusals while a container that boots but never serves still burned 200 x 40 probes — the very
     # seven-hour no-op the cap was added to end.
     fails=$((fails + 1))
@@ -152,17 +138,14 @@ for attempt in $(seq 1 200); do
     sleep $((fails * 15))
     continue
   fi
-  # One segment: embed up to SEGMENT new titles, then exit so den-embed can be recycled.
-  # DOC_FACTS and DROP_DIRECTOR are part of the shipped store's identity, not options. Without them this
-  # composed the FULL document shape — title, year and cast included — while the shipped index is the CC0
-  # lean shape with the director clause dropped, so running this script was the one thing guaranteed NOT to
-  # reproduce it. The two settings were unrecorded and had to be recovered by re-embedding probe titles and
-  # comparing bytes (12/12 exact at these; 10/12 with the director clause, 2/12 at cap 1500).
-  out=$("$BIN" embed-corpus --labels "$LABELS" --enriched-dir "$ENRICHED_DIR" --out-dir "$OUT_DIR" \
-        ${DOC_FACTS:+--doc-facts "$DOC_FACTS"} ${DROP_DIRECTOR:+--doc-drop-director} \
-        --chunk "$CHUNK" --plot-cap "$PLOT_CAP" --limit "$SEGMENT" 2>>"$ERR_LOG") || {
-    # Not every failure is a dead container. A refusal from embed-corpus itself — a mixed embedder, a plot
-    # cap the service would truncate, a missing binary — is DETERMINISTIC, and retrying it 200 times boots
+  # One segment: embed up to SEGMENT new titles, then exit so den-embed can be recycled. The inputs are
+  # pointed at with --set because they live beside LABELS, not in OUT_DIR; the stores and their records
+  # are written into OUT_DIR. `--dataset-version` is required by `den` and names no file this stage writes.
+  out=$(./den stage embed --out-dir "$OUT_DIR" --dataset-version unused --limit "$SEGMENT" \
+        --set "vector_labels=$LABELS" --set "enriched=$ENRICHED_DIR" --set "doc_facts=$DOC_FACTS" \
+        2>>"$ERR_LOG") || {
+    # Not every failure is a dead container. A refusal from the stage itself — a mixed embedder, a service
+    # that would truncate, a canary it does not reproduce — is DETERMINISTIC, and retrying it 200 times boots
     # the 555 MB model 200 times to reach the same answer. That was the shape of the seven-hour no-op this
     # script used to be; the trigger was fixed and the amplifier was not.
     fails=$((fails + 1))
@@ -177,8 +160,8 @@ for attempt in $(seq 1 200); do
   echo "$out"
   # A parse failure must NOT read as "written: 0" → "everything is embedded" → finalize a PARTIAL store and
   # exit 0. Distinguish the two: empty means unparseable, and that is a hard stop.
-  written=$(printf '%s' "$out" | python3 -c 'import sys,json;print(json.load(sys.stdin)["written"])' 2>/dev/null)
-  [ -n "$written" ] || { echo "could not read 'written' from embed-corpus output — stopping"; exit 1; }
+  written=$(printf '%s' "$out" | tail -1 | python3 -c 'import sys,json;print(json.load(sys.stdin)["written"])' 2>/dev/null)
+  [ -n "$written" ] || { echo "could not read 'written' from the embed stage's output — stopping"; exit 1; }
   rss=$("$RUNTIME" stats --no-stream --format '{{.MemUsage}}' "$NAME" 2>/dev/null | head -1)
   echo "  segment done: +$written titles (den-embed mem ${rss:-?}); recycling den-embed"
   if [ "$written" -eq 0 ]; then

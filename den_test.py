@@ -129,23 +129,10 @@ class Dispatch(unittest.TestCase):
         grounded title plus an `articles.jsonl` row for it, because a row already in the dump's output is
         a row it resumes past rather than fetches. `fetch` drains in-process, so it gets a checkpoint that
         already holds both universes, with credentials in the environment so the drain does not go hunting
-        for a `den.env` this checkout has no reason to own. Nothing here reaches TMDB. `DEN_BACKFILL_BIN`
-        is a stub for the stages that still run the binary.
+        for a `den.env` this checkout has no reason to own. Nothing here reaches TMDB.
         """
         with tempfile.TemporaryDirectory() as out:
-            stub = os.path.join(out, "stub")
-            with open(stub, "w", encoding="utf-8") as fh:
-                fh.write("#!/usr/bin/env python3\n"
-                         "import json, os, sys\n"
-                         "argv = sys.argv[1:]\n"
-                         "where = argv[argv.index('--out-dir') + 1]\n"
-                         "os.makedirs(os.path.join(where, 'enriched'), exist_ok=True)\n"
-                         "with open(os.path.join(where, 'enrich-checkpoint.json'), 'w') as fh:\n"
-                         "    json.dump({'processed': [], 'nextBatch': 1}, fh)\n"
-                         "print(json.dumps({'remaining': 0, 'count': 0}))\n")
-            os.chmod(stub, 0o755)
-            for name, value in (("DEN_BACKFILL_BIN", stub),
-                                ("TMDB_API_KEY", "stub-key-nothing-here-calls-tmdb"),
+            for name, value in (("TMDB_API_KEY", "stub-key-nothing-here-calls-tmdb"),
                                 ("WIKIMEDIA_ENTERPRISE_TOKEN", "stub-bearer")):
                 previous = os.environ.get(name)
                 os.environ[name] = value
@@ -190,7 +177,8 @@ class Dispatch(unittest.TestCase):
         loader.exec_module(module)
         args = argparse.Namespace(set=[], out_dir="out", dataset_version="v", stamp_meta=None, mode=None,
                                   since=None, expect=None, pause_ms=0, limit=None, media=None, vote_floor=40,
-                                  regional_vote_floor=10, imdb_floor=1500, regional_imdb_floor=300, plan=False)
+                                  regional_vote_floor=10, imdb_floor=1500, regional_imdb_floor=300, plan=False,
+                                  dump_docs=None)
         ctx = module.context(args)
         self.assertEqual((ctx.vote_floor, ctx.regional_vote_floor, ctx.imdb_floor, ctx.regional_imdb_floor),
                          (40, 10, 1500, 300))

@@ -99,21 +99,30 @@ def _label(item, where):
 
 
 def record(line, where):
-    """One labels-store line as the record that ships — its declared fields and nothing else.
+    """One labels-store line as the record that ships. See `parse_record`."""
+    try:
+        raw = json.loads(line)
+    except ValueError:
+        raise StageError(f"finalize: {where} is not a labels-store record: {line[:200]}") from None
+    return parse_record(raw, where, line)
 
-    Strict: a line missing a field refuses the run, as the Swift's decode did. Extra keys are dropped
+
+def parse_record(raw, where, line=None):
+    """A label record as it ships — its declared fields and nothing else.
+
+    Strict: a record missing a field refuses the run, as the Swift's decode did. Extra keys are dropped
     rather than carried, which is also what keeps a `plot` an importer left on a row out of the artifact.
     """
     try:
-        raw = json.loads(line)
         ok = (isinstance(raw["tmdbId"], int) and not isinstance(raw["tmdbId"], bool)
               and isinstance(raw["mediaType"], str) and isinstance(raw["primaryGenre"], str)
               and isinstance(raw["subgenres"], list) and isinstance(raw["moods"], list)
               and raw["source"] in SOURCES and isinstance(raw["animated"], bool))
-    except (ValueError, KeyError, TypeError):
+    except (KeyError, TypeError):
         ok = False
     if not ok:
-        raise StageError(f"finalize: {where} is not a labels-store record: {line[:200]}")
+        shown = line if line is not None else json.dumps(raw)
+        raise StageError(f"finalize: {where} is not a labels-store record: {shown[:200]}")
     return {"animated": raw["animated"], "mediaType": raw["mediaType"],
             "moods": [_label(item, where) for item in raw["moods"]],
             "primaryGenre": raw["primaryGenre"], "source": raw["source"],

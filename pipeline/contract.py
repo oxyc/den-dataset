@@ -173,6 +173,10 @@ class Context:
     regional_vote_floor: int | None = None
     imdb_floor: int | None = None
     regional_imdb_floor: int | None = None
+    #: Where the embed pass writes the documents it composes INSTEAD of embedding them, so they can be
+    #: embedded on the den-embed that will serve them. Empty embeds as usual. A path rather than a switch:
+    #: the documents travel, so the operator names where they go.
+    dump_docs: str = ""
 
     def path(self, artifact):
         if artifact.shards:

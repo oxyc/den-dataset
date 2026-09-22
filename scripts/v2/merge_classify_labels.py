@@ -5,7 +5,7 @@
       --labels out-repass/labels-t02.json --out out-repass/labels-t02.json
 
 The run labelled the 9,010 titles that have a Wikipedia plot and no labels. This adds them to the
-store `embed-corpus` reads, in that store's own record shape.
+file the embed stage reads, in that file's own record shape.
 
 ## What is dropped on the way in
 

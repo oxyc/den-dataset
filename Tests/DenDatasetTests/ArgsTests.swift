@@ -12,19 +12,18 @@ import XCTest
 /// DIFFERENT embedding document — and on a fresh out-dir that wrong shape was then written into
 /// index/composition.json as the store's recorded truth, which every later run was matched against. The
 /// documents embed, the vectors rank, the neighbours look plausible; nothing downstream can detect it.
+/// `embed-corpus` is a Python stage now; the reader it exposed still parses `facts`, so these drive that.
 final class ArgsTests: XCTestCase {
     func testUnknownFlagIsRefused() throws {
-        let result = run(["embed-corpus", "--labels", "labels.json", "--out-dir", "out",
-                          "--doc-drop-directer"])
+        let result = run(["facts", "--out-dir", "out", "--has-vectr"])
         XCTAssertNotEqual(result.status, 0, "an unrecognised flag must not be accepted")
-        XCTAssert(result.stderr.contains("unknown flag --doc-drop-directer"),
+        XCTAssert(result.stderr.contains("unknown flag --has-vectr"),
                   "the refusal names the flag it refused: \(result.stderr)")
     }
 
     func testANearMissNamesTheFlagItWasMeantToBe() throws {
-        let result = run(["embed-corpus", "--labels", "labels.json", "--out-dir", "out",
-                          "--doc-drop-directer"])
-        XCTAssert(result.stderr.contains("Did you mean --doc-drop-director?"),
+        let result = run(["facts", "--out-dir", "out", "--has-vectr"])
+        XCTAssert(result.stderr.contains("Did you mean --has-vector?"),
                   "a one-character slip is named, which is what turns it into a one-line fix: \(result.stderr)")
     }
 
@@ -40,27 +39,26 @@ final class ArgsTests: XCTestCase {
     func testValueFlagWithNoValueIsRefused() throws {
         // The second silent path: `--plot-cap` became a BARE flag because the next token started with `--`,
         // so the cap fell back to 1500 while `--chunk` got the 7.
-        let result = run(["embed-corpus", "--labels", "labels.json", "--out-dir", "out",
-                          "--plot-cap", "--chunk", "7"])
+        let result = run(["facts", "--out-dir", "out", "--batch", "--has-vector"])
         XCTAssertNotEqual(result.status, 0, "a value flag with no value must not be accepted")
-        XCTAssert(result.stderr.contains("--plot-cap") && result.stderr.contains("takes a value"),
+        XCTAssert(result.stderr.contains("--batch") && result.stderr.contains("takes a value"),
                   "the refusal names the flag left without a value: \(result.stderr)")
     }
 
     func testMissingRequiredFlagIsRefused() throws {
-        let result = run(["embed-corpus", "--out-dir", "out"])
+        let result = run(["facts", "--labels", "labels.json"])
         XCTAssertNotEqual(result.status, 0)
-        XCTAssert(result.stderr.contains("missing required --labels"), result.stderr)
+        XCTAssert(result.stderr.contains("missing required --out-dir"), result.stderr)
     }
 
     func testABareFlagAndAValueFlagBothStillParse() throws {
         // A bare flag sitting BETWEEN a value flag and a required one is where the two shapes can go wrong
-        // without saying so. If `--doc-drop-director` consumed the next token the way a value flag does, it
-        // would swallow `--labels` and the run would die on a missing required flag; if `--chunk` did not
-        // take its 5, the 5 would be refused as an unknown flag. Reaching the labels FILE — which is read
-        // before any service is asked — is what proves neither happened.
-        let result = run(["embed-corpus", "--out-dir", "/nonexistent", "--chunk", "5",
-                          "--doc-drop-director", "--labels", "/nonexistent/labels.json"])
+        // without saying so. If `--has-vector` consumed the next token the way a value flag does, it would
+        // swallow `--labels` and the run would read no labels; if `--batch` did not take its 5, the 5 would
+        // be refused as an unknown flag. Reaching the labels FILE — which is read before anything is asked
+        // of Wikidata — is what proves neither happened.
+        let result = run(["facts", "--out-dir", "/nonexistent", "--batch", "5",
+                          "--has-vector", "--labels", "/nonexistent/labels.json"])
         XCTAssertNotEqual(result.status, 0)
         XCTAssertFalse(result.stderr.contains("missing required"),
                        "the bare flag consumed its neighbour: \(result.stderr)")
@@ -71,11 +69,10 @@ final class ArgsTests: XCTestCase {
     }
 
     func testHelpListsTheSubcommandsFlags() throws {
-        let result = run(["embed-corpus", "--help"])
+        let result = run(["facts", "--help"])
         XCTAssertEqual(result.status, 0, "--help is not an error")
-        for flag in ["--out-dir", "--labels", "--enriched-dir", "--doc-facts", "--doc-drop-director",
-                     "--chunk", "--plot-cap", "--limit", "--pause-ms", "--dump-docs"] {
-            XCTAssert(result.stdout.contains(flag), "\(flag) is missing from embed-corpus --help")
+        for flag in ["--out-dir", "--ids", "--labels", "--batch", "--has-vector", "--titles-only"] {
+            XCTAssert(result.stdout.contains(flag), "\(flag) is missing from facts --help")
         }
         XCTAssert(result.stdout.contains("(required)"), "required flags are marked as such")
         XCTAssertFalse(result.stdout.contains("--vectors"), "another command's flags are not listed")
@@ -85,10 +82,10 @@ final class ArgsTests: XCTestCase {
         let result = run([])
         XCTAssertNotEqual(result.status, 0, "naming no command is a usage error")
         // Every command that survives: the vote-pass generation went with the Jev pass, the deterministic
-        // ones — `finalize` among them — and `enrich` are Python now, and `metadata` went with the poster
-        // sidecar. Naming all of them rather than a sample, so a command that disappears from the overview
-        // fails here rather than in an operator's terminal.
-        for command in ["embed-corpus", "facts", "recluster"] {
+        // ones — `finalize` and `embed-corpus` among them — and `enrich` are Python now, and `metadata` went
+        // with the poster sidecar. Naming all of them rather than a sample, so a command that disappears from
+        // the overview fails here rather than in an operator's terminal.
+        for command in ["facts", "recluster"] {
             XCTAssert(result.stderr.contains(command), "\(command) is missing from the overview")
         }
     }
@@ -97,7 +94,7 @@ final class ArgsTests: XCTestCase {
         let result = run(["embed-korpus"])
         XCTAssertNotEqual(result.status, 0)
         XCTAssert(result.stderr.contains("unknown command 'embed-korpus'"), result.stderr)
-        XCTAssert(result.stderr.contains("embed-corpus"), "the overview follows the refusal")
+        XCTAssert(result.stderr.contains("facts"), "the overview follows the refusal")
     }
 
     // MARK: - helpers

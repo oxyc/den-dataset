@@ -93,10 +93,10 @@ jobs:
       # producer registry derived from the stage order, the corpus, embed and store stages against the
       # rules they wrap, and `den`.
       #
-      # The embed stage's equivalence oracle is not here and cannot be: it needs a Swift toolchain and a
-      # live den-embed, and it is byte comparison against the real service. What runs here is the argument
-      # list, the pinned composition and what the stage does with the result. The worklist stage's oracle
-      # is out for the same reason — the toolchain, and a 28 MB daily dump from files.tmdb.org.
+      # The embed stage runs here against a den-embed stand-in on a local port — its gates, its resume and
+      # its tear repair — and its composer against documents the Swift composer wrote. What cannot run here
+      # is the real model; that is what the committed canary checks on every run. The worklist stage's
+      # oracle is out for the toolchain, and a 28 MB daily dump from files.tmdb.org.
       #
       # `lib/` is tested here rather than beside a stage because two stages share it, and because its
       # cache key is a CONTRACT with 2.1 GB of bodies already on disk: `lib/cache_test.py` pins two
@@ -119,7 +119,7 @@ jobs:
       # to; this fails the build on a module under `pipeline/` that no stage reaches, and on one under
       # `store/` that the writer the store stage runs does not reach.
       - name: The pipeline
-        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/docfacts_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/imdb_test.py lib/plot_test.py lib/enterprise_test.py guards/reachable_test.py den_test.py
+        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/docfacts_test.py pipeline/compose_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/imdb_test.py lib/plot_test.py lib/enterprise_test.py lib/denembed_test.py guards/reachable_test.py den_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The
       # guards above are the pieces; this is whether the script wires them up — that it refuses a wrong
       # hash, a missing blob, a dropped key, a shrunk count and a blob from a dead generation, and that

@@ -22,6 +22,7 @@ Options (both run forms):
     --imdb-floor N                 the IMDb vote count that admits a title TMDB's floor left out
     --regional-imdb-floor N        the same, for the regional tier
     --plan                         the classify pass validates and reports, and buys nothing
+    --dump-docs PATH               the embed pass writes its documents here and embeds nothing
     --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
                                    NAME to name every shard of a set
 
@@ -82,7 +83,8 @@ def context(args):
                             expect=args.expect, pause_ms=args.pause_ms, limit=args.limit,
                             media=args.media or "", vote_floor=args.vote_floor,
                             regional_vote_floor=args.regional_vote_floor, imdb_floor=args.imdb_floor,
-                            regional_imdb_floor=args.regional_imdb_floor, plan=args.plan)
+                            regional_imdb_floor=args.regional_imdb_floor, plan=args.plan,
+                            dump_docs=args.dump_docs or "")
 
 
 def execute(module, ctx):
@@ -119,6 +121,8 @@ def main(argv=None):
                          help="the regional tier's IMDb vote floor (default 500)")
         sub.add_argument("--plan", action="store_true",
                          help="the classify pass validates and reports its call plan, and buys nothing")
+        sub.add_argument("--dump-docs", metavar="PATH",
+                         help="the embed pass writes the documents it composes here and embeds nothing")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
         return sub
 

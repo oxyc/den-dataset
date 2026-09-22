@@ -256,7 +256,7 @@ def run(ctx, cache=None):
             # gone on sending an operator to a script the pipeline no longer runs.
             f"when it grounds a title — build the batches with: {fetch_stage.HOW}")
     # Applied after the refusal above, so `--limit 0` asks for nothing rather than reading as an empty
-    # enrichment — and 0 means zero here, as it does to `enrich` and `embed-corpus`.
+    # enrichment — and 0 means zero here, as it does to `enrich` and the embed stage.
     if ctx.limit is not None:
         todo = todo[:ctx.limit]
     print(f"  articles: {len(done)} already dumped, {len(todo)} to fetch", file=sys.stderr)
