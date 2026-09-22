@@ -9,7 +9,7 @@
   "scripts/v2/import_box_vectors.py": "joins embed_docs.py's box output back into an index store finalize reads",
   "scripts/v2/merge_classify_labels.py": "folds a classification phase directory into labels-t02.json without losing a title",
   "scripts/v2/embed_premise_v2.py": "builds the premise vector blob, reusing only base vectors the live embedder reproduces byte for byte",
-  "scripts/v2/build_premise_labels.py": "writes labels-premise.json in the premise blob's row order; the store reads it until the genres & moods reader switch",
+  "scripts/build-premise-tags.py": "rebuilds data/premise-tags-v1.json, the strings behind the v1 premise vectors, from the v1 tag batches; it reads labels-premise.json, it does not write it",
   "scripts/v2/seed_genres_moods_curated.py": "seeded data/genres-moods-curated.json; moves into the package that owns it under oxyc/den-dataset#73",
   "scripts/v2/resume_combined_excluding.py": "resumes a paid combined run with capacity exceptions quarantined to their own shard, which audit_combined_bundle.py then verifies",
   "scripts/v2/assert_compliance.py": "after any subagent LLM phase: proves from the batch files on disk that no TMDB prose reached a model (TMDb 1.C)",

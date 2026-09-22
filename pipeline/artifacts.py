@@ -308,8 +308,9 @@ PREMISE_VECTORS = Artifact(
 PREMISE_LABELS = Artifact(
     name="premise_labels",
     filename="labels-premise.json",
-    producer="scripts/build-premise-tags.py",
-    how="scripts/build-premise-tags.py",
+    producer="scripts/v2/build_premise_labels.py",
+    how="scripts/v2/build_premise_labels.py --ids <premise ids> --labels <out-dir>/labels-t02.json "
+        "--blob <out-dir>/vectors-premise.bin --out <out-dir>/labels-premise.json",
     manifest_key="premiseLabelsFile",
 )
 
