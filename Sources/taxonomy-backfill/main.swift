@@ -2,24 +2,22 @@ import CryptoKit
 import DenDataset
 import Foundation
 
-// taxonomy-backfill (DT-C) — the one-time central classification + embedding job, structured as discrete,
-// resumable phases so the **Haiku-subagent backend** (chosen in DT-C) can drive it: the Opus loop runs the
-// deterministic Swift phases and slots Haiku subagents in for the per-title labels. No external LLM key.
+// taxonomy-backfill — the fetch and artifact half of the producer, structured as discrete, resumable phases.
+// Labelling is no longer here: the decision-only pass (`scripts/v2/run_combined.py`, the `classify` stage)
+// produces the labels and facets the corpus join reads, so this tool gathers the inputs that pass needs and
+// turns already-decided labels into the shipped artifacts.
 //
-//   worklist  — build the universe (TMDB /discover sorted vote_count.desc for the pilot; daily-export parse
-//               for the full run) → out/worklist-<media>.json
-//   enrich    — next N un-enriched ids → ONE TMDB call each (append_to_response=keywords), drop below the
-//               vote floor / anime / fetch failures (logged) → out/enriched/batch-<id>.json (+ checkpoint).
-//               The enriched batch is SCRATCH (holds raw TMDB text) — fed to Haiku, never shipped.
-//   [Haiku]   — the Opus loop spawns Haiku subagents over the batch → out/votes/batch-<id>-pass<N>.json
-//   assemble  — enriched batch + its vote passes → the SAME calibrated aggregation as the in-process path
-//               (TaxonomyClassifier.classify(rawVotes:)) → embed + int8-quantize → append to the index store.
-//   finalize  — index store → labels-<taxonomy>.json + vectors-<embed>.bin + report.json + dataset.meta.json
-//               (DERIVED only). Folds in the former import-dataset.mjs job (meta + gzipped labels).
-//   score     — labels vs the golden set → primary-genre accuracy + multi-label F1 + per-family precision
-//               (with --gate: exit non-zero if a family misses its target).
+//   worklist      — build the universe (TMDB /discover sorted vote_count.desc for the pilot; daily-export
+//                   parse for the full run) → out/worklist-<media>.json
+//   enrich        — next N un-enriched ids → ONE TMDB call each (append_to_response=keywords), drop below the
+//                   vote floor / anime / fetch failures (logged) → out/enriched/batch-<id>.json (+ checkpoint).
+//                   The enriched batch is SCRATCH (holds raw TMDB text) and is never shipped.
+//   dump-articles — each grounded title's whole Wikipedia article as prose → the classify pass's input.
+//   embed-corpus  — compose(facts + already-decided tags + plot) → den-embed → append to the index store.
+//   finalize      — index store → labels-<taxonomy>.json + vectors-<embed>.bin + report.json +
+//                   dataset.meta.json (DERIVED only). Folds in the former import-dataset.mjs job.
 //
-// Env: TMDB_API_KEY (enrichment only). NO LLM key — the labels come from Haiku subagents, not an API.
+// Env: TMDB_API_KEY (enrichment only). No LLM key — this tool does not classify.
 
 @main
 struct TaxonomyBackfill {
@@ -65,8 +63,7 @@ enum Commands {
         // ids with no vote or date signal, so it costs one detail lookup PER id just to discover that almost
         // all of them are below the floor. A dated `vote_count.desc` slice selects the same titles in a few
         // paged calls. The trade: a re-release or a late metadata fix on an OLD title won't be picked up —
-        // acceptable, because `assemble` re-reads whatever is in the worklist and a periodic full pass covers
-        // drift, whereas paying per-id daily does not scale.
+        // acceptable, because a periodic full pass covers drift, whereas paying per-id daily does not scale.
         case "delta":
             let since = try args.require("--since")
             let floor = args.int("--vote-floor") ?? 50
@@ -154,7 +151,8 @@ enum Commands {
 
     // enrich — next `limit` un-enriched worklist ids → one TMDB call each (append_to_response=keywords),
     // bounded concurrency. Drops below the vote floor / anime / fetch failures (each logged + counted).
-    // Writes one scratch batch file for Haiku + advances the resumable checkpoint.
+    // Writes one scratch batch file the article dump and the embed pass read + advances the resumable
+    // checkpoint.
     static func enrich(_ args: Args) async throws {
         let worklistPath = try args.require("--worklist")
         let outDir = try args.require("--out-dir")
@@ -185,11 +183,10 @@ enum Commands {
             print(JSON.line(["remaining": 0, "count": 0])); return
         }
         // A BATCH HOLDS ONE MEDIA TYPE. Enrichment itself handles both (its Wikidata mapping is keyed by
-        // MediaKey), but everything downstream of the batch file is not: `HaikuVote` carries no media type,
-        // so `loadVotePasses`, `escalation` and `assemble` all key a title by a bare TMDB id. The corpus
-        // holds 1,756 ids that exist as BOTH a movie and a series, so a mixed batch would hand Armageddon
-        // and Buffy the same labels, with nothing in the output to show it. Worklists are written per media,
-        // so this only fires on a hand-assembled one — where failing is far better than labelling silently.
+        // MediaKey), but the corpus holds 1,756 ids that exist as BOTH a movie and a series, and any reader
+        // that keys a batch row by a bare TMDB id would hand Armageddon and Buffy the same record with
+        // nothing in the output to show it. Worklists are written per media, so this only fires on a
+        // hand-assembled one — where failing is far better than mislabelling silently.
         let mediaTypes = Set(pending.map(\.media))
         guard mediaTypes.count == 1 else {
             throw ToolError(message: "worklist mixes \(mediaTypes.map(\.rawValue).sorted().joined(separator: " + ")) "
@@ -258,7 +255,7 @@ enum Commands {
 
         // FP-2 — re-ground on Wikipedia: ONE Wikidata SPARQL maps the surviving ids to their enwiki articles,
         // then each title's plot is fetched live. Where a plot exists it REPLACES the TMDB overview (ToS-clean
-        // grounding for the Haiku classifier); titles keep the TMDB overview only where Wikipedia has no plot.
+        // grounding for the labelling pass); titles keep the TMDB overview only where Wikipedia has no plot.
         // ONE query PER MEDIA TYPE, and the result keyed by both. TMDB's movie and series id spaces overlap
         // (movie 95 is Armageddon, series 95 is Buffy), so a batch holding both cannot share a lookup: taking
         // the whole batch's media from its first entry looked series 91545 up as a MOVIE and grounded Young
@@ -293,13 +290,14 @@ enum Commands {
         var survivors = grounded.map(EnrichedDTO.init)
 
         survivors.sort { $0.tmdbId < $1.tmdbId }
-        // Never write over an existing batch: its vote passes belong to the titles it USED to hold, so a
-        // clobbered batch mislabels silently rather than failing.
+        // Never write over an existing batch: the plots already dumped from it belong to the titles it USED
+        // to hold, so a clobbered batch strands them silently rather than failing.
         let batchPath = Layout.enrichedBatch(outDir, batchId)
         guard !FileManager.default.fileExists(atPath: batchPath) else {
             throw ToolError(message: "refusing to overwrite \(batchPath): it already holds an enriched batch, "
-                + "and any vote passes for id \(batchId) belong to those titles. The enrich checkpoint's "
-                + "nextBatch is out of step with the batches on disk — fix it rather than clobbering.")
+                + "and anything derived from batch \(batchId) belongs to those titles. The enrich "
+                + "checkpoint's nextBatch is out of step with the batches on disk — fix it rather than "
+                + "clobbering.")
         }
         // And never let a NEW batch silently re-cover a key an existing batch already holds. The guard above
         // protects the batch FILE; nothing protected the keys inside it, so 1,855 of 59,218 keys ended up in
@@ -539,93 +537,6 @@ enum Commands {
             index += gate
         }
         return out
-    }
-
-    // enrich-ids — re-fetch an EXPLICIT set of already-vetted ids (taken from a vote file) into one enriched
-    // batch, bypassing the worklist/checkpoint/filters. Used to rebuild a scratch enriched batch that lost
-    // alignment with its votes, and to gather a targeted re-pass set. The published index never contains this.
-    static func enrichIds(_ args: Args) async throws {
-        let outDir = try args.require("--out-dir")
-        let batchId = try args.requireInt("--batch-id")
-        let idsPath = try args.require("--ids")
-        let mediaType: MediaType = args["--media"] == "tv" ? .tv : .movie
-        let rows: [HaikuVote] = try JSON.read(idsPath)
-        let ids = rows.map(\.tmdbId)
-        let tmdb = try TMDB.client()
-        var out: [EnrichedDTO] = []
-        var misses: [String] = []
-        try await withThrowingTaskGroup(of: Result<EnrichedDTO, Error>.self) { group in
-            for id in ids {
-                group.addTask {
-                    do { return .success(EnrichedDTO(try await tmdb.classificationRecord(
-                        MediaIdentifier(id, mediaType)))) }
-                    catch { return .failure(EnrichIDError(id: id, mediaType: mediaType, underlying: error)) }
-                }
-            }
-            // Keep the reason, don't swallow it. The floor below asserts "that is TMDB failing, not dead ids";
-            // a bare `try?` threw away the only evidence for that claim, leaving the operator to guess which
-            // of the two it was. `metadata` logs each miss for exactly this reason.
-            for try await result in group {
-                switch result {
-                case .success(let dto): out.append(dto)
-                case .failure(let error):
-                    misses.append("\(error)")
-                    Log.append(Layout.enrichLog(outDir), "enrich-ids-miss \(error)")
-                }
-            }
-        }
-        // A near-empty batch must not be written and called success: the batch file is the source of truth
-        // for the ids it covers, so whatever is missing ceases to exist downstream.
-        //
-        // The floor is on RETRYABLE failures only. Judging it on total coverage let a genuinely dead id
-        // block a batch for good — on a 5-id targeted re-pass one 404 is 80%, under the 90% floor, and no
-        // amount of re-running fixes a deleted TMDB record. A 404 is an answer; a 429 is not.
-        let retryable = misses.filter { $0.contains("retryable") }.count
-        let retryableShare = ids.isEmpty ? 0 : Double(retryable) / Double(ids.count)
-        guard retryableShare <= 1 - Self.metadataCoverageFloor else {
-            throw ToolError(message: "\(retryable) of \(ids.count) ids failed transiently "
-                + "(\(Int(retryableShare * 100))%, tolerance \(Int((1 - Self.metadataCoverageFloor) * 100))%) "
-                + "— that is TMDB failing, not dead ids. Nothing written; re-run to retry this batch. "
-                + "First few: \(misses.prefix(3).joined(separator: "; "))")
-        }
-        if !misses.isEmpty {
-            let note = "  enrich-ids: \(misses.count) of \(ids.count) ids returned no record "
-                + "(see \(Layout.enrichLog(outDir)))\n"
-            FileHandle.standardError.write(Data(note.utf8))
-        }
-        out.sort { $0.tmdbId < $1.tmdbId }
-        try JSON.writePretty(out, to: Layout.enrichedBatch(outDir, batchId))
-        print(JSON.line(["batchId": batchId, "requested": ids.count, "enriched": out.count]))
-    }
-
-    // escalation — adaptive self-consistency (DT-C / DT-classification-prompt.md): after pass 1, emit the
-    // SUBSET of a batch that needs a 2nd/3rd Haiku pass — primary genre ∈ {Drama, Comedy, Thriller} (the
-    // broad/ambiguous ones) OR a borderline top subgenre (max confidence < 0.65). Confident titles keep just
-    // pass 1; only the hard cases pay for n=3. A title missing from pass 1 is escalated (so it gets re-tried).
-    static func escalation(_ args: Args) throws {
-        let outDir = try args.require("--out-dir")
-        let batchId = try args.requireInt("--batch-id")
-        let borderlinePrimaries: Set<String> = ["Drama", "Comedy", "Thriller"]
-        let borderlineConfidence = 0.65
-
-        let enriched: [EnrichedDTO] = try JSON.read(Layout.enrichedBatch(outDir, batchId))
-        let pass1: [HaikuVote] = (try? JSON.read(Layout.votePass(outDir, batchId, 1))) ?? []
-        let byID = Dictionary(pass1.map { ($0.tmdbId, $0) }, uniquingKeysWith: { a, _ in a })
-
-        let needs = enriched.filter { dto in
-            guard let vote = byID[dto.tmdbId] else { return true }       // missing in pass 1 → re-try
-            guard let primary = vote.primaryGenre else { return true }   // no primary → uncertain
-            if borderlinePrimaries.contains(primary) { return true }     // broad/ambiguous primary → n=3
-            // A weak-but-PRESENT top subgenre is borderline; an absent subgenre is "confidently none", not
-            // borderline — don't pay for n=3 just because a confident Sci-Fi/Horror has no subgenre.
-            if let maxSub = (vote.subgenres ?? []).map(\.confidence).max(), maxSub < borderlineConfidence {
-                return true
-            }
-            return false
-        }
-        try JSON.writePretty(needs, to: Layout.escalateBatch(outDir, batchId))
-        print(JSON.line(["batchId": batchId, "escalate": needs.count, "total": enriched.count,
-                         "file": Layout.escalateBatch(outDir, batchId)]))
     }
 
     // facts — the CC0 facts sidecar den-atlas /recommend ranks on. Takes an explicit id list (the DELTA: the
@@ -1082,8 +993,8 @@ enum Commands {
         // Cap the PLOT portion (facts + tags are always kept). 4000 chars keeps the median plot whole and every
         // mid-plot genre pivot the length audit found, dropping only low-value end-of-plot twist tails — the
         // knee between similarity quality and bge-m3's O(seq^2) embedding cost.
-        // 1500, matching `assemble`: both append to the SAME store and must compose comparable documents,
-        // and 4000 + facts cannot fit any token cap den-embed will accept (its ceiling is 1024 tokens, so
+        // 1500, because every run appends to the SAME store and must compose comparable documents, and
+        // 4000 + facts cannot fit any token cap den-embed will accept (its ceiling is 1024 tokens, so
         // ~4096 chars). The old default was from the Python era, which had no token cap at all.
         let plotCap = args.int("--plot-cap") ?? 1500
 
@@ -1460,178 +1371,6 @@ enum Commands {
         if vectors.count != n { try rewrite(vectors, vectorsPath) }
     }
 
-    // assemble — one enriched batch + its Haiku vote passes → calibrated classification (reused, tested) →
-    // embed + quantize → append to the index store. Opus never classifies; the judgment stays in DenDataset.
-    static func assemble(_ args: Args) async throws {
-        let outDir = try args.require("--out-dir")
-        let batchId = try args.requireInt("--batch-id")
-        let force = args.has("--force")   // re-process already-classified titles (targeted re-pass)
-        // ToS: a no-Wikipedia-plot title was classified from the TMDB overview PROSE (the enrichment fallback),
-        // so its labels derive from TMDB expressive text. TMDB's terms forbid that use — drop those titles from
-        // the shipped index entirely. Their vectors were already plot-empty; here we skip the whole record.
-        let requireWikiPlot = args.has("--require-wiki-plot")
-        // Cap the embedded plot (assemble used the FULL ~6000-char overview → slow O(seq²) embeds + big RAM).
-        // The setup/premise dominates the vector anyway; a cap speeds it up and bounds memory.
-        let plotCap = args.int("--plot-cap") ?? 1500
-        // Embedder: `den-embed` (default, FP-2 — bge-m3 int8[1024] via the service) or `fnv` (offline
-        // HashingEmbedder fallback, e.g. for a network-free run/test). The composed doc feeds BOTH.
-        let embedderKind = args["--embedder"] ?? "den-embed"
-        let denEmbed = DenEmbedClient()
-        let fnv = HashingEmbedder()
-        // Same guard as embed-corpus: assemble appends to the SAME store, so it is just as able to mix two
-        // generations of the service into one corpus. `--embedder fnv` is the offline fallback and has no
-        // service to ask.
-        if embedderKind != "fnv" {
-            try await recordEmbedder(outDir: outDir, client: denEmbed, plotCap: plotCap)
-        }
-        // And the same guard on the DOCUMENT, which is where this actually differs from `embed-corpus`:
-        // that composes the CC0 lean shape when given `--doc-facts`, while this always composes the full one
-        // (title, year and cast) at its own default cap. So appending here to a lean store mixes two
-        // document shapes in one vector space — the near-miss that motivated the composition record, and it
-        // was still open in exactly this function while the comment above claimed parity.
-        //
-        // NOT gated on `--embedder fnv`: the document is composed the same way whoever embeds it, so a wrong
-        // shape is wrong regardless of which embedder turns it into numbers.
-        try recordComposition(outDir: outDir, docShape: "full", dropDirector: false, plotCap: plotCap)
-
-        let enriched: [EnrichedDTO] = try JSON.read(Layout.enrichedBatch(outDir, batchId))
-        let passes = try loadVotePasses(outDir: outDir, batchId: batchId)
-        guard !passes.isEmpty else { throw ToolError(message: "no vote passes for batch \(batchId) in \(Layout.votesDir(outDir))") }
-
-        // Per-family acceptance thresholds (override for calibration sweeps; default = DenDataset calibrated).
-        let defaults = TaxonomyClassifier.Thresholds()
-        let thresholds = TaxonomyClassifier.Thresholds(
-            subgenre: args.double("--sub-threshold") ?? defaults.subgenre,
-            thematic: args.double("--thematic-threshold") ?? defaults.thematic,
-            mood: args.double("--mood-threshold") ?? defaults.mood)
-        let classifier = TaxonomyClassifier(llm: NoLLM(), samples: passes.count, thresholds: thresholds)
-        // Loud on a corrupt checkpoint, like `enrich` twenty lines away — a silent reset here re-classifies
-        // and re-embeds the whole out-dir, which is hours of den-embed time rather than a wrong answer, but
-        // it should still be the operator's decision.
-        let classifyCkPath = Layout.classifyCheckpoint(outDir)
-        var classified: ClassifyCheckpoint
-        if FileManager.default.fileExists(atPath: classifyCkPath) {
-            do { classified = try JSON.read(classifyCkPath) } catch {
-                throw ToolError(message: "classify checkpoint at \(classifyCkPath) is unreadable (\(error)); "
-                    + "refusing to reset progress — restore it, or delete it to intentionally start fresh")
-            }
-        } else {
-            classified = ClassifyCheckpoint()
-        }
-        // Repaired BEFORE the rebuild below reads it — embed-corpus does it in this order too. Reading
-        // first would mark rows done that the repair is about to drop, and they would never be re-embedded.
-        try reconcileStore(Layout.labelsStore(outDir), Layout.vectorsStore(outDir))
-
-        // A legacy bare-Int checkpoint cannot say which media each id belonged to, so rebuild the set from
-        // the labels store, which records mediaType per row. Titles that were classified but DROPPED
-        // (noPrimary / no-wiki) have no store row and are re-processed once — CPU and an embed, no LLM
-        // spend — which is the cost of recovering the 940 TV series the un-keyed set was hiding.
-        if classified.needsMigration {
-            var rebuilt: Set<String> = []
-            if FileManager.default.fileExists(atPath: Layout.labelsStore(outDir)) {
-                for line in try FileIO.readLines(Layout.labelsStore(outDir)) {
-                    if let r: IndexRecord = try? JSON.decode(line) {
-                        rebuilt.insert(ClassifyCheckpoint.key(r.mediaType, r.tmdbId))
-                    }
-                }
-            }
-            // The store is the only record of which media each legacy id was, so a rebuild that finds far
-            // fewer than the checkpoint claimed means the store is missing or truncated — not that the work
-            // was never done. Silently accepting it re-classifies and re-embeds the whole out-dir.
-            if rebuilt.count * 2 < classified.legacyCount {
-                throw ToolError(message: "the classify checkpoint records \(classified.legacyCount) titles "
-                    + "but only \(rebuilt.count) are in \(Layout.labelsStore(outDir)), so migrating it "
-                    + "would discard most of the run's progress. Restore the labels store, or delete the "
-                    + "checkpoint to intentionally start fresh.")
-            }
-            FileHandle.standardError.write(Data(("  migrated the classify checkpoint to media-qualified "
-                + "keys (\(rebuilt.count) from the labels store, was \(classified.legacyCount))\n").utf8))
-            classified.done = rebuilt
-            classified.needsMigration = false
-        }
-        // Opus-confirmed world-knowledge labels (DT-G title-recognition adjudication) that survive the vc gate.
-        // Keyed "movie:123"/"tv:123" like every other map here. wk-confirmed.json is ONE file per
-        // out-dir and delta-run/enrich-all put both media in the same one, so a bare Int key let a
-        // series' Opus-confirmed world-knowledge labels apply to the movie sharing its id — for exactly
-        // the 940 colliding titles, and exactly the hallucinated-tail label the vote gate exists to strip.
-        // A legacy bare id applies to BOTH media: it does not record which was adjudicated, and reading
-        // them all as movies dropped 87 series-only entries outright.
-        let wkPath = Layout.wkConfirmed(outDir)
-        let wkConfirmed = try WorldKnowledge.load(at: wkPath)
-        if let raw = try? JSON.read(wkPath) as [String: [String]] {
-            let unkeyed = WorldKnowledge.unkeyedCount(raw)
-            if unkeyed > 0 {
-                FileHandle.standardError.write(Data(("  note: \(wkPath) holds \(unkeyed) bare id(s); each "
-                    + "applies to BOTH media — the file does not record which was adjudicated\n").utf8))
-            }
-            let unusable = WorldKnowledge.unusableKeys(raw)
-            if !unusable.isEmpty {
-                FileHandle.standardError.write(Data(("  warning: \(wkPath) has \(unusable.count) key(s) "
-                    + "that are neither qualified nor a plain id and were DROPPED: "
-                    + "\(unusable.prefix(5).joined(separator: ", "))\n").utf8))
-            }
-        }
-        var noPrimary = 0, missingVotes = 0, droppedNoWiki = 0
-
-        let labelsHandle = try FileIO.appender(Layout.labelsStore(outDir))
-        let vectorsHandle = try FileIO.appender(Layout.vectorsStore(outDir))
-        defer { try? labelsHandle.close(); try? vectorsHandle.close() }
-
-        // Embeds are BATCHED (den-embed /embed/batch). The old per-title `embedInt8` paid a network round-trip
-        // each (~1/s → ~14h for the corpus); a chunked batch removes that overhead — but NOT the inference
-        // cost, because den-embed's `embed_many` maps `embed_one` serially. At its measured ~0.33s/512
-        // tokens the floor for a full corpus is ~4-5h, not the "~20-30min" this comment used to claim. A title
-        // is only marked done once its vector is actually flushed, so a crash never checkpoints an unwritten row.
-        let denEmbedChunk = args.int("--chunk") ?? 8   // small: bge-m3 attention is O(batch·seq²) — big batches of
-                                                       // long docs spike den-embed RAM (swap-thrash). Keep it low.
-        var buffer: [(tmdbId: Int, record: IndexRecord, doc: String)] = []
-        func flush() async throws {
-            guard !buffer.isEmpty else { return }
-            let vectors: [[Int8]] = embedderKind == "fnv"
-                ? buffer.map { Quantizer.int8(blockingEmbed(fnv, $0.doc)) }
-                : try await denEmbed.embedManyInt8(buffer.map(\.doc))
-            guard vectors.count == buffer.count else {
-                throw ToolError(message: "den-embed returned \(vectors.count) vectors for \(buffer.count) docs")
-            }
-            for (item, vector) in zip(buffer, vectors) {
-                try labelsHandle.writeLine(JSON.encodeLine(item.record))
-                try vectorsHandle.writeLine(JSON.encodeLine(VectorRow(tmdbId: item.tmdbId, v: vector.map(Int.init))))
-                classified.done.insert(ClassifyCheckpoint.key(item.record.mediaType, item.tmdbId))
-            }
-            buffer.removeAll(keepingCapacity: true)
-        }
-
-        for dto in enriched where force || !classified.done.contains(ClassifyCheckpoint.key(dto.mediaType, dto.tmdbId)) {
-            // One raw-JSON string per pass for this title (re-serialized) → the calibrated aggregation seam.
-            let raws: [String] = passes.compactMap { $0[dto.tmdbId] }
-            guard !raws.isEmpty else { missingVotes += 1; continue }
-            let title = dto.toEnrichedTitle()
-            if requireWikiPlot && !title.hasWikiPlot { droppedNoWiki += 1; continue }   // ToS: no TMDB-prose labels
-            let confirmedWK = Set(wkConfirmed[ClassifyCheckpoint.key(dto.mediaType, dto.tmdbId)] ?? [])
-            guard let classification = classifier.classify(rawVotes: raws, title: title, confirmedWK: confirmedWK) else {
-                noPrimary += 1
-                classified.done.insert(ClassifyCheckpoint.key(dto.mediaType, dto.tmdbId))
-                continue
-            }
-            // Compose the embedding doc from FACTS + the just-classified TAGS + the (Wikipedia) plot. A title
-            // with no wiki plot composes on facts + tags with an empty Plot — never skipped.
-            let tags = (classification.subgenres + classification.moods).map(\.label)
-            let plot = title.hasWikiPlot ? Self.cappedPlot(title.overview, maxChars: plotCap) : ""
-            let composed = ComposedDoc.build(title: title, tags: tags, plot: plot)
-            // Queue for the next batched embed (den-embed returns the FINAL int8[1024]; do NOT re-quantize).
-            let record = classification.indexRecord(animated: title.genreIDs.contains(16))   // TMDB genre 16
-            buffer.append((dto.tmdbId, record, composed))
-            if buffer.count >= denEmbedChunk { try await flush() }
-        }
-        try await flush()
-        classified.totals.merge(noPrimary: noPrimary, missingVotes: missingVotes)
-        try JSON.write(classified, to: Layout.classifyCheckpoint(outDir))
-        print(JSON.line([
-            "batchId": batchId, "classifiedTotal": classified.done.count,
-            "noPrimary": noPrimary, "missingVotes": missingVotes, "droppedNoWiki": droppedNoWiki,
-        ]))
-    }
-
     /// Expected vector dimension for a known embedding label, or nil (skip the check) for an unrecognized one.
     static func expectedDims(forEmbeddingVersion version: String) -> Int? {
         if version.hasPrefix("bge-m3") { return 1024 }
@@ -1664,8 +1403,8 @@ enum Commands {
                 + "\(allRecords[bad].tmdbId), vectors say \(allRows[bad].tmdbId) — refusing to ship. "
                 + "Re-run embed-corpus, which reconciles the stores before appending.")
         }
-        // De-dup by (mediaType, tmdbId) keeping the LAST occurrence — a targeted re-pass (assemble --force)
-        // appends superseding records, and finalize keeps the newest while preserving aligned vectors.
+        // De-dup by (mediaType, tmdbId) keeping the LAST occurrence — a re-embed appends superseding
+        // records, and finalize keeps the newest while preserving aligned vectors.
         var lastIndex: [String: Int] = [:]
         for (i, r) in allRecords.enumerated() { lastIndex["\(r.mediaType):\(r.tmdbId)"] = i }
         let keep = Set(lastIndex.values)
@@ -2028,131 +1767,6 @@ enum Commands {
         FileHandle.standardError.write(Data(summary.utf8))
     }
 
-    // score — labels vs the golden set: primary-genre accuracy, multi-label F1, per-family precision. The
-    // gate (genres/blended ≥0.90, moods ≥0.75) — with --gate, a miss exits non-zero (fail the run).
-    static func score(_ args: Args) throws {
-        let labelsPath = try args.require("--labels")
-        let goldenPath = try args.require("--golden")
-        let records = try loadRecords(labelsPath)
-        let golden: GoldenSet = try JSON.read(goldenPath)
-
-        // Key by (mediaType, tmdbId): TMDB reuses ids across film/TV, so a bare-id key collides on a
-        // mixed-media golden (movie 1781 ≠ tv 1781).
-        // `"<mediaType>:<tmdbId>"` throughout — the same key the rest of the pipeline uses for a title. This
-        // was an id offset by 10 billion for TV, which worked but re-invented, in one function, a distinction
-        // the codebase already had a shape for.
-        let byKey = Dictionary(records.map { ("\($0.mediaType):\($0.tmdbId)", $0) }, uniquingKeysWith: { a, _ in a })
-        let covered = golden.titles.filter { byKey[$0.key] != nil }
-        guard !covered.isEmpty else { throw ToolError(message: "no golden titles present in \(labelsPath) — nothing to score") }
-
-        let goldenLabels = Dictionary(covered.map { ($0.key, $0.labels) }, uniquingKeysWith: { a, _ in a })
-        let predictedLabels = Dictionary(covered.map { g -> (String, Set<String>) in
-            let r = byKey[g.key]!
-            return (g.key, Set(r.subgenres.map(\.label) + r.moods.map(\.label)))
-        }, uniquingKeysWith: { a, _ in a })
-        let goldenPrimary = Dictionary(covered.map { ($0.key, $0.primaryGenre) }, uniquingKeysWith: { a, _ in a })
-        let predictedPrimary = Dictionary(covered.map { ($0.key, byKey[$0.key]!.primaryGenre) },
-                                          uniquingKeysWith: { a, _ in a })
-
-        let f1 = TaxonomyScorer.score(golden: goldenLabels, predicted: predictedLabels)
-        let primaryAcc = TaxonomyScorer.primaryGenreAccuracy(golden: goldenPrimary, predicted: predictedPrimary)
-        let tax = Taxonomy.current
-
-        // Golden positive support per label + a minimum-support guard: a label with too few golden examples
-        // yields an unstable per-label F1 (a 3-title label swings the family mean; a 0-golden label — e.g. the
-        // emergent themes / Animation — can ONLY register false positives and never validate recall). Exclude
-        // sub-threshold labels from the GATE (still reported) so they can neither fail nor pass the whole run.
-        let minSupport = args.int("--min-support") ?? 10
-        var support: [String: Int] = [:]
-        for labels in goldenLabels.values { for label in labels { support[label, default: 0] += 1 } }
-
-        // Per-family precision AND recall at the current acceptance thresholds — the table used to set the
-        // precision knee (DT-C). Recall = tp/(tp+fn); fn is golden labels the index missed at this cutoff.
-        // Only labels meeting the min-support floor count toward the gate.
-        func familyStats(_ labels: [String]) -> (p: Double, r: Double, tp: Int, fp: Int, fn: Int)? {
-            let set = Set(labels.filter { (support[$0] ?? 0) >= minSupport })
-            let scores = f1.perLabel.filter { set.contains($0.key) }.values
-            let tp = scores.reduce(0) { $0 + $1.truePositives }
-            let fp = scores.reduce(0) { $0 + $1.falsePositives }
-            let fn = scores.reduce(0) { $0 + $1.falseNegatives }
-            guard tp + fp + fn > 0 else { return nil }
-            let p = tp + fp > 0 ? Double(tp) / Double(tp + fp) : 0
-            let r = tp + fn > 0 ? Double(tp) / Double(tp + fn) : 0
-            return (p, r, tp, fp, fn)
-        }
-
-        print("=== golden score (\(covered.count)/\(golden.titles.count) covered, taxonomy \(golden.taxonomyVersion)) ===")
-        print(String(format: "primary-genre accuracy: %.3f", primaryAcc))
-        print(String(format: "multi-label  micro-F1: %.3f   macro-F1: %.3f", f1.microF1, f1.macroF1))
-
-        // Surface (never silently) the labels the min-support guard drops from the gate.
-        let excluded = (tax.subgenres + tax.thematic + tax.moods)
-            .filter { (support[$0] ?? 0) < minSupport }.sorted()
-        if !excluded.isEmpty {
-            print("gate excludes \(excluded.count) label(s) with <\(minSupport) golden examples:")
-            print("  " + excluded.map { "\($0)=\(support[$0] ?? 0)" }.joined(separator: ", "))
-        }
-
-        let families: [(String, [String], Double)] = [
-            ("blended (subgenres)", tax.subgenres, 0.90),
-            ("thematic", tax.thematic, 0.90),
-            ("moods", tax.moods, 0.75),
-        ]
-        var gateFailed = false
-        for (name, labels, target) in families {
-            if let s = familyStats(labels) {
-                let miss = s.p < target
-                gateFailed = gateFailed || miss
-                print(String(format: "family %-20@ precision %.3f  recall %.3f  F1 %.3f (tp=%d fp=%d fn=%d) target P≥%.2f%@",
-                             name as NSString, s.p, s.r,
-                             (s.p + s.r) > 0 ? 2 * s.p * s.r / (s.p + s.r) : 0,
-                             s.tp, s.fp, s.fn, target, miss ? "  ✗ MISS" : "  ✓"))
-            } else {
-                print("family \(name): no predictions (n/a)")
-            }
-        }
-        // Primary genre is its own family — accuracy is its precision (single-label).
-        let primaryMiss = primaryAcc < 0.90
-        gateFailed = gateFailed || primaryMiss
-        print(String(format: "family %-20@ accuracy  %.3f target 0.90%@",
-                     "primary-genre" as NSString, primaryAcc, primaryMiss ? "  ✗ MISS" : "  ✓"))
-
-        if args.has("--gate") && gateFailed {
-            FileHandle.standardError.write(Data("gate FAILED: a family missed its precision target\n".utf8))
-            exit(3)
-        }
-    }
-
-    // MARK: - helpers
-
-    private static func loadRecords(_ path: String) throws -> [IndexRecord] {
-        if path.hasSuffix(".jsonl") {
-            return try FileIO.readLines(path).map { try JSON.decode($0) }
-        }
-        let artifact: LabelsArtifact = try JSON.read(path)
-        return artifact.records
-    }
-
-    private static func loadVotePasses(outDir: String, batchId: Int) throws -> [[Int: String]] {
-        let dir = Layout.votesDir(outDir)
-        let prefix = "batch-\(batchId)-pass"
-        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
-        let passFiles = files.filter { $0.hasPrefix(prefix) && $0.hasSuffix(".json") }.sorted()
-        // A malformed pass (a Haiku subagent that returned prose/truncated JSON) is skipped + logged, not
-        // fatal — the remaining passes still carry the vote. assemble fails only if NO pass parses.
-        return passFiles.compactMap { file in
-            let path = (dir as NSString).appendingPathComponent(file)
-            guard let votes: [HaikuVote] = try? JSON.read(path) else {
-                Log.append(Layout.enrichLog(outDir), "bad-vote-pass \(file) (unparseable JSON, skipped)")
-                return nil
-            }
-            // tmdbId → the per-title JSON string the calibrated aggregation will parse.
-            return Dictionary(votes.compactMap { vote -> (Int, String)? in
-                guard let data = try? JSONEncoder().encode(vote), let s = String(data: data, encoding: .utf8) else { return nil }
-                return (vote.tmdbId, s)
-            }, uniquingKeysWith: { a, _ in a })
-        }
-    }
 }
 
 // MARK: - Anime filter (single authority; both worklist modes funnel through enrich)
@@ -2177,29 +1791,6 @@ func isAnime(_ title: EnrichedTitle) -> Bool {
 func confidenceBucket(_ confidence: Double) -> String {
     let low = (confidence * 10).rounded(.down) / 10
     return String(format: "%.1f-%.1f", low, low + 0.1)
-}
-
-/// Bridge the async embedder to the synchronous assemble loop (HashingEmbedder is pure CPU; no await needed
-/// in practice, but the protocol is async). Runs the embedding on a transient semaphore-gated task.
-func blockingEmbed(_ embedder: any Embedder, _ text: String) -> [Float] {
-    let box = ResultBox()
-    let semaphore = DispatchSemaphore(value: 0)
-    Task {
-        box.value = (try? await embedder.embed(text)) ?? []
-        semaphore.signal()
-    }
-    semaphore.wait()
-    return box.value
-}
-
-final class ResultBox: @unchecked Sendable { var value: [Float] = [] }
-
-/// No-op LLM — `assemble` constructs a `TaxonomyClassifier` only for its calibrated aggregation
-/// (`classify(rawVotes:)`), which never calls the LLM. This stub satisfies the initializer.
-struct NoLLM: LLMClient {
-    func complete(_ request: LLMRequest) async throws -> String {
-        throw ToolError(message: "NoLLM: classification comes from Haiku subagents, not an API")
-    }
 }
 
 // MARK: - Hashing / gzip / dates (import-dataset.mjs fold-in)
@@ -2252,21 +1843,6 @@ struct WLEntry: Codable {
     init(_ e: WorklistEntry) { tmdbId = e.tmdbId; mediaType = e.mediaType.rawValue }
 }
 
-/// The scratch enriched record (holds raw TMDB text → never shipped; gitignored). Captures the full
-/// EnrichedTitle so `assemble` can rebuild it for grounding, plus the human-readable fields Haiku reads.
-/// One `enrich-ids` fetch that failed, carrying enough to tell a dead id from a failing TMDB. Its description
-/// names whether the cause was retryable, which is what the coverage gate keys on.
-struct EnrichIDError: Error, CustomStringConvertible {
-    let id: Int
-    let mediaType: MediaType
-    let underlying: Error
-
-    var description: String {
-        let kind = Transport.isRetryable(underlying) ? "retryable" : "definitive"
-        return "\(mediaType.rawValue):\(id) \(kind) (\(underlying))"
-    }
-}
-
 /// A TMDB id together with its media type — the only safe key for anything holding both. The two id spaces
 /// overlap, so a bare `Int` silently conflates movie 95 (Armageddon) with series 95 (Buffy).
 struct MediaKey: Hashable {
@@ -2283,6 +1859,8 @@ struct MediaKey: Hashable {
     var logLabel: String { "\(mediaType.rawValue):\(tmdbId)" }
 }
 
+/// The scratch enriched record (holds raw TMDB text → never shipped; gitignored). Captures the full
+/// EnrichedTitle so the article dump and the embed pass can rebuild it for grounding.
 struct EnrichedDTO: Codable {
     let tmdbId: Int
     let mediaType: String
@@ -2297,7 +1875,7 @@ struct EnrichedDTO: Codable {
     let originalLanguage: String?
     let voteCount: Int
     // FP-2: credits feed the composed embedding doc; `hasWikiPlot` marks `overview` as the live Wikipedia plot
-    // (re-grounded at enrich) so `assemble` composes the Plot clause only when a real plot was found.
+    // (re-grounded at enrich) so `embed-corpus` composes the Plot clause only when a real plot was found.
     let director: String?
     let topCast: [String]
     /// TV showrunners — the credit that links a series to its creator's other work, since `director` is
@@ -2400,40 +1978,6 @@ struct EnrichedDTO: Codable {
     }
 }
 
-/// One Haiku subagent's label call for a title (its vote-pass output). Matches DT-classification-prompt.md.
-struct HaikuVote: Codable {
-    let tmdbId: Int
-    let primaryGenre: String?
-    let subgenres: [Label]?
-    let moods: [Label]?
-    enum CodingKeys: String, CodingKey { case tmdbId, primaryGenre = "primary_genre", subgenres, moods }
-
-    /// A label + confidence — decoded leniently because a small fraction of Haiku passes emit a label as a
-    /// bare string (`"Heist"`) or omit the confidence, instead of `{"label":…,"confidence":…}`. Rather than
-    /// let one off-schema item reject the whole pass (→ everything spuriously escalates), accept both shapes
-    /// with a neutral default confidence. The calibrated aggregation still thresholds across the passes.
-    struct Label: Codable {
-        let label: String
-        let confidence: Double
-        static let defaultConfidence = 0.7
-
-        init(from decoder: any Decoder) throws {
-            if let bare = try? decoder.singleValueContainer().decode(String.self) {
-                label = bare; confidence = Self.defaultConfidence; return
-            }
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            label = try c.decode(String.self, forKey: .label)
-            confidence = (try? c.decode(Double.self, forKey: .confidence)) ?? Self.defaultConfidence
-        }
-        func encode(to encoder: any Encoder) throws {
-            var c = encoder.container(keyedBy: CodingKeys.self)
-            try c.encode(label, forKey: .label); try c.encode(confidence, forKey: .confidence)
-        }
-        enum CodingKeys: String, CodingKey { case label, confidence }
-    }
-}
-
-
 /// Ids here are `MediaKey`, never a bare Int: a batch can hold both media types, and TMDB's id spaces
 /// overlap, so deferring "95" would otherwise defer a movie and a series together.
 enum EnrichOutcome {
@@ -2502,17 +2046,13 @@ struct ReportExtras: Codable {
 enum Layout {
     static func enrichCheckpoint(_ dir: String) -> String { join(dir, "enrich-checkpoint.json") }
     static func classifyCheckpoint(_ dir: String) -> String { join(dir, "classify-checkpoint.json") }
-    static func wkConfirmed(_ dir: String) -> String { join(dir, "wk-confirmed.json") }
     static func metadataArtifact(_ dir: String, _ version: String) -> String { join(dir, "metadata-\(version).json") }
     static func enrichLog(_ dir: String) -> String { join(dir, "enrich-log.txt") }
     static func enrichedDir(_ dir: String) -> String { join(dir, "enriched") }
     static func enrichedBatch(_ dir: String, _ id: Int) -> String { join(dir, "enriched/batch-\(id).json") }
-    static func escalateBatch(_ dir: String, _ id: Int) -> String { join(dir, "escalate/batch-\(id).json") }
     static func embedderIdentity(_ dir: String) -> String { join(dir, "index/embedder.json") }
     static func embeddingSpace(_ dir: String) -> String { join(dir, "index/embedding-space.json") }
     static func compositionIdentity(_ dir: String) -> String { join(dir, "index/composition.json") }
-    static func votesDir(_ dir: String) -> String { join(dir, "votes") }
-    static func votePass(_ dir: String, _ id: Int, _ pass: Int) -> String { join(dir, "votes/batch-\(id)-pass\(pass).json") }
     static func labelsStore(_ dir: String) -> String { join(dir, "index/labels.jsonl") }
     static func vectorsStore(_ dir: String) -> String { join(dir, "index/vectors.jsonl") }
     static func labelsArtifact(_ dir: String, _ v: String) -> String { join(dir, "labels-\(v).json") }
@@ -2720,7 +2260,7 @@ enum Spec {
             run: { try await Commands.worklist($0) }),
         Subcommand(
             name: "enrich",
-            summary: "Next N un-enriched worklist ids → one TMDB call each → a scratch batch for Haiku.",
+            summary: "Next N un-enriched worklist ids → one TMDB call each → a scratch batch.",
             flags: [
                 .value("--worklist", "<path>", "the worklist JSON to draw ids from", required: true),
                 .value("--out-dir", "<dir>", "the run directory (enriched batches + the resumable checkpoint)",
@@ -2731,47 +2271,6 @@ enum Spec {
                       "drop anime. Opt-IN: excluding it by default silently cost the corpus 1,498 titles"),
             ],
             run: { try await Commands.enrich($0) }),
-        Subcommand(
-            name: "enrich-ids",
-            summary: "Re-fetch an EXPLICIT set of already-vetted ids into one batch (targeted re-enrich).",
-            flags: [
-                .value("--out-dir", "<dir>", "the run directory the batch is written into", required: true),
-                .value("--batch-id", "<n>", "the batch number to write", required: true),
-                .value("--ids", "<path>", "a vote file whose tmdbIds are re-fetched", required: true),
-                .value("--media", "<movie|tv>", "movie (default) or tv — the batch holds one media type"),
-            ],
-            run: { try await Commands.enrichIds($0) }),
-        Subcommand(
-            name: "escalation",
-            summary: "After pass 1: emit the subset of a batch that needs a 2nd/3rd Haiku pass.",
-            flags: [
-                .value("--out-dir", "<dir>", "the run directory holding the batch and its vote passes", required: true),
-                .value("--batch-id", "<n>", "the batch to triage", required: true),
-            ],
-            run: { try Commands.escalation($0) }),
-        Subcommand(
-            name: "assemble",
-            summary: "One enriched batch + its vote passes → calibrated labels → embed → the index store.",
-            flags: [
-                .value("--out-dir", "<dir>", "the run directory (batch, votes, index store)", required: true),
-                .value("--batch-id", "<n>", "the batch to assemble", required: true),
-                .bare("--force", "re-process titles the classify checkpoint already holds (targeted re-pass)"),
-                .bare("--require-wiki-plot",
-                      "drop titles with no Wikipedia plot — their labels would derive from TMDB prose, which "
-                      + "TMDB's terms forbid shipping"),
-                .value("--plot-cap", "<chars>",
-                       "cap the plot clause of the embedding document (default 1500). Recorded in "
-                       + "index/composition.json; a later run must match it"),
-                .value("--embedder", "<den-embed|fnv>",
-                       "den-embed (default, bge-m3 int8[1024] via the service) or fnv, the offline fallback"),
-                .value("--sub-threshold", "<0..1>", "override the calibrated subgenre acceptance threshold"),
-                .value("--thematic-threshold", "<0..1>", "override the calibrated thematic acceptance threshold"),
-                .value("--mood-threshold", "<0..1>", "override the calibrated mood acceptance threshold"),
-                .value("--chunk", "<n>",
-                       "documents per den-embed request (default 8). bge-m3 attention is O(batch·seq²), so "
-                       + "big batches of long documents spike the service's RAM"),
-            ],
-            run: { try await Commands.assemble($0) }),
         Subcommand(
             name: "embed-corpus",
             summary: "Embed ALREADY-DECIDED labels: compose the document, embed, append to the index store.",
@@ -2792,8 +2291,8 @@ enum Spec {
                        + "budget: 8192 / --plot-cap's token cost. Above it every request is a 413, which is "
                        + "not retried, so the run dies on its first flush having written nothing"),
                 .value("--plot-cap", "<chars>",
-                       "cap the plot clause (default 1500, matching assemble — both append to the SAME store "
-                       + "and must compose comparable documents). Recorded in index/composition.json"),
+                       "cap the plot clause (default 1500 — every run appends to the SAME store and must "
+                       + "compose comparable documents). Recorded in index/composition.json"),
                 .value("--limit", "<n>", "stop after N newly-embedded titles; the run is resumable, so this "
                        + "segments a long one"),
                 .value("--pause-ms", "<ms>",
@@ -2864,18 +2363,6 @@ enum Spec {
                        + "sidecar would re-sync every device onto a gutted one"),
             ],
             run: { try await Commands.metadata($0) }),
-        Subcommand(
-            name: "score",
-            summary: "Labels vs the golden set: primary-genre accuracy, multi-label F1, per-family precision.",
-            flags: [
-                .value("--labels", "<labels.jsonl|labels-t02.json>", "the labels to score", required: true),
-                .value("--golden", "<golden.json>", "the golden set to score them against", required: true),
-                .value("--min-support", "<n>",
-                       "exclude labels with fewer than N golden examples from the GATE (default 10) — they are "
-                       + "still reported, but too few to pass or fail a run on"),
-                .bare("--gate", "exit non-zero if a family misses its precision target"),
-            ],
-            run: { try Commands.score($0) }),
         Subcommand(
             name: "recluster",
             summary: "Cluster the shipped vectors and report groups the vocabulary does not explain (DT-F weekly).",
