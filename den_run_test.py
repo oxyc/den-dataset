@@ -617,7 +617,9 @@ class DenRun(unittest.TestCase):
         self.assertEqual(record["franchise"], ["Q98000001"])
         self.assertNotIn("Q98000000", self.facts()["entities"])
         store = Store(self.path(artifacts.STORE))
-        self.assertEqual(dict(zip(store.keys(), store.column("franchise", "I", 4)))["movie:900001"], 98000001)
+        offsets, values = store.column("franchise_o", "I", 4), store.column("franchise_v", "I", 4)
+        row = store.keys().index("movie:900001")
+        self.assertEqual(values[offsets[row]:offsets[row + 1]], [98000001])
 
     def test_every_shipped_title_has_a_vector_and_says_which(self):
         store = Store(self.path(artifacts.STORE))

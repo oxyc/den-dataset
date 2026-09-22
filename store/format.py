@@ -1,6 +1,6 @@
 """The wire primitives every section group writes through.
 
-The layout is den-spec `wire/store-v1.md` § "Layout": a 64-byte header, a table of 32-byte entries,
+The layout is den-spec `wire/store-v2.md` § "Layout": a 64-byte header, a table of 32-byte entries,
 then the section bodies, each 8-byte aligned. Nothing here knows what a section MEANS — that is the
 group modules' half — and nothing there knows how a section reaches the file.
 """
@@ -8,7 +8,8 @@ import hashlib
 import struct
 import sys
 
-FORMAT_VERSION = 1
+#: 2 since `franchise` became a list (den-spec `wire/store-v2.md`); a v1 reader refuses it by this number.
+FORMAT_VERSION = 2
 MAGIC = b"DENSTOR1"
 ENDIAN_CHECK = 0x01020304
 HEADER_BYTES = 64

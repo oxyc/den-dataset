@@ -1,4 +1,4 @@
-"""The store FORMAT — one module per section group in den-spec `wire/store-v1.md`.
+"""The store FORMAT — one module per section group in den-spec `wire/store-v2.md`.
 
 That document is the contract and its headings are this package's index: a reader who knows which
 section they are after reads the heading, then opens the module of the same name.

@@ -1,6 +1,6 @@
 """Facts — everything Wikidata says about a title: who made it, where it is from, when it aired.
 
-den-spec `wire/store-v1.md` § "Facts". Nothing here is a model's answer; the one exception is
+den-spec `wire/store-v2.md` § "Facts". Nothing here is a model's answer; the one exception is
 `facts_has_vec`, which is this pipeline's own scrape-time bookkeeping and is named so it cannot be
 mistaken for `vec_plot_has`.
 """
@@ -204,18 +204,23 @@ class Facts:
         self.released_prec.append(prec)
         mins = facts.get("runtimeMinutes")
         self.runtime.append(min(65535, int(mins)) if isinstance(mins, int) and mins > 0 else 0)
-        # The raw Q-ID, not an entity index. The entity table holds almost no franchise entities —
-        # 2,680 of 3,019 references are unresolvable — so interning this dropped the franchise for
+        # Raw Q-IDs, not entity indices. The entity table holds almost no franchise entities —
+        # 2,680 of 3,019 references are unresolvable — so interning these dropped the franchise for
         # seven titles in eight, silently. A Q-id needs no table to be useful: two titles sharing one
         # are in the same series whether or not anything can name it.
         #
         # The facts stage writes every P179 target that is a series, most specific first
         # (`lib/wikidata_facts.franchises`), and nothing else: a critics' list filed under P179 is not a
-        # franchise. The column holds one value, so it is the first — the one atlas's JSON reader took too.
-        fr = facts.get("franchise")
-        fr = fr[0] if isinstance(fr, list) and fr else fr
-        fr_num = int(fr[1:]) if isinstance(fr, str) and fr.startswith("Q") and fr[1:].isdigit() else None
-        self.franchise.append(fr_num if fr_num is not None else U32_NONE)
+        # franchise. ALL of them, in that order. store-v1 kept only the first, and 219 titles are in more
+        # than one real series — The Batman and The Hobbit only meet their siblings through the second.
+        # A bare string is the older single-valued shape, read as a list of one.
+        raw = facts.get("franchise")
+        row_franchises = []
+        for fr in (raw if isinstance(raw, list) else [raw]):
+            fr_num = int(fr[1:]) if isinstance(fr, str) and fr.startswith("Q") and fr[1:].isdigit() else None
+            if fr_num is not None and fr_num not in row_franchises:
+                row_franchises.append(fr_num)
+        self.franchise.append(row_franchises)
         for field in ENTITY_LISTS:
             self.entity_lists[field].append(
                 [i for i in (ent.id(q, field) for q in facts.get(field) or []) if i is not None])
@@ -256,5 +261,5 @@ class Facts:
     def put_trailing(self, sec, rows):
         """The three fact columns the writer emits after the applicability ones."""
         sec.put("runtime", "H", self.runtime, 2, expect=rows)
-        sec.put("franchise", "I", self.franchise, 4, expect=rows)
+        sec.put_list("franchise", "I", 4, self.franchise)
         sec.put("orig_lang", "I", self.orig_lang, 4, expect=rows)

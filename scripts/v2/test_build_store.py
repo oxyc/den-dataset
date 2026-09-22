@@ -1,7 +1,7 @@
 """`build_store.py` against den-spec's committed fixture — the WRITER's half of the format contract.
 
-store-v1 is implemented three times: this writer, `den-core/crates/den-store` and the mmap in den-atlas.
-Both readers load `den-spec/vectors/store-v1.*` in their own tests and fail without it. The writer — the
+store-v2 is implemented three times: this writer, `den-core/crates/den-store` and the mmap in den-atlas.
+Both readers load `den-spec/vectors/store-v2.*` in their own tests and fail without it. The writer — the
 side that decides what the bytes actually are — had no test at all, so a layout change here would have
 been caught only by the readers failing afterwards, in other repos, on someone else's branch.
 
@@ -50,7 +50,7 @@ def spec_or_fail(*parts):
     if os.environ.get("DEN_SPEC_OPTIONAL") == "1":
         raise unittest.SkipTest("den-spec absent and DEN_SPEC_OPTIONAL=1")
     raise AssertionError(
-        f"{path} not found — this test checks build_store.py against the store-v1 contract and cannot "
+        f"{path} not found — this test checks build_store.py against the store-v2 contract and cannot "
         "do so without it. Check out den-spec beside this repo, set DEN_SPEC_DIR, or set "
         "DEN_SPEC_OPTIONAL=1 to skip deliberately."
     )
@@ -71,7 +71,7 @@ def build_store_module():
 
 class FixtureRoundTrip(unittest.TestCase):
     def test_the_writer_reproduces_the_committed_fixture(self):
-        committed = spec_or_fail("vectors", "store-v1.store")
+        committed = spec_or_fail("vectors", "store-v2.store")
         generator = spec_or_fail("tools", "store-fixture.py")
         with tempfile.TemporaryDirectory() as out:
             result = subprocess.run(
@@ -80,14 +80,14 @@ class FixtureRoundTrip(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, f"the fixture generator failed:\n{result.stderr}")
-            rebuilt = os.path.join(out, "store-v1.store")
+            rebuilt = os.path.join(out, "store-v2.store")
             self.assertTrue(os.path.isfile(rebuilt), f"generator wrote nothing:\n{result.stdout}")
             self.assertEqual(
                 sha256(rebuilt),
                 sha256(committed),
                 "build_store.py no longer produces the committed fixture. Three causes, and they want "
                 "different answers: the LAYOUT changed — in which case this is a new format version "
-                "(store-v2.md), not an edit to store-v1; the writer lost its DETERMINISM; or what the "
+                "(store-v3.md), not an edit to store-v2; the writer lost its DETERMINISM; or what the "
                 "writer CHOOSES TO PUBLISH changed, which is a content change at an unchanged layout "
                 "and is fixed by regenerating the fixture in den-spec, not by bumping the version. The "
                 "publication gates are the third kind: a fixture facet carrying no `probabilities` "
@@ -109,7 +109,7 @@ class FixtureRoundTrip(unittest.TestCase):
                     text=True,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                digests.append(sha256(os.path.join(out, "store-v1.store")))
+                digests.append(sha256(os.path.join(out, "store-v2.store")))
         self.assertEqual(digests[0], digests[1], "two runs of the writer disagree byte-for-byte")
 
 
@@ -185,7 +185,7 @@ class StoreFixture:
                 "composers": ["Q103"], "cinematographers": ["Q104"], "distributors": ["Q105"],
                 "productionCompanies": ["Q106"], "narrativeLocations": ["Q107"],
                 "mainSubjects": ["Q108"], "instanceOf": ["Q109"], "basedOn": ["Q110"],
-                "basedOnKind": ["book"],
+                "basedOnKind": ["book"], "franchise": ["Q111"],
             },
             "labels": {"primaryGenre": "Drama", "animated": False,
                        "subgenres": [{"label": "Prison", "confidence": 0.7}],
@@ -958,6 +958,33 @@ class ThePosterPathIsNotPublished(StoreFixture, unittest.TestCase):
         paths = [s for s in interned if s and s.startswith("/") and s.endswith(".jpg")]
         self.assertEqual(paths, [], "an artwork path is in the store's string table")
         self.assertIn("Alpha", interned, "the title still ships; only the artwork reference is gone")
+
+
+class EverySeriesATitleIsPartOfShips(StoreFixture, unittest.TestCase):
+    """`franchise` is a list (store-v2): every series the facts name, in the facts' order.
+
+    store-v1 held one Q-id per title, the first. 219 titles are in more than one real series, and some only
+    meet their siblings through the second — The Batman, Spider-Man: Brand New Day, The Hobbit
+    (oxyc/den-atlas#43). The facts stage already orders them most specific first, so the writer must keep
+    that order rather than sort it.
+    """
+
+    def test_the_list_keeps_the_facts_order_and_every_series(self):
+        titles = [
+            dict(self.TITLES[0], facts=dict(self.TITLES[0]["facts"], franchise=["Q30", "Q20", "Q30", "L5"])),
+            # The older single-valued shape: a bare Q-id is a list of one.
+            dict(self.TITLES[1], facts=dict(self.TITLES[1]["facts"], franchise="Q40")),
+            {"key": "movie:3", "mediaType": "movie", "tmdbId": 3,
+             "facts": {"titles": {"en": "Gamma"}}, "labels": None, "premiseLabels": None},
+        ]
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, titles=titles)
+        offsets, values = store.ints("franchise_o"), store.ints("franchise_v")
+        got = {key: values[offsets[row]:offsets[row + 1]] for row, key in enumerate(store.keys())}
+        self.assertEqual(got, {"movie:1": [30, 20], "movie:2": [40], "movie:3": []},
+                         "most specific first, deduplicated, a non-Q-id dropped, none as an empty span")
+        self.assertNotIn("franchise", store.table, "the single-valued store-v1 column is gone")
+        self.assertEqual(struct.unpack("<I", store.blob[8:12])[0], 2, "a list franchise is format 2")
 
 
 class OnlyATitleIdReachesTheImdbColumn(unittest.TestCase):

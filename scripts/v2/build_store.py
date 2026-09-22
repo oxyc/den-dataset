@@ -8,11 +8,11 @@
       --premise-vectors out-repass/vectors-premise.bin --premise-labels out-repass/labels-premise.json \
       --dataset-version <ver> --out out-repass/den-<ver>.store
 
-The layout is den-spec `wire/store-v1.md`. That document is the contract; this is one of its two
+The layout is den-spec `wire/store-v2.md`. That document is the contract; this is one of its two
 implementations, and `den-atlas/src/store.rs` is the other. Change one and you change all three.
 
 This file is the command line and the publication policy. The FORMAT is the `store/` package, one
-module per section group in `wire/store-v1.md`, so the document's own headings say which file to open;
+module per section group in `wire/store-v2.md`, so the document's own headings say which file to open;
 `store/build.py` is the order they run in.
 
 ## The rule the store exists to enforce
@@ -133,7 +133,7 @@ PROVENANCE = {
     "facts_has_vec": "ours",
     "applic_v": "llm", "applic_c": "llm",
     "runtime": "wikidata",
-    "franchise": "wikidata",
+    "franchise_v": "wikidata", "franchise_o": "wikidata",
     "orig_lang": "wikidata",
     "ent_qid": "wikidata", "ent_name": "wikidata",
     "ent_tmdb": "identifier",
