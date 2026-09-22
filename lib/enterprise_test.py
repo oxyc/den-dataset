@@ -67,9 +67,9 @@ class Account(unittest.TestCase):
         port = server.server_address[1]
         self.stderr = io.StringIO()
         self.gate = enterprise.Gate(headroom=500)
-        for patch in (mock.patch.object(http._connections, "get", lambda host, timeout:
+        for patch in (mock.patch.object(http._connections, "get", lambda host, timeout, scheme="https":
                                         http_client.HTTPConnection("127.0.0.1", port, timeout=timeout)),
-                      mock.patch.object(http._connections, "drop", lambda host: None),
+                      mock.patch.object(http._connections, "drop", lambda host, scheme="https": None),
                       mock.patch.object(enterprise, "gate", self.gate),
                       mock.patch("sys.stderr", self.stderr)):
             patch.start()
