@@ -35,19 +35,24 @@ USER_AGENT = "den-dataset/1.0 (github.com/oxyc/den-dataset)"
 #: Seconds. Long enough for a WDQS query over a 100-id batch, short enough that a dead socket surfaces.
 TIMEOUT = 60
 
-#: Doubling from 0.5s, four attempts — the Swift `Transport.retrying` schedule, with jitter added so a
-#: fleet of workers that all back off on the same curve does not re-collide.
+#: Doubling from 0.5s, four attempts — the Swift `Transport.retrying` schedule, 0.5 + 1 + 2 = 3.5s of
+#: waiting before the last attempt. Jitter goes ON TOP, up to `JITTER` of each step again, so a fleet of
+#: workers backing off together does not re-collide and none of them waits less than the Swift pass did.
+#: Jitter drawn from zero instead halves the expected wait, and a blip that outlasts it drops the title.
 ATTEMPTS = 4
 BASE_DELAY = 0.5
-#: A server that names a wait can still name an unreasonable one; past this we give up rather than sleep.
+JITTER = 0.5
+#: A server that names a wait can still name an unreasonable one. Past this the request gives up and says
+#: why: sleeping that long stalls a worker for minutes, and retrying sooner than asked is the one thing a
+#: rate-limited client must not do.
 MAX_RETRY_AFTER = 120
 
 
 class HTTPError(RuntimeError):
     """A non-2xx answer. `status` is what decides whether it is worth asking again."""
 
-    def __init__(self, status, url, body=b""):
-        super().__init__(f"HTTP {status} for {url}")
+    def __init__(self, status, url, body=b"", reason=None):
+        super().__init__(f"HTTP {status} for {url}" + (f": {reason}" if reason else ""))
         self.status = status
         self.url = url
         self.body = body
@@ -101,7 +106,7 @@ def _retry_after(response):
         seconds = float(value.strip())
     except ValueError:
         return None
-    return seconds if 0 <= seconds <= MAX_RETRY_AFTER else None
+    return seconds if seconds >= 0 else None
 
 
 def request(host, path, params=None, method="GET", body=None, headers=None, timeout=TIMEOUT,
@@ -141,7 +146,11 @@ def request(host, path, params=None, method="GET", body=None, headers=None, time
             if last or not is_transient(response.status):
                 raise HTTPError(response.status, url, payload)
             wait = _retry_after(response)
-        time.sleep(wait if wait is not None else random.uniform(0, delay))
+            if wait is not None and wait > MAX_RETRY_AFTER:
+                raise HTTPError(response.status, url, payload,
+                                f"the server asked for {wait:g}s before a retry, past the "
+                                f"{MAX_RETRY_AFTER}s this client will wait — giving up")
+        time.sleep(wait if wait is not None else delay + random.uniform(0, delay * JITTER))
         delay = min(delay * 2, MAX_RETRY_AFTER)
     raise HTTPError(0, url)
 
