@@ -22,6 +22,7 @@ import tempfile
 import unittest
 
 import pipeline
+from lib import http
 
 from . import articles, artifacts, fetch
 from .contract import Context, StageError, bind
@@ -52,6 +53,7 @@ class Staged(unittest.TestCase):
         self.enriched = os.path.join(self.out, "enriched")
         os.makedirs(self.enriched)
         self.fetched = []
+        self.answers = {}
         self.original = articles.wikipedia.article_prose
         articles.wikipedia.article_prose = self.stub
 
@@ -61,6 +63,10 @@ class Staged(unittest.TestCase):
 
     def stub(self, article, language="en", cache=None):
         self.fetched.append((article, language))
+        if article in self.answers:
+            return self.answers[article]
+        if article.startswith("Down"):
+            raise http.HTTPError(503, f"https://{language}.wikipedia.org/w/api.php")
         return None if article.startswith("Missing") else prose(article, language)
 
     def batch(self, number, records):
@@ -121,6 +127,13 @@ class Selection(Staged):
         articles.run(self.context(limit=3))
         self.assertEqual(len(self.dumped()), 3)
 
+    def test_a_limit_of_zero_fetches_nothing(self):
+        """Zero means zero, as it does to `enrich` and `embed-corpus` — not "no limit", which turns a
+        dry-run-sized request into the whole corpus."""
+        self.batch(1, [record(n) for n in range(1, 11)])
+        articles.run(self.context(limit=0))
+        self.assertEqual((self.fetched, self.dumped()), ([], []))
+
 
 class Resume(Staged):
     def test_it_re_reads_its_own_output_and_does_not_refetch(self):
@@ -133,12 +146,44 @@ class Resume(Staged):
         self.assertEqual([name for name, _lang in self.fetched], ["Article 2"])
         self.assertEqual([row["tmdbId"] for row in self.dumped()], [1, 2])
 
-    def test_an_article_that_could_not_be_read_is_left_for_a_later_run(self):
-        """An article briefly unreachable and one that does not exist look the same from here, and a row
-        with no prose in it is a title the classify pass would pay to read and learn nothing from."""
+    def test_an_article_that_is_not_there_is_not_written(self):
+        """A row with no prose in it is a title the classify pass would pay to read and learn nothing
+        from."""
         self.batch(1, [record(1, article="Missing Thing"), record(2)])
         articles.run(self.context())
         self.assertEqual([row["tmdbId"] for row in self.dumped()], [2])
+
+    def test_an_article_that_could_not_be_reached_is_left_for_a_later_run(self):
+        self.batch(1, [record(1, article="Down Thing"), record(2), record(3)])
+        articles.run(self.context())
+        self.assertEqual([row["tmdbId"] for row in self.dumped()], [2, 3])
+        self.fetched.clear()
+        self.answers["Down Thing"] = prose("Down Thing")
+        articles.run(self.context())
+        self.assertEqual([name for name, _lang in self.fetched], ["Down Thing"])
+
+
+class Outage(Staged):
+    """Wikipedia down is not a corpus with no articles in it. Reported as "no article" it exits 0 over an
+    empty file, one step before the pass that pays per title."""
+
+    def test_a_run_where_every_fetch_failed_in_transport_is_refused(self):
+        self.batch(1, [record(n, article=f"Down {n}") for n in range(5)])
+        with self.assertRaises(StageError) as refused:
+            articles.run(self.context())
+        self.assertIn("5 of 5 fetches failed in transport", str(refused.exception))
+        self.assertIn("HTTP 503", str(refused.exception))
+
+    def test_a_run_where_most_fetches_failed_is_refused_and_keeps_what_arrived(self):
+        self.batch(1, [record(1), record(2, article="Down 2"), record(3, article="Down 3")])
+        with self.assertRaises(StageError):
+            articles.run(self.context())
+        self.assertEqual([row["tmdbId"] for row in self.dumped()], [1])
+
+    def test_articles_that_are_genuinely_not_there_are_not_an_outage(self):
+        self.batch(1, [record(1, article="Missing 1"), record(2, article="Missing 2"), record(3)])
+        articles.run(self.context())
+        self.assertEqual([row["tmdbId"] for row in self.dumped()], [3])
 
 
 class Output(Staged):
@@ -158,11 +203,46 @@ class Output(Staged):
 
     def test_the_count_it_records_is_the_one_the_auditor_recomputes(self):
         """`audit_combined.py` refuses a row whose `articleChars` is not `len(text)`. A dumper counting in
-        a different unit puts the auditor and the file it audits into permanent disagreement."""
+        a different unit puts the auditor and the file it audits into permanent disagreement.
+
+        The text carries a combining mark on purpose: on ASCII every unit agrees, and the Swift dumper's
+        grapheme count disagreed on exactly such rows — 7 in 3,000."""
         self.batch(1, [record(7)])
+        self.answers["Article 7"] = dict(prose("Article 7"), text="Café noir")
         articles.run(self.context())
         row = self.dumped()[0]
-        self.assertEqual(row["chars"], len(row["text"]))
+        self.assertEqual(row["text"], "Café noir")
+        self.assertEqual(row["chars"], 10, "code points: 'e' and its combining acute are two")
+
+    def test_an_unrecorded_plot_revision_is_null_and_never_omitted(self):
+        """The readers take `rec.get("extractorArticleRevId", rec.get("revId"))`. Omitted, the key falls
+        back to the revision this dump READ, and a title whose plot revision nobody recorded would claim it
+        was extracted at that same revision — `sectionAuditSameRevision` true for a fact that is unknown.
+        `null` keeps it unknown."""
+        self.batch(1, [record(7, plotRevId=None)])
+        articles.run(self.context())
+        with open(os.path.join(self.out, "articles.jsonl"), encoding="utf-8") as fh:
+            raw = fh.readline()
+        self.assertIn('"extractorArticleRevId":null', raw)
+        self.assertIsNone(json.loads(raw)["extractorArticleRevId"])
+
+    def test_a_row_is_the_bytes_the_file_already_holds(self):
+        """Written against a golden line, not against `line()`: `articles.jsonl` is 445 MB the Swift pass
+        wrote, the classify pass hashes it, and this stage APPENDS to it. `/` escaped and UTF-8 unescaped
+        is the Swift encoder's spelling; a row in a second spelling is the same JSON and a moved hash."""
+        self.batch(1, [{"tmdbId": 7, "mediaType": "movie", "hasWikiPlot": True,
+                        "plotArticle": "AC/DC: Let There Be Rock", "plotLanguage": "en",
+                        "plotSections": ["Plot"]}])
+        self.answers["AC/DC: Let There Be Rock"] = {
+            "text": "Café AC/DC.", "revId": 900, "resolvedArticle": "AC/DC: Let There Be Rock",
+            "sections": ["Plot"], "language": "en"}
+        articles.run(self.context())
+        golden = ('{"mediaType":"movie","tmdbId":7,"title":null,"year":null,'
+                  '"article":"AC\\/DC: Let There Be Rock","language":"en",'
+                  '"resolvedArticle":"AC\\/DC: Let There Be Rock","revId":900,"extractorArticleRevId":null,'
+                  '"sections":["Plot"],"plotSections":["Plot"],"chars":12,"text":"Café AC\\/DC."}\n')
+        with open(os.path.join(self.out, "articles.jsonl"), "rb") as fh:
+            self.assertEqual(fh.read(), golden.encode("utf-8"))
 
     def test_two_runs_over_one_set_of_batches_write_one_file(self):
         """The classify pass hashes this file into its manifest and costs $20.47. A row order or a key

@@ -100,7 +100,7 @@ def already_dumped(path):
     return done
 
 
-def wanted(enriched_dir, done, limit=None):
+def wanted(enriched_dir, done):
     """The grounded titles still to dump, newest record per title, in batch order.
 
     Newest wins because the same key appears in several batches disagreeing about whether a plot was
@@ -123,7 +123,7 @@ def wanted(enriched_dir, done, limit=None):
             if item in done:
                 continue
             out.append(record)
-    return out[:limit] if limit else out
+    return out
 
 
 def line(row):
@@ -141,7 +141,16 @@ def line(row):
 def row(record, found):
     """One output line. The key order is the reader's: `scripts/v2/` joins this file by `mediaType` and
     `tmdbId`, and `extractorArticleRevId` is what says whether the article moved since the plot was
-    taken."""
+    taken.
+
+    A field the enrichment did not record is written as an explicit `null`, never left out — and for
+    `extractorArticleRevId` that is a decision, not a serialiser default. `run_combined.py` and
+    `audit_combined.py` read it as `rec.get("extractorArticleRevId", rec.get("revId"))`: an OMITTED key
+    falls back to the revision this dump read, so a title with no `plotRevId` (~17k of the grounded corpus)
+    would claim its plot was extracted from the very revision the classifier reads, and
+    `sectionAuditSameRevision` would vouch for it. That is unknown, not true. `null` says unknown, and it
+    is what the shipped classify pass actually computed from. The Swift dumper omitted the key.
+    """
     return {
         "mediaType": record["mediaType"],
         "tmdbId": record["tmdbId"],
@@ -165,17 +174,27 @@ def row(record, found):
     }
 
 
-def fetch(record, cache):
-    """One article, or None when there is nothing readable there.
+class Unreachable:
+    """A fetch that failed in transport: an outage, a rate limit that outlasted the retries, a body that is
+    not JSON. Kept apart from None — an article that is not there — because the two call for opposite
+    things: one is a fact about the title, the other says nothing about it."""
 
-    A miss is counted and the title is left for a later run rather than written as an empty article: an
-    article that is briefly unreachable and one that does not exist look the same from here, and a row
-    with no prose in it is a title the classify pass would pay to read and learn nothing from.
+    def __init__(self, error):
+        self.error = error
+
+
+def fetch(record, cache):
+    """One article; None when there is nothing readable there; `Unreachable` when Wikipedia could not be
+    asked.
+
+    Neither miss is written as an empty article — a row with no prose in it is a title the classify pass
+    would pay to read and learn nothing from — so both are left for a later run. They are COUNTED apart,
+    because an outage reported as "no article" is a normal-looking run over an empty file.
     """
     try:
         return wikipedia.article_prose(record["plotArticle"], record.get("plotLanguage") or "en", cache)
-    except (http.HTTPError, ValueError):
-        return None
+    except (http.HTTPError, ValueError) as error:
+        return Unreachable(error)
 
 
 def run(ctx, cache=None):
@@ -188,8 +207,7 @@ def run(ctx, cache=None):
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
 
     done = already_dumped(out)
-    todo = wanted(enriched, done, ctx.limit)
-    print(f"  articles: {len(done)} already dumped, {len(todo)} to fetch", file=sys.stderr)
+    todo = wanted(enriched, done)
     if not todo and not done:
         raise StageError(
             f"articles: {enriched} holds no title with a recorded Wikipedia article, so there is nothing "
@@ -198,9 +216,15 @@ def run(ctx, cache=None):
             # `scripts/enrich-run.sh` until the drain became a stage, and a copy of that string would have
             # gone on sending an operator to a script the pipeline no longer runs.
             f"when it grounds a title — build the batches with: {fetch_stage.HOW}")
+    # Applied after the refusal above, so `--limit 0` asks for nothing rather than reading as an empty
+    # enrichment — and 0 means zero here, as it does to `enrich` and `embed-corpus`.
+    if ctx.limit is not None:
+        todo = todo[:ctx.limit]
+    print(f"  articles: {len(done)} already dumped, {len(todo)} to fetch", file=sys.stderr)
 
     cache = wikipedia.cache_for() if cache is None else cache
-    written = missing = 0
+    written = missing = failed = 0
+    last_error = None
     with open(out, "a", encoding="utf-8") as handle:
         with concurrent.futures.ThreadPoolExecutor(max_workers=GATE) as pool:
             # Submitted in batch order and consumed in the SAME order, so two runs over one set of batches
@@ -208,12 +232,26 @@ def run(ctx, cache=None):
             for index in range(0, len(todo), GATE):
                 slice_ = todo[index:index + GATE]
                 for record, found in zip(slice_, pool.map(lambda r: fetch(r, cache), slice_)):
+                    if isinstance(found, Unreachable):
+                        failed += 1
+                        last_error = found.error
+                        continue
                     if found is None:
                         missing += 1
                         continue
                     handle.write(line(row(record, found)) + "\n")
                     written += 1
                 if written and written % 2000 < GATE:
-                    print(f"  articles: dumped {written} (no article {missing})…", file=sys.stderr)
-    print(f"  articles: {written} written, {missing} with no article -> {out}", file=sys.stderr)
+                    print(f"  articles: dumped {written} (no article {missing}, unreachable {failed})…",
+                          file=sys.stderr)
+    print(f"  articles: {written} written, {missing} with no article, {failed} unreachable -> {out}",
+          file=sys.stderr)
+    # The classify pass reads this file next and pays per title. A run where most fetches never reached
+    # Wikipedia is an outage, and finishing it normally hands the paid step a short file as if it were
+    # the corpus.
+    if failed > written + missing:
+        raise StageError(
+            f"articles: {failed} of {written + missing + failed} fetches failed in transport (last: "
+            f"{last_error}). That is Wikipedia being unreachable, not {failed} titles without an article. "
+            f"The {written} that did arrive are in {out}; re-run to fetch the rest once it answers.")
     return out
