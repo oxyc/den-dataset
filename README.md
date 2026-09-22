@@ -1,7 +1,8 @@
 # den-dataset
 
 The producer of Den's discovery dataset: per-title facts, genres & moods, plot facets, and two vector
-indexes, built into one store that den-atlas serves. Plots come live from English Wikipedia, facts from
+indexes, built into one store that den-atlas serves. Plots come live from Wikipedia — the title's own
+English article first, then its own articles in other languages — facts from
 Wikidata, labels and facets from typed model passes over the article, and vectors from the `den-embed`
 service (bge-m3, 1024-dim int8).
 
