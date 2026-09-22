@@ -17,6 +17,42 @@
 with the same arguments, built from `pipeline/corpus.py`'s declaration rather than retyped — the shard
 paths come from the declared glob, so the set cannot be short by one.
 
+## A later run supersedes an earlier one, by key
+
+A title re-grounded on a different article is classified and critiqued again into a NEW shard, beside
+the one that answered it from the old article. When two shards of one pass answer the same key, the shard
+whose run STARTED later wins: `runStartedAt` in its sidecar manifest. The pass writes that stamp once, when
+it creates the manifest, and never rewrites it — a resume under a different configuration is refused
+rather than re-stamped — so it is a recorded fact about the run, not a file mtime or a glob order. It is
+also the right clock: a run's article dump is pinned when it starts, so the run that started later read
+the newer article, however long either one took to finish.
+
+Refused rather than guessed: a key twice in ONE shard (one run, two answers); a key in two shards where
+either has no recorded start, or both started at the same instant. The report lists every shard with the
+keys it took over from an earlier one (`supersedes`), the rows a later one took from it (`superseded`),
+and the rows a tombstone withdrew.
+
+## Withdrawing a title that lost its plot
+
+A re-fetch can leave a title with no plot at all (a redirect that no longer counts, #64). Its old rows
+were answered from an article it no longer has, and no new run will answer it, so nothing supersedes
+them. `withdrawn.jsonl` in the out-dir says so, one title per line, written by
+
+  scripts/v2/consolidate_corpus.py withdraw --keys A-to-plotless.txt --reason "…" \
+      --out out-repass/withdrawn.jsonl
+
+and passed to the join as `--withdrawn`. A tombstone removes the rows of every run that STARTED before
+its `withdrawnAt`, so a title that later regains a plot and is answered again by a newer run comes back
+without the tombstone being edited. The title itself stays in the corpus, with its facts and labels;
+what goes is the judgements read from the wrong article. The file is append-only: a key is withdrawn
+once.
+
+## Classify and critique must have read the same article
+
+Each row records the `articleSha256` it was answered from. Superseding lets a new classify shard be
+folded in before its critique is, which would ship facets from one article beside a critique of another,
+so the join refuses a kept critique row whose classify row is missing or read a different article.
+
 ## Why this exists
 
 The signals were spread across ten artifacts keyed the same way, and nothing checked they agreed. A title
@@ -38,8 +74,11 @@ purpose: there is no flag that makes redistributing it acceptable.
 """
 import argparse
 import gzip
+import hashlib
 import json
+import os
 import sys
+from datetime import datetime, timezone
 
 FACET_AXES = ("era", "setting", "scope", "ending", "pacing", "chronology",
               "continuity", "conflict", "ensemble", "tone", "timespan", "archetype")
@@ -54,20 +93,161 @@ def key_of(record):
     return f"{record['mediaType']}:{record['tmdbId']}"
 
 
-def records(paths, label, expect_disjoint=True):
-    """Every record across the shards of one pass, refusing a duplicate key."""
-    seen = set()
-    for path in paths:
+def timestamp(value, where):
+    """An ISO-8601 instant with a zone. A naive one cannot be ordered against the pass's UTC stamps."""
+    try:
+        when = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        sys.exit(f"{where}: {value!r} is not an ISO-8601 timestamp")
+    if when.tzinfo is None:
+        sys.exit(f"{where}: {value!r} has no time zone")
+    return when
+
+
+def started_at(shard):
+    """When the run that wrote `shard` started, from its sidecar manifest; None when it records none."""
+    manifest = shard + ".manifest.json"
+    if not os.path.exists(manifest):
+        return None
+    with open(manifest, encoding="utf-8") as fh:
+        stamp = json.load(fh).get("runStartedAt")
+    return None if stamp is None else timestamp(stamp, f"{manifest} runStartedAt")
+
+
+def shard_order(paths):
+    """`paths` oldest run first — the order a later shard supersedes an earlier one in. A shard with no
+    recorded start sorts last, by path; it can only take part in a join where no other shard shares a
+    key with it, so where it sorts changes nothing written."""
+    started = {path: started_at(path) for path in paths}
+    return sorted(paths, key=lambda p: (0, started[p], p) if started[p] else (1, p))
+
+
+def latest(paths, label, withdrawals=None, keep=lambda record: record):
+    """`(rows, report, withdrawn keys)`: the record that answers for each key across one pass's shards,
+    under the supersede rule and the tombstones in the module docstring. `keep` trims a record to what
+    the caller reads, so the whole pass is not held in memory.
+
+    The shards are read oldest run first whatever order they were passed in, so what is kept and what
+    the report counts depend only on the manifests.
+    """
+    ordered = shard_order(paths)
+    started = {path: started_at(path) for path in ordered}
+    report = {path: {"shard": os.path.basename(path),
+                     "runStartedAt": started[path].isoformat() if started[path] else None,
+                     "rows": 0, "supersedes": 0, "superseded": 0, "withdrawn": 0}
+              for path in ordered}
+    rows, owner = {}, {}
+    for path in ordered:
+        own = set()
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 if not line.strip():
                     continue
                 record = json.loads(line)
                 key = key_of(record)
-                if expect_disjoint and key in seen:
-                    sys.exit(f"duplicate key across {label} shards: {key}")
-                seen.add(key)
-                yield key, record
+                if key in own:
+                    sys.exit(f"duplicate key within {label} shard {path}: {key} — one run answered it twice")
+                own.add(key)
+                report[path]["rows"] += 1
+                earlier = owner.get(key)
+                if earlier is not None:
+                    if started[earlier] is None or started[path] is None:
+                        undated = earlier if started[earlier] is None else path
+                        sys.exit(f"duplicate key across {label} shards: {key} in {earlier} and {path}. A shard "
+                                 f"supersedes another only by the runStartedAt its manifest records, and "
+                                 f"{undated} records none")
+                    if started[earlier] == started[path]:
+                        sys.exit(f"duplicate key across {label} shards: {key} in {earlier} and {path}, whose "
+                                 f"runs both started at {started[path].isoformat()}, so neither is later")
+                    report[earlier]["superseded"] += 1
+                    report[path]["supersedes"] += 1
+                rows[key] = keep(record)
+                owner[key] = path
+    withdrawn, stood = set(), 0
+    for key, when in (withdrawals or {}).items():
+        path = owner.get(key)
+        if path is None:
+            continue
+        if started[path] is None:
+            sys.exit(f"{key} is withdrawn and answered in {path}, whose manifest records no runStartedAt, so "
+                     f"nothing says whether that run read the article before or after the withdrawal")
+        if started[path] < when:
+            del rows[key]
+            report[path]["withdrawn"] += 1
+            withdrawn.add(key)
+        else:
+            stood += 1
+    return rows, {"shards": list(report.values()), "withdrawn": len(withdrawn),
+                  "answeredAfterWithdrawal": stood}, withdrawn
+
+
+def read_withdrawals(path):
+    """`key` → when it was withdrawn, from a tombstone file. A key withdrawn twice is refused: the file
+    is append-only, and a second line for one title means two writers disagreed about it."""
+    if not path:
+        return {}
+    out = {}
+    with open(path, encoding="utf-8") as fh:
+        for number, line in enumerate(fh, 1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            key = key_of(row)
+            if key in out:
+                sys.exit(f"{path}:{number}: {key} is withdrawn twice")
+            if not row.get("reason"):
+                sys.exit(f"{path}:{number}: {key} is withdrawn with no reason")
+            out[key] = timestamp(row.get("withdrawnAt"), f"{path}:{number} withdrawnAt")
+    return out
+
+
+def read_keys(path):
+    """`mediaType:tmdbId` keys, one per line, in file order; a malformed or repeated line is refused."""
+    keys = []
+    with open(path, encoding="utf-8") as fh:
+        for number, line in enumerate(fh, 1):
+            key = line.strip()
+            if not key:
+                continue
+            media, _, tmdb = key.partition(":")
+            if media not in ("movie", "tv") or not tmdb.isdigit():
+                sys.exit(f"{path}:{number}: {key!r} is not a mediaType:tmdbId key")
+            if key in keys:
+                sys.exit(f"{path}:{number}: {key} is listed twice")
+            keys.append(key)
+    return keys
+
+
+def withdraw(argv=None, now=None):
+    """`consolidate_corpus.py withdraw`: append a tombstone for each listed key to the withdrawn file.
+
+    Each line records why, when, and which key list it came from (name and digest), so a withdrawn
+    title can be traced back to the re-fetch that decided it. A key already withdrawn is refused and
+    nothing is written.
+    """
+    ap = argparse.ArgumentParser(prog="consolidate_corpus.py withdraw")
+    ap.add_argument("--keys", required=True, help="the titles to withdraw, one mediaType:tmdbId per line")
+    ap.add_argument("--reason", required=True, help="why their rows no longer stand, e.g. #64 redirect")
+    ap.add_argument("--out", required=True, help="the out-dir's withdrawn.jsonl; appended to")
+    args = ap.parse_args(argv)
+    if not args.reason.strip():
+        sys.exit("--reason is empty")
+    keys = read_keys(args.keys)
+    already = read_withdrawals(args.out) if os.path.exists(args.out) else {}
+    again = [k for k in keys if k in already]
+    if again:
+        sys.exit(f"refusing: {len(again)} keys are already withdrawn in {args.out}, e.g. {again[:4]}")
+    with open(args.keys, "rb") as fh:
+        digest = hashlib.sha256(fh.read()).hexdigest()
+    when = (now or datetime.now(timezone.utc)).isoformat()
+    with open(args.out, "a", encoding="utf-8") as fh:
+        for key in keys:
+            media, tmdb = key.split(":")
+            fh.write(json.dumps({"keysFile": os.path.basename(args.keys), "keysSha256": digest,
+                                 "mediaType": media, "reason": args.reason, "tmdbId": int(tmdb),
+                                 "withdrawnAt": when}, sort_keys=True) + "\n")
+    print(json.dumps({"withdrawn": len(keys), "withdrawnAt": when, "out": args.out}, indent=1))
+    return 0
 
 
 def typed(answers, names):
@@ -117,7 +297,7 @@ def by_key(path, label):
 #: The inputs this join reads, in the order the parser below declares them. `pipeline/corpus.py` builds
 #: the command line out of its own declaration and `pipeline/corpus_test.py` holds the two lists
 #: together, so an input can only be added or dropped in one place without something going red.
-INPUT_ARGS = ("combined", "delta", "facts", "labels", "premise_labels")
+INPUT_ARGS = ("combined", "delta", "facts", "labels", "premise_labels", "withdrawn")
 
 
 def build_parser():
@@ -129,13 +309,23 @@ def build_parser():
     ap.add_argument("--facts", required=True, help="the FULL facts file, not facts-slim")
     ap.add_argument("--labels", required=True)
     ap.add_argument("--premise-labels")
+    ap.add_argument("--withdrawn", help="tombstones: titles whose older pass rows no longer stand")
     ap.add_argument("--expect", type=int, default=None, help="required title count")
     ap.add_argument("--out", required=True, help="written gzipped when it ends .gz")
     return ap
 
 
+def pass_row(record):
+    """What the join reads from a pass row: its identity, its answers and the article it read."""
+    return {"mediaType": record["mediaType"], "tmdbId": record["tmdbId"],
+            "answers": record.get("answers") or {}, "articleSha256": record.get("articleSha256")}
+
+
 def main():
+    if sys.argv[1:2] == ["withdraw"]:
+        return withdraw(sys.argv[2:])
     args = build_parser().parse_args()
+    withdrawals = read_withdrawals(args.withdrawn)
 
     print("reading facts …", file=sys.stderr)
     with open(args.facts, encoding="utf-8") as fh:
@@ -147,8 +337,16 @@ def main():
     labels = by_key(args.labels, "labels")
     premise = by_key(args.premise_labels, "labels")
 
-    print("reading the delta pass …", file=sys.stderr)
-    delta = {k: (r.get("answers") or {}) for k, r in records(args.delta, "delta")}
+    print("reading the passes …", file=sys.stderr)
+    combined_rows, combined_report, combined_withdrawn = latest(args.combined, "combined", withdrawals,
+                                                                keep=pass_row)
+    delta_rows, delta_report, _ = latest(args.delta, "delta", withdrawals, keep=pass_row)
+    unpaired = sorted(k for k, r in delta_rows.items()
+                      if k not in combined_rows or combined_rows[k]["articleSha256"] != r["articleSha256"])
+    if unpaired:
+        sys.exit(f"{len(unpaired)} titles keep a critique row whose classify row is missing or read a "
+                 f"different article, e.g. {unpaired[:4]} — fold a re-run in with both of its passes")
+    delta = {k: r["answers"] for k, r in delta_rows.items()}
 
     print("joining …", file=sys.stderr)
     out_path = args.out
@@ -164,8 +362,11 @@ def main():
     # index, and publish-dataset.sh's record-count guard exists because a facts rebuild once dropped 137
     # of them — "the only symptom was /recommend quietly losing library titles". Iterating the pass
     # silently omitted all 89, and a coverage guard against labelsRecords reads 99.98% and passes.
-    combined_rows = {key: record for key, record in records(args.combined, "combined")}
-    spine = sorted(set(combined_rows) | set(facts))
+    #
+    # A withdrawn title keeps its place on the spine: it lost the judgements read from the wrong article,
+    # not its facts or its labels, and `--expect` counts titles.
+    answered = set(combined_rows) | combined_withdrawn
+    spine = sorted(answered | set(facts))
     try:
         for key in spine:
             record = combined_rows.get(key)
@@ -237,8 +438,10 @@ def main():
 
     print(json.dumps({"titles": written, "withFacts": with_facts, "withLabels": with_labels,
                       "withPremiseLabels": with_premise, "withDelta": with_delta,
-                      "withPass": len(combined_rows), "factsOnly": written - len(combined_rows),
-                      "entities": len(entities), "out": out_path, "entitiesOut": ents_path}, indent=1))
+                      "withPass": len(combined_rows), "factsOnly": written - len(answered),
+                      "entities": len(entities), "out": out_path, "entitiesOut": ents_path,
+                      "tombstones": len(withdrawals), "combined": combined_report, "delta": delta_report},
+                     indent=1))
 
 
 if __name__ == "__main__":

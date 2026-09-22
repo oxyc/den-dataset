@@ -39,10 +39,32 @@ themes share one field and one cap, as they do in the labels. A field classify l
 keeping the subagents' labels there instead scored lower on the golden set in both families (subgenre
 0.7713/0.7801 vs 0.7727/0.7816 micro/macro, mood 0.6448/0.5718 vs 0.6505/0.5770).
 
+## Which classify row, when a title was classified again
+
+The corpus join's rule (`consolidate_corpus.latest`): a title answered in several shards takes the row of
+the run that started latest, by the `runStartedAt` in each shard's manifest, and a title withdrawn in
+`--withdrawn` loses every row from a run that started before its withdrawal. So a September title
+re-classified on a corrected article derives from the new answers, and one that lost its plot has no
+classify row and is refused below.
+
+## Re-deriving a few titles: `--keys`
+
+  scripts/v2/seed_genres_moods_curated.py --keys reclassified.txt \
+      --labels out-repass/labels-t02.json --phase out-repass/classify \
+      --combined out-repass/combined-v1-r2.jsonl … --combined out-reground/combined-v1-r2.jsonl \
+      --out out-repass/labels-t02.json --curated data/genres-moods-curated.json
+
+rewrites the subgenres and moods of the listed titles only, in both files, and leaves every other title's
+bytes alone — including the curated file's entries that `./den genres-moods merge` wrote, which a full
+re-seed from the labels would overwrite. Every listed title must be a September title whose curated
+entry is still `classify-swap`: the rule only ever applied to those, and a title the enrichment has since
+relabelled is not this script's to take back.
+
 ## Refused rather than guessed
 
-- a September title with no classify row;
-- a key in more than one shard, or twice in one (two answers, no way to pick);
+- a September title (or listed title) with no classify row;
+- a key twice in one shard, or in two shards whose runs are not ordered by their manifests (two answers,
+  no way to pick);
 - a classify row whose taxonomy answers are not exactly the taxonomy's Nouls, each a number: a row asked
   under another taxonomy would map probabilities onto the wrong labels.
 
@@ -56,6 +78,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import consolidate_corpus as cc  # noqa: E402  — the corpus join's supersede rule and tombstones
 from combined_questions import taxonomy_questions  # noqa: E402
 
 THRESHOLD, CAP = 0.8, 3
@@ -87,22 +110,12 @@ def september_keys(phase):
     return keys
 
 
-def classify_answers(paths, wanted):
-    """`key` → answers for every `wanted` key, refusing a key answered twice anywhere in the shards."""
-    seen, answers = {}, {}
-    for path in paths:
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                if not line.strip():
-                    continue
-                row = json.loads(line)
-                key = key_of(row)
-                if key in seen:
-                    sys.exit(f"refusing: {key} is answered in both {seen[key]} and {path}")
-                seen[key] = path
-                if key in wanted:
-                    answers[key] = row.get("answers") or {}
-    return answers
+def classify_answers(paths, wanted, withdrawals=None):
+    """`(key → answers for every wanted key that has a row, the join's shard report)`, under the corpus
+    join's supersede rule and tombstones."""
+    rows, report, _ = cc.latest(paths, "combined", withdrawals,
+                                keep=lambda r: (r.get("answers") or {}) if key_of(r) in wanted else None)
+    return {k: rows[k] for k in wanted if k in rows}, report
 
 
 def derive(answers, mapping):
@@ -124,22 +137,23 @@ def derive(answers, mapping):
     return out
 
 
-def swap(blob, sept, answers, mapping):
-    """Rewrite `blob`'s September records in place and return the curated entries and the counts."""
+def rederive(blob, keys, answers, mapping):
+    """Rewrite the subgenres and moods of `keys`' records in `blob` in place; return the records by key
+    and the counts."""
     records = blob["records"]
     by_key = {key_of(r): r for r in records}
     if len(by_key) != len(records):
         sys.exit("refusing: the labels file holds a key twice")
-    absent = sorted(sept - set(by_key))
+    absent = sorted(keys - set(by_key))
     if absent:
         sys.exit(f"refusing: {len(absent)} September titles are not in the labels, e.g. {absent[:4]}")
-    missing = sorted(sept - set(answers))
+    missing = sorted(keys - set(answers))
     if missing:
         sys.exit(f"refusing: {len(missing)} September titles have no classify row, e.g. {missing[:4]}")
-    counts = {"july": len(records) - len(sept), "september": len(sept), "changed": 0, "unchanged": 0,
+    counts = {"changed": 0, "unchanged": 0,
               "noSubgenresAtThreshold": 0, "noMoodsAtThreshold": 0, "neitherAtThreshold": 0}
     bad = []
-    for key in sorted(sept):
+    for key in sorted(keys):
         try:
             new = derive(answers[key], mapping)
         except ValueError as e:
@@ -154,6 +168,14 @@ def swap(blob, sept, answers, mapping):
         counts["neitherAtThreshold"] += not new["subgenres"] and not new["moods"]
     if bad:
         sys.exit(f"refusing: {len(bad)} classify rows are not usable, e.g. {bad[:3]}")
+    return by_key, counts
+
+
+def swap(blob, sept, answers, mapping):
+    """Rewrite `blob`'s September records in place and return the curated entries and the counts."""
+    records = blob["records"]
+    _, rederived = rederive(blob, sept, answers, mapping)
+    counts = {"july": len(records) - len(sept), "september": len(sept), **rederived}
     curated = {}
     for rec in records:
         key = key_of(rec)
@@ -175,8 +197,13 @@ def dump_curated(curated, taxonomy_version):
                  "and moods came from, `primaryGenreSource` where its primary genre and `animated` came from. "
                  "Seeded by scripts/v2/seed_genres_moods_curated.py (oxyc/den-dataset#56).",
             "count": len(curated), "sources": SOURCES, "taxonomyVersion": taxonomy_version}
+    return encode_curated(head, curated)
+
+
+def encode_curated(head, titles):
+    """The curated file's bytes for a head and its titles, in the titles' own order."""
     lines = [json.dumps(head, ensure_ascii=False, sort_keys=True)[:-1] + ',"titles":{']
-    items = list(curated.items())
+    items = list(titles.items())
     for i, (key, entry) in enumerate(items):
         comma = "," if i < len(items) - 1 else ""
         lines.append(f"{json.dumps(key)}:{json.dumps(entry, ensure_ascii=False, sort_keys=True)}{comma}")
@@ -204,7 +231,10 @@ def main(argv=None):
     ap.add_argument("--combined", required=True, action="append",
                     help="a classify shard; repeat for each (incl. the token-fallback shards)")
     ap.add_argument("--out", required=True, help="where to write the updated labels; may be --labels itself")
-    ap.add_argument("--curated", required=True, help="where to write the curated genres & moods")
+    ap.add_argument("--curated", required=True,
+                    help="where to write the curated genres & moods; with --keys, read and updated in place")
+    ap.add_argument("--withdrawn", help="the corpus join's tombstones; a withdrawn title has no classify row")
+    ap.add_argument("--keys", help="re-derive only these titles, one mediaType:tmdbId per line")
     args = ap.parse_args(argv)
 
     _, mapping, _ = taxonomy_questions()
@@ -212,12 +242,42 @@ def main(argv=None):
         blob = json.load(fh)
     before = len(blob["records"])
     sept = september_keys(args.phase)
-    curated, counts = swap(blob, sept, classify_answers(args.combined, sept), mapping)
+    withdrawals = cc.read_withdrawals(args.withdrawn)
+    if args.keys:
+        return rederive_keys(args, blob, sept, withdrawals, mapping)
+    answers, report = classify_answers(args.combined, sept, withdrawals)
+    curated, counts = swap(blob, sept, answers, mapping)
     if len(blob["records"]) != before or len(curated) != before or blob.get("count") not in (None, before):
         sys.exit("refusing: the record count changed")
     write_atomically(args.curated, dump_curated(curated, blob.get("taxonomyVersion")))
     write_atomically(args.out, dump_labels(blob))
-    print(json.dumps({**counts, "records": before, "out": args.out, "curated": args.curated}, indent=2))
+    print(json.dumps({**counts, "records": before, "out": args.out, "curated": args.curated,
+                      "combined": report}, indent=2))
+    return 0
+
+
+def rederive_keys(args, blob, sept, withdrawals, mapping):
+    """`--keys`: the listed titles' subgenres and moods, re-derived in both files; nothing else moves."""
+    keys = set(cc.read_keys(args.keys))
+    outside = sorted(keys - sept)
+    if outside:
+        sys.exit(f"refusing: {len(outside)} listed titles are not September titles, so classify never set "
+                 f"their subgenres and moods, e.g. {outside[:4]}")
+    with open(args.curated, encoding="utf-8") as fh:
+        head = json.load(fh)
+    titles = head.pop("titles")
+    relabelled = sorted(k for k in keys if (titles.get(k) or {}).get("source") != SWAP)
+    if relabelled:
+        sys.exit(f"refusing: {len(relabelled)} listed titles are not {SWAP} in {args.curated}, e.g. "
+                 f"{relabelled[:4]}")
+    answers, report = classify_answers(args.combined, keys, withdrawals)
+    by_key, counts = rederive(blob, keys, answers, mapping)
+    for key in keys:
+        titles[key]["subgenres"], titles[key]["moods"] = by_key[key]["subgenres"], by_key[key]["moods"]
+    write_atomically(args.curated, encode_curated(head, titles))
+    write_atomically(args.out, dump_labels(blob))
+    print(json.dumps({**counts, "keys": len(keys), "out": args.out, "curated": args.curated,
+                      "combined": report}, indent=2))
     return 0
 
 

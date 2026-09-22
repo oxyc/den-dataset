@@ -126,6 +126,18 @@ DELTA = Artifact(
     shards=True,
 )
 
+#: Tombstones: titles a re-fetch left with no plot, whose older classify and critique rows the corpus join
+#: must stop shipping. Append-only and written by hand from the re-fetch's key list, because deciding a
+#: title lost its plot is the re-fetch's call, not a stage's. Optional: an out-dir with none withdraws
+#: nothing. See `scripts/v2/consolidate_corpus.py`.
+WITHDRAWN = Artifact(
+    name="withdrawn",
+    filename="withdrawn.jsonl",
+    producer="scripts/v2/consolidate_corpus.py",
+    how="scripts/v2/consolidate_corpus.py withdraw --keys <keys> --reason <why> --out <out-dir>/withdrawn.jsonl",
+    required=False,
+)
+
 #: The enrichment's batch files, named as the DIRECTORY that holds them rather than as a shard set. The
 #: embed pass reads them in batch-number order and lets the newest win, because 505 keys appear in several
 #: batches disagreeing about `hasWikiPlot` — which decides whether a title embeds with its plot or without
@@ -316,7 +328,7 @@ RELEASE = Artifact(
 
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
              COMBINED_MANIFEST, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST, GENRES_MOODS,
-             DELTA, ENRICHED, ENRICH_CHECKPOINT, DOC_FACTS, EMBED_LABELS,
+             DELTA, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, DOC_FACTS, EMBED_LABELS,
              EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
              DELTA_IDS, DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, FINALIZE_REPORT,
              PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)

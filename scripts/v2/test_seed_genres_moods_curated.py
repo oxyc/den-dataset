@@ -39,6 +39,9 @@ def read(path):
         return fh.read()
 
 
+EARLY, LATE = "2026-09-19T16:13:40+00:00", "2026-09-23T09:00:00+00:00"
+
+
 def record(media, tmdb_id, primary="Drama", subgenres=(), moods=()):
     return {"animated": False, "mediaType": media, "primaryGenre": primary, "source": "llm", "tmdbId": tmdb_id,
             "subgenres": [{"confidence": 0.7, "label": l} for l in subgenres],
@@ -52,6 +55,7 @@ class Seed(unittest.TestCase):
         os.makedirs(os.path.join(self.dir, "phase", "out"))
         self.labels = os.path.join(self.dir, "labels-t02.json")
         self.curated = os.path.join(self.dir, "genres-moods-curated.json")
+        self.tombstones = os.path.join(self.dir, "withdrawn.jsonl")
         # tv:95 and movie:95 share an id: only the September one (tv) may change.
         self.records = [record("movie", 95, "Action", subgenres=[label(SUB[0])], moods=[label(MOOD[0])]),
                         record("movie", 7, "Horror", subgenres=["Slasher/Stalker"]),
@@ -61,6 +65,10 @@ class Seed(unittest.TestCase):
                                    ("movie", 7, answers({SUB[2]: 0.95, THEME[0]: 0.9, SUB[3]: 0.8,
                                                          SUB[4]: 0.85, MOOD[2]: 0.79}))],
                        "b.jsonl": [("tv", 95, answers({MOOD[3]: 0.9, MOOD[4]: 0.9}))]}
+        #: Shard name → the runStartedAt its manifest records; a shard not named here has no manifest.
+        self.started = {}
+        #: (media, tmdbId, withdrawnAt) tombstones; none means no --withdrawn.
+        self.withdrawn = []
 
     def write(self):
         with open(self.labels, "w", encoding="utf-8") as fh:
@@ -72,15 +80,26 @@ class Seed(unittest.TestCase):
             with open(os.path.join(self.dir, name), "w") as fh:
                 for media, tmdb_id, ans in rows:
                     fh.write(json.dumps({"mediaType": media, "tmdbId": tmdb_id, "answers": ans}) + "\n")
+        for name, when in self.started.items():
+            with open(os.path.join(self.dir, name + ".manifest.json"), "w") as fh:
+                json.dump({"runStartedAt": when}, fh)
+        with open(self.tombstones, "w") as fh:
+            for media, tmdb_id, when in self.withdrawn:
+                fh.write(json.dumps({"mediaType": media, "tmdbId": tmdb_id, "reason": "#64",
+                                     "withdrawnAt": when}) + "\n")
 
-    def run_seed(self):
-        self.write()
+    def argv(self):
         argv = ["--labels", self.labels, "--phase", os.path.join(self.dir, "phase"), "--out", self.labels,
-                "--curated", self.curated]
+                "--curated", self.curated, "--withdrawn", self.tombstones]
         for name in self.shards:
             argv += ["--combined", os.path.join(self.dir, name)]
+        return argv
+
+    def run_seed(self, write=True, extra=()):
+        if write:
+            self.write()
         with contextlib.redirect_stdout(io.StringIO()):
-            seed.main(argv)
+            seed.main(self.argv() + list(extra))
         with open(self.labels, encoding="utf-8") as fh:
             labels = {seed.key_of(r): r for r in json.load(fh)["records"]}
         with open(self.curated, encoding="utf-8") as fh:
@@ -154,19 +173,116 @@ class Seed(unittest.TestCase):
         self.shards["b.jsonl"] = []
         self.refused("no classify row")
 
-    def test_a_key_in_two_shards_is_refused(self):
+    def test_a_key_in_two_shards_whose_runs_are_not_ordered_is_refused(self):
         self.shards["b.jsonl"].append(("movie", 95, answers()))
-        self.refused("answered in both")
+        self.refused("duplicate key across combined shards")
 
     def test_a_key_twice_in_one_shard_is_refused(self):
         self.shards["b.jsonl"].append(("tv", 95, answers()))
-        self.refused("answered in both")
+        self.refused("duplicate key within combined shard")
+
+    def test_a_later_classify_run_supersedes_an_earlier_one(self):
+        """The corpus join's rule: the run that started later answers for the title."""
+        self.shards["c.jsonl"] = [("tv", 95, answers({MOOD[5]: 0.9}))]
+        self.started = {"a.jsonl": EARLY, "b.jsonl": EARLY, "c.jsonl": LATE}
+        labels, curated = self.run_seed()
+        self.assertEqual(labels["tv:95"]["moods"], [{"confidence": 0.9, "label": label(MOOD[5])}])
+        self.assertEqual(curated["titles"]["tv:95"]["moods"], labels["tv:95"]["moods"])
+
+    def test_a_withdrawn_title_has_no_classify_row(self):
+        """A title that lost its plot keeps no labels derived from the article it lost."""
+        self.started = {"a.jsonl": EARLY, "b.jsonl": EARLY}
+        self.withdrawn = [("tv", 95, LATE)]
+        self.refused("no classify row")
 
     def test_a_row_asked_under_another_taxonomy_is_refused(self):
         ans = answers()
         del ans[MOOD[0]]
         self.shards["b.jsonl"] = [("tv", 95, ans)]
         self.refused("not usable")
+
+    def seeded_then_reclassified(self):
+        """The shipped state, then a re-classify run that answered BOTH September titles again. The
+        curated file also carries an entry the enrichment merge rewrote since the seed."""
+        self.run_seed()
+        with open(self.curated, encoding="utf-8") as fh:
+            head = json.load(fh)
+        titles = head.pop("titles")
+        titles["movie:95"] = dict(titles["movie:95"], source="hand-enrichment", moods=[])
+        with open(self.curated, "w", encoding="utf-8") as fh:
+            fh.write(seed.encode_curated(head, titles))
+        self.shards["c.jsonl"] = [("tv", 95, answers({MOOD[5]: 0.9})), ("movie", 7, answers({SUB[5]: 0.9}))]
+        self.started = {"a.jsonl": EARLY, "b.jsonl": EARLY, "c.jsonl": LATE}
+        self.write_shards_only()
+        self.keys = os.path.join(self.dir, "keys.txt")
+        with open(self.keys, "w", encoding="utf-8") as fh:
+            fh.write("tv:95\n")
+
+    def write_shards_only(self):
+        """Shards and manifests, leaving the labels and curated files as the last run wrote them."""
+        labels, curated = read(self.labels), read(self.curated)
+        self.write()
+        with open(self.labels, "wb") as fh:
+            fh.write(labels)
+        with open(self.curated, "wb") as fh:
+            fh.write(curated)
+
+    def test_keys_rederives_only_the_listed_titles_and_leaves_every_other_line_alone(self):
+        self.seeded_then_reclassified()
+        labels_before = read(self.labels).decode()
+        curated_before = read(self.curated).decode().splitlines()
+        labels, curated = self.run_seed(write=False, extra=["--keys", self.keys])
+        self.assertEqual(labels["tv:95"]["moods"], [{"confidence": 0.9, "label": label(MOOD[5])}])
+        self.assertEqual(curated["titles"]["tv:95"]["moods"], labels["tv:95"]["moods"])
+        self.assertEqual(labels["tv:95"]["primaryGenre"], "Horror", "only subgenres and moods move")
+        # movie:7 was answered again too, and is not listed.
+        self.assertEqual(labels["movie:7"]["subgenres"][0]["label"], label(SUB[2]))
+        for key in ("movie:7", "movie:95"):
+            self.assertIn(seed.dump_labels(labels[key]), labels_before, key)
+        after = read(self.curated).decode().splitlines()
+        self.assertEqual(len(after), len(curated_before))
+        changed = [i for i, (a, b) in enumerate(zip(curated_before, after)) if a != b]
+        self.assertEqual([after[i].split(":", 2)[:2] for i in changed], [['"tv', '95"']])
+        self.assertEqual(curated["titles"]["movie:95"]["source"], "hand-enrichment", "the merge's entry")
+
+    def test_keys_refuses_a_title_classify_never_labelled(self):
+        self.seeded_then_reclassified()
+        with open(self.keys, "a", encoding="utf-8") as fh:
+            fh.write("movie:95\n")
+        self.keys_refused("not September titles")
+
+    def test_keys_refuses_a_title_the_enrichment_has_relabelled(self):
+        self.seeded_then_reclassified()
+        with open(self.curated, encoding="utf-8") as fh:
+            head = json.load(fh)
+        titles = head.pop("titles")
+        titles["tv:95"]["source"] = "hand-enrichment"
+        with open(self.curated, "w", encoding="utf-8") as fh:
+            fh.write(seed.encode_curated(head, titles))
+        self.keys_refused("are not classify-swap")
+
+    def test_keys_refuses_a_withdrawn_title(self):
+        self.seeded_then_reclassified()
+        self.shards.pop("c.jsonl")
+        self.withdrawn = [("tv", 95, LATE)]
+        self.write_shards_only()
+        self.keys_refused("no classify row")
+
+    def keys_refused(self, needle):
+        labels, curated = read(self.labels), read(self.curated)
+        with self.assertRaises(SystemExit) as caught:
+            self.run_seed(write=False, extra=["--keys", self.keys])
+        self.assertIn(needle, str(caught.exception))
+        self.assertEqual((read(self.labels), read(self.curated)), (labels, curated), "a refusal writes nothing")
+
+    def test_the_curated_encoding_round_trips_the_committed_file(self):
+        """`--keys` reads the committed file and writes it back through `encode_curated`, so an untouched
+        title must come out as the same bytes."""
+        committed = os.path.join(HERE, "..", "..", "data", "genres-moods-curated.json")
+        with open(committed, encoding="utf-8") as fh:
+            head = json.load(fh)
+        titles = head.pop("titles")
+        self.assertEqual(seed.encode_curated(head, titles).encode("utf-8"), read(committed))
 
     def test_a_september_title_missing_from_the_labels_is_refused(self):
         self.september.append("movie:404")
