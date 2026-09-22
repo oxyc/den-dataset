@@ -3,6 +3,7 @@
 
     scripts/eval-taxonomy.py out-repass/labels-t02.json            # report
     scripts/eval-taxonomy.py out-repass/labels-t02.json --gate     # …and exit 1 below the floors
+    scripts/eval-taxonomy.py out-repass/labels-t02.json --record   # make these scores the floors
 
 This is the ONLY check in the pipeline that measures label QUALITY rather than plumbing. Everything else
 asks whether the right number of records arrived in the right shape; this asks whether they are *correct*.
@@ -23,6 +24,25 @@ overall". Macro averages per-label F1, so a sparse label counts as much as a com
 label broken". A gate on micro alone passes a build that destroyed every rare thematic; a gate on macro
 alone is noisy when support is tiny. Both are reported and both are gated.
 
+## The floors are a ratchet
+
+The floors are the scores of the labels that currently ship, recorded in `data/eval/quality-floors.json`
+with the date and the sha256 of the labels file they were measured on. `--gate` refuses a score below its
+floor, so the labels can hold still or improve, never quietly get worse.
+
+They used to be constants carried over from `ShippedDatasetEvalTests`, a few points under the scores they
+were set against. The labels that shipped after that scored under two of them (mood micro .639 vs .640,
+macro .564 vs .580), so the publisher could only run the gate as a report — enforcing it would have refused
+the next publish of unchanged labels, over a regression that had already shipped. A ratchet starts from
+what is actually out there and still refuses the next step down.
+
+The floors are exact, not rounded: unchanged labels score identically, and a rounded floor would let a
+drop smaller than the rounding through.
+
+Raising or lowering them is `--record` and a commit, so every change to what counts as good enough is in
+git with the labels it was measured on. A floor measured on another golden set, support threshold or
+confidence floor does not describe these scores, so `--gate` refuses to compare against one.
+
 ## `--min-support`
 
 Labels with fewer than this many golden positives are dropped before scoring, mirroring the producer's own
@@ -31,15 +51,16 @@ positives so it can only ever register false positives — gating on it would fa
 vocabulary than the golden set knows.
 """
 import argparse
+import datetime
+import hashlib
 import json
+import math
+import os
 import sys
 from collections import defaultdict
 
-# The floors, carried over from `ShippedDatasetEvalTests` with the values they were set against:
-# primary .787/.765, subgenre .786/.790, mood .686/.632 at min-support 10. Each floor sits a few points
-# under the measured value — headroom for a deliberate small change, not for noise.
-MIN_MICRO_F1 = {"primaryGenre": 0.75, "subgenre": 0.74, "mood": 0.64}
-MIN_MACRO_F1 = {"primaryGenre": 0.72, "subgenre": 0.74, "mood": 0.58}
+FAMILIES = ("primaryGenre", "subgenre", "mood")
+FLOORS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "eval", "quality-floors.json")
 MIN_SUPPORT = 10
 
 # The golden set must still overlap the corpus. A big fall means the corpus shrank or the golden drifted
@@ -141,8 +162,40 @@ def family_scores(tallies, min_support):
     tp = sum(t[0] for t in kept.values())
     fp = sum(t[1] for t in kept.values())
     fn = sum(t[2] for t in kept.values())
-    macro = sum(f1(*t) for t in kept.values()) / len(kept)
+    # fsum, because the labels arrive in set-iteration order, which changes with every process's hash seed.
+    # A plain sum in that order can differ in the last bit between two runs over the same labels, and the
+    # floors are compared exactly.
+    macro = math.fsum(f1(*t) for t in kept.values()) / len(kept)
     return f1(tp, fp, fn), macro, len(kept)
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def below_floors(scores, recorded, golden_sha, min_support, confidence_floor):
+    """Why `scores` fail the recorded floors: one line per reason, empty when they hold.
+
+    Floors measured under other conditions are refused rather than compared. The same labels score
+    differently against another golden set, support threshold or confidence floor, so comparing across them
+    would pass or fail on the change of ruler, not on the labels.
+    """
+    for key, now in (("goldenSha256", golden_sha), ("minSupport", min_support),
+                     ("confidenceFloor", confidence_floor)):
+        if recorded.get(key) != now:
+            return [f"the floors were measured with {key} {recorded.get(key)!r}, this run uses {now!r} — "
+                    f"re-record them against the new one (--record) and commit"]
+    out = []
+    for family in FAMILIES:
+        for metric in ("microF1", "macroF1"):
+            floor = recorded["floors"][family][metric]
+            if scores[family][metric] < floor:
+                out.append(f"{family} {metric} {scores[family][metric]:.4f} < floor {floor:.4f}")
+    return out
 
 
 def main():
@@ -153,7 +206,10 @@ def main():
     ap.add_argument("--confidence-floor", type=float, default=0.0)
     ap.add_argument("--min-coverage", type=float, default=MIN_COVERAGE,
                     help="the share of the golden set that must be in the labels")
-    ap.add_argument("--gate", action="store_true", help="exit 1 when a family is under its floor")
+    ap.add_argument("--floors", default=FLOORS, help="the recorded floors (default: data/eval/quality-floors.json)")
+    ap.add_argument("--gate", action="store_true", help="exit 1 when a family is under its recorded floor")
+    ap.add_argument("--record", action="store_true",
+                    help="write these scores to --floors as the new floors, with today's date and the labels' sha256")
     args = ap.parse_args()
 
     with open(args.golden, encoding="utf-8") as fh:
@@ -165,34 +221,64 @@ def main():
 
     counts, evaluated, missing = evaluate(golden, labels, args.confidence_floor)
     failures = []
+    scores = {}
     report = {"taxonomyVersion": version, "evaluated": evaluated, "missingFromLabels": missing,
               "families": {}}
-    for family in ("primaryGenre", "subgenre", "mood"):
+    for family in FAMILIES:
         micro, macro, scored = family_scores(counts[family], args.min_support)
+        scores[family] = {"microF1": micro, "macroF1": macro}
         report["families"][family] = {"microF1": round(micro, 4), "macroF1": round(macro, 4),
                                       "labelsScored": scored}
-        # A family you set a floor on that scored NO labels fails, deliberately: with nothing to score both
-        # F1s are vacuously 1.0, so the gate would certify a family that had disappeared.
+        # A family that scored NO labels fails, deliberately: with nothing to score both F1s are vacuously
+        # 1.0, so the gate would certify a family that had disappeared.
         if scored == 0:
             failures.append(f"{family}: no labels had {args.min_support}+ golden positives to score")
-            continue
-        if micro < MIN_MICRO_F1[family]:
-            failures.append(f"{family} microF1 {micro:.3f} < required {MIN_MICRO_F1[family]:.3f}")
-        if macro < MIN_MACRO_F1[family]:
-            failures.append(f"{family} macroF1 {macro:.3f} < required {MIN_MACRO_F1[family]:.3f}")
     coverage = evaluated / max(1, len(golden["titles"]))
     report["coverage"] = round(coverage, 4)
     if coverage < args.min_coverage:
         failures.append(f"only {evaluated} of {len(golden['titles'])} golden titles are in the labels "
                         f"({coverage:.0%}, want {args.min_coverage:.0%}+) — the gate is being hollowed "
                         f"out, not passed")
-
     print(json.dumps(report, indent=1))
+
+    golden_sha = sha256(args.golden)
+    if args.record:
+        # Floors taken from a vacuous or hollowed-out score would certify anything above nothing.
+        if failures:
+            print("\neval: refusing to record floors from a run that cannot be scored:", file=sys.stderr)
+            for line in failures:
+                print(f"       {line}", file=sys.stderr)
+            return 1
+        recorded = {
+            "measuredOn": datetime.datetime.now(datetime.timezone.utc).date().isoformat(),
+            "labels": os.path.basename(args.labels),
+            "labelsSha256": sha256(args.labels),
+            "goldenSha256": golden_sha,
+            "minSupport": args.min_support,
+            "confidenceFloor": args.confidence_floor,
+            "floors": scores,
+        }
+        with open(args.floors, "w", encoding="utf-8") as fh:
+            json.dump(recorded, fh, indent=1)
+            fh.write("\n")
+        print(f"\neval: recorded these scores as the floors in {args.floors}", file=sys.stderr)
+        return 0
+
+    with open(args.floors, encoding="utf-8") as fh:
+        recorded = json.load(fh)
+    failures += below_floors(scores, recorded, golden_sha, args.min_support, args.confidence_floor)
     if failures:
-        print("\neval: the labels are below their quality floors:", file=sys.stderr)
+        print(f"\neval: the labels are below the floors recorded on {recorded.get('measuredOn')} "
+              f"(labels sha256 {recorded.get('labelsSha256', '')[:12]}…):", file=sys.stderr)
         for line in failures:
             print(f"       {line}", file=sys.stderr)
+        print("       If the drop is deliberate, record these scores as the new floors and commit them:\n"
+              f"         scripts/eval-taxonomy.py {args.labels} --record", file=sys.stderr)
         return 1 if args.gate else 0
+    if any(scores[f][m] > recorded["floors"][f][m] for f in FAMILIES for m in ("microF1", "macroF1")):
+        # Nothing raises the floors on its own; an improvement that is not recorded can be given back.
+        print(f"\neval: above the floors — once these labels ship, raise them: "
+              f"scripts/eval-taxonomy.py {args.labels} --record", file=sys.stderr)
     return 0
 
 

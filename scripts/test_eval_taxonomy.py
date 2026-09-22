@@ -139,46 +139,109 @@ class Vacuity(unittest.TestCase):
             ev.evaluate(g, labels([record(999, "Crime")]))
 
 
+def rows(mood_hits):
+    """30 titles, all right on primary genre and subgenre, and right on mood for the first `mood_hits`."""
+    return [record(i, "Crime", subgenres=[("Heist", 0.9)],
+                   moods=[("Tense" if i <= mood_hits else "Wrong", 0.9)]) for i in range(1, 31)]
+
+
 class Gate(unittest.TestCase):
+    """The ratchet: floors are the recorded scores of what ships, and a drop below them is refused."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.golden = os.path.join(self.dir, "golden.json")
+        self.floors = os.path.join(self.dir, "floors.json")
+        with open(self.golden, "w") as fh:
+            json.dump(golden([title(i, "Crime", moods=["Tense"], subgenres=["Heist"])
+                              for i in range(1, 31)]), fh)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.dir)
+
     def _run(self, labels_rows, extra=()):
         import contextlib, io, sys
-        with tempfile.TemporaryDirectory() as dir:
-            lpath = os.path.join(dir, "labels.json")
-            gpath = os.path.join(dir, "golden.json")
-            with open(lpath, "w") as fh:
-                json.dump({"taxonomyVersion": "t02", "records": labels_rows}, fh)
-            with open(gpath, "w") as fh:
-                json.dump(golden([title(i, "Crime", moods=["Tense"], subgenres=["Heist"])
-                                  for i in range(1, 31)]), fh)
-            argv = sys.argv
-            sys.argv = ["eval-taxonomy.py", lpath, "--golden", gpath, *extra]
-            err, out = io.StringIO(), io.StringIO()
-            try:
-                with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
-                    code = ev.main()
-            finally:
-                sys.argv = argv
-            return code, err.getvalue()
+        lpath = os.path.join(self.dir, "labels.json")
+        with open(lpath, "w") as fh:
+            json.dump({"taxonomyVersion": "t02", "records": labels_rows}, fh)
+        argv = sys.argv
+        sys.argv = ["eval-taxonomy.py", lpath, "--golden", self.golden, "--floors", self.floors, *extra]
+        err, out = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                code = ev.main()
+        finally:
+            sys.argv = argv
+        return code, err.getvalue()
 
-    def test_good_labels_pass(self):
-        rows = [record(i, "Crime", subgenres=[("Heist", 0.9)], moods=[("Tense", 0.9)])
-                for i in range(1, 31)]
-        code, err = self._run(rows, extra=["--gate"])
+    def test_the_labels_the_floors_were_recorded_on_pass(self):
+        """The case the old fixed floors failed: what ships must pass its own floors, or the gate can only
+        ever run as a report."""
+        self.assertEqual(self._run(rows(20), extra=["--record"])[0], 0)
+        code, err = self._run(rows(20), extra=["--gate"])
         self.assertEqual(code, 0, err)
 
-    def test_a_collapsed_family_fails_the_gate(self):
-        rows = [record(i, "Crime", subgenres=[("Heist", 0.9)], moods=[("Wrong", 0.9)])
-                for i in range(1, 31)]
-        code, err = self._run(rows, extra=["--gate"])
+    def test_a_drop_below_the_recorded_floor_fails_the_gate(self):
+        self._run(rows(20), extra=["--record"])
+        code, err = self._run(rows(19), extra=["--gate"])
         self.assertEqual(code, 1)
-        self.assertIn("mood", err)
+        self.assertIn("mood microF1", err)
+        self.assertIn("--record", err, "the refusal says how to accept a deliberate drop")
+
+    def test_an_improvement_passes_and_says_the_floors_can_rise(self):
+        self._run(rows(20), extra=["--record"])
+        code, err = self._run(rows(25), extra=["--gate"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("raise them", err)
+
+    def test_the_record_names_the_labels_and_the_date(self):
+        self._run(rows(20), extra=["--record"])
+        with open(self.floors) as fh:
+            recorded = json.load(fh)
+        with open(os.path.join(self.dir, "labels.json"), "rb") as fh:
+            import hashlib
+            self.assertEqual(recorded["labelsSha256"], hashlib.sha256(fh.read()).hexdigest())
+        self.assertRegex(recorded["measuredOn"], r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_floors_from_another_golden_set_are_not_compared(self):
+        """Another golden set scores the same labels differently, so passing or failing against its floors
+        would be about the golden set, not the labels."""
+        self._run(rows(20), extra=["--record"])
+        with open(self.golden, "w") as fh:
+            json.dump(golden([title(i, "Crime", moods=["Tense"], subgenres=["Heist"])
+                              for i in range(1, 32)]), fh)
+        code, err = self._run(rows(20), extra=["--gate"])
+        self.assertEqual(code, 1)
+        self.assertIn("goldenSha256", err)
+
+    def test_floors_are_not_recorded_from_a_run_with_nothing_to_score(self):
+        """With no label above support every F1 is vacuous; recorded, it would certify anything."""
+        code, err = self._run(rows(20), extra=["--record", "--min-support", "100"])
+        self.assertEqual(code, 1)
+        self.assertFalse(os.path.exists(self.floors))
 
     def test_without_gate_a_failure_reports_but_does_not_block(self):
-        rows = [record(i, "Crime", subgenres=[("Heist", 0.9)], moods=[("Wrong", 0.9)])
-                for i in range(1, 31)]
-        code, err = self._run(rows)
+        self._run(rows(20), extra=["--record"])
+        code, err = self._run(rows(10))
         self.assertEqual(code, 0)
-        self.assertIn("below their quality floors", err)
+        self.assertIn("below the floors", err)
+
+
+class CommittedFloors(unittest.TestCase):
+    """`data/eval/quality-floors.json` is what the publisher gates on, so it must be one `--gate` can read
+    and must still describe the committed golden set."""
+
+    def test_the_committed_floors_describe_the_committed_golden_set(self):
+        with open(ev.FLOORS) as fh:
+            recorded = json.load(fh)
+        self.assertEqual(recorded["goldenSha256"],
+                         ev.sha256(os.path.join(HERE, "..", "data", "eval", "golden-large.json")),
+                         "the golden set changed: re-record the floors against it")
+        self.assertEqual(recorded["minSupport"], ev.MIN_SUPPORT)
+        for family in ev.FAMILIES:
+            for metric in ("microF1", "macroF1"):
+                self.assertGreater(recorded["floors"][family][metric], 0.0, (family, metric))
 
 
 if __name__ == "__main__":
