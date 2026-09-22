@@ -2,7 +2,7 @@
 """FINALIZE — the embed pass's two append-only stores, turned into what the corpus is built from.
 
 `index/labels.jsonl` + `index/vectors.jsonl` → `labels-t02.json`, `vectors-bge-m3.bin` and
-`dataset.meta.json` (plus `labels-t02.json.gz` and `report.json`, which nothing downstream reads). It sits
+`dataset.meta.json` (plus `report.json`, which nothing downstream reads). It sits
 after `embed` because those stores are its input, and before `facts` because the corpus facts pass scrapes
 the ids in the `labels-t02.json` this writes.
 
@@ -22,9 +22,14 @@ the ids in the `labels-t02.json` this writes.
 record's vector, which is what makes an incremental top-up an append rather than a rebuild.
 
 **The bytes are the Swift's.** `labels-t02.json`'s sha is half of `datasetVersion`, so it is written by
-`pipeline/jsonbytes.py`'s `JSONEncoder` spelling; the manifest keeps `JSONSerialization`'s. The gzip is
-`/usr/bin/gzip -k`'s framing — the input's name and mtime in the header, deflate at level 6 — built here
-rather than shelled out to, which is the same deflate stream byte for byte.
+`pipeline/jsonbytes.py`'s `JSONEncoder` spelling; the manifest keeps `JSONSerialization`'s.
+
+**There is no `labels-t02.json.gz`.** It was the precompressed copy den-atlas served to clients sending
+`Accept-Encoding: gzip`, and that stopped when the blobs were retired for the store (oxyc/den#113):
+`prune-manifest.py` drops every `*GzFile` key, so the release has not named it since, and no reader in
+this repo, in den-atlas or in the box's sync looks for it. It went on being written anyway — 11 MB per
+run into the out-dir, for nobody. `labelsGzFile` stays in `OWNED` so a rewrite over an older manifest
+drops the key rather than inheriting a claim about a file that is no longer there.
 
 `--embedding-version` is gone. It relabelled the blob for an offline FNV run, and the stage declares the
 file it writes: a second name for the same output is a declaration the run does not keep.
@@ -34,10 +39,8 @@ import hashlib
 import json
 import math
 import os
-import struct
 import sys
 import time
-import zlib
 
 from . import artifacts, jsonbytes
 from .contract import REPO, StageError
@@ -66,16 +69,16 @@ QUANTIZATION = "int8-symmetric-x127"
 #: the vote-pass `assemble`, deleted in #48, so it is not read here and the counter is gone with it.
 INPUTS = (artifacts.EMBED_LABELS, artifacts.EMBED_VECTORS, artifacts.EMBEDDER, artifacts.EMBEDDING_SPACE,
           artifacts.ENRICH_CHECKPOINT)
-OUTPUTS = (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST, artifacts.VECTOR_LABELS_GZ,
-           artifacts.FINALIZE_REPORT)
+OUTPUTS = (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST, artifacts.FINALIZE_REPORT)
 
 #: What the enrichment's checkpoint tallies. The Swift decoded all four, so a malformed one of them made the
 #: whole checkpoint unreadable, which the report shows as zeros.
 ENRICH_TOTALS = ("belowFloor", "anime", "failures", "noOverview")
 
 #: Every key the manifest this stage writes is authoritative for — including when it leaves one out. The
-#: three `metadata*` keys belong to the retired poster sidecar and stay OWNED so a rewrite drops them
-#: rather than inheriting a previous run's, which would vouch for a sha both consumers hard-verify.
+#: three `metadata*` keys belong to the retired poster sidecar, and `labelsGzFile` to the precompressed
+#: labels this stage no longer writes; both stay OWNED so a rewrite drops them rather than inheriting a
+#: previous run's, which would vouch for a file that is not there and a sha both consumers hard-verify.
 OWNED = frozenset((
     "datasetVersion", "taxonomyVersion", "embeddingModel", "dims", "count", "quantization", "labelsFile",
     "vectorsFile", "labelsGzFile", "labelsSha256", "labelsBytes", "vectorsSha256", "vectorsBytes",
@@ -202,25 +205,6 @@ def prohibited(value, found=None):
     return sorted(found)
 
 
-def gzip_like_the_cli(path, out):
-    """`gzip -k <path>`, written to `out`: the input's basename and mtime in the header, level-6 deflate,
-    OS byte Unix.
-
-    Byte-for-byte what `/usr/bin/gzip` wrote beside the labels, so the only thing two runs disagree on is
-    the four mtime bytes — the input's, which `gzip` records and which moves with every write.
-    """
-    with open(path, "rb") as handle:
-        body = handle.read()
-    mtime = int(os.stat(path).st_mtime)
-    deflate = zlib.compressobj(6, zlib.DEFLATED, -zlib.MAX_WBITS, 8)
-    header = (b"\x1f\x8b\x08\x08" + struct.pack("<I", mtime) + b"\x00\x03"
-              + os.path.basename(path).encode("utf-8") + b"\x00")
-    trailer = struct.pack("<II", zlib.crc32(body) & 0xFFFFFFFF, len(body) & 0xFFFFFFFF)
-    caching.write_atomically(out, header + deflate.compress(body) + deflate.flush() + trailer)
-    os.utime(out, (mtime, mtime))
-    return out
-
-
 def bucket(confidence):
     low = math.floor(confidence * 10) / 10
     return "%.1f-%.1f" % (low, low + 0.1)
@@ -304,13 +288,12 @@ def run(ctx, now=None):
     vectors_blob = vector_blob.header(keys, dim) + bytes(x & 0xFF for row in vectors for x in row)
 
     labels_path, vectors_path = ctx.path(artifacts.VECTOR_LABELS), ctx.path(artifacts.VECTORS)
-    meta_path, labels_gz = ctx.path(artifacts.MANIFEST), ctx.path(artifacts.VECTOR_LABELS_GZ)
+    meta_path = ctx.path(artifacts.MANIFEST)
     report_path = ctx.path(artifacts.FINALIZE_REPORT)
-    for path in (labels_path, vectors_path, meta_path, labels_gz, report_path):
+    for path in (labels_path, vectors_path, meta_path, report_path):
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     caching.write_atomically(labels_path, labels_blob)
     caching.write_atomically(vectors_path, vectors_blob)
-    gzip_like_the_cli(labels_path, labels_gz)
 
     labels_sha = hashlib.sha256(labels_blob).hexdigest()
     vectors_sha = hashlib.sha256(vectors_blob).hexdigest()
@@ -319,8 +302,7 @@ def run(ctx, now=None):
     meta = {"datasetVersion": version, "taxonomyVersion": TAXONOMY, "embeddingModel": EMBEDDING_MODEL,
             "dims": dim, "count": len(records), "quantization": QUANTIZATION,
             "labelsFile": os.path.basename(labels_path), "vectorsFile": os.path.basename(vectors_path),
-            "labelsGzFile": os.path.basename(labels_gz), "labelsSha256": labels_sha,
-            "labelsBytes": len(labels_blob), "vectorsSha256": vectors_sha, "vectorsBytes": len(vectors_blob),
+            "labelsSha256": labels_sha, "labelsBytes": len(labels_blob), "vectorsSha256": vectors_sha, "vectorsBytes": len(vectors_blob),
             "builtAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stamp)),
             "lastModifiedHttp": email.utils.formatdate(stamp, usegmt=True)}
     if embedder:

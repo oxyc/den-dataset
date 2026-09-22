@@ -263,13 +263,6 @@ VECTOR_LABELS = Artifact(
     manifest_key="labelsFile",
 )
 
-#: `gzip -k` of the labels, which the manifest names as `labelsGzFile`. No manifest key is claimed here:
-#: `check-producers.py` treats a `*GzFile` as a copy of its source, owned by the source's producer.
-VECTOR_LABELS_GZ = Artifact(
-    name="vector_labels_gz",
-    filename="labels-t02.json.gz",
-)
-
 #: The finalize run's tallies — titles per primary genre, the confidence histogram, and the enrichment's
 #: counters. Read by a person, never by a stage.
 FINALIZE_REPORT = Artifact(
@@ -325,5 +318,5 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              COMBINED_MANIFEST, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST, GENRES_MOODS,
              DELTA, ENRICHED, ENRICH_CHECKPOINT, DOC_FACTS, EMBED_LABELS,
              EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
-             DELTA_IDS, DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, VECTOR_LABELS_GZ, FINALIZE_REPORT,
+             DELTA_IDS, DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, FINALIZE_REPORT,
              PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)
