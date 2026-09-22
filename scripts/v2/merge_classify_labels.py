@@ -56,9 +56,9 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--phase", required=True)
 ap.add_argument("--labels", required=True, help="the store to extend; read, never truncated in place")
 ap.add_argument("--out", required=True)
-# `source` is decoded into DenDataset's LabelSource enum (BackfillModels.swift), which accepts only
-# llm/recipe/wikidata/cluster. A descriptive value like "llm-t02-classify" writes fine here and then fails
-# every later read of the store with a DecodingError naming a record index rather than the cause.
+# `source` is checked against `pipeline/finalize.py`'s SOURCES by the embed and finalize stages, which
+# accept only llm/recipe/wikidata/cluster. A descriptive value like "llm-t02-classify" writes fine here and
+# then fails every later read of the store with a refusal naming a record index rather than the cause.
 SOURCES = ("llm", "recipe", "wikidata", "cluster")
 ap.add_argument("--source", default="llm", choices=SOURCES)
 args = ap.parse_args()

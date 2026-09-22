@@ -3,8 +3,9 @@
 #
 #   scripts/recluster-run.sh [OUT_DIR]        # default: ./out-t02
 #
-# Costs nothing but CPU (no API calls) — ~30s over the 37k×1024 corpus at k=800 — so it is safe to run on a
-# timer. Writes candidates and stops: naming a cluster is a human judgement, and adding a label is a taxonomy
+# Costs nothing but CPU (no API calls) — ~15 minutes over the 47.5k×1024 corpus at k=800, measured on a
+# loaded laptop where the Swift it replaced took ~2 — so it is safe to run on a timer. The time is the price
+# of reproducing the Swift's arithmetic bit for bit in pure Python (see `scripts/recluster.py`). Writes candidates and stops: naming a cluster is a human judgement, and adding a label is a taxonomy
 # bump, which under DT-F forces a whole-universe reclassification. Auto-adding labels here would silently
 # trigger the most expensive pass in the system.
 #
@@ -13,13 +14,11 @@
 # existing label explains (low purity). Work the top of the list.
 set -euo pipefail
 
+cd "$(dirname "$0")/.." || exit 1
 OUT_DIR="${1:-out-t02}"
 K="${K:-800}"
 MIN_SIZE="${MIN_SIZE:-25}"
-BIN=".build/release/taxonomy-backfill"
 REPORT="$OUT_DIR/recluster-$(date -u +%Y-%m-%d).json"
-
-[ -x "$BIN" ] || { echo "building release binary…"; swift build -c release; }
 
 # Globbed for the same reason the vectors are: the name carries the taxonomy version, and hardcoding it
 # breaks the weekly re-cluster on a taxonomy bump.
@@ -36,8 +35,8 @@ done
 [ -f "$labels" ] || { echo "error: no labels in $OUT_DIR" >&2; exit 1; }
 [ -n "$vectors" ] || { echo "error: no vectors blob in $OUT_DIR" >&2; exit 1; }
 
-"$BIN" recluster --labels "$labels" --vectors "$vectors" \
-                 --k "$K" --iterations 5 --min-size "$MIN_SIZE" --out "$REPORT"
+python3 scripts/recluster.py --labels "$labels" --vectors "$vectors" \
+                             --k "$K" --iterations 5 --min-size "$MIN_SIZE" --out "$REPORT"
 
 echo "== tightest candidates =="
 python3 - "$REPORT" <<'PY'

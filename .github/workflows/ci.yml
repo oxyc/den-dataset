@@ -17,15 +17,6 @@ permissions:
   contents: read
 
 jobs:
-  swift:
-    # macOS, because Package.swift declares `platforms: [.macOS(.v13)]` and the sources use
-    # Foundation APIs that differ on corelibs. Building elsewhere would test something else.
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v7
-      - run: swift build --build-tests
-      - run: swift test
-
   # The shell scripts are the half that actually runs in production: they drive enrichment, the
   # delta pass, the corpus embed, and the publish that den-atlas's sync consumes. `sh -n` is a
   # floor, not a test suite — it catches the syntax error that would otherwise surface as a failed
@@ -86,7 +77,7 @@ jobs:
       # digests, and that its cases still cover a query, a non-Latin text, the corpus document shape and
       # a text past the token cap.
       - name: The publisher's guards
-        run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py scripts/test_prune_manifest.py scripts/v2/test_consolidate_corpus.py scripts/test_eval_taxonomy.py scripts/v2/test_embed_canary.py scripts/test_check_plot_invariants.py scripts/test_backfill_plot_provenance.py
+        run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py scripts/test_prune_manifest.py scripts/v2/test_consolidate_corpus.py scripts/test_eval_taxonomy.py scripts/v2/test_embed_canary.py scripts/test_check_plot_invariants.py scripts/test_backfill_plot_provenance.py scripts/test_recluster.py
         env:
           DEN_SPEC_DIR: ${{ github.workspace }}/den-spec-checkout
       # The pipeline skeleton (oxyc/den-dataset#27): the stage contract, the artifact catalogue, the
@@ -134,12 +125,12 @@ jobs:
 
   ci-ok:
     # One required status check. `always()` so a skipped job does not fail branch protection.
-    needs: [swift, scripts]
+    needs: [scripts]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - run: |
-          results='${{ needs.swift.result }} ${{ needs.scripts.result }}'
+          results='${{ needs.scripts.result }}'
           echo "results: $results"
           for r in $results; do
             case "$r" in failure|cancelled) echo "a required job failed"; exit 1 ;; esac

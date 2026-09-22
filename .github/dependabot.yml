@@ -1,9 +1,6 @@
 # Weekly dependency PRs, grouped so a refresh is one reviewable PR rather than several.
 #
-# There is deliberately NO `swift` entry. This package declares no external dependencies — every target is
-# local — so SwiftPM writes no Package.resolved, and dependabot's Swift support resolves from that file:
-# with none, the update job ERRORS every week rather than sitting quiet. A recurring red job is worse than
-# no entry, so add one alongside the first real dependency, when there is a manifest to read.
+# There is no `pip` entry because the Python is stdlib-only: there is no requirements file to read.
 #
 # The artifacts this repo consumes and produces are pinned by other means and dependabot has no
 # ecosystem for them: the corpus is embedded through den-embed (whose ONNX Runtime version changes

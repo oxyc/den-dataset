@@ -15,11 +15,6 @@ held to: a declaration nothing reaches is deleted, not kept for later.
 """
 from .contract import Artifact
 
-#: The binary the fetch stage still drains `enrich` through. It builds two artifacts from one source file
-#: that holds a whole tool, so a staleness warning on it would fire for reasons that have nothing to do with
-#: either — which is how a guard gets ignored to death.
-BACKFILL = "Sources/taxonomy-backfill/main.swift"
-
 #: The article dump the classify pass reads: one JSON object per title carrying the whole Wikipedia article
 #: text, its revision and the extractor's chosen plot headings. Every question the pass asks is about a
 #: section of this file, which is why the pass hashes it into its manifest.

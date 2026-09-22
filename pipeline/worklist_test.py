@@ -289,17 +289,15 @@ class Delta(Staged):
     def test_the_hand_off_names_commands_that_exist_in_the_pipelines_order(self):
         """What the daily pass prints for a person to run next. It named `dump-articles` after that command
         was deleted — the binary answers `unknown command` — and skipped `docfacts`, whose absence composes
-        a different vector space. Every stage from the dump on, in `STAGES` order, and every `$BIN` command
-        one the binary still declares."""
+        a different vector space. Every stage from the dump on, in `STAGES` order — and no Swift binary, which
+        no longer exists to answer."""
         with open(os.path.join(REPO, "scripts", "delta-run.sh"), encoding="utf-8") as fh:
             script = fh.read()
-        with open(os.path.join(REPO, "Sources", "taxonomy-backfill", "main.swift"), encoding="utf-8") as fh:
-            commands = set(re.findall(r'^\s*name: "([a-z-]+)",$', fh.read(), re.M))
         hand_off = script.split("Next, by hand")[1]
         stages = list(dict.fromkeys(re.findall(r"\./den stage ([a-z]+)", hand_off)))
         self.assertEqual(stages, list(pipeline.STAGES[pipeline.STAGES.index("articles"):]))
-        for command in re.findall(r'\$BIN"? ([a-z-]+)', script):
-            self.assertIn(command, commands, f"delta-run.sh runs `{command}`, which the binary does not have")
+        self.assertNotIn("swift build", script)
+        self.assertNotIn("taxonomy-backfill", script)
 
     def test_the_media_the_daily_pass_enriches_are_the_media_this_stage_builds(self):
         """The stage writes both lists in one call and the script then drains each. A media the script

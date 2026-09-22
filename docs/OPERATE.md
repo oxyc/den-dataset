@@ -154,7 +154,6 @@ ssh root@pve 'incus exec den -- podman run --rm --network den docker.io/curlimag
 
 # 1. Secrets — copy the template and fill it (gitignored via *.env). The fetch stage sources this.
 cd ~/Projects/Personal/den-dataset
-swift build -c release            # the enrichment still drains through the Swift binary
 cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterprise username/password (optional)
 
 # 2. Worklist — the universe, ORDERED popularity-desc so we process the titles most likely to have a

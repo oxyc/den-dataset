@@ -7,7 +7,7 @@ The only coupling to the app is the artifact **format**.
 
 Enrichment prose is sourced **live from Wikipedia** (Wikidata SPARQL → article → plot section, ToS-clean)
 rather than shipping TMDB overviews, and embeddings come from the **`den-embed`** service (**bge-m3**,
-1024-dim int8). The offline FNV embedder remains as a `--embedder fnv` fallback.
+1024-dim int8).
 
 - [`docs/OPERATE.md`](docs/OPERATE.md) — **current state and how to run it**: the alignment rule, the
   re-embed and incremental-top-up procedures. Start there for anything you intend to execute.
@@ -141,19 +141,16 @@ the other 421 would be dropped by the ToS rule regardless.
   it reads and writes; `./den stages` prints it.
 - `lib/` — what a stage needs from outside the machine: HTTP with retry, the response cache, and the
   upstream clients (TMDB, Wikidata, Wikipedia — the whole article in `wikipedia.py`, the plot in `plot.py`).
-- `Sources/DenDataset/` — the library the remaining Swift phases still need: the format + producer model
-  types. `Taxonomy.swift` is referenced by no Swift code any more and is still load-bearing:
-  `scripts/v2/combined_questions.py` parses it as the classify pass's vocabulary and hashes it into that
-  pass's manifest.
-- `Sources/taxonomy-backfill/` — the CLI that drives the phase not ported yet (`recluster`).
-- `Tests/DenDatasetTests/` — the argument reader and the vector blob's format.
+- `Sources/DenDataset/Taxonomy.swift` — all that is left of the Swift producer, and not compiled: it is the
+  taxonomy as data. `scripts/v2/combined_questions.py` parses it as the classify pass's vocabulary and
+  hashes it into that pass's manifest, so it stays where that hash says it is.
+- `scripts/` — the operator's drivers, the publisher and its guards. The weekly re-cluster is
+  `scripts/recluster.py`, driven by `scripts/recluster-run.sh`: it is in no build order.
 
 ## Build / test
 
-```sh
-swift build
-swift test
-```
+There is nothing to build. The tests are the steps in `.github/workflows/ci.yml` — `python3 -m unittest`
+over each suite it names, and `bash scripts/publish-dataset.test.sh` — on Python 3.12.
 
 ## The tool — phases
 

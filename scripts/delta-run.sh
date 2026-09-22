@@ -40,13 +40,8 @@ VOTE_FLOOR="${VOTE_FLOOR:-50}"
 # a backlog would grow without ever saying so; state the limit and report what is left over.
 LIMIT="${LIMIT:-150}"
 SINCE="$(date -u -v-"${DAYS_BACK}"d +%Y-%m-%d 2>/dev/null || date -u -d "${DAYS_BACK} days ago" +%Y-%m-%d)"
-BIN=".build/release/taxonomy-backfill"
 
 den_load_env
-
-# Always rebuild: `[ -x "$BIN" ] || swift build` would let a timer run a months-old binary against current
-# sources. The build is a no-op when nothing changed.
-swift build -c release >/dev/null
 
 # The published labels blob, found rather than hardcoded — its name carries the taxonomy version, and a
 # taxonomy bump would otherwise silently point `--known` at a file that no longer exists.

@@ -51,7 +51,7 @@ class Artifact:
     """One file — or one set of shards — a stage reads or writes.
 
     `producer`/`how`/`dedicated` are the registration `check-producers.py` asks for. `dedicated` is false
-    for a producer that builds several artifacts (`taxonomy-backfill` builds four), because the staleness
+    for a producer that builds several artifacts (the embed stage writes five), because the staleness
     warning is only meaningful for a producer edited FOR this artifact.
 
     `producer`/`how` are EMPTY for an artifact this pipeline produces. The stage that declares it in
