@@ -86,12 +86,13 @@ COMBINED_MANIFEST = Artifact(
     shards=True,
 )
 
-#: The second pass — the questions `combined-v1-r2` did not ask.
+#: The second pass — the questions `combined-v1-r2` did not ask. It buys from a paid provider, and without
+#: `--spend` the script prints the estimate and stops, so the command a refusal quotes carries it.
 DELTA = Artifact(
     name="delta",
     filename="delta-v1*.jsonl",
     producer="scripts/v2/run_delta.py",
-    how="scripts/v2/run_delta.py",
+    how="scripts/v2/run_delta.py --spend",
     shards=True,
 )
 
