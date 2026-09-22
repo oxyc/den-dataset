@@ -304,13 +304,14 @@ class Gate(Fixture):
         Jev.labels = {"Prison": 0.95, "Cozy": 0.95}
         with self.assertRaises(StageError):
             self.run_stage(spend=True)
-        # Lowering a floor is the deliberate, committed step the ratchet asks for; here it stands for one.
+        # Lowering the baseline is the deliberate, committed step the ratchet asks for; here it stands
+        # for one.
         with open(self.floors, encoding="utf-8") as fh:
             floors = json.load(fh)
-        floors["floors"]["subgenre"]["microF1"] = 0.0
-        floors["floors"]["subgenre"]["macroF1"] = 0.0
-        floors["floors"]["mood"]["microF1"] = 0.0
-        floors["floors"]["mood"]["macroF1"] = 0.0
+        floors["baseline"]["subgenre"]["microF1"] = 0.0
+        floors["baseline"]["subgenre"]["macroF1"] = 0.0
+        floors["baseline"]["mood"]["microF1"] = 0.0
+        floors["baseline"]["mood"]["macroF1"] = 0.0
         with open(self.floors, "w", encoding="utf-8") as fh:
             json.dump(floors, fh)
         genres_moods.run(self.context())

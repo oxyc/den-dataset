@@ -179,11 +179,16 @@ which reads the dumped articles and writes the `combined-v1-r2*.jsonl` shards th
 `embed` composes and embeds those already-decided labels; `finalize` writes the shipped artifacts.
 Label quality is scored by `scripts/eval-taxonomy.py` against the golden set in `data/eval/golden-large.json`.
 CI tests the scorer; the labels themselves are not in git, so they are scored at publish time.
-`publish-dataset.sh` refuses a publish whose labels score below any floor in `data/eval/quality-floors.json`.
-The floors are the scores of the labels that currently ship, recorded with the date and the labels' sha256,
-so they work as a ratchet: the labels can stay the same or improve, never get worse without a decision.
-To accept a drop, or to raise the floors after an improvement ships, run
-`scripts/eval-taxonomy.py <out-dir>/labels-t02.json --record` and commit the result.
+A title is scored in a label family only where the golden set names labels there: 23% of its entries leave
+subgenres blank and 23% leave moods blank, and a prediction scored against an empty list can only ever be
+a false positive.
+`publish-dataset.sh` refuses a publish whose labels score more than the tolerance under the baseline in
+`data/eval/quality-floors.json`. The baseline is the scores of the labels that currently ship, recorded
+with the date and the labels' sha256, and it moves only when an operator records deliberately — so the
+tolerance absorbs ordinary movement without letting the scores walk downhill a fraction at a time.
+To raise the baseline after an improvement ships, run
+`scripts/eval-taxonomy.py <out-dir>/labels-t02.json --record`; to lower it, add `--accept-drop`. Commit
+the result either way.
 
 ## `finalize` outputs
 

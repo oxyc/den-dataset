@@ -67,9 +67,11 @@ again, so enriching one by hand is what overrides it.
      instruction, which also asks for each batch's `.sources.json`.
 3. Give a batch to a new agent if its validator does not print `ok`.
 4. `./den genres-moods merge --model <model> [--web] --work <out-dir>/genres-moods-enrich`. It refuses if a
-   batch is missing or invalid, or if the result scores below the floors in `data/eval/quality-floors.json`.
-   On a pass it records new floors.
+   batch is missing or invalid, or if the result scores more than the tolerance under the baseline in
+   `data/eval/quality-floors.json`. On a pass it raises the baseline, and only raises it: a pass that is
+   still a little under leaves the baseline where it was.
 5. Read the summary it prints: titles added and changed, how many titles each label gained or lost, and ten
    before/after examples. If it looks right, commit `data/genres-moods-curated.json` and
    `data/eval/quality-floors.json` together. For a deliberate drop, rerun step 4 with `--accept-drop`, then
-   run `scripts/eval-taxonomy.py data/genres-moods-curated.json --record` and commit both files.
+   run `scripts/eval-taxonomy.py data/genres-moods-curated.json --record --accept-drop` and commit both
+   files.

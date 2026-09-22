@@ -18,7 +18,7 @@ genres & moods under `data/genres-moods-rule.json`: the primary genre is the Cho
 and moods keep each label whose Noul clears its own threshold, strongest first, top three, with the
 family's "most defining" pick added when it reaches the rule's `pick`. A curated title with neither
 subgenres nor moods gets the derived ones and keeps its primary genre. A title classify now judges not
-about the requested work gets nothing. The result must clear the quality floors
+about the requested work gets nothing. The result must clear the quality baseline
 (`scripts/eval-taxonomy.py --gate`) or nothing is written.
 
 The rule's digest is recorded in the output rather than in the answers' manifest: the manifest decides
@@ -301,7 +301,7 @@ def ask(ctx):
 
 
 def derive(ctx):
-    """Write `genres-moods.json`: the curated entries plus the derived ones, behind the quality floors."""
+    """Write `genres-moods.json`: the curated entries plus the derived ones, behind the quality gate."""
     vocab = gm.vocabulary()
     head, titles = gm.read_curated(CURATED)
     if head.get("taxonomyVersion") != vocab["version"]:

@@ -90,7 +90,7 @@ write_meta() {
   # rather than for the thing each case is testing — which is how this fixture was wrong the first time.
   #
   # The labels also carry the golden set's own answers, so the quality gate scores them 1.0 against the
-  # committed golden set and floors — the real gate, passing, rather than a stubbed one. `$MOOD` replaces
+  # committed golden set and baseline — the real gate, passing, rather than a stubbed one. `$MOOD` replaces
   # every mood, which is how a case makes the labels worse than what ships.
   python3 - "$DIR/labels-t02.json" "$labels_records" "$HERE/../data/eval/golden-large.json" "${MOOD:-}" <<'MKLABELS'
 import json, sys
@@ -184,7 +184,7 @@ if run_publish; then
     ok "the meta it publishes no longer declares a blob the release does not carry"
   fi
   grep -q '"microF1"' "$WORK/out.log" \
-    && ok "the labels were scored against the golden set and passed the quality floors" \
+    && ok "the labels were scored against the golden set and passed the quality baseline" \
     || bad "the happy path published without scoring the labels"
 else
   bad "the happy path failed: $(tail -3 "$WORK/err.log")"
@@ -194,17 +194,17 @@ teardown
 # --- labels that score below what ships ------------------------------------------------------------
 #
 # The quality gate ran as `|| true` for as long as it existed here, so a publish went out whatever the
-# labels scored. The floors are now the recorded scores of the shipped labels, and falling below any of
-# them refuses before anything uploads.
+# labels scored. The baseline is now the recorded scores of the shipped labels, and falling more than the
+# recorded tolerance under any of them refuses before anything uploads.
 
 setup
 MOOD="Wrong" write_meta
 publish_baseline
 if run_publish; then
-  bad "labels below the quality floors published anyway"
+  bad "labels below the quality baseline published anyway"
 else
-  grep -q "below the floors recorded" "$WORK/err.log" \
-    && ok "labels scoring below the recorded quality floors are refused" \
+  grep -q "below the baseline recorded" "$WORK/err.log" \
+    && ok "labels scoring below the recorded quality baseline are refused" \
     || bad "refused, but not for the quality: $(tail -3 "$WORK/err.log")"
   grep -q "\-\-record" "$WORK/err.log" \
     && ok "and the refusal says how to accept a deliberate drop" \
