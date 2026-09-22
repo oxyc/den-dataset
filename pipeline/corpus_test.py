@@ -53,7 +53,7 @@ VERSION = "testver"
 #: these and then runs the stage with no overrides exercises the filename templates too.
 FIXTURE_FILES = {
     "combined": ("combined-v1-r2.jsonl", "combined-v1-r2-token-fallback.jsonl"),
-    "delta": ("delta-v1.jsonl",),
+    "delta": ("delta-v2.jsonl", "delta-v2-rest.jsonl"),
     "facts": (f"facts-{VERSION}.json",),
     "vector_labels": ("labels-t02.json",),
     "premise_labels": ("labels-premise.json",),
@@ -78,6 +78,11 @@ def write_inputs(out):
     fixture.write(os.path.join(out, FIXTURE_FILES["delta"][0]),
                   [{"mediaType": "movie", "tmdbId": 1,
                     "answers": {"critique__craft": {"p": 0.7}, "made_for_children": {"choice": "no"}}}])
+    # The second shard: the corrected pass ran in two parts, because the first file's manifest pins a
+    # client the connection fix changed and so cannot resume.
+    fixture.write(os.path.join(out, FIXTURE_FILES["delta"][1]),
+                  [{"mediaType": "tv", "tmdbId": 9,
+                    "answers": {"critique__craft": {"p": 0.4}, "made_for_children": {"choice": "no"}}}])
     fixture.facts_file(os.path.join(out, FIXTURE_FILES["facts"][0]), list(FACTS_KEYS),
                        entities={"Q42": {"en": "Ada Director"}})
     fixture.labels_file(os.path.join(out, FIXTURE_FILES["vector_labels"][0]), list(PASS_KEYS))
@@ -121,7 +126,8 @@ class CommandLine(unittest.TestCase):
             # shards, so the order it reads them in changes nothing it writes.
             self.assertEqual(parsed.combined,
                              sorted(os.path.join(out, n) for n in FIXTURE_FILES["combined"]))
-            self.assertEqual(parsed.delta, [os.path.join(out, FIXTURE_FILES["delta"][0])])
+            self.assertEqual(parsed.delta,
+                             sorted(os.path.join(out, n) for n in FIXTURE_FILES["delta"]))
             self.assertEqual(parsed.labels, os.path.join(out, "labels-t02.json"))
             self.assertEqual(parsed.premise_labels, os.path.join(out, "labels-premise.json"))
             self.assertEqual(parsed.out, os.path.join(out, f"corpus-{VERSION}.jsonl.gz"))
@@ -133,6 +139,17 @@ class CommandLine(unittest.TestCase):
             write_inputs(out)
             command = corpus.argv(context(out))
             self.assertEqual(command.count("--combined"), 2)
+
+    def test_the_title_only_delta_generation_is_not_joined(self):
+        """`delta-v1` rows were answered with no article text at all: the pass patched out the function
+        that builds the state, so Jev saw the title and nothing else, and those answers reach More Like
+        This through the corpus. A v1 file left beside the corrected one must not be read."""
+        with tempfile.TemporaryDirectory() as out:
+            write_inputs(out)
+            stale = os.path.join(out, "delta-v1.jsonl")
+            fixture.write(stale, [{"mediaType": "movie", "tmdbId": 1,
+                                   "answers": {"critique__craft": {"p": 0.1}}}])
+            self.assertNotIn(stale, corpus.argv(context(out)))
 
     def test_a_shard_set_with_no_members_stops_the_stage(self):
         with tempfile.TemporaryDirectory() as out:
@@ -195,8 +212,9 @@ class Equivalence(unittest.TestCase):
         command = [sys.executable, os.path.join(V2, "consolidate_corpus.py")]
         for name in FIXTURE_FILES["combined"]:
             command += ["--combined", os.path.join(out, name)]
-        command += ["--delta", os.path.join(out, FIXTURE_FILES["delta"][0]),
-                    "--facts", os.path.join(out, FIXTURE_FILES["facts"][0]),
+        for name in sorted(FIXTURE_FILES["delta"]):
+            command += ["--delta", os.path.join(out, name)]
+        command += ["--facts", os.path.join(out, FIXTURE_FILES["facts"][0]),
                     "--labels", os.path.join(out, FIXTURE_FILES["vector_labels"][0]),
                     "--premise-labels", os.path.join(out, FIXTURE_FILES["premise_labels"][0]),
                     "--expect", "4", "--out", target]
