@@ -13,7 +13,7 @@ from .format import U32_NONE, hundredths
 FACET_AXES = ("era", "setting", "scope", "ending", "pacing", "chronology",
               "continuity", "conflict", "ensemble", "tone", "timespan", "archetype")
 
-# The two applicability questions, and the audience Nouls from the delta pass.
+# The two applicability questions, from the corpus pass.
 APPLICABILITY = ("validity", "narrative_applicability")
 
 # ---- the FACETS-V2 publication gates ---------------------------------------------------------------
@@ -55,8 +55,8 @@ ARCHETYPE_REQUIRES = "bounded-fictional-narrative"
 def row_applicability(row):
     """`(validity probability, narrative_applicability choice)` — the two facts the gates judge against.
 
-    Both come from the `applicability` block, which the delta pass answers for every record. A row that
-    has no block at all reads as probability 0.0, which fails the validity clause and so publishes no
+    Both come from the `applicability` block, which the corpus pass answers for every title it read. A row
+    that has no block at all reads as probability 0.0, which fails the validity clause and so publishes no
     facets — the same answer as an explicit "this is not the right work", and the safe one.
     """
     applic = row.get("applicability") or {}
