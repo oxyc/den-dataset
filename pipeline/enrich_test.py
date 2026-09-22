@@ -115,6 +115,8 @@ class Batch(unittest.TestCase):
         answer = self.plots.get((article, language))
         if isinstance(answer, Exception):
             raise answer
+        if isinstance(answer, dict) and answer.get("source") == enrich.plot.ENTERPRISE:
+            enrich.enterprise.gate.sent_this_run += 1   # what one Enterprise request costs the gate
         return answer
 
     def worklist(self, *entries):
@@ -266,7 +268,7 @@ class Batch(unittest.TestCase):
         """`overview` holds a Wikipedia plot or nothing. Emptied outright rather than filtered, so a TMDB field
         that some later change carries on the record under another name still cannot reach it."""
         record = tmdb_record(1, overview="TMDB PROSE " * 5, tmdbOverview="TMDB PROSE " * 5)
-        verdict, row, _error = enrich.reground(record, {}, self.cache, None)
+        verdict, row, _detail = enrich.reground(record, {}, self.cache, None)
         self.assertEqual((verdict, row["overview"], row["hasWikiPlot"]), ("noPlot", "", False))
 
     def test_the_floor_and_the_four_reasons(self):
@@ -298,6 +300,31 @@ class Batch(unittest.TestCase):
         self.assertEqual(rows["movie:2"]["plotArticle"], "Wire")
         self.assertNotIn("plotArticleRedirected", rows["movie:2"])
         self.assertNotIn("plotRevId", rows["movie:2"])
+
+    def test_the_report_counts_the_source_that_served_each_plot(self):
+        """Which source was ASKED is not which answered: a throttled bearer falls back title by title."""
+        self.mapping.update({("movie", i): {"article": f"A{i}"} for i in (1, 2, 3)})
+        self.plots[("A1", "en")] = dict(found("a" * 300, resolved=None, revid=None), source=enrich.plot.ENTERPRISE)
+        self.plots[("A2", "en")] = dict(found("b" * 300), source=enrich.plot.ACTION_API)
+        with mock.patch.object(enrich.enterprise, "gate", enrich.enterprise.Gate()):
+            report = self.run_batch({f"/movie/{i}": detail(i) for i in (1, 2, 3)},
+                                    [("movie", i) for i in (1, 2, 3)])
+            self.assertEqual((report["plotsFromEnterprise"], report["plotsFromActionApi"], report["wikiPlot"],
+                              report["enterpriseRequests"]), (1, 1, 2, 1))
+            self.assertNotIn("source", json.dumps(self.rows()), "which source served is reported, not recorded")
+            self.mapping[("movie", 4)] = {"article": "A4"}
+            self.plots[("A4", "en")] = dict(found("d" * 300, resolved=None, revid=None),
+                                            source=enrich.plot.ENTERPRISE)
+            report = self.run_batch({"/movie/4": detail(4)}, [("movie", 4)])
+        self.assertEqual(report["enterpriseRequests"], 1, "this batch's requests, not the process's")
+
+    def test_a_malformed_reserve_refuses_a_run_that_holds_a_bearer(self):
+        """Read inside a grounding worker, the error would be swallowed as one more failed fast path."""
+        with mock.patch.object(enrich.enterprise, "gate", enrich.enterprise.Gate()), \
+                mock.patch.dict(os.environ, {"DEN_ENTERPRISE_RESERVE": "lots"}):
+            with self.assertRaises(ValueError):
+                self.run_batch({"/movie/1": detail(1)}, [("movie", 1)], token="bearer")
+        self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
 
     # -- the checkpoint -------------------------------------------------------------------------------
 

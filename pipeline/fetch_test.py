@@ -13,6 +13,7 @@ One batch is `pipeline/enrich.py` and is tested there. What is tested here is th
   * **a drained run end to end**, through the real batch code, which returns before it builds a TMDB
     client: nothing is fetched and nothing is written.
 """
+import io
 import json
 import os
 import subprocess
@@ -200,6 +201,35 @@ class Loop(Staged):
             fetch.drain(context(self.out), "movie")
         self.assertIn("--vote-floor 0", str(refused.exception))
         self.assertEqual((self.slept, len(self.calls)), ([], 2))
+
+
+class Served(Staged):
+    def test_the_drain_reports_which_source_served_its_plots_summed_over_its_batches(self):
+        """Not which was asked. Announcing a held bearer as the source before anything was read hid a bearer
+        that was then throttled or expired, and the two sources record different things."""
+        self.script({"remaining": 400, "count": 500, "plotsFromEnterprise": 300, "plotsFromActionApi": 50,
+                     "enterpriseRequests": 340},
+                    {"remaining": 0, "count": 400, "plotsFromEnterprise": 0, "plotsFromActionApi": 380,
+                     "enterpriseRequests": 8, "enterpriseOff": "8 throttled (429) answers in a row"})
+        gate = fetch.enterprise.Gate()
+        gate.first, gate.latest = (49100, 50000), (49448, 50000)
+        with mock.patch("sys.stderr", io.StringIO()) as err, mock.patch("sys.stdout", io.StringIO()), \
+                mock.patch.object(fetch.enterprise, "gate", gate):
+            fetch.drain(context(self.out), "movie")
+        self.assertIn("movie plots served by Wikimedia Enterprise: 300, by the free action API: 430; "
+                      "Enterprise requests sent: 348; the account's on-demand count 49,100 → 49,448 of 50,000",
+                      err.getvalue())
+        self.assertIn("switched off during the run (8 throttled (429) answers in a row)", err.getvalue())
+
+    def test_an_unreadable_account_count_is_said_rather_than_left_out(self):
+        self.script({"remaining": 0, "count": 1, "plotsFromEnterprise": 0, "plotsFromActionApi": 1,
+                     "enterpriseRequests": 1})
+        gate = fetch.enterprise.Gate()
+        gate.unknown = "get-user answered HTTP 401"
+        with mock.patch("sys.stderr", io.StringIO()) as err, mock.patch("sys.stdout", io.StringIO()), \
+                mock.patch.object(fetch.enterprise, "gate", gate):
+            fetch.drain(context(self.out), "movie")
+        self.assertIn("on-demand count is unknown (get-user answered HTTP 401)", err.getvalue())
 
 
 class Run(Staged):

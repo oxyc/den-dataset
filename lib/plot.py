@@ -12,10 +12,15 @@ first; otherwise, and whenever it has nothing, the free action API's wikitext is
 not interchangeable in what they RECORD: Enterprise returns sections and no page title, so it reports no
 revision id and no resolved article, and cannot see a redirect. Enterprise is never cached — it is the
 fresh path by construction — and the action API always is, through `lib/wikipedia.py`'s key.
+
+Every plot says which of the two served it (`source`), because which was ASKED is not which answered: a
+throttled or expired bearer falls back title by title, and `lib/enterprise` stops asking at all once the
+account's month is spent or its breaker trips.
 """
 import json
 import urllib.parse
 
+from . import enterprise
 from . import http
 from . import wikipedia
 
@@ -90,6 +95,9 @@ ENTERPRISE_PATH = "/v2/structured-contents/"
 ENTERPRISE_BODY = b'{"filters":[{"field":"is_part_of.identifier","value":"enwiki"}],"limit":1}'
 #: Foundation's `urlPathAllowed`, which is how the Swift pass spelled a title into the path.
 _PATH_SAFE = "!$&'()*+,-./:;=@_~"
+
+#: Which source served a plot.
+ENTERPRISE, ACTION_API = "enterprise", "action-api"
 
 
 def compared(line):
@@ -218,7 +226,7 @@ def _found(text, sections, parsed, article, language):
     # storing the redirect's name beside them would make a revision refresh compare two different pages.
     return {"text": text, "revId": revid if isinstance(revid, int) and not isinstance(revid, bool) else None,
             "resolvedArticle": title if isinstance(title, str) else article,
-            "sections": sections, "language": language}
+            "sections": sections, "language": language, "source": ACTION_API}
 
 
 def action_api_plot(article, cache=None):
@@ -334,13 +342,19 @@ def enterprise_plot(article, token):
     """The Enterprise answer, or None — on ANY failure, so the caller falls back to the action API.
 
     Best-effort by design: the free API has the same coverage, and a failed or empty fast path must cost a
-    slower fetch rather than a title.
+    slower fetch rather than a title. None without a request when `lib/enterprise` says not to ask — the
+    month's quota is spent, or the breaker is off.
+
+    Asked ONCE: with the action API behind it, waiting out a retry schedule — or a `Retry-After: 5`, which
+    cost 15s per candidate — is never cheaper than asking the action API.
     """
+    if not enterprise.gate.reserve(token):
+        return None
     path = ENTERPRISE_PATH + urllib.parse.quote(article, safe=_PATH_SAFE)
     try:
-        payload = http.request(ENTERPRISE_HOST, path, method="POST", body=ENTERPRISE_BODY,
-                               headers={"Authorization": f"Bearer {token}",
-                                        "Content-Type": "application/json"})
+        payload = enterprise.gate.sent(
+            http.request, ENTERPRISE_HOST, path, method="POST", body=ENTERPRISE_BODY,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, attempts=1)
         found = enterprise_prose(payload)
     except (http.HTTPError, ValueError):
         return None
@@ -349,7 +363,7 @@ def enterprise_plot(article, token):
     # No revision and no resolved article: the endpoint names no page. Echoing the requested title back
     # would read as "no redirect happened" on the one path that cannot tell.
     return {"text": found[0], "revId": None, "resolvedArticle": None, "sections": found[1],
-            "language": "en"}
+            "language": "en", "source": ENTERPRISE}
 
 
 def plot(article, language="en", cache=None, token=None):

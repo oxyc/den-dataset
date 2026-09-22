@@ -23,7 +23,7 @@ import time
 
 from . import artifacts, enrich
 from .contract import REPO, StageError, bind
-from lib import tmdb as tmdb_api
+from lib import enterprise, tmdb as tmdb_api
 
 NAME = "fetch"
 
@@ -117,18 +117,31 @@ def pause(seconds):
     time.sleep(seconds)
 
 
-def announce_prose_source():
-    """Say which Wikipedia a drain is about to read, before it reads any of it.
+#: The batch report's counts: which source served each grounded plot, and the Enterprise requests sent.
+SERVED = ("plotsFromEnterprise", "plotsFromActionApi", "enterpriseRequests")
 
-    `enterprise_login` announces its own outcome on stderr, but only on the batches that call it — a run
-    holding a bearer already says nothing, and the choice is invisible afterwards. It is not a performance
-    detail: the Enterprise path records no revision id and no resolved article, so two runs of the same
-    command against the same worklist can differ in what they know about their own rows.
+
+def announce_prose_source(media, served):
+    """Say which Wikipedia SERVED a drain's plots, counted from its batch reports, and what the account's
+    on-demand count was at the start and end — read from the server, which sees every machine on it.
+
+    Not which was asked: this once announced a held bearer as the source before anything was read, and a
+    bearer that was then throttled or expired fell back title by title with nothing saying so. It is not a
+    performance detail: the Enterprise path records no revision id and no resolved article, so two runs of
+    the same command against the same worklist can differ in what they know about their own rows.
     """
-    held = os.environ.get("WIKIMEDIA_ENTERPRISE_TOKEN")
-    source = ("Wikimedia Enterprise (bearer already held; no revision ids, no redirect detection)"
-              if held else "resolved per batch by enterprise_login — see its line below")
-    print(f"==> {NAME}: plot prose from {source}", file=sys.stderr)
+    line = (f"==> {NAME}: {media} plots served by Wikimedia Enterprise: {served['plotsFromEnterprise']}, "
+            f"by the free action API: {served['plotsFromActionApi']}; Enterprise requests sent: "
+            f"{served['enterpriseRequests']}")
+    first, latest = enterprise.gate.refresh()
+    if first is not None:
+        line += (f"; the account's on-demand count {first[0]:,} → {latest[0]:,} of {latest[1]:,} "
+                 f"(get-user, all machines)")
+    elif enterprise.gate.unknown:
+        line += f"; the account's on-demand count is unknown ({enterprise.gate.unknown})"
+    if served.get("enterpriseOff"):
+        line += f" — Enterprise was switched off during the run ({served['enterpriseOff']})"
+    print(line, file=sys.stderr)
 
 
 def batch(ctx, media):
@@ -159,6 +172,7 @@ def drain(ctx, media):
     """
     aborts = stalls = batches = 0
     previous = None
+    served = dict.fromkeys(SERVED, 0)
     while True:
         try:
             report = batch(ctx, media)
@@ -174,8 +188,12 @@ def drain(ctx, media):
         aborts = 0
         batches += 1
         print(f"{media}: {json.dumps(report, sort_keys=True)}", flush=True)
+        for name in SERVED:
+            served[name] += report.get(name, 0)
+        served["enterpriseOff"] = report.get("enterpriseOff") or served.get("enterpriseOff")
         remaining = report.get("remaining")
         if remaining == 0:
+            announce_prose_source(media, served)
             return batches
         if remaining == previous:
             if report.get("belowFloor", 0) > 0 and report.get("count", 0) == 0:
@@ -218,7 +236,6 @@ def run(ctx):
     finds everything enriched runs a single batch, fetches nothing and exits clean.
     """
     os.makedirs(os.path.abspath(ctx.out_dir), exist_ok=True)
-    announce_prose_source()
     ran = {media: drain(ctx, media) for media in media_types(ctx)}
     check_outputs(ctx)
     batches = ", ".join(f"{count} {media} batch(es)" for media, count in ran.items())

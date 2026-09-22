@@ -10,12 +10,14 @@ The source cases are the ones that change what a record CAN say: the Enterprise 
 must report no revision and no resolved article rather than echo the requested title back as if no
 redirect had happened.
 """
+import io
 import json
 import tempfile
 import unittest
 from unittest import mock
 
 from . import cache as caching
+from . import enterprise
 from . import http
 from . import plot
 from . import wikidata
@@ -118,11 +120,15 @@ class Fetching(unittest.TestCase):
         self.cache = caching.ResponseCache("wiki", self.directory.name, 3600)
         self.requests = []
         self.enterprise = None
-        patch = mock.patch.object(http, "request", self.answer)
-        patch.start()
-        self.addCleanup(patch.stop)
+        for patch in (mock.patch.object(http, "request", self.answer),
+                      mock.patch.object(enterprise, "gate", enterprise.Gate()),
+                      mock.patch("sys.stderr", io.StringIO())):
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def answer(self, host, path, params=None, **kwargs):
+        if host == enterprise.AUTH_HOST:
+            return json.dumps({"ondemand_requests_count": 0, "ondemand_limit": 50000}).encode()
         self.requests.append(host)
         if host == plot.ENTERPRISE_HOST:
             if isinstance(self.enterprise, Exception):
@@ -163,8 +169,9 @@ class Fetching(unittest.TestCase):
                         {"error": "not a list"}):
             self.requests.clear()
             self.enterprise = failure
-            found = plot.plot("The Wire", cache=self.cache, token="bearer")
-            self.assertEqual(found["revId"], 77, failure)
+            with mock.patch.object(enterprise, "gate", enterprise.Gate()):
+                found = plot.plot("The Wire", cache=self.cache, token="bearer")
+            self.assertEqual((found["revId"], found["source"]), (77, plot.ACTION_API), failure)
             self.assertEqual(self.requests[0], plot.ENTERPRISE_HOST)
 
     def test_the_enterprise_tree_uses_the_same_classifier_with_nesting_as_the_parent(self):

@@ -26,7 +26,7 @@ import sys
 import threading
 
 from lib import cache as caching
-from lib import http, plot, tmdb as tmdb_api, wikidata, wikipedia
+from lib import enterprise, http, plot, tmdb as tmdb_api, wikidata, wikipedia
 
 from .contract import StageError
 
@@ -186,8 +186,10 @@ def grounded(record, found, article, role):
 
 
 def reground(record, facts, cache, token):
-    """`(verdict, record, error)` for one title: `grounded`, `noPlot`, `missed` — a definitive fetch failure,
-    kept as a plotless record — or `deferred`, which is not written and not checkpointed.
+    """`(verdict, record, detail)` for one title: `grounded`, `noPlot`, `missed` — a definitive fetch failure,
+    kept as a plotless record — or `deferred`, which is not written and not checkpointed. `detail` is the
+    error for `missed` and `deferred`, and for `grounded` which source served the plot (`plot.ENTERPRISE`
+    or `plot.ACTION_API`).
 
     Candidates in order: the title's OWN article, then the Wikidata P144 work it adapts — an adaptation's
     article is often production and episodes with no story in it ("Attack on Titan (TV series)"). The
@@ -250,7 +252,7 @@ def reground(record, facts, cache, token):
         # reach this" and "the floor rejected it"; each wants a different re-run.
         return "noPlot", dict(record, noPlotReason="belowFloor" if saw_section else "noSection"), None
     found, article, role = best
-    return "grounded", grounded(record, found, article, role), None
+    return "grounded", grounded(record, found, article, role), found.get("source")
 
 
 def written(record):
@@ -312,6 +314,9 @@ def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anim
     """
     if limit < 1:
         raise StageError(f"enrich: --limit {limit} takes nothing, and would report the worklist as drained")
+    if token:
+        # Read now, so a malformed reserve refuses the run instead of being swallowed as a failed fast path.
+        enterprise.gate.headroom()
     worklist = read_worklist(worklist_path)
     ck_path = checkpoint_path(out_dir)
     checkpoint = read_checkpoint(ck_path)
@@ -366,19 +371,21 @@ def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anim
         raise Aborted(f"Wikidata mapping failed for batch {batch_id} after retries ({error}); nothing "
                       f"written — re-run to retry this batch") from error
 
-    survivors, with_plot = [], 0
+    survivors, with_plot, from_enterprise = [], 0, 0
+    requests_before = enterprise.gate.sent_this_run
     with concurrent.futures.ThreadPoolExecutor(max_workers=WIKI_WORKERS) as pool:
         outcomes = pool.map(lambda r: reground(r, facts.get(key(r["mediaType"], r["tmdbId"])), cache, token),
                             titles)
-        for record, (verdict, found, error) in zip(titles, outcomes):
+        for record, (verdict, found, detail) in zip(titles, outcomes):
             label = key(record["mediaType"], record["tmdbId"])
             if verdict == "deferred":
                 deferred.add(label)
-                log(out_dir, f"plot-deferred id={label} (transient: {error})")
+                log(out_dir, f"plot-deferred id={label} (transient: {detail})")
                 continue
             if verdict == "missed":
-                log(out_dir, f"plot-miss id={label} ({error})")
+                log(out_dir, f"plot-miss id={label} ({detail})")
             with_plot += verdict == "grounded"
+            from_enterprise += verdict == "grounded" and detail == plot.ENTERPRISE
             survivors.append(written(found))
     survivors.sort(key=lambda row: row["tmdbId"])
 
@@ -403,10 +410,17 @@ def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anim
     state = {"nextBatch": batch_id + 1, "processed": sorted(processed), "totals": totals}
     caching.write_atomically(ck_path, compact(state).encode("utf-8"))
 
-    return {"batchId": batch_id, "count": len(survivors), "belowFloor": counts["belowFloor"],
-            "anime": counts["anime"], "noOverview": counts["noOverview"], "failures": counts["failures"],
-            "deferred": len(deferred), "remaining": sum(key(*e) not in processed for e in worklist),
-            "wikiPlot": with_plot, "tagsOnly": len(survivors) - with_plot, "batch": path}
+    # Which source SERVED each plot, not which was asked: a bearer can be throttled or expire mid-run, and the
+    # two record different things (the Enterprise path names no revision and cannot see a redirect).
+    report = {"batchId": batch_id, "count": len(survivors), "belowFloor": counts["belowFloor"],
+              "anime": counts["anime"], "noOverview": counts["noOverview"], "failures": counts["failures"],
+              "deferred": len(deferred), "remaining": sum(key(*e) not in processed for e in worklist),
+              "wikiPlot": with_plot, "tagsOnly": len(survivors) - with_plot, "batch": path,
+              "plotsFromEnterprise": from_enterprise, "plotsFromActionApi": with_plot - from_enterprise,
+              "enterpriseRequests": enterprise.gate.sent_this_run - requests_before}
+    if token and enterprise.gate.off:
+        report["enterpriseOff"] = enterprise.gate.off
+    return report
 
 
 def parser():

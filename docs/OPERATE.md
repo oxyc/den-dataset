@@ -365,6 +365,17 @@ uses to hit the structured-contents endpoint for the pre-sectioned plot (higher 
 the section's `has_parts` paragraphs, joined). Any miss falls back to the public action API. That path is
 never cached, and it names no page, so a plot read through it records no revision id and no resolved article
 and cannot see a redirect (`plotArticleRedirected` is absent, i.e. unknown).
+
+The account allows a fixed number of on-demand requests a month (50,000, reset on the 1st), shared by every
+machine that holds its credentials, and an overdrawn month answers 429 like a throttle. `lib/enterprise.py`
+asks the account's own count (`POST auth.enterprise.wikimedia.com/v1/get-user`, which spends no quota) before
+a run's first Enterprise request and every 100 after, and stops asking at `limit - DEN_ENTERPRISE_RESERVE`
+(default 500, set it in the environment — `den.env` is only read for credentials). Enterprise is asked once
+per article, never retried, and a 401/403 — or 8 throttled answers in a row — switches it off for the rest of
+the run; if `get-user` itself fails, that breaker is the only guard, and one stderr line says so. Each batch
+report counts `plotsFromEnterprise` / `plotsFromActionApi` / `enterpriseRequests`, and a finished drain
+prints the totals with the account's count at its start and end: that, not the bearer being held, is which
+source a run's rows came from.
 Leave the two fields blank to use the public `action=parse` API only (same plot coverage, slower). Fetch is
 per-article/on-demand — **never** a Wikimedia dump (those are stale + hundreds of GB); the working set is a
 few hundred MB total.
