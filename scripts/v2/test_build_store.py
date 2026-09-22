@@ -173,8 +173,8 @@ class StoreFixture:
     about its inputs — not about the layout.
     """
 
-    # movie:1 fills every list section the writer refuses to ship empty; movie:2 is labelled by the
-    # premise pass alone.
+    # movie:1 fills every list section the writer refuses to ship empty; movie:2 has no genres & moods,
+    # only the premise pass's copy of some, which the writer does not read.
     TITLES = [
         {
             "key": "movie:1", "mediaType": "movie", "tmdbId": 1,
@@ -264,74 +264,46 @@ class StoreFixture:
         return ReadBack(store), result.stderr
 
 
-class PremiseOnlyTitlesKeepTheirLabels(StoreFixture, unittest.TestCase):
-    """A title labelled by the PREMISE pass and not the plot pass must carry its labels.
+class GenresAndMoodsHaveOneSource(StoreFixture, unittest.TestCase):
+    """A title's genres & moods are the corpus `labels` field, joined from `genres-moods.json`, and nothing
+    else.
 
-    The store's label sections were written from the corpus `labels` field alone — the plot pass's output —
-    while `premiseLabels` sat beside it, read only to increment a counter that was never asserted on. Three
-    real titles are labelled from their premise and never from a plot (movie:51870 *Father and Sons*,
-    movie:121329 *Two Sons of Ringo*, tv:42680 *Sítio do Picapau Amarelo*), so the store answered no
-    primary genre, no subgenres and no moods for them where the legacy blobs answered all three — and they
-    are in the premise index, which is exactly where a reader asks.
+    The premise pass's labels used to fill in where the plot pass had none. They were a copy of the plot
+    labels (44,528 of 44,531 identical, oxyc/den-dataset#56), and a second source is a second answer: three
+    real titles (movie:51870 *Father and Sons*, movie:121329 *Two Sons of Ringo*, tv:42680 *Sítio do
+    Picapau Amarelo*) carried genres & moods only that copy knew of, which the genres & moods stage never
+    decided.
     """
 
-    def test_the_premise_pass_labels_reach_the_store(self):
+    def test_the_premise_pass_labels_are_not_read(self):
         with tempfile.TemporaryDirectory() as out:
             store, stderr = self.build(out)
             self.assertEqual(store.keys(), ["movie:1", "movie:2"])
-            row = store.keys().index("movie:2")
-
             primary = store.ints("primary_genre")
-            self.assertEqual(
-                store.text(primary[row]), "Western",
-                "movie:2 was labelled by the premise pass alone and the store holds no primary genre "
-                "for it — the label sections are being written from the plot pass only.")
-            self.assertEqual(store.labelled("subgenre", row), [("Road Movie", 50)])
-            self.assertEqual(store.labelled("mood", row), [("Campy", 60)])
+            row = store.keys().index("movie:2")
+            self.assertIsNone(store.text(primary[row]), "movie:2's only labels are the premise pass's copy")
+            self.assertEqual(store.labelled("subgenre", row), [])
+            self.assertEqual(store.labelled("mood", row), [])
 
-            # And the plot pass's title is untouched: the union adds, it does not replace.
             plot_row = store.keys().index("movie:1")
             self.assertEqual(store.text(primary[plot_row]), "Drama")
             self.assertEqual(store.labelled("subgenre", plot_row), [("Prison", 70)])
             self.assertEqual(store.labelled("mood", plot_row), [("Bleak", 55)])
 
             summary = json.loads(stderr[stderr.index("{"):stderr.rindex("}") + 1])
-            self.assertEqual(summary["withLabels"], 2, "both titles are labelled, by one pass or the other")
-            self.assertEqual(summary["withPlotLabels"], 1)
-            self.assertEqual(summary["withPremiseLabels"], 1)
+            self.assertEqual(summary["withLabels"], 1)
 
-    def test_a_label_artifact_the_store_does_not_cover_is_fatal(self):
-        """The assert that makes the union's own miss loud. A title the premise pass labelled but the
-        corpus never carried is the same silent drop in the other direction, and a count that matched only
-        the plot artifact would not see it."""
-        # The premise artifact still names movie:2; the corpus row for it no longer carries the labels.
-        stripped = [dict(t, premiseLabels=None) if t["key"] == "movie:2" else t for t in self.TITLES]
+    def test_a_plot_vector_title_the_corpus_carries_no_genres_and_moods_for_is_fatal(self):
+        """The plot labels file is `finalize`'s record of the titles with a vector, each with its genres
+        & moods; a corpus row for one of them without any is a join that missed. movie:2's premise copy
+        does not stand in for them."""
+        titles = self.TITLES + [{"key": "movie:3", "mediaType": "movie", "tmdbId": 3,
+                                 "facts": {"titles": {"en": "Gamma"}}, "labels": None,
+                                 "premiseLabels": self.TITLES[0]["labels"]}]
         with tempfile.TemporaryDirectory() as out:
             with self.assertRaises(AssertionError) as caught:
-                self.build(out, stripped)
-        self.assertIn("labelled titles", str(caught.exception))
-
-    def test_the_two_passes_disagreeing_is_fatal_rather_than_silently_resolved(self):
-        """`title_labels` takes the plot record WHOLE where both passes answered, which is safe only while
-        they agree — and they do today, for all 44,528 such titles. If a repass ever makes them diverge,
-        which labelling ships is a decision, and the `or` would make it by preferring whichever field came
-        first. The build refuses and names the titles instead of choosing quietly.
-
-        movie:1 is plot-labelled `Drama` in the fixture; give it a premise record calling it `Horror`."""
-        clashing = [
-            dict(t, premiseLabels={"primaryGenre": "Horror", "animated": False,
-                                   "subgenres": [{"label": "Prison", "confidence": 0.7}],
-                                   "moods": [{"label": "Bleak", "confidence": 0.55}]})
-            if t["key"] == "movie:1" else t
-            for t in self.TITLES
-        ]
-        with tempfile.TemporaryDirectory() as out:
-            with self.assertRaises(AssertionError) as caught:
-                self.build(out, clashing)
-        message = str(caught.exception)
-        self.assertIn("disagree", message)
-        self.assertIn("primaryGenre", message)
-        self.assertIn("movie:1", message)
+                self.build(out, titles, plot_keys=("movie:1", "movie:3"))
+        self.assertIn("labelled titles: 1 in the store, 2 in", str(caught.exception))
 
 
 class TheBlobNamesItsOwnRows(StoreFixture, unittest.TestCase):

@@ -31,7 +31,7 @@ import os
 import sys
 import tempfile
 
-from . import artifacts
+from . import artifacts, finalize
 from .contract import REPO, StageError
 
 sys.path.insert(0, os.path.join(REPO, "scripts"))
@@ -142,6 +142,30 @@ def derive_record(answers, mapping, rule):
     return {"primaryGenre": answers["gm__primary_genre"]["choice"],
             "subgenres": family_labels(answers, mapping, "subgenre", rule["subgenre"]),
             "moods": family_labels(answers, mapping, "mood", rule["mood"])}
+
+
+def read(path):
+    """`genres-moods.json` as `{mediaType:tmdbId: record}`, each entry in the record shape `docfacts`, `embed`,
+    `worklist` and `finalize` read: the one place this file's shape is converted for them.
+
+    The file keys titles by `mediaType:tmdbId` and gives each entry its own `source`/`primaryGenreSource`;
+    the record carries the key's two halves and the `source` every model-made label has in the embed
+    stores and `labels-t02.json` (`llm`). A file with no titles is refused: read as an empty map it would
+    embed nothing and tell a delta that nothing is published.
+    """
+    with open(path, encoding="utf-8") as fh:
+        blob = json.load(fh)
+    titles = blob.get("titles") if isinstance(blob, dict) else None
+    if not isinstance(titles, dict) or not titles:
+        raise StageError(f"{path} holds no genres & moods titles. Build it with: {HOW}")
+    out = {}
+    for key, entry in titles.items():
+        media, _, ident = key.partition(":")
+        if not (ident.isascii() and ident.isdigit()) or not isinstance(entry, dict):
+            raise StageError(f"{path}: {key!r} is not a mediaType:tmdbId genres & moods entry")
+        out[key] = finalize.parse_record({**entry, "mediaType": media, "tmdbId": int(ident), "source": "llm"},
+                                         f"{path} {key}")
+    return out
 
 
 def answered_keys(paths):

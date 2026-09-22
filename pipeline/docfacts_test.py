@@ -44,12 +44,15 @@ class Staged(unittest.TestCase):
                 for tmdb_id in ids if (media, tmdb_id) in self.answers}
 
     def labels(self, records):
-        with open(os.path.join(self.out, "labels-t02.json"), "w", encoding="utf-8") as fh:
-            json.dump({"taxonomyVersion": "t02", "count": len(records), "records": records}, fh)
+        """`genres-moods.json` holding `records`, keyed the way the genres & moods stage writes it."""
+        titles = {f"{r['mediaType']}:{r['tmdbId']}": {k: r[k] for k in ("animated", "moods", "primaryGenre",
+                                                                         "subgenres")} for r in records}
+        with open(os.path.join(self.out, "genres-moods.json"), "w", encoding="utf-8") as fh:
+            json.dump({"taxonomyVersion": "t02", "count": len(titles), "titles": titles}, fh)
 
     def record(self, tmdb_id, media="movie"):
         return {"tmdbId": tmdb_id, "mediaType": media, "primaryGenre": "Drama",
-                "subgenres": [], "moods": [], "source": "llm"}
+                "subgenres": [], "moods": [], "animated": False}
 
     def context(self, **kwargs):
         return Context(out_dir=self.out, dataset_version=VERSION, **kwargs)
@@ -164,17 +167,17 @@ class Resume(Staged):
 
 
 class Refusal(Staged):
-    def test_a_missing_labels_file_is_refused_with_what_builds_it(self):
+    def test_a_missing_genres_moods_file_is_refused_with_what_builds_it(self):
         with self.assertRaises(StageError) as refused:
             docfacts.run(self.context())
-        self.assertIn("./den stage finalize", str(refused.exception))
+        self.assertIn("./den stage genres_moods", str(refused.exception))
 
-    def test_a_labels_file_with_no_records_is_refused(self):
+    def test_a_genres_moods_file_with_no_titles_is_refused(self):
         self.labels([])
         with self.assertRaises(StageError) as refused:
             docfacts.run(self.context())
-        self.assertIn("no records", str(refused.exception))
-        self.assertIn("./den stage finalize", str(refused.exception))
+        self.assertIn("holds no genres & moods titles", str(refused.exception))
+        self.assertIn("./den stage genres_moods", str(refused.exception))
 
 
 class Topology(unittest.TestCase):
@@ -191,10 +194,12 @@ class Topology(unittest.TestCase):
         self.assertLess(order.index("docfacts"), order.index("embed"))
         self.assertIn("doc_facts", [bind(e).name for e in pipeline.stage("embed").INPUTS])
 
-    def test_the_labels_keep_one_name_and_are_read_under_their_own(self):
-        bound = {bind(e).name: bind(e) for e in docfacts.INPUTS}["vector_labels"]
-        self.assertEqual(bound.flag(), "--labels")
-        self.assertEqual(bound.artifact, artifacts.VECTOR_LABELS)
+    def test_the_titles_are_this_runs_genres_and_moods(self):
+        """Not `labels-t02.json`, which `finalize` writes after this stage: reading it made a fresh out-dir
+        unable to start."""
+        self.assertEqual([bind(e).artifact for e in docfacts.INPUTS], [artifacts.GENRES_MOODS])
+        order = list(pipeline.STAGES)
+        self.assertLess(order.index("genres_moods"), order.index("docfacts"))
 
     def test_the_cheaper_path_is_still_there(self):
         """`scripts/v2/derive_doc_facts.py` builds the same file out of the facts sidecar, validated

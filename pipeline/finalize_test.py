@@ -139,9 +139,18 @@ def vector(i):
     return [((i * 37 + d * 11) % 300) - 150 for d in range(1024)]
 
 
-def lay_down(out, records=RECORDS, vectors=None, previous=PREVIOUS, embedder=True, space=True):
+def genres_moods_of(records):
+    """`genres-moods.json`'s titles agreeing with the newest stored record per title."""
+    return {f"{r['mediaType']}:{r['tmdbId']}": {f: r[f] for f in ("animated", "moods", "primaryGenre", "subgenres")}
+            for r in records}
+
+
+def lay_down(out, records=RECORDS, vectors=None, previous=PREVIOUS, embedder=True, space=True, titles=None):
     index = os.path.join(out, "index")
     os.makedirs(index, exist_ok=True)
+    with open(os.path.join(out, "genres-moods.json"), "w", encoding="utf-8") as fh:
+        json.dump({"taxonomyVersion": "t02", "titles": genres_moods_of(records) if titles is None else titles},
+                  fh)
     with open(os.path.join(index, "labels.jsonl"), "w", encoding="utf-8") as fh:
         for rec in records:
             fh.write(json.dumps(rec) + "\n")
@@ -275,6 +284,30 @@ class Store(Staged):
         last_row = blob[-1024:]
         self.assertEqual(list(last_row), [x & 0xFF for x in (max(-128, min(127, v)) for v in vector(3))])
 
+    def test_the_genres_and_moods_that_ship_are_this_runs_not_the_ones_the_vector_was_composed_from(self):
+        """A label line records what its vector was composed from. Shipping it carried a title's old genres
+        & moods forward until someone re-embedded it, and a change to them did not move the version."""
+        titles = genres_moods_of(RECORDS)
+        titles["movie:7"] = dict(titles["movie:7"], primaryGenre="Mystery", moods=[{"confidence": 0.8,
+                                                                                    "label": "Eerie"}])
+        lay_down(self.out, titles=titles)
+        self.run_stage()
+        shipped = {(r["mediaType"], r["tmdbId"]): r for r in
+                   json.loads(read(os.path.join(self.out, "labels-t02.json")))["records"]}
+        self.assertEqual((shipped[("movie", 7)]["primaryGenre"], shipped[("movie", 7)]["moods"]),
+                         ("Mystery", [{"confidence": 0.8, "label": "Eerie"}]))
+        self.assertEqual(shipped[("movie", 7)]["source"], "wikidata", "the store's record, relabelled")
+        self.assertEqual(shipped[("tv", 5)]["primaryGenre"], "Comedy")
+        meta = json.loads(read(os.path.join(self.out, "dataset.meta.json")))
+        self.assertNotEqual(meta["datasetVersion"], "5ea827864cd5", "new genres & moods, a new version")
+
+    def test_a_vector_whose_title_has_no_genres_and_moods_is_refused(self):
+        titles = genres_moods_of(RECORDS)
+        del titles["movie:7"]
+        lay_down(self.out, titles=titles)
+        self.assertIn("1 title(s) have a vector and no genres & moods", self.refused())
+        self.assertFalse(os.path.exists(os.path.join(self.out, "labels-t02.json")))
+
     def test_a_store_torn_between_its_two_files_is_refused(self):
         lay_down(self.out)
         with open(os.path.join(self.out, "index", "vectors.jsonl"), "a", encoding="utf-8") as fh:
@@ -294,7 +327,7 @@ class Store(Staged):
     def test_a_record_missing_a_field_is_refused(self):
         broken = [dict(RECORDS[2])]
         del broken[0]["animated"]
-        lay_down(self.out, records=broken)
+        lay_down(self.out, records=broken, titles=genres_moods_of(RECORDS))
         self.assertIn("not a labels-store record", self.refused())
 
     def test_vectors_of_two_lengths_are_refused(self):

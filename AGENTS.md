@@ -11,7 +11,7 @@ prose somewhere that can go stale without anything failing.
 | What does a store section mean? | den-spec `wire/store-v1.md`, then the `store/` module named for its heading. |
 | What order are the store's sections written in? | `store/build.py`, and `PROVENANCE` declares the same order. |
 | Why was a publish refused? | `scripts/publish-dataset.sh` and the checks it runs under `scripts/`. `pipeline/publish.py` runs it and adds no guard of its own. |
-| How do I run it? | `docs/OPERATE.md`. `./den run --dataset-version <ver>` runs every stage; it skips the paid classify pass without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. |
+| How do I run it? | `docs/OPERATE.md`. `./den run` runs every stage; it skips the paid classify pass without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. |
 
 ## The part that is still being rebuilt
 

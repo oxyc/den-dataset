@@ -6,6 +6,13 @@
 after `embed` because those stores are its input, and before `facts` because the corpus facts pass scrapes
 the ids in the `labels-t02.json` this writes.
 
+**The stores decide which titles; `genres-moods.json` decides their genres & moods.** A label line in the
+stores is what its vector was composed from, which can be older than this run's genres & moods: a title
+whose genres & moods changed keeps its vector until `embed --reembed-changed` re-embeds it. What ships is
+this run's, so `labels-t02.json` carries each vector title's genres & moods from `genres-moods.json`, and
+`datasetVersion` moves when they change. A vector whose title has no genres & moods is refused — shipping
+the label line instead would carry forward what the genres & moods stage no longer says.
+
 **Every refusal here is a way a corpus shipped, or nearly shipped, wrong while looking healthy:**
 
   * the two stores are zipped by POSITION from here on — the vector row carries no mediaType — so equal
@@ -34,6 +41,7 @@ drops the key rather than inheriting a claim about a file that is no longer ther
 `--embedding-version` is gone. It relabelled the blob for an offline FNV run, and the stage declares the
 file it writes: a second name for the same output is a declaration the run does not keep.
 """
+import dataclasses
 import email.utils
 import hashlib
 import json
@@ -43,7 +51,7 @@ import sys
 import time
 
 from . import artifacts, jsonbytes
-from .contract import REPO, StageError
+from .contract import REPO, StageError, bind
 from lib import cache as caching
 
 sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
@@ -67,8 +75,8 @@ QUANTIZATION = "int8-symmetric-x127"
 #: The enrichment's checkpoint is read for three counters in `report.json` and nothing else. The Swift
 #: also read `classify-checkpoint.json` for a fourth, `noPrimary`; the only thing that wrote that file was
 #: the vote-pass `assemble`, deleted in #48, so it is not read here and the counter is gone with it.
-INPUTS = (artifacts.EMBED_LABELS, artifacts.EMBED_VECTORS, artifacts.EMBEDDER, artifacts.EMBEDDING_SPACE,
-          artifacts.ENRICH_CHECKPOINT)
+INPUTS = (artifacts.EMBED_LABELS, artifacts.EMBED_VECTORS, artifacts.GENRES_MOODS, artifacts.EMBEDDER,
+          artifacts.EMBEDDING_SPACE, artifacts.ENRICH_CHECKPOINT)
 OUTPUTS = (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST, artifacts.FINALIZE_REPORT)
 
 #: What the enrichment's checkpoint tallies. The Swift decoded all four, so a malformed one of them made the
@@ -258,9 +266,30 @@ def report(records, enrich_checkpoint):
                        "processed": len(records), "skippedBelowVoteFloor": totals.get("belowFloor", 0)}}
 
 
+#: What `genres-moods.json` decides about a title. The rest of a record — its key and `source` — is the
+#: store's.
+GENRES_MOODS_FIELDS = ("animated", "moods", "primaryGenre", "subgenres")
+
+
+def current(records, genres_moods_path):
+    """Each stored record with its title's genres & moods from `genres-moods.json`, in the stores' order."""
+    from . import genres_moods  # it imports this module for `parse_record`
+    known = genres_moods.read(genres_moods_path)
+    keys = [f"{rec['mediaType']}:{rec['tmdbId']}" for rec in records]
+    missing = [key for key in keys if key not in known]
+    if missing:
+        raise StageError(f"finalize: {len(missing)} title(s) have a vector and no genres & moods in "
+                         f"{genres_moods_path}, e.g. {missing[:5]}. Their vectors were composed from genres "
+                         f"& moods this run no longer has; give them genres & moods again (the curated file, "
+                         f"or `./den stage genres_moods --spend`), or rebuild the stores without them.")
+    return [dict(rec, **{field: known[key][field] for field in GENRES_MOODS_FIELDS})
+            for rec, key in zip(records, keys)]
+
+
 def run(ctx, now=None):
     """Write the shipped artifacts from the index stores. Returns the manifest's path."""
     records, vectors = read_store(ctx.require(artifacts.EMBED_LABELS), ctx.require(artifacts.EMBED_VECTORS))
+    records = current(records, ctx.require(artifacts.GENRES_MOODS))
     lengths = sorted({len(v) for v in vectors})
     if len(lengths) != 1 or lengths[0] <= 0:
         raise StageError(f"finalize: vectors have non-uniform length {lengths} — a mixed-embedder store; "
@@ -326,3 +355,39 @@ def run(ctx, now=None):
     genres = sorted(summary["report"]["byPrimaryGenre"].items(), key=lambda kv: (-kv[1], kv[0]))
     print("  primary-genre dist: " + " ".join(f"{g}:{n}" for g, n in genres), file=sys.stderr)
     return meta_path
+
+
+def manifest_version(ctx):
+    """`datasetVersion` from this out-dir's manifest, or None when there is no manifest yet.
+
+    The version names the files of the stages after this one, and it is derived here from what this stage
+    wrote, so an operator cannot know it before the run. A `--dataset-version` is therefore only a check:
+    one that disagrees with the manifest is refused rather than obeyed, because the stages would then look
+    for each other's files under two names.
+    """
+    path = ctx.path(artifacts.MANIFEST)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            version = json.load(handle).get("datasetVersion")
+    except (OSError, ValueError, AttributeError) as broken:
+        raise StageError(f"{path} is not a readable manifest ({broken}), so the dataset version is "
+                         f"unknown.") from None
+    if not isinstance(version, str) or not version:
+        raise StageError(f"{path} names no datasetVersion. Re-run: {HOW}")
+    if ctx.dataset_version and ctx.dataset_version != version:
+        raise StageError(f"--dataset-version {ctx.dataset_version} is not this out-dir's generation — "
+                         f"{path} says {version}, and every versioned file is named after the labels and "
+                         f"vectors it describes. Pass --dataset-version {version}, or leave it off.")
+    return version
+
+
+def versioned(module, ctx):
+    """`ctx` with the manifest's dataset version, for a stage that names a file with it; `ctx` unchanged
+    for one that does not, or when there is no manifest to read one from."""
+    declared = (bind(e).artifact for e in tuple(module.INPUTS) + tuple(module.OUTPUTS))
+    if not any("{version}" in artifact.filename for artifact in declared):
+        return ctx
+    version = manifest_version(ctx)
+    return dataclasses.replace(ctx, dataset_version=version) if version else ctx

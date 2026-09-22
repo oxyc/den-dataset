@@ -57,10 +57,10 @@ it is a corpus decision: re-embed, then `den-update den-embed`.
 
 ## Building a generation
 
-`./den run --dataset-version <ver> --out-dir out` runs every stage in order. It skips the paid classify
-pass unless given `--spend`, and stops before publishing unless given `--publish`. Because `corpus` and
-`store` name files by the version finalize decides, a fresh generation is run stage by stage through
-finalize, then finished with the version in hand. The daily delta prints the same sequence.
+`./den run --out-dir out` runs every stage in order. It skips the paid classify pass unless given
+`--spend`, and stops before publishing unless given `--publish`. `facts`, `corpus` and `store` name their
+files by the version `finalize` derives, and read it from `out/dataset.meta.json`; a `--dataset-version`
+given to any of them is only checked against it. The daily delta prints the same sequence.
 
 ```sh
 # 1. Secrets. den.env is gitignored; the fetch stage reads it.
@@ -104,17 +104,19 @@ ssh root@pve 'incus exec den -- podman run --rm --network den \
     -v /tmp/embed-canary.json:/canary.json:ro -v /tmp/box:/w:z \
     docker.io/library/python:3.12-slim python /embed_docs.py \
         --docs /w/docs.jsonl --out-dir /w/out --url http://den-embed:8080 --canary /canary.json'
-python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels out/labels-t02.json \
+python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels out/genres-moods.json \
     --out-dir out/index --embed-space box/embedding-space.json \
     --embedder-health '{"model":"bge-m3","dims":1024,"vector_epoch":1,"runtime":"…","max_tokens":1024}'
 
-# 6. Finalize — the labels file, the vector blob and dataset.meta.json. This decides <ver>.
+# 6. Finalize — labels-t02.json (each vector title with this run's genres & moods), the vector blob and
+#    dataset.meta.json. This decides <ver>.
 ./den stage finalize --out-dir out
 ```
 
-**Step 5, what to watch for.** The embed stage composes from the previous finalize's `labels-t02.json` (the
-genres & moods labels, under their historical file name), so a title with no label record there is skipped
-as `missingLabel`. The first run in an out-dir records the service's identity and the document shape
+**Step 5, what to watch for.** The embed stage composes from the `genres-moods.json` step 3b wrote, so a
+title with no genres & moods is skipped as `missingLabel`. A title whose genres & moods changed keeps its old
+vector until `--reembed-changed` re-embeds it; `finalize` ships the new genres & moods either way, and
+refuses a vector whose title has none. The first run in an out-dir records the service's identity and the document shape
 (`index/embedder.json`, `index/composition.json`); later runs refuse a service or shape that differs, and a
 store with rows but no identity record refuses too. The plot cap is 3,500 characters and keeps the head
 only, so a truncated plot embeds no ending — while the facets prompt keeps a tail, because `ending` needs it.
@@ -145,10 +147,10 @@ its vector and belongs here. On `out-repass` on 2026-09-22 this was 79 ids. A ba
 whole and the merge refuses a pass that skipped one; `scripts/facts-run.sh out` loops until nothing is
 skipped.
 
-**7. The corpus** — the pass shards, facts and both label sets joined into one JSONL, the source of truth.
+**7. The corpus** — the pass shards, facts and genres & moods joined into one JSONL, the source of truth.
 
 ```sh
-./den stage corpus --out-dir out --dataset-version <ver> --expect <titles>
+./den stage corpus --out-dir out --expect <titles>
 ```
 
 `--expect` refuses a short join. `--set combined=<path>` (repeatable) points at a pass under another name.
@@ -157,7 +159,7 @@ skipped.
 manifest; without it the publish refuses.
 
 ```sh
-./den stage store --out-dir out --dataset-version <ver> --stamp-meta out/dataset.meta.json
+./den stage store --out-dir out --stamp-meta out/dataset.meta.json
 ```
 
 The same writer typed by hand, which `pipeline/store_test.py` holds to the same bytes:

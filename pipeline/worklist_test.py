@@ -64,9 +64,9 @@ def write_inputs(out):
     for name, text in DUMPS.items():
         with open(os.path.join(out, name), "w", encoding="utf-8") as fh:
             fh.write(text)
-    with open(os.path.join(out, "labels-t02.json"), "w", encoding="utf-8") as fh:
-        json.dump({"records": [{"tmdbId": 11, "mediaType": "movie"},
-                               {"tmdbId": 1399, "mediaType": "tv"}]}, fh)
+    entry = {"animated": False, "moods": [], "primaryGenre": "Drama", "subgenres": []}
+    with open(os.path.join(out, "genres-moods.json"), "w", encoding="utf-8") as fh:
+        json.dump({"titles": {"movie:11": entry, "tv:1399": entry}}, fh)
 
 
 def context(out, **kwargs):
@@ -88,12 +88,12 @@ class Staged(unittest.TestCase):
 
 
 class Declaration(unittest.TestCase):
-    def test_the_labels_artifact_keeps_one_name_and_is_read_under_its_own(self):
-        """`labels-t02.json` is `--known` here, `--labels` to the corpus join and `--vector-labels` to the
-        store writer — one file, one pipeline-wide name, and the word is the reader's."""
-        bound = {bind(e).name: bind(e) for e in worklist.INPUTS}["vector_labels"]
+    def test_what_a_delta_skips_is_the_titles_with_genres_and_moods(self):
+        """`genres-moods.json` is `--known` here — one file, one pipeline-wide name, and the word is the
+        reader's."""
+        bound = {bind(e).name: bind(e) for e in worklist.INPUTS}["genres_moods"]
         self.assertEqual(bound.flag(), "--known")
-        self.assertEqual(bound.artifact, artifacts.VECTOR_LABELS)
+        self.assertEqual(bound.artifact, artifacts.GENRES_MOODS)
 
     def test_it_declares_a_worklist_per_media(self):
         """One file per media is what the fetch stage declares and drains, one universe at a time."""
@@ -233,7 +233,7 @@ class Discover(Staged):
 
 class Delta(Staged):
     def test_it_skips_what_is_already_published_for_that_media(self):
-        """movie 11 and tv 1399 are in the fixture labels. The skip is media-qualified: TMDB's two id
+        """movie 11 and tv 1399 have genres & moods in the fixture. The skip is media-qualified: TMDB's two id
         spaces overlap, so a bare id set would drop a series because a film shares its number."""
         client = FakeTMDB({"movie": [[11, 12]], "tv": [[11, 1399]]})
         ctx = context(self.out, mode="delta", since="2026-09-07")
@@ -261,26 +261,26 @@ class Delta(Staged):
             worklist.universe(context(self.out, mode="delta"), "movie", FakeTMDB({}))
         self.assertIn("--since", str(refused.exception))
 
-    def test_a_delta_with_no_published_labels_is_refused(self):
+    def test_a_delta_with_no_genres_and_moods_is_refused(self):
         """Without them the pass re-enriches every title already shipped, at the per-title price the vote
         floor exists to bound, and nothing in its output says that is what happened."""
-        os.remove(os.path.join(self.out, "labels-t02.json"))
+        os.remove(os.path.join(self.out, "genres-moods.json"))
         with self.assertRaises(StageError) as refused:
             worklist.universe(context(self.out, mode="delta", since="2026-09-07"), "movie", FakeTMDB({}))
-        self.assertIn("./den stage finalize", str(refused.exception))
+        self.assertIn("./den stage genres_moods", str(refused.exception))
 
-    def test_a_labels_file_that_names_no_records_is_refused_rather_than_read_as_nothing_published(self):
-        """A wrong `--set vector_labels=…` is a file with no `records` in it. Read as an empty set it skips
-        nothing, and the delta re-enriches the published catalogue at the per-title price. `docfacts`
-        refuses the same shape, and so did the Swift command."""
-        with open(os.path.join(self.out, "labels-t02.json"), "w", encoding="utf-8") as fh:
-            json.dump({"taxonomyVersion": "t02"}, fh)
+    def test_a_file_that_names_no_titles_is_refused_rather_than_read_as_nothing_published(self):
+        """A wrong `--set genres_moods=…` — the old labels file, say — has no `titles` in it. Read as an
+        empty set it skips nothing, and the delta re-enriches the published catalogue at the per-title
+        price. `docfacts` refuses the same shape, and so did the Swift command."""
+        with open(os.path.join(self.out, "genres-moods.json"), "w", encoding="utf-8") as fh:
+            json.dump({"taxonomyVersion": "t02", "records": []}, fh)
         client = FakeTMDB({"movie": [[12]]})
         with self.assertRaises(StageError) as refused:
             worklist.universe(context(self.out, mode="delta", since="2026-09-07"), "movie", client)
-        self.assertIn("labels-t02.json", str(refused.exception))
-        self.assertIn("no records", str(refused.exception))
-        self.assertIn("./den stage finalize", str(refused.exception))
+        self.assertIn("genres-moods.json", str(refused.exception))
+        self.assertIn("holds no genres & moods titles", str(refused.exception))
+        self.assertIn("./den stage genres_moods", str(refused.exception))
         self.assertEqual(client.asked, [])
 
     def test_a_delta_that_found_nothing_is_not_a_failure(self):
@@ -296,15 +296,15 @@ class Delta(Staged):
         is the oracle for what a delta needs — and the two `--set` lines are not decoration: without them a
         delta's forty rows are written over the full run's 47k-title worklists under the same names.
 
-        The labels override is the expensive one to lose. Point it at nothing and the pass re-enriches the
-        whole published catalogue at the per-title price, reporting an ordinary-looking count.
+        The genres & moods override is the expensive one to lose. Point it at nothing and the pass
+        re-enriches the whole published catalogue at the per-title price, reporting an ordinary-looking count.
         """
         with open(os.path.join(REPO, "scripts", "delta-run.sh"), encoding="utf-8") as fh:
             script = fh.read()
         invocation = script.split("./den stage worklist")[1].split("\n\n")[0]
         self.assertIn("--mode delta", invocation)
         self.assertIn('--since "$SINCE"', invocation)
-        for name in ("vector_labels", "universe_movie", "universe_tv"):
+        for name in ("genres_moods", "universe_movie", "universe_tv"):
             self.assertIn(f"--set \"{name}=", invocation, f"the daily pass does not point {name} anywhere")
 
     def test_the_hand_off_names_commands_that_exist_in_the_pipelines_order(self):

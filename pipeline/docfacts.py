@@ -28,8 +28,8 @@ import json
 import os
 import sys
 
-from . import artifacts
-from .contract import StageError, bind, how_to_build
+from . import artifacts, genres_moods
+from .contract import StageError
 from lib import cache as caching
 from lib import http, wikidata
 
@@ -51,12 +51,11 @@ BATCH = 100
 #: that must be able to run again, not one run's wall clock.
 CONCURRENCY = 3
 
-#: `labels-t02.json` is `--labels` here and to the corpus join, `--vector-labels` to the store writer.
-INPUTS = (artifacts.VECTOR_LABELS.called("labels"),)
+#: The titles to scrape are the ones with genres & moods: the embed pass composes a document for those and
+#: no others, and this run's `genres_moods` stage has just written them.
+INPUTS = (artifacts.GENRES_MOODS,)
 
 OUTPUTS = (artifacts.DOC_FACTS,)
-
-BOUND = {bind(entry).name: bind(entry) for entry in INPUTS}
 
 
 def existing(path):
@@ -76,16 +75,10 @@ def existing(path):
     return rows
 
 
-def outstanding(labels_path, have):
-    """`{media: [tmdbId]}` for the titles not in the file yet, in the labels' own order."""
-    with open(labels_path, encoding="utf-8") as handle:
-        labels = json.load(handle)
-    records = labels.get("records")
-    if not records:
-        raise StageError(f"docfacts: {labels_path} names no records, so there is no corpus to scrape "
-                         f"facts for. Build it with: {how_to_build(artifacts.VECTOR_LABELS)}")
+def outstanding(genres_moods_path, have):
+    """`{media: [tmdbId]}` for the titles not in the file yet, in the genres & moods file's own order."""
     todo = {}
-    for record in records:
+    for record in genres_moods.read(genres_moods_path).values():
         media, tmdb_id = record["mediaType"], record["tmdbId"]
         if f"{media}:{tmdb_id}" not in have:
             todo.setdefault(media, []).append(tmdb_id)
@@ -120,7 +113,7 @@ def write(path, rows):
 
 def run(ctx, cache=None):
     """Scrape what is missing. Returns the file."""
-    labels = ctx.require(BOUND[artifacts.VECTOR_LABELS.name].artifact)
+    labels = ctx.require(artifacts.GENRES_MOODS)
     path = ctx.path(artifacts.DOC_FACTS)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
 

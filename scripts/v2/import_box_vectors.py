@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn `embed_docs.py` output from the serving box into an index store `finalize` can read.
 
-  scripts/v2/import_box_vectors.py --vectors box-vectors.jsonl --labels out-repass/labels-t02.json \
+  scripts/v2/import_box_vectors.py --vectors box-vectors.jsonl --labels out-repass/genres-moods.json \
       --out-dir out-repass/index --embedder-health '{"runtime":"den-embed/5.1.2",…}'
 
 `embed_docs.py` writes `{"key": "movie:11", "v": [...]}` — keyed, because the file travels between machines
@@ -44,7 +44,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import embed_canary  # noqa: E402
+from pipeline import genres_moods  # noqa: E402  — the one reader of genres-moods.json's shape
+from pipeline.contract import StageError  # noqa: E402
 
 DIMS = 1024
 
@@ -55,7 +58,8 @@ def die(msg):
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--vectors", required=True, help="vectors.jsonl as embed_docs.py wrote it on the box")
-ap.add_argument("--labels", required=True, help="labels-t02.json — the record per title")
+ap.add_argument("--labels", required=True,
+                help="genres-moods.json — the genres & moods the box's documents were composed from")
 ap.add_argument("--out-dir", required=True, help="the index dir to write labels.jsonl + vectors.jsonl into")
 ap.add_argument("--embedder-health", help="the serving den-embed's /health JSON, recorded as embedder.json")
 ap.add_argument("--expect-missing", type=int,
@@ -74,10 +78,10 @@ if args.embed_space:
             f"{expected!r} — these vectors were embedded against a different set of known answers, so "
             f"nothing here can say they are in the space this repo ships")
 
-store = json.load(open(args.labels, encoding="utf-8"))
-records = {f"{r['mediaType']}:{r['tmdbId']}": r for r in store["records"]}
-if len(records) != len(store["records"]):
-    die(f"{args.labels} holds duplicate mediaType:tmdbId keys")
+try:
+    records = genres_moods.read(args.labels)
+except StageError as refusal:
+    die(str(refusal))
 
 rows, seen = [], set()
 with open(args.vectors, encoding="utf-8") as fh:

@@ -237,7 +237,7 @@ class StoreInputs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as dir:
             code, err = self.check(dir, self.meta([self.entry(dir, mtime=0)]))
             self.assertEqual(code, 0, "stale is a warning here, as it is for a published artifact")
-            self.assertIn("build-premise-tags.py was edited after this input was made", err)
+            self.assertIn("build_premise_labels.py was edited after this input was made", err)
 
     def test_an_input_the_tree_no_longer_holds_is_reported_rather_than_skipped(self):
         """A publish dir may hold only the store and the manifest — that is the point of the cutover —

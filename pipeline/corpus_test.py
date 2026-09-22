@@ -60,8 +60,7 @@ FIXTURE_FILES = {
     "combined": ("combined-v1-r2.jsonl", "combined-v1-r2-token-fallback.jsonl"),
     "delta": ("delta-v2.jsonl", "delta-v2-rest.jsonl"),
     "facts": (f"facts-{VERSION}.json",),
-    "vector_labels": ("labels-t02.json",),
-    "premise_labels": ("labels-premise.json",),
+    "genres_moods": ("genres-moods.json",),
 }
 
 #: Two pass shards, one title that carries facts and no pass row at all, and a delta answer — the joins
@@ -114,8 +113,7 @@ def write_inputs(out):
         write_manifest(os.path.join(out, name))
     fixture.facts_file(os.path.join(out, FIXTURE_FILES["facts"][0]), list(FACTS_KEYS),
                        entities={"Q42": {"en": "Ada Director"}})
-    fixture.labels_file(os.path.join(out, FIXTURE_FILES["vector_labels"][0]), list(PASS_KEYS))
-    fixture.labels_file(os.path.join(out, FIXTURE_FILES["premise_labels"][0]), ["movie:1"])
+    fixture.genres_moods_file(os.path.join(out, FIXTURE_FILES["genres_moods"][0]), list(PASS_KEYS))
 
 
 def context(out, **kwargs):
@@ -134,15 +132,15 @@ class Declaration(unittest.TestCase):
         declared only the corpus would leave 3.6 MB of entity names owned by nobody."""
         self.assertEqual([bind(e).name for e in corpus.OUTPUTS], ["corpus", "entities"])
 
-    def test_the_labels_artifact_keeps_one_name_and_reaches_the_script_under_its_own(self):
-        """`labels-t02.json` is `--vector-labels` to the store writer and `--labels` to this join. The
-        FILE keeps one name across the pipeline — that is what `--set` and the producer registry key on —
-        and the flag is the reader's word for it."""
-        bound = {bind(e).name: bind(e) for e in corpus.INPUTS}["vector_labels"]
+    def test_the_genres_and_moods_reach_the_script_as_its_labels(self):
+        """`genres-moods.json` is `--labels` to this join. The FILE keeps one name across the pipeline —
+        that is what `--set` and the producer registry key on — and the flag is the reader's word for it.
+        The premise labels are not handed over: they were a copy of the same genres & moods."""
+        bound = {bind(e).name: bind(e) for e in corpus.INPUTS}["genres_moods"]
         self.assertEqual(bound.flag(), "--labels")
-        self.assertEqual(bound.artifact, artifacts.VECTOR_LABELS)
-        self.assertEqual(artifacts.VECTOR_LABELS.flag(), "--vector-labels")
-        self.assertIn(artifacts.VECTOR_LABELS, [bind(e).artifact for e in store.INPUTS])
+        self.assertEqual(bound.artifact, artifacts.GENRES_MOODS)
+        self.assertNotIn(artifacts.PREMISE_LABELS, [bind(e).artifact for e in corpus.INPUTS])
+        self.assertNotIn(artifacts.VECTOR_LABELS, [bind(e).artifact for e in corpus.INPUTS])
 
 
 class CommandLine(unittest.TestCase):
@@ -157,8 +155,7 @@ class CommandLine(unittest.TestCase):
                              sorted(os.path.join(out, n) for n in FIXTURE_FILES["combined"]))
             self.assertEqual(parsed.delta,
                              sorted(os.path.join(out, n) for n in FIXTURE_FILES["delta"]))
-            self.assertEqual(parsed.labels, os.path.join(out, "labels-t02.json"))
-            self.assertEqual(parsed.premise_labels, os.path.join(out, "labels-premise.json"))
+            self.assertEqual(parsed.labels, os.path.join(out, "genres-moods.json"))
             self.assertIsNone(parsed.withdrawn, "no tombstone file, no flag")
             self.assertEqual(parsed.out, os.path.join(out, f"corpus-{VERSION}.jsonl.gz"))
 
@@ -295,11 +292,9 @@ class Topology(unittest.TestCase):
         self.assertEqual(corpus.SCRIPT, os.path.join(REPO, corpus.PRODUCER))
         self.assertTrue(os.path.isfile(corpus.SCRIPT))
 
-    def test_the_labels_it_joins_are_the_finalize_stages(self):
-        """The seam this test used to hold open is closed: `vector_labels` answered for itself until the
-        finalize stage landed, and now the registry names that stage's rule."""
-        self.assertEqual(artifacts.VECTOR_LABELS.producer, "")
-        self.assertEqual(pipeline.producers()["vector_labels"][0], "pipeline/finalize.py")
+    def test_the_genres_and_moods_it_joins_are_the_genres_moods_stages(self):
+        self.assertEqual(artifacts.GENRES_MOODS.producer, "")
+        self.assertEqual(pipeline.producers()["genres_moods"][0], "pipeline/genres_moods.py")
 
     def test_the_corpus_is_built_before_the_store_reads_it(self):
         self.assertLess(pipeline.STAGES.index("corpus"), pipeline.STAGES.index("store"))
@@ -315,8 +310,7 @@ class Equivalence(unittest.TestCase):
         for name in sorted(FIXTURE_FILES["delta"]):
             command += ["--delta", os.path.join(out, name)]
         command += ["--facts", os.path.join(out, FIXTURE_FILES["facts"][0]),
-                    "--labels", os.path.join(out, FIXTURE_FILES["vector_labels"][0]),
-                    "--premise-labels", os.path.join(out, FIXTURE_FILES["premise_labels"][0]),
+                    "--labels", os.path.join(out, FIXTURE_FILES["genres_moods"][0]),
                     "--expect", "4", "--out", target]
         done = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -422,8 +416,7 @@ class Supersede(unittest.TestCase):
             for name in sorted(FIXTURE_FILES["delta"] + self.REGROUND[1:]):
                 command += ["--delta", os.path.join(out, name)]
             command += ["--facts", os.path.join(out, FIXTURE_FILES["facts"][0]),
-                        "--labels", os.path.join(out, FIXTURE_FILES["vector_labels"][0]),
-                        "--premise-labels", os.path.join(out, FIXTURE_FILES["premise_labels"][0]),
+                        "--labels", os.path.join(out, FIXTURE_FILES["genres_moods"][0]),
                         "--withdrawn", os.path.join(out, "withdrawn.jsonl"),
                         "--expect", "4", "--out", reference]
             self.assertNotEqual(command, corpus.argv(context(out, expect=4))[:-2] + ["--out", reference])
@@ -445,14 +438,13 @@ class Supersede(unittest.TestCase):
 class Rows(unittest.TestCase):
     def test_the_stage_carries_the_joins_through_untouched(self):
         """Not a second test of the join — a check that the wrapper hands over every artifact, so the
-        row it produces holds facts, labels, premise labels and the delta pass at once. A stage that
-        dropped a flag would still write a corpus, and it would be quietly thinner."""
+        row it produces holds facts, genres & moods and the delta pass at once. A stage that dropped a
+        flag would still write a corpus, and it would be quietly thinner."""
         with tempfile.TemporaryDirectory() as out:
             write_inputs(out)
             rows = {r["key"]: r for r in fixture.read(corpus.run(context(out, expect=4)))}
             self.assertEqual(sorted(rows), ["movie:1", "movie:2", "movie:77", "tv:9"])
             self.assertEqual(rows["movie:1"]["labels"]["primaryGenre"], "Crime")
-            self.assertEqual(rows["movie:1"]["premiseLabels"]["primaryGenre"], "Crime")
             self.assertEqual(rows["movie:1"]["critique"]["craft"], {"p": 0.7})
             self.assertEqual(rows["movie:77"]["facts"]["countries"], ["US"], "the facts-only title")
             with open(os.path.join(out, f"corpus-{VERSION}-entities.json.gz"), "rb") as fh:

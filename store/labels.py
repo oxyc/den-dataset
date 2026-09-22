@@ -1,46 +1,16 @@
 """Labels — `primary_genre`, `animated`, and the scored `subgenre` / `mood` lists.
 
-den-spec `wire/store-v1.md` § "Labels". Two passes label a title — the plot pass writes `labels`, the
-premise pass writes `premiseLabels` — and these sections are the union of the two.
+den-spec `wire/store-v1.md` § "Labels". A title's genres & moods are the corpus `labels` field, which the
+corpus join took from `genres-moods.json`. The premise pass's labels used to be a second source; they were a
+copy of the plot pass's (44,528 of 44,531 identical, oxyc/den-dataset#56), and a second source is a second
+answer, so they are not read.
 """
 from .format import hundredths
 
 
 def title_labels(row):
-    """The labelling a title got, from EITHER pass — `labels` (plot) or `premiseLabels`.
-
-    Two passes label a title and only one of them was ever read here. 3 titles of 47,618 were labelled
-    from their premise and never from a plot, so the store answered no primary genre, no subgenres and no
-    moods for them while the legacy blobs answered all three — *Father and Sons*, *Two Sons of Ringo* and
-    *Sítio do Picapau Amarelo*. They sit in the premise index, which is exactly where a reader asks.
-
-    The plot record wins WHOLE where both passes answered, rather than field by field: within one pass the
-    fields are coherent — an empty `subgenres` is the pass saying "none", not a gap — so filling one pass's
-    empty list from the other's would emit a combination neither pass produced. It costs nothing on this
-    corpus: all 44,528 titles both passes labelled agree byte-identically on all four fields, so this rule
-    and any other give the same bytes for them, and the union is a pure addition of the 3.
-
-    That agreement is a property of TODAY'S corpus, not a guarantee, so `disagreement()` below counts it
-    and the build refuses rather than quietly choosing. A repass where the passes diverge is a decision
-    about which labelling ships, and it should be made by someone rather than by the order of an `or`.
-    """
-    return (row.get("labels") or row.get("premiseLabels")) or {}
-
-
-#: The fields a pass answers — the whole of what `title_labels` picks between.
-LABEL_FIELDS = ("primaryGenre", "subgenres", "moods", "animated")
-
-
-def disagreement(row):
-    """The fields the two passes answer differently for one title, or `()` when they agree or only one
-    answered.
-
-    `title_labels` silently prefers the plot record, so this is the only thing that can see a divergence
-    at all."""
-    plot, premise = row.get("labels"), row.get("premiseLabels")
-    if not plot or not premise:
-        return ()
-    return tuple(f for f in LABEL_FIELDS if plot.get(f) != premise.get(f))
+    """A title's genres & moods, or `{}` when it has none."""
+    return row.get("labels") or {}
 
 
 def labelled(entries, strings, what, key):
@@ -58,7 +28,7 @@ def labelled(entries, strings, what, key):
 
 
 class Labels:
-    """The four label columns, and the per-pass coverage counts the build asserts against the artifacts."""
+    """The four label columns, and the coverage count the build asserts against `genres-moods.json`."""
 
     def __init__(self):
         self.primary = []
@@ -66,10 +36,6 @@ class Labels:
         self.moods = []
         self.animated = []
         self.with_labels = 0
-        self.with_plot_labels = 0
-        self.with_premise = 0
-        #: Titles the two passes answer differently for. The build refuses on a non-empty list.
-        self.divergent = []
 
     def intern(self, strings, row):
         labels = title_labels(row)
@@ -78,19 +44,11 @@ class Labels:
             strings.add(entry.get("label") if isinstance(entry, dict) else entry)
 
     def add(self, strings, key, row):
-        # Counted off the SAME dict the sections below are written from, so the count proves the union
-        # happened rather than agreeing with it by construction.
+        # Counted off the SAME dict the sections below are written from, so the count proves what was
+        # written rather than what the corpus holds.
         labels = title_labels(row)
         if labels:
             self.with_labels += 1
-        if row.get("labels"):
-            self.with_plot_labels += 1
-        if row.get("premiseLabels"):
-            self.with_premise += 1
-        fields = disagreement(row)
-        if fields:
-            self.divergent.append((key, fields))
-
         self.primary.append(strings.id(labels.get("primaryGenre")))
         self.subgenres.append(labelled(labels.get("subgenres"), strings, "subgenre", key))
         self.moods.append(labelled(labels.get("moods"), strings, "mood", key))

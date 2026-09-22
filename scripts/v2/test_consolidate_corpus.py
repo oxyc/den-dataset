@@ -68,6 +68,14 @@ def labels_file(path, keys, wrapper="records"):
         json.dump({wrapper: rows} if wrapper else rows, fh)
 
 
+def genres_moods_file(path, keys):
+    """`genres-moods.json` as the genres & moods stage writes it: titles keyed `mediaType:tmdbId`."""
+    entry = {"animated": False, "moods": [], "primaryGenre": "Crime", "primaryGenreSource": "jev-v3",
+             "source": "jev-v3", "subgenres": []}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"count": len(keys), "taxonomyVersion": "t02", "titles": {k: entry for k in keys}}, fh)
+
+
 def run(dir, combined_paths, delta_paths, facts, labels, out, extra=()):
     """The script as the pipeline runs it, returning (exit code, stderr)."""
     argv = [sys.executable, SCRIPT]
@@ -140,6 +148,27 @@ class Joins(unittest.TestCase):
             with self.assertRaises(SystemExit) as raised:
                 cc.by_key(path, "labels")
             self.assertIn("no recognisable rows", str(raised.exception))
+
+    def test_the_genres_moods_file_is_joined_under_its_titles_and_nothing_else_labels_a_title(self):
+        """`genres-moods.json` nests its titles under `titles`; read as an unknown wrapper it would be
+        refused, and read as the rows it would miss every key. The premise labels are not a second
+        source any more, so no row carries them."""
+        with tempfile.TemporaryDirectory() as dir:
+            c, d = os.path.join(dir, "c.jsonl"), os.path.join(dir, "d.jsonl")
+            f, l = os.path.join(dir, "f.json"), os.path.join(dir, "genres-moods.json")
+            out = os.path.join(dir, "corpus.jsonl")
+            write(c, [combined(1)])
+            write(d, [])
+            facts_file(f, ["movie:1", "movie:2"])
+            genres_moods_file(l, ["movie:1"])
+            code, err = run(dir, [c], [d], f, l, out)
+            self.assertEqual(code, 0, err)
+            rows = {r["key"]: r for r in read(out)}
+            self.assertEqual(rows["movie:1"]["labels"]["primaryGenre"], "Crime")
+            self.assertEqual(rows["movie:1"]["labels"]["source"], "jev-v3")
+            self.assertIsNone(rows["movie:2"]["labels"])
+            self.assertNotIn("premiseLabels", rows["movie:1"])
+            self.assertNotIn("--premise-labels", cc.build_parser().format_help())
 
     def test_a_bare_mapping_of_key_to_row_is_accepted(self):
         with tempfile.TemporaryDirectory() as dir:
