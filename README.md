@@ -116,8 +116,8 @@ committed under [`data/`](data/README.md) — read that before re-deriving any o
 
 **Why 57,715 enriched becomes 38,532 shipped.** 19,255 of the 20,182 dropped titles have no Wikipedia
 plot. Those were classified from the TMDB overview *prose*, which TMDB's terms forbid us deriving from,
-so `assemble --require-wiki-plot` drops them from the index entirely rather than shipping labels we are
-not entitled to. That single rule accounts for 95.4% of the gap. The remaining 927 are titles that *do*
+so the shipped generation dropped them from the index entirely rather than shipping labels we are not
+entitled to. That single rule accounts for 95.4% of the gap. The remaining 927 are titles that *do*
 have a plot and still did not ship — 519 of them because of the media-id collision described below.
 
 **The universe these are drawn from.** TMDB's daily exports list 1,216,343 movie ids and 225,504 TV
@@ -133,12 +133,10 @@ the other 421 would be dropped by the ToS rule regardless.
 
 ## Layout
 
-- `Sources/DenDataset/` — the library: the calibrated `TaxonomyClassifier`, the `t02` `Taxonomy`, the
-  `TaxonomyScorer` + `GoldenSet`, the `HashingEmbedder` + `Quantizer`, the format + producer model types, the
-  baked `GroundingKeywords` map, and a thin `TMDBClient` (two endpoints only).
+- `Sources/DenDataset/` — the library: the `t02` `Taxonomy`, the `HashingEmbedder` + `Quantizer`, the
+  format + producer model types, and a thin `TMDBClient` (two endpoints only).
 - `Sources/taxonomy-backfill/` — the CLI that drives the resumable phases (`worklist`, `enrich`,
-  `enrich-ids`, `escalation`, `assemble`, `embed-corpus`, `doc-facts`, `facts`, `finalize`, `metadata`,
-  `score`, `recluster`).
+  `embed-corpus`, `dump-articles`, `doc-facts`, `facts`, `finalize`, `metadata`, `recluster`).
 - `Tests/DenDatasetTests/` — golden (embedder/quantizer determinism), conformance (artifact format), and a
   fixture-based end-to-end smoke test (no TMDB, no network).
 
@@ -152,18 +150,20 @@ swift test
 ## The tool — phases
 
 ```
-taxonomy-backfill worklist  --mode discover|export|delta --media movie|tv [--count N] --out <path>
-taxonomy-backfill enrich    --worklist <path> [--limit 150] --out-dir <dir>
-taxonomy-backfill escalation --batch-id <n> --out-dir <dir>
-taxonomy-backfill assemble  --batch-id <n> --out-dir <dir>
-taxonomy-backfill finalize  --out-dir <dir>
-taxonomy-backfill metadata  --out-dir <dir> [--skip-fetch]   # the poster sidecar; after EVERY finalize
-taxonomy-backfill score     --labels labels-t02.json --golden golden.json [--gate]
+taxonomy-backfill worklist      --mode discover|export|delta --media movie|tv [--count N] --out <path>
+taxonomy-backfill enrich        --worklist <path> [--limit 150] --out-dir <dir>
+taxonomy-backfill dump-articles --enriched-dir <dir> --out <articles.jsonl>
+./den stage classify            --out-dir <dir> --dataset-version <ver> [--plan]
+taxonomy-backfill embed-corpus  --out-dir <dir> --labels labels-t02.json [--doc-facts …]
+taxonomy-backfill finalize      --out-dir <dir>
+taxonomy-backfill metadata      --out-dir <dir> [--skip-fetch]   # the poster sidecar; after EVERY finalize
 ```
 
-`worklist`/`enrich`/`enrich-ids` hit TMDB and need `TMDB_API_KEY`. The per-title labels come from Haiku
-subagents (the vote files under `out/votes/`), not an in-process LLM key. `assemble` runs the calibrated
-aggregation + embeds + quantizes; `finalize` writes the shipped artifacts.
+`worklist`/`enrich` hit TMDB and need `TMDB_API_KEY`. The per-title labels and facets come from the
+`classify` stage — the decision-only pass in `scripts/v2/run_combined.py`, which reads the dumped articles
+and writes the `combined-v1-r2*.jsonl` shards the corpus join consumes. `embed-corpus` composes and embeds
+those already-decided labels; `finalize` writes the shipped artifacts. Label quality is scored by
+`scripts/eval-taxonomy.py`, which CI runs and which gates a publish.
 
 ## `finalize` outputs
 
@@ -285,7 +285,7 @@ A vendor's fields travel inside files whose names suggest otherwise, which is ho
 ("nothing TMDB-sourced ships except posters, ids and titles") was broken twice without anyone noticing:
 
 - `overview` in the enriched batches is the **Wikipedia plot** when `hasWikiPlot` is true and the **TMDB
-  overview** when it is false. Same field, two sources — which is why `assemble --require-wiki-plot` exists.
+  overview** when it is false. Same field, two sources — which is why the no-wiki-plot rule below exists.
 - The v2 Wikipedia corpus carried `genres` and `voteCount`, both TMDB. They are stripped in the committed
   copy under `data/`.
 
@@ -338,9 +338,8 @@ state and what to do: `docs/OPERATE.md` "The alignment rule". Evidence: oxyc/den
 here, so there is one copy to keep true.
 
 What the gate still cannot see is the **doc shape** and the **plot cap**. The shipped index is the CC0 lean
-shape (`embed-corpus --doc-facts`), and its cap is recorded nowhere. Both differ silently from what a plain
-`assemble` or a default `embed-corpus` would compose, so neither is safe to append without establishing them
-first.
+shape (`embed-corpus --doc-facts`), and its cap is recorded nowhere. Both differ silently from what a
+default `embed-corpus` would compose, so neither is safe to append without establishing them first.
 
 ### 2. The token cap is most of what the vector sees
 Plot is **~87%** of the composed document by length (median 93%); facts and tags are ~204 chars. den-embed
@@ -362,8 +361,8 @@ plot cap without raising the service's token cap in the same change, and vice ve
 
 ### 3. No Wikipedia plot ⇒ the title does not ship
 A title with no Wikipedia plot was classified from the **TMDB overview prose**, which TMDB's terms forbid us
-deriving from, so `assemble --require-wiki-plot` drops it entirely. This is **95.4% of everything the
-pipeline discards** — a deliberate policy, not attrition.
+deriving from, so it is dropped entirely. This is **95.4% of everything the pipeline discards** — a
+deliberate policy, not attrition.
 
 Two consequences that are easy to trip over:
 - `finalize`'s ship guard is literally `s.contains("overview")`. A future field carrying prose under another

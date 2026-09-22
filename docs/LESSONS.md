@@ -6,10 +6,13 @@ shaped the way it is.
 
 ## Running the Haiku classification — and the two ways it silently fails
 
-`enrich` writes batches; nothing in this repo can classify them. Labels come from a Claude Code run over
-`DT-classification-prompt.md` (in the den repo), writing `out-t02/votes/batch-<id>-pass<n>.json`, which
-`assemble` then aggregates. Both failure modes below were hit in one session, and neither is visible to any
-check that was in place at the time.
+**This generation is retired**: the vote passes and the `assemble` step that aggregated them are gone,
+replaced by the decision-only `classify` stage (`scripts/v2/run_combined.py`). The section stays because
+both failure modes are about how a labelling pass hides its own emptiness, which the replacement can do too.
+
+`enrich` wrote batches; labels came from a Claude Code run over `DT-classification-prompt.md` (in the den
+repo), writing `out-t02/votes/batch-<id>-pass<n>.json`, which `assemble` then aggregated. Both failure modes
+below were hit in one session, and neither is visible to any check that was in place at the time.
 
 ### Failure 1: a batch can be structurally perfect and still worthless
 

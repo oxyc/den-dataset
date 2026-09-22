@@ -31,7 +31,8 @@ final class ArgsTests: XCTestCase {
     func testAFarMissSuggestsNothing() throws {
         // The suggestion is bounded, so a flag that resembles nothing declared does not get pointed at an
         // unrelated one — a wrong suggestion is worse than none.
-        let result = run(["score", "--labels", "labels.json", "--golden", "golden.json", "--zzzzzzzzzz"])
+        let result = run(["recluster", "--labels", "labels.json", "--vectors", "vectors.bin",
+                          "--out", "report.json", "--zzzzzzzzzz"])
         XCTAssertNotEqual(result.status, 0)
         XCTAssertFalse(result.stderr.contains("Did you mean"), result.stderr)
     }
@@ -69,13 +70,13 @@ final class ArgsTests: XCTestCase {
             XCTAssert(result.stdout.contains(flag), "\(flag) is missing from embed-corpus --help")
         }
         XCTAssert(result.stdout.contains("(required)"), "required flags are marked as such")
-        XCTAssertFalse(result.stdout.contains("--gate"), "another command's flags are not listed")
+        XCTAssertFalse(result.stdout.contains("--vectors"), "another command's flags are not listed")
     }
 
     func testABareInvocationListsTheSubcommands() throws {
         let result = run([])
         XCTAssertNotEqual(result.status, 0, "naming no command is a usage error")
-        for command in ["worklist", "enrich", "assemble", "embed-corpus", "finalize", "metadata", "score"] {
+        for command in ["worklist", "enrich", "embed-corpus", "finalize", "metadata", "recluster"] {
             XCTAssert(result.stderr.contains(command), "\(command) is missing from the overview")
         }
     }

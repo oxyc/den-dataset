@@ -1,61 +1,46 @@
 import XCTest
 @testable import DenDataset
 
-/// End-to-end producer smoke: a fixture enriched batch + one fixture vote pass (with a bare-string label to
-/// exercise the lenient decode) → `assemble` → `finalize`, all offline. No TMDB, no network, no 60k rebuild.
-/// Asserts the shipped artifacts (labels JSON, int8 vector blob, dataset.meta.json, gzipped labels) exist and
-/// are well-formed. Drives the REAL CLI binary so the tool's own code path is what runs.
+/// End-to-end producer smoke: a fixture index store → `finalize`, all offline. No TMDB, no network, no 60k
+/// rebuild. Asserts the shipped artifacts (labels JSON, int8 vector blob, dataset.meta.json, gzipped labels)
+/// exist and are well-formed. Drives the REAL CLI binary so the tool's own code path is what runs.
+///
+/// The store is written directly rather than produced by an embed run: `embed-corpus` needs a live
+/// den-embed, so seeding its output is the only way to exercise the artifact half with no network.
 final class SmokeTests: XCTestCase {
-    func testAssembleThenFinalizeProducesArtifacts() throws {
+    func testFinalizeProducesArtifacts() throws {
         let fm = FileManager.default
         let outDir = fm.temporaryDirectory.appendingPathComponent("den-dataset-smoke-\(UUID().uuidString)")
         defer { try? fm.removeItem(at: outDir) }
 
-        // Fixture enriched batch (scratch input Haiku would read) — 3 titles, one carrying the heist keyword
-        // (id 10051) so the grounding bonus fires.
-        let enriched = """
-        [
-          {"tmdbId":603,"mediaType":"movie","title":"The Matrix","year":1999,
-           "overview":"A hacker learns reality is a simulation and joins a rebellion against machines.",
-           "genreIDs":[28,878],"genres":["Action","Science Fiction"],
-           "keywordIDs":[83,9882],"keywords":["saviour","dystopia"],
-           "originCountry":["US"],"originalLanguage":"en","voteCount":24000},
-          {"tmdbId":155,"mediaType":"movie","title":"The Dark Knight","year":2008,
-           "overview":"Batman faces the Joker, an agent of chaos threatening Gotham City.",
-           "genreIDs":[28,80,18],"genres":["Action","Crime","Drama"],
-           "keywordIDs":[9715],"keywords":["superhero"],
-           "originCountry":["US"],"originalLanguage":"en","voteCount":30000},
-          {"tmdbId":27205,"mediaType":"movie","title":"Inception","year":2010,
-           "overview":"A thief who steals corporate secrets through dream-sharing pulls off one last heist.",
-           "genreIDs":[28,878,12],"genres":["Action","Science Fiction","Adventure"],
-           "keywordIDs":[10051],"keywords":["heist"],
-           "originCountry":["US"],"originalLanguage":"en","voteCount":34000}
+        // The append-only index store: one labels line and one vectors line per title, positionally paired.
+        let records = [
+            IndexRecord(tmdbId: 603, mediaType: "movie", primaryGenre: "Science Fiction",
+                        subgenres: [LabelConfidence(label: "Sci-Fi Action", confidence: 0.9)],
+                        moods: [LabelConfidence(label: "Mind-bending", confidence: 0.8)],
+                        source: .llm, animated: false),
+            IndexRecord(tmdbId: 155, mediaType: "movie", primaryGenre: "Action",
+                        subgenres: [LabelConfidence(label: "Crime Thriller", confidence: 0.85)],
+                        moods: [LabelConfidence(label: "Dark & Gritty", confidence: 0.7)],
+                        source: .llm, animated: false),
+            IndexRecord(tmdbId: 27205, mediaType: "movie", primaryGenre: "Science Fiction",
+                        subgenres: [LabelConfidence(label: "Heist", confidence: 0.7)],
+                        moods: [LabelConfidence(label: "Mind-bending", confidence: 0.75)],
+                        source: .llm, animated: false),
         ]
-        """
-        try write(enriched, to: outDir.appendingPathComponent("enriched/batch-1.json"))
+        // 384 dims, the length `--embedding-version e02` implies — finalize refuses a blob whose length
+        // contradicts its label.
+        let rows = records.enumerated().map { index, record in
+            VectorRow(tmdbId: record.tmdbId, v: (0..<384).map { ($0 + index) % 127 - 63 })
+        }
+        let encoder = JSONEncoder()
+        try write(records.map { String(decoding: try encoder.encode($0), as: UTF8.self) }.joined(separator: "\n") + "\n",
+                  to: outDir.appendingPathComponent("index/labels.jsonl"))
+        try write(rows.map { String(decoding: try encoder.encode($0), as: UTF8.self) }.joined(separator: "\n") + "\n",
+                  to: outDir.appendingPathComponent("index/vectors.jsonl"))
 
-        // Fixture vote pass — one Haiku subagent's labels. Inception's subgenre is a BARE STRING ("Heist")
-        // rather than {label,confidence}, exercising the lenient decode (defaults to 0.7).
-        let votes = """
-        [
-          {"tmdbId":603,"primary_genre":"Science Fiction",
-           "subgenres":[{"label":"Sci-Fi Action","confidence":0.9}],
-           "moods":[{"label":"Mind-bending","confidence":0.8}]},
-          {"tmdbId":155,"primary_genre":"Action",
-           "subgenres":[{"label":"Crime Thriller","confidence":0.85}],
-           "moods":["Dark & Gritty"]},
-          {"tmdbId":27205,"primary_genre":"Science Fiction",
-           "subgenres":["Heist"],
-           "moods":[{"label":"Mind-bending","confidence":0.75}]}
-        ]
-        """
-        try write(votes, to: outDir.appendingPathComponent("votes/batch-1-pass1.json"))
-
-        // Drive the real CLI. `--embedder fnv` keeps this offline (the default den-embed path needs the live
-        // service); the artifact plumbing (compose → embed → int8 blob → finalize) is what's under test.
-        try run(["assemble", "--batch-id", "1", "--out-dir", outDir.path, "--embedder", "fnv"])
-        // Label the artifact to match the FNV embedder (384-dim → e02); finalize's dim/label guard rejects a
-        // bge-m3 label on 384-dim vectors. This keeps the offline smoke test internally consistent.
+        // Label the artifact to match the 384-dim rows (e02); finalize's dim/label guard rejects a bge-m3
+        // label on 384-dim vectors.
         try run(["finalize", "--out-dir", outDir.path, "--embedding-version", "e02"])
 
         // labels-<taxonomyVersion>.json parses and has the 3 records.
@@ -66,18 +51,17 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(artifact.taxonomyVersion, version)
         XCTAssertEqual(artifact.count, 3)
         XCTAssertEqual(artifact.records.count, 3)
-        // Lenient bare-string label survived as a real thematic label (with the heist grounding bonus).
         let inception = artifact.records.first { $0.tmdbId == 27205 }
         XCTAssertNotNil(inception)
-        XCTAssert(inception!.subgenres.contains { $0.label == "Heist" }, "bare-string 'Heist' decoded + kept")
+        XCTAssert(inception!.subgenres.contains { $0.label == "Heist" }, "the store's labels reach the artifact")
 
-        // vectors-e02.bin header count matches (FNV fallback: name + dim both 384/e02, consistent per the guard).
+        // vectors-e02.bin header count matches (name + dim both 384/e02, consistent per the guard).
         let vectorsPath = outDir.appendingPathComponent("vectors-e02.bin")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: vectorsPath.path), "FNV artifact name is vectors-e02.bin")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: vectorsPath.path), "the artifact is named for the label")
         let vectorsData = try Data(contentsOf: vectorsPath)
         let blob = try VectorBlob.decode(vectorsData)
         XCTAssertEqual(blob.count, 3, "blob header count == records")
-        XCTAssertEqual(blob.dim, 384, "FNV fallback embedding dimension")
+        XCTAssertEqual(blob.dim, 384, "the dimension the e02 label implies")
         XCTAssertEqual(vectorsData.count, blob.rowsBase + blob.count * blob.dim,
                        "header + keys + count*dim int8 rows")
         // And each row is named by the title it belongs to, so the labels artifact is no longer the only
