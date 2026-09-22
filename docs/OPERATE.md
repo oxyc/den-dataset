@@ -187,6 +187,28 @@ python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popu
 #    One batch by hand (credentials already in the environment):
 python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --limit 150
 #    (Observed on the popular tier: ~96% wikiPlot hit; the misses are recent/obscure titles with no enwiki article.)
+#
+#    THE FLOORS (`pipeline/floors.py` has the measurements). A title is admitted when its TMDB vote count
+#    clears its TMDB floor OR its IMDb vote count clears its IMDb floor — a union, so nothing TMDB admits is
+#    lost — and the floors are per tier: a title of European, South American or AU/NZ origin is judged by the
+#    lower of the two. Both the stage and `python3 -m pipeline.enrich` take all four:
+#      --vote-floor N            worldwide TMDB floor           (default 50)
+#      --regional-vote-floor N   regional-origin TMDB floor     (default 15)
+#      --imdb-floor N            worldwide IMDb floor           (default 2000)
+#      --regional-imdb-floor N   regional-origin IMDb floor     (default 500)
+#    A below-floor title is not checkpointed (a vote count only climbs), so it is judged again next batch.
+#    Each batch report counts who admitted what — `admittedByTmdb`, `admittedByImdb`, `admittedByBoth` — and
+#    `shortOfImdbId`, the titles TMDB left short that Wikidata names no IMDb id for, so TMDB alone decided
+#    them. `imdbGate` says whether IMDb took part in that batch:
+#      downloaded | unchanged    today's `title.ratings` dump judged it (fetched, or a 304 on the copy held)
+#      stale: <error>; using the copy from N day(s) ago
+#                                the download failed and an older dump judged it — it can only under-admit,
+#                                since counts only climb; the next batch with a fresh dump catches up
+#      off: <error>              no dump at all: this batch ran on the TMDB floors alone, and the titles
+#                                only IMDb would have admitted stay pending rather than being dropped
+#    The IMDb counts themselves never leave the process — IMDb's licence is non-transferable — so no report,
+#    batch or artifact carries one; the dump is kept under the cache root (`.cache/imdb/` by default),
+#    outside every out-dir.
 
 # 3a. Classify — the Jev pass that produced the shipped labels and facets: one typed request per title over
 #     the dumped article, into the `combined-v1-r2*.jsonl` shards the corpus join reads. It is the only step
