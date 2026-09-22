@@ -1,5 +1,5 @@
 {
- "_": "What each genres & moods label means, for a labeller. The label names are data/taxonomy-t02.swift's (Taxonomy.current, the file the classify pass hashes); scripts/genres_moods_enrich.py refuses a vocabulary this file does not define exactly. Subgenres hold the blended subgenres and the themes.",
+ "_": "What each genres & moods label means, for a labeller. The label names are data/genres-moods-vocabulary.json's, the file the classify pass hashes; scripts/genres_moods_enrich.py refuses a vocabulary this file does not define exactly. Subgenres hold the blended subgenres and the themes.",
  "taxonomyVersion": "t02",
  "primaryGenres": {
   "Action": "Spectacle, fights, chases or combat are the dominant mode, including superhero and martial-arts action whose hero fights criminals.",

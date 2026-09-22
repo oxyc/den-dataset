@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Canonical typed questions for the combined Jev corpus pass.
 
-The controlled vocabulary is read from ``Taxonomy.current`` rather than copied.  Regional labels are
+The controlled vocabulary is read from the committed file rather than copied.  Regional labels are
 deliberately excluded: they describe origin/language and are derived from metadata, not inferred from prose.
 """
+import json
 import os
 import re
 
@@ -11,55 +12,44 @@ from facet_questions import questions as facet_questions
 from run_facets import VALIDITY
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-#: The controlled vocabulary, as data. It is Swift source that nothing compiles — the repo has no Swift
-#: toolchain left (oxyc/den-dataset#27) — so it lives under `data/` with the other committed inputs and
-#: keeps the extension its contents honestly are.
-TAXONOMY = os.path.join(ROOT, "data", "taxonomy-t02.swift")
+#: The genres & moods vocabulary, as data: JSON under `data/` with the other committed inputs
+#: (oxyc/den-dataset#27). The constant, the `--taxonomy` flag and the manifest keys `taxonomy`,
+#: `taxonomySha256` and `taxonomyVersion` keep their names — shipped manifests and the store carry them,
+#: and a recorded key that is renamed is a key its readers no longer find.
+TAXONOMY = os.path.join(ROOT, "data", "genres-moods-vocabulary.json")
 PROMPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "facets-v2.md")
 PINNED_MODEL = "jev-1.13.0"
 
-
-def _swift_string_array(source, field, start=0):
-    """Read one simple Swift string-array argument with balanced brackets."""
-    match = re.search(rf"\b{re.escape(field)}\s*:\s*\[", source[start:])
-    if not match:
-        raise ValueError(f"Taxonomy.current has no {field} array")
-    opening = start + match.end() - 1
-    depth = 0
-    in_string = escaped = False
-    for pos in range(opening, len(source)):
-        char = source[pos]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-        elif char == '"':
-            in_string = True
-        elif char == "[":
-            depth += 1
-        elif char == "]":
-            depth -= 1
-            if depth == 0:
-                block = source[opening:pos + 1]
-                return re.findall(r'"((?:[^"\\]|\\.)*)"', block)
-    raise ValueError(f"unterminated {field} array")
+#: The label families, in the order the file writes them. `version` is read beside them.
+FAMILIES = ("primaryGenres", "subgenres", "thematic", "regional", "moods")
 
 
 def taxonomy(path=TAXONOMY):
+    """The vocabulary as `{version, <family>: [label, …]}`, refusing a file that cannot mean one thing.
+
+    Every question the paid pass asks is built from these names, so a family that is absent or a label
+    written twice has to stop here: the second spelling would either collide with the first question id
+    or quietly ask the same question under two names.
+    """
     with open(path, encoding="utf-8") as fh:
-        source = fh.read()
-    current = source.index("public static let current")
-    version_match = re.search(r'version:\s*"([^"]+)"', source[current:])
-    if not version_match:
-        raise ValueError("Taxonomy.current has no version")
-    return {
-        "version": version_match.group(1),
-        **{name: _swift_string_array(source, name, current)
-           for name in ("primaryGenres", "subgenres", "thematic", "regional", "moods")},
-    }
+        document = json.load(fh)
+    version = document.get("version")
+    if not isinstance(version, str) or not version:
+        raise ValueError(f"{path} has no version")
+    vocabulary = {"version": version}
+    seen = {}
+    for family in FAMILIES:
+        labels = document.get(family)
+        if not isinstance(labels, list) or not labels or not all(
+                isinstance(label, str) and label for label in labels):
+            raise ValueError(f"{path} has no {family} labels")
+        for label in labels:
+            if label in seen:
+                raise ValueError(f"{path}: {label!r} is in both {seen[label]} and {family} — a label is "
+                                 f"written once, in the family it belongs to")
+            seen[label] = family
+        vocabulary[family] = labels
+    return vocabulary
 
 
 def slug(value):

@@ -141,14 +141,14 @@ the other 421 would be dropped by the ToS rule regardless.
   it reads and writes; `./den stages` prints it.
 - `lib/` — what a stage needs from outside the machine: HTTP with retry, the response cache, and the
   upstream clients (TMDB, Wikidata, Wikipedia — the whole article in `wikipedia.py`, the plot in `plot.py`).
-- `data/` — the committed inputs. `data/taxonomy-t02.swift` is all that is left of the Swift producer and
-  nothing compiles it: it is the genres & moods vocabulary as data, which
-  `scripts/v2/combined_questions.py` parses and hashes into the classify pass's manifest. The manifest
-  pins the vocabulary by that DIGEST, not by where the file sits, so moving it costs a recorded
-  allowance in `scripts/v2/implementation-lineage.json` for the one constant that names the path — not a
-  reclassification. Converting it to JSON would change the digest for no change in vocabulary; do that
-  when a taxonomy bump is reclassifying anyway, and make the hash canonical over the parsed vocabulary
-  then.
+- `data/` — the committed inputs. `data/genres-moods-vocabulary.json` is the genres & moods vocabulary:
+  the label names, per family, that `scripts/v2/combined_questions.py` builds one question from and
+  hashes into the classify pass's manifest as `taxonomySha256`. The manifest pins the vocabulary by that
+  DIGEST, so rewriting the file — as #27 did, from the Swift source nothing compiled into JSON — costs a
+  recorded allowance in `scripts/v2/implementation-lineage.json` rather than a reclassification. What
+  makes such an allowance honest is the equality beside it: the questions built from the file still hash
+  to the `globalQuestionsSha256` the paid pass recorded, which is what the pass actually bought answers
+  to. `scripts/v2/test_combined.py` pins both digests, so an edit that reaches a question fails there.
 - `scripts/` — the operator's drivers, the publisher and its guards. The weekly re-cluster is
   `scripts/recluster.py`, driven by `scripts/recluster-run.sh`: it is in no build order. It takes ~15
   minutes over the corpus at k=800 (the Swift took ~2) and needs Python 3.12, whose `math.sumprod` is what
