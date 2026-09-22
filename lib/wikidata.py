@@ -521,6 +521,82 @@ def languages(ids, media, cache=None):
     return parsed
 
 
+#: What makes a P144 work a SCREEN work: an instance of film, television program or web series, or of any
+#: subclass of them (`television series`, `anime film`, `miniseries`, `silent short film`). A class walk
+#: rather than `lib/wikidata_facts.SOURCE_KIND_BY_TYPE`'s label list, which names `film` and `television
+#: series` but folds `television program`, `miniseries`, `anime film` and `web series` into `other`.
+SCREEN_CLASSES = ("Q11424", "Q15416", "Q526877")
+
+
+def source_query(ids, media):
+    """The SPARQL that names, for one batch of TMDB ids, the English article of every work each is based on
+    (P144), and whether that work is itself a film or a series.
+
+    Its own request, for the reason `language_query` is: the mapping's text is its cache key. The class
+    test is an EXISTS walked from the work up, so WDQS starts from the handful of P144 targets rather than
+    from every film there is.
+    """
+    values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
+    classes = ", ".join(f"wd:{qid}" for qid in SCREEN_CLASSES)
+    return (f"SELECT DISTINCT ?tmdb ?sourceArticle ?screen WHERE {{\n"
+            f"  VALUES ?tmdb {{ {values} }}\n"
+            f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"  ?film wdt:P144 ?basedOn .\n"
+            f"  ?sourceArticle schema:about ?basedOn ; schema:isPartOf <https://en.wikipedia.org/> .\n"
+            f"  BIND(EXISTS {{ ?basedOn wdt:P31/wdt:P279* ?class . FILTER(?class IN ({classes})) }} AS ?screen)\n"
+            f"}}\n"
+            f"ORDER BY ?tmdb ?sourceArticle")
+
+
+def parse_sources(payload):
+    """`tmdbId -> {article: is a screen work}`. RAISES on a body that is not a SPARQL result.
+
+    An article two P144 works share is a screen work when either is — the question is whether reading it
+    describes another production. An id with no P144 work that has an English article is absent.
+    """
+    try:
+        bindings = json.loads(payload.decode("utf-8"))["results"]["bindings"]
+        if not isinstance(bindings, list):
+            raise TypeError(bindings)
+    except (ValueError, KeyError, TypeError):
+        raise WikidataError(f"not a SPARQL result: {payload[:200]!r}") from None
+    out = {}
+    for binding in bindings:
+        raw, url = _cell(binding, "tmdb"), _cell(binding, "sourceArticle")
+        if raw is None or not _INTEGER.fullmatch(raw) or url is None:
+            continue
+        article = article_title(url)
+        if article is None:
+            continue
+        works = out.setdefault(int(raw), {})
+        works[article] = works.get(article, False) or _cell(binding, "screen") == "true"
+    return out
+
+
+def sources(ids, media, cache=None):
+    """`tmdbId -> {article: is a screen work}` for one batch of one media type, from disk where the same
+    batch was asked before. What lets the source-work fallback tell a novel from a remake's original."""
+    if not ids:
+        return {}
+    query = source_query(ids, media)
+    key = None
+    if cache is not None:
+        key = cache.key("sparql-source", {"q": query})
+        hit = cache.read(key)
+        if hit is not None:
+            try:
+                return parse_sources(hit)
+            except WikidataError:
+                pass
+    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
+                           headers={"Content-Type": "application/sparql-query",
+                                    "Accept": "application/sparql-results+json"})
+    parsed = parse_sources(payload)
+    if key is not None:
+        cache.write(key, payload)
+    return parsed
+
+
 def target_query(ids, media):
     """The SPARQL that names one batch of TMDB ids: the item's label and its publication dates (P577),
     plus its start time (P580) for a series, whose first air date is what a series' year means."""
