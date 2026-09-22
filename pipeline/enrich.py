@@ -161,11 +161,20 @@ def is_transient(error):
 
 
 def fetch_title(client, media, tmdb_id):
-    """`(verdict, record-or-reason)` for one worklist id."""
+    """`(verdict, record-or-reason)` for one worklist id. Raises `StageError` when TMDB refuses the KEY.
+
+    A 401 or 403 is not an answer about the title. Read as a per-title failure it was checkpointed: one
+    batch reported 150 of 150 as failures with `remaining` falling, so a revoked key marched the drain
+    through the whole universe marking every title dead.
+    """
     try:
         body = client.get(f"/{media}/{tmdb_id}", {"append_to_response": tmdb_api.APPEND})
         return "ok", tmdb_api.title_record(body, tmdb_id, media)
     except http.HTTPError as error:
+        if error.status in (401, 403):
+            raise StageError(f"enrich: TMDB answered HTTP {error.status} for {error.url} — TMDB_API_KEY is "
+                             f"revoked or wrong. Nothing from this batch was written or checkpointed; fix the "
+                             f"key and run again.") from error
         return ("deferred" if is_transient(error) else "failure"), str(error)
     except ValueError as error:
         return "failure", f"undecodable detail body: {error}"

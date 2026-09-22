@@ -339,6 +339,29 @@ class Batch(unittest.TestCase):
         self.assertEqual((report["deferred"], report["belowFloor"], report["failures"], report["noOverview"],
                           report["remaining"], report["count"]), (2, 1, 1, 1, 3, 0))
 
+    def test_a_refused_tmdb_key_stops_the_batch_and_checkpoints_nothing(self):
+        """A revoked key answers 401 for every id. Read as per-title failures, one batch checkpointed 150 of
+        150 with `remaining` falling, and the drain would have marked the whole universe dead."""
+        for status in (401, 403):
+            with self.subTest(status=status):
+                bodies = {f"/movie/{i}": detail(i) for i in range(1, 40)}
+                bodies["/movie/7"] = http.HTTPError(status, "https://api.themoviedb.org/3/movie/7")
+                with self.assertRaises(StageError) as refused:
+                    self.run_batch(bodies, [("movie", i) for i in range(1, 40)])
+                self.assertIn("TMDB_API_KEY", str(refused.exception))
+                self.assertIn(f"HTTP {status}", str(refused.exception))
+                self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
+                self.assertFalse(os.path.exists(os.path.join(self.out, "enriched")))
+
+    def test_every_id_refused_is_one_refusal_not_a_batch_of_failures(self):
+        class Revoked:
+            def get(self, path, params=None):
+                raise http.HTTPError(401, "https://api.themoviedb.org/3" + path)
+        with self.assertRaises(StageError):
+            enrich.run(self.worklist(*[("movie", i) for i in range(1, 501)]), self.out, client=Revoked(),
+                       cache=self.cache)
+        self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
+
     def test_no_answer_at_all_is_transient_everywhere(self):
         """A dropped connection, a TLS failure, a refused socket: none says anything about the title. The
         Swift pass wrote some of these as a permanently plotless `fetchFailed`."""
