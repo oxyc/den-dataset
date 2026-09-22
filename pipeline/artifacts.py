@@ -19,15 +19,38 @@ from .contract import Artifact
 #: for reasons that have nothing to do with any one artifact — which is how a guard gets ignored to death.
 BACKFILL = "Sources/taxonomy-backfill/main.swift"
 
+#: The article dump the classify pass reads: one JSON object per title carrying the whole Wikipedia article
+#: text, its revision and the extractor's chosen plot headings. Every question the pass asks is about a
+#: section of this file, which is why the pass hashes it into its manifest.
+ARTICLES = Artifact(
+    name="articles",
+    filename="articles.jsonl",
+    producer=BACKFILL,
+    how="taxonomy-backfill dump-articles",
+    dedicated=False,
+)
+
 #: The classify pass, in shards. Three of them today, named by the run that wrote them rather than by the
 #: dataset version — the pass owns that naming, and this is a glob so the set is whatever the pass left
 #: behind. Reading one shard of three is what took eleven titles out of a derived blob for a day; a stage
 #: that only knows the set cannot repeat it. Point `--set combined=…` at another run's shards.
+#:
+#: The wildcard is EMPTY for the shard a pass writes; what fills it are the capacity quarantines
+#: `resume_combined_excluding.py` adds afterwards, which is why `Context.shard` derives the write target
+#: from the same glob the corpus join reads the set by.
 COMBINED = Artifact(
     name="combined",
     filename="combined-v1-r2*.jsonl",
-    producer="scripts/v2/run_combined.py",
-    how="scripts/v2/run_combined.py",
+    shards=True,
+)
+
+#: Each shard's sidecar: the run id, and the hashes of the input, the questions, the prompt, the taxonomy,
+#: the model and the pass's own source files. `run_combined.py` derives its name from `--out` rather than
+#: taking a flag for it, and `audit_combined.py` — the only thing between a corrupted bundle and a
+#: published dataset — looks it up by that derived name. Declared so the stage checks it landed there.
+COMBINED_MANIFEST = Artifact(
+    name="combined_manifest",
+    filename="combined-v1-r2*.jsonl.manifest.json",
     shards=True,
 )
 
@@ -192,6 +215,6 @@ RELEASE = Artifact(
     remote=True,
 )
 
-CATALOGUE = (COMBINED, DELTA, ENRICHED, DOC_FACTS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
-             EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, FACTS, VECTORS, VECTOR_LABELS,
-             PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)
+CATALOGUE = (ARTICLES, COMBINED, COMBINED_MANIFEST, DELTA, ENRICHED, DOC_FACTS, EMBED_LABELS,
+             EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, FACTS, VECTORS,
+             VECTOR_LABELS, PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)

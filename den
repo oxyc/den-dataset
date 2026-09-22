@@ -13,6 +13,7 @@ Options (both run forms):
     --expect N                     the title count the corpus join is held to
     --pause-ms N                   milliseconds the embed pass idles between requests
     --limit N                      stop the embed pass after N new titles
+    --plan                         the classify pass validates and reports, and buys nothing
     --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
                                    NAME to name every shard of a set
 
@@ -66,7 +67,8 @@ def context(args):
             overrides[name] = path
     return pipeline.Context(out_dir=args.out_dir, dataset_version=args.dataset_version,
                             overrides=overrides, stamp_meta=args.stamp_meta or "",
-                            expect=args.expect, pause_ms=args.pause_ms, limit=args.limit)
+                            expect=args.expect, pause_ms=args.pause_ms, limit=args.limit,
+                            plan=args.plan)
 
 
 def execute(module, ctx):
@@ -89,6 +91,8 @@ def main(argv=None):
         sub.add_argument("--pause-ms", type=int, default=0,
                          help="milliseconds the embed pass idles between requests")
         sub.add_argument("--limit", type=int, help="stop the embed pass after N new titles")
+        sub.add_argument("--plan", action="store_true",
+                         help="the classify pass validates and reports its call plan, and buys nothing")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
         return sub
 

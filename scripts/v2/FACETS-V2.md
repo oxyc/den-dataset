@@ -229,6 +229,12 @@ python3 scripts/v2/run_combined.py \
 The paid command is the same without `--plan`. Do not launch it until the code, questions, plan, tests, and
 smoke artifact have passed the final independent audit.
 
+`./den stage classify --out-dir out --dataset-version <ver> [--plan]` runs exactly this, with the files
+resolved from `pipeline/classify.py`'s declaration rather than retyped, and `--out` pointed at the shard the
+corpus join globs so a rerun resumes the existing manifest instead of starting a second paid pass.
+`pipeline/classify_test.py` holds the two to the same arguments, and holds a run the stage launches to the
+configuration hash the hand-typed command's manifest records.
+
 After the writer exits successfully, independently reconstruct and audit the stored artifact before measuring
 or publishing it:
 

@@ -148,6 +148,10 @@ class Context:
     #: never shrinks, so a long-lived den-embed creeps up until it OOMs the machine; the run is segmented
     #: to let the service be restarted between segments, and the store is what makes that free.
     limit: int | None = None
+    #: Validate and report, buying nothing. The classify pass is the one stage whose cost is money rather
+    #: than time — $20.47 for the shipped corpus — so its launch procedure is written around a dry run
+    #: that proves the input parses and prints the call plan before anything is paid for.
+    plan: bool = False
 
     def path(self, artifact):
         if artifact.shards:
@@ -174,6 +178,26 @@ class Context:
             return tuple(override) if isinstance(override, (list, tuple)) else (override,)
         pattern = os.path.join(self.out_dir, artifact.filename.format(version=self.dataset_version))
         return tuple(sorted(globbing.glob(pattern)))
+
+    def shard(self, artifact):
+        """Where ONE pass writes into a shard set.
+
+        `path` refuses a set because no single file is the set, and a pass still has to name one file. The
+        name is not a free choice: the declared glob with an empty wildcard is the shard a pass writes,
+        and the members that fill the wildcard are the quarantine shards a later repair adds. Deriving it
+        from the glob the readers resolve the set by is what keeps a run inside the set they will find —
+        a pass sent to a name of its own is a second manifest, and a second manifest is a second paid run.
+        """
+        if not artifact.shards:
+            raise StageError(f"{artifact.name} is one file, not a set of shards — ask for path()")
+        override = self.overrides.get(artifact.name)
+        if isinstance(override, (list, tuple)):
+            raise StageError(f"{artifact.name} was pointed at {len(override)} paths and one pass writes "
+                             f"one shard — name the shard to write, or leave it to the declaration")
+        if override is not None:
+            return override
+        return os.path.join(self.out_dir,
+                            artifact.filename.format(version=self.dataset_version).replace("*", ""))
 
     def require(self, artifact):
         """The input's path, or a refusal that names what builds it.
