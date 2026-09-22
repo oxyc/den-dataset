@@ -159,7 +159,7 @@ class Batch(unittest.TestCase):
         """A well-covered adaptation must not pay for a second fetch it cannot use."""
         self.mapping[("movie", 1)] = {"article": "Own", "sourceArticle": "Book",
                                       "articlesByLang": {"de": "Eigen"}}
-        self.plots[("Own", "en")] = found("o" * enrich.OWN_ARTICLE_SUFFICIENT, resolved="Own")
+        self.plots[("Own", "en")] = found("o" * 1000, resolved="Own")
         self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
         self.assertEqual(self.plot_calls, [("Own", "en")])
         self.assertEqual(self.rows()["movie:1"]["plotArticleRole"], "own")
@@ -207,9 +207,11 @@ class Batch(unittest.TestCase):
         self.mapping.update({("movie", 1): {}, ("movie", 2): {"article": "Bare"},
                              ("movie", 3): {"article": "Short"}, ("movie", 4): {"article": "Gone"},
                              ("movie", 5): {"article": "Floor"}})
-        self.plots[("Short", "en")] = found("s" * (enrich.WIKI_PLOT_FLOOR - 1))
+        # Literal lengths: the floor is 120 on measurement (Silo's 189-character premise), and a test written
+        # against the constant would follow it anywhere.
+        self.plots[("Short", "en")] = found("s" * 119)
         self.plots[("Gone", "en")] = http.HTTPError(404, "https://en.wikipedia.org/w/api.php")
-        self.plots[("Floor", "en")] = found("f" * enrich.WIKI_PLOT_FLOOR)
+        self.plots[("Floor", "en")] = found("f" * 120)
         self.run_batch({f"/movie/{i}": detail(i) for i in range(1, 6)}, [("movie", i) for i in range(1, 6)])
         rows = self.rows()
         self.assertEqual([rows[f"movie:{i}"].get("noPlotReason") for i in range(1, 6)],
@@ -243,6 +245,16 @@ class Batch(unittest.TestCase):
         self.assertEqual(sorted(self.checkpoint()["processed"]), ["movie:3", "movie:5"])
         self.assertEqual((report["deferred"], report["belowFloor"], report["failures"], report["noOverview"],
                           report["remaining"], report["count"]), (2, 1, 1, 1, 3, 0))
+
+    def test_no_answer_at_all_is_transient_everywhere(self):
+        """A dropped connection, a TLS failure, a refused socket: none says anything about the title. The
+        Swift pass wrote some of these as a permanently plotless `fetchFailed`."""
+        self.mapping[("movie", 2)] = {"article": "Two"}
+        self.plots[("Two", "en")] = http.HTTPError(0, "https://en.wikipedia.org/w/api.php")
+        report = self.run_batch({"/movie/1": http.HTTPError(0, "x"), "/movie/2": detail(2)},
+                                [("movie", 1), ("movie", 2)])
+        self.assertEqual((report["deferred"], report["failures"], report["count"]), (2, 0, 0))
+        self.assertEqual(self.checkpoint()["processed"], [])
 
     def test_the_next_batch_is_numbered_from_the_directory_when_the_checkpoint_is_missing(self):
         """`out-t02` had 153 batches and no checkpoint; a delta numbered from 1 and overwrote two."""

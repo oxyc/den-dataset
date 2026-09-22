@@ -64,8 +64,11 @@ class Staged(unittest.TestCase):
         self.steps = list(steps)
 
     def scripted(self, ctx, media):
-        """One step per call; the last repeats, which is how a stall or an outage is spelled."""
+        """One step per call; the last repeats, which is how a stall or an outage is spelled. Bounded, so a
+        stopping rule that stops holding fails here instead of spinning forever."""
         self.calls.append(media)
+        if len(self.calls) > 50:
+            raise AssertionError("the drain never stopped")
         step = self.steps[min(len(self.calls), len(self.steps)) - 1] if self.steps else {"remaining": 0}
         if isinstance(step, Exception):
             raise step
