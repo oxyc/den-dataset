@@ -524,4 +524,6 @@ done < "$manifest_files"
 # consumers keep serving the last-good dataset instead of a version that 404s. NEVER upload the meta on its own.
 echo "→ dataset.meta.json (commit)"
 upload_one "$meta" || exit 1
-echo "done — consumers: den-atlas scripts/fetch-dataset.sh · Den app 'make sync-dataset'."
+# den-atlas is the only thing that fetches the release. The Den app does not: it reads den-atlas's
+# /dataset.json and queries den-atlas for everything the store holds.
+echo "done — consumer: den-atlas (scripts/fetch-dataset.sh). The Den app reads it through den-atlas's /dataset.json."
