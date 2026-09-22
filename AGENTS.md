@@ -15,15 +15,19 @@ prose somewhere that can go stale without anything failing.
 
 ## The part that is still being rebuilt
 
-`pipeline/` holds **six** stages today — the worklist, the classify pass, the embed pass, the corpus join,
-the store build and the publish. Only the enrichment drain still runs from `docs/OPERATE.md` under
-`scripts/`.
+`pipeline/` holds **nine** stages today — the worklist, the article dump, the classify pass, the Wikidata
+doc facts, the embed pass, the corpus join, the store build, the poster sidecar and the publish. Only the
+enrichment drain still runs from `docs/OPERATE.md` under `scripts/`.
 That is the migration in oxyc/den-dataset#27, not a second generation: stages join `STAGES` one at a
 time, and the old tree is deleted in the commit that makes the new one authoritative.
 
+`lib/` is what a stage needs from OUTSIDE the machine — HTTP with one retry policy, the response cache,
+and the upstream clients. It is held to the same reachability rule, entered from the stages that import
+it. Its cache key is a contract with ~2.1 GB of bodies already on disk: see `lib/cache.py`.
+
 Three rules keep it from becoming `scripts/v3/`, and all three are enforced rather than written down:
 
-- **Existence means reachability.** A module under `pipeline/` that nothing in `STAGES` imports is
+- **Existence means reachability.** A module under `pipeline/`, `store/` or `lib/` that nothing reaches is
   deleted. `guards/reachable.py` fails CI on one.
 - **Declare an artifact once.** `scripts/check-producers.py` reads its registry off the stage
   declarations. There is no second list, because the second list is what drifted.
