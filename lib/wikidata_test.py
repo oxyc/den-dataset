@@ -552,6 +552,46 @@ class OneItemPerTitle(unittest.TestCase):
                          {"wikidataItem": BOON, "wikidataCandidates": [BONN, BOON]})
         self.assertEqual(wikidata.provenance(resolved[1399]), {}, "an uncontested row is unchanged")
 
+    def resolve_with(self, claimed, decisions, ids=(6618,)):
+        with mock.patch.object(wikidata, "claimants", return_value=claimed), \
+                mock.patch.object(wikidata, "item_evidence", return_value={}) as evidence:
+            return wikidata.resolve(list(ids), "tv", None, lambda i: {}, decisions), evidence
+
+    def test_a_committed_decision_chooses_before_the_rules_and_asks_no_evidence(self):
+        """Total Drama (the franchise) and Total Drama Island both state series 6618, TMDB's IMDb id and
+        year, and an article; no rule tells them apart, and without a decision the title has no card."""
+        resolved, evidence = self.resolve_with({6618: ["Q754334", "Q116195"]}, {("tv", 6618): "Q754334"})
+        self.assertEqual(resolved[6618], {"item": "Q754334", "candidates": ["Q116195", "Q754334"],
+                                          "rule": "decision"})
+        evidence.assert_not_called()
+
+    def test_a_decision_for_an_id_no_longer_contested_is_refused(self):
+        """A stale entry: someone fixed Wikidata, and the judgement nobody re-made must not linger."""
+        with self.assertRaisesRegex(wikidata.DecisionError, "stale"):
+            self.resolve_with({6618: ["Q754334"]}, {("tv", 6618): "Q754334"})
+        with self.assertRaisesRegex(wikidata.DecisionError, "stale"):
+            self.resolve_with({}, {("tv", 6618): "Q754334"})
+
+    def test_a_decision_for_an_item_that_no_longer_claims_the_id_is_refused(self):
+        with self.assertRaisesRegex(wikidata.DecisionError, "no longer one of its claimants"):
+            self.resolve_with({6618: ["Q116195", "Q9"]}, {("tv", 6618): "Q754334"})
+
+    def test_a_decision_about_an_id_outside_the_batch_is_not_asked_about(self):
+        resolved, _ = self.resolve_with({7: ["Q1"]}, {("tv", 6618): "Q754334"}, ids=(7,))
+        self.assertEqual(resolved, {7: {"item": "Q1"}})
+
+    def test_the_committed_decisions_are_well_formed(self):
+        with open(wikidata.DECISIONS, encoding="utf-8") as handle:
+            rows = json.load(handle)["decisions"]
+        keys = [(row["mediaType"], row["tmdbId"]) for row in rows]
+        self.assertEqual(len(keys), len(set(keys)), "one decision per title")
+        for row in rows:
+            self.assertIn(row["mediaType"], ("movie", "tv"))
+            self.assertIsInstance(row["tmdbId"], int)
+            self.assertRegex(row["item"], r"^Q\d+$")
+            self.assertTrue(row["why"].strip() and row["upstream"].strip(), row)
+        self.assertEqual(wikidata.load_decisions()[("tv", 6618)], "Q754334")
+
     def test_an_ambiguous_title_sets_every_claimant_aside(self):
         resolved = {5: {"item": None, "candidates": ["Q1", "Q2"], "rule": "ambiguous"}}
         self.assertEqual(wikidata.set_aside(resolved), {5: ["Q1", "Q2"]})

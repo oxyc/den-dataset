@@ -619,6 +619,8 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
               f"alone; a title only IMDb would admit stays pending for the next batch.", file=sys.stderr)
     try:
         resolved, excluded = identities(records, client, cache)
+    except wikidata.DecisionError as stale:
+        raise StageError(f"enrich: {stale}") from None
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise Aborted(f"choosing each title's Wikidata item failed for batch {batch_id} after retries ({error}); "
                       f"nothing written — re-run to retry this batch") from error

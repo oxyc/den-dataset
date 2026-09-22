@@ -10,6 +10,8 @@ fixed order and which the binary itself read first-wins. Three of the Swift's ru
 purpose, each measured in its commit: a genre's rename keeps the rest of its entity, a title's strings are
 chosen by rule rather than by row order, and a stated day wins over the year that contains it.
 """
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -479,13 +481,37 @@ class OneItemPerTitle(Staged):
         self.assertEqual(told["tv"], {2559: [BONN]})
 
     def test_a_title_nothing_singles_out_ships_no_field_from_either(self):
+        self.ambiguous()
+        self.run_stage()
+        self.assertEqual(self.record(), {"mediaType": "tv", "tmdbId": 2559, "hasVector": True,
+                                         "wikidataCandidates": [BONN, BOON]})
+
+    def ambiguous(self):
         self.wd.claimants[("tv", 2559)] = [BOON, BONN]
         self.wd.evidence = {BONN: {"imdb": [], "years": [], "claims": [2559]},
                             BOON: {"imdb": [], "years": [], "claims": [2559]}}
         self.tmdb["/tv/2559"] = {"id": 2559, "name": "Boon"}
+
+    def test_an_ambiguous_title_is_counted_loudly_in_the_report(self):
+        self.ambiguous()
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said):
+            self.run_stage()
+        self.assertIn("WARNING: 1 titles ship with NO Wikidata fields", said.getvalue())
+        self.assertIn("data/wikidata-item-decisions.json", said.getvalue())
+        self.assertIn('"ambiguousItems": 1', said.getvalue())
+
+    def test_a_decision_chooses_and_the_row_checkpointed_as_ambiguous_is_scraped_again(self):
+        self.ambiguous()
         self.run_stage()
-        self.assertEqual(self.record(), {"mediaType": "tv", "tmdbId": 2559, "hasVector": True,
-                                         "wikidataCandidates": [BONN, BOON]})
+        self.assertNotIn("wikidataItem", self.record())
+        original = facts.wikidata.load_decisions
+        facts.wikidata.load_decisions = lambda path=None: {("tv", 2559): BOON}
+        self.addCleanup(setattr, facts.wikidata, "load_decisions", original)
+        self.run_stage()
+        record = self.record()
+        self.assertEqual((record["wikidataItem"], record["titles"]["en"], record["imdbId"]),
+                         (BOON, "Boon", "tt0090400"))
 
     def test_a_checkpointed_row_that_merged_its_claimants_is_scraped_again(self):
         """A checkpoint written before the choice existed holds the merged row, and resuming would keep it."""

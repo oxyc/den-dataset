@@ -40,6 +40,13 @@ def run(args, inputs, prose_check, provenance_check):
     alias_record = aliases.apply(rows.values())
     print(f"  aliases: {alias_record['dropped']} dropped by data/alias-decisions.json, "
           f"{alias_record['undecided']} naming another title with no decision", file=sys.stderr)
+    # Titles several Wikidata items claim with nothing chosen between them: the facts stage wrote them
+    # with no Wikidata fields rather than mixing two works, so they have no card.
+    # `check-wikidata-items.py --gate` refuses the publish while any is listed.
+    item_record = {"ambiguous": sorted(key for key, row in rows.items()
+                                       if (row.get("facts") or {}).get("wikidataCandidates")
+                                       and not (row.get("facts") or {}).get("wikidataItem"))}
+    print(f"  wikidata items: {len(item_record['ambiguous'])} titles with no decided item", file=sys.stderr)
 
     entity_table = read_json(args.entities)
     genre_map, facts_records = facts.read_genre_map(read_json(args.facts), args.facts)
@@ -209,6 +216,8 @@ def run(args, inputs, prose_check, provenance_check):
         # `check-alias-collisions.py --gate` refuses the publish unless the hash is the committed file's
         # and the count is zero. Same shape rule as the two above: no `File`/`Sha256`/`Bytes` name.
         meta["aliasDecisions"] = alias_record
+        # Same shape rule; `check-wikidata-items.py --gate` refuses while `ambiguous` names a title.
+        meta["wikidataItems"] = item_record
         with open(args.stamp_meta, "w") as fh:
             json.dump(meta, fh, indent=1)
             fh.write("\n")

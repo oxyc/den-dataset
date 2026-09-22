@@ -123,6 +123,8 @@ def identities(titles, cache, client):
                                         lambda tmdb_id, media=media: tmdb_api.title_identity(client, media, tmdb_id))
             found.update({f"{media}:{tmdb_id}": value for tmdb_id, value in resolved.items()})
             excluded[media] = wikidata.set_aside(resolved)
+    except wikidata.DecisionError as stale:
+        raise StageError(f"docfacts: {stale}") from None
     except (wikidata.WikidataError, http.HTTPError) as refusal:
         raise StageError(f"docfacts: choosing each title's Wikidata item failed ({refusal}); re-run.") from None
     except tmdb_api.TMDBError as refusal:
@@ -143,9 +145,11 @@ def run(ctx, cache=None, client=None):
     client = client or tmdb_api.TMDB(require_key=False)
     rows = existing(path)
     resolved, excluded = identities(outstanding(labels, {}), cache, client)
-    # A contested row written before the choice existed merged every claimant's directors and genres.
+    # A contested row written under another choice is asked again: one from before the choice existed
+    # merged every claimant's directors and genres, and one written as ambiguous holds none.
     for key, found in resolved.items():
-        if found.get("candidates") and key in rows and "wikidataCandidates" not in rows[key]:
+        if found.get("candidates") and key in rows and wikidata.provenance(found) != {
+                name: rows[key][name] for name in ("wikidataItem", "wikidataCandidates") if name in rows[key]}:
             del rows[key]
     before = len(rows)
     todo = outstanding(labels, rows)

@@ -165,6 +165,8 @@ def identities(types, cache, client):
                                         lambda tmdb_id, media=media: tmdb_api.title_identity(client, media, tmdb_id))
             found.update({f"{kind}:{tmdb_id}": value for tmdb_id, value in resolved.items()})
             excluded[kind] = wikidata.set_aside(resolved)
+    except wikidata.DecisionError as stale:
+        raise StageError(f"facts: {stale}") from None
     except (wikidata.WikidataError, http.HTTPError) as failure:
         raise StageError(f"facts: choosing each title's Wikidata item failed ({failure}). Nothing new was "
                          f"scraped; re-run.") from None
@@ -361,6 +363,13 @@ def entity_out(entry):
     return out
 
 
+def ambiguous_keys(records):
+    """The titles several items claim and nothing chose between — written with no Wikidata fields at all,
+    so they have no card. `store/build.py` counts the same thing for the publish gate."""
+    return sorted(f"{r['mediaType']}:{r['tmdbId']}" for r in records
+                  if r.get("wikidataCandidates") and not r.get("wikidataItem"))
+
+
 def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, client=None):
     """One pass: `keys` scraped into `out`, checkpointed in `directory`. Returns how many ids it skipped."""
     fields_path = os.path.join(directory, "facts-fields.json")
@@ -372,13 +381,17 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, client=N
     contested = {key for key, found in resolved.items() if found.get("candidates")}
     say(f"facts: {len(contested)} titles have several Wikidata items claiming their TMDB id; "
         f"{sum(1 for key in contested if resolved[key]['item'] is None)} of them nothing singles one out of")
-    # A contested row a scrape checkpointed before the choice existed merged every claimant, and nothing in
-    # it says which of its values are whose. It is scraped again rather than trusted.
-    merged = sorted(key for key in contested if key in fields and "wikidataCandidates" not in fields[key])
+    # A contested row checkpointed under another choice is scraped again rather than trusted: one from
+    # before the choice existed merged every claimant, and one checkpointed as ambiguous has nothing in it
+    # now that a decision names its item.
+    merged = sorted(key for key in contested if key in fields
+                    and wikidata.provenance(resolved[key]) != {name: fields[key][name] for name in
+                                                              ("wikidataItem", "wikidataCandidates")
+                                                              if name in fields[key]})
     for key in merged:
         del fields[key]
     if merged:
-        say(f"facts: re-scraping {len(merged)} checkpointed contested titles that merged their claimants")
+        say(f"facts: re-scraping {len(merged)} checkpointed contested titles scraped under another choice")
     if fields:
         say(f"resuming from {len(fields)} checkpointed titles")
         types = {kind: [i for i in ids if f"{kind}:{i}" not in fields] for kind, ids in types.items()}
@@ -406,8 +419,14 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, client=N
         records.append({**fields[key], "mediaType": media, "tmdbId": int(tmdb_id), "hasVector": has_vector})
     save(out, {"schema": 1, "datasetVersion": version, "genreMap": genre_map,
                "entities": {qid: entity_out(entry) for qid, entry in entities.items()}, "records": records})
+    ambiguous = ambiguous_keys(records)
+    if ambiguous:
+        say(f"WARNING: {len(ambiguous)} titles ship with NO Wikidata fields: several items claim each one's TMDB "
+            f"id and nothing chose between them. Decide each in {os.path.relpath(wikidata.DECISIONS, REPO)} "
+            f"and re-run; the publish refuses until then: {', '.join(ambiguous)}")
     say(json.dumps({"facts": len(records), "entities": len(entities), "genreMap": len(genre_map),
-                    "path": out, "skippedAfterFailure": skipped, "hasVector": int(has_vector)}))
+                    "path": out, "skippedAfterFailure": skipped, "hasVector": int(has_vector),
+                    "ambiguousItems": len(ambiguous)}))
     return skipped
 
 

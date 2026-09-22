@@ -1,0 +1,38 @@
+{
+  "_": [
+    "Which Wikidata item answers for a title whose TMDB id several items claim, where no rule in",
+    "lib/wikidata.choose singles one out. lib/wikidata.resolve reads this before the rules; `item` must be",
+    "one of the claimants, and an entry for an id that is no longer contested is refused as stale.",
+    "`why` is the evidence: TMDB's own detail record (name, dates, seasons, episodes, IMDb id) against each",
+    "item's statements. `upstream` names what is wrong on Wikidata, for someone to fix there."
+  ],
+  "decisions": [
+    {"mediaType": "movie", "tmdbId": 226857, "item": "Q14396397",
+     "why": "TMDB: Endless Love, released 2014-02-12, 104 min, IMDb tt2318092. Q14396397 is the 2014 film directed by Shana Feste, P577 2014-02-12, 24 sitelinks. Q109155536 is a 2014 Burmese film of the same name, P577 year-only.",
+     "upstream": "Q109155536 (the Burmese film) states P4947 226857 and P345 tt2318092, both the American film's."},
+    {"mediaType": "tv", "tmdbId": 814, "item": "Q735749",
+     "why": "TMDB: Hornblower, first aired 1998-10-07, 3 seasons, 8 episodes. Q735749 is the series: P580 1998-10-07, P2437 3, P1113 8. Q7732641 is The Even Chance, its first television film (P179 Hornblower).",
+     "upstream": "Q7732641 (The Even Chance) states P4983 814, the series' TMDB id; its own is P4947 19493."},
+    {"mediaType": "tv", "tmdbId": 1072, "item": "Q2601647",
+     "why": "TMDB: Scooby's All-Stars, first aired 1977-09-10, 2 seasons, IMDb tt0181941. Both items are that one show, with the same start, end, episode count and IMDb id. Q2601647 carries the seasons (P2437 2, P527 both seasons) and 9 sitelinks against Q922442's 4.",
+     "upstream": "Q2601647 (Laff-A-Lympics) and Q922442 (Scooby's All-Star Laff-A-Lympics) are duplicate items for one series and could be merged."},
+    {"mediaType": "tv", "tmdbId": 5895, "item": "Q92572",
+     "why": "TMDB: FLCL, 5 seasons, 24 episodes, IMDb tt0279077. Q92572 is the series, 27 sitelinks, its parts (P527) including Progressive, Alternative, Grunge and Shoegaze. Q111954103 is FLCL, season 1 (P179 FLCL).",
+     "upstream": "Q111954103 (FLCL, season 1) states the series' P4983 5895 and P345 tt0279077."},
+    {"mediaType": "tv", "tmdbId": 6618, "item": "Q754334",
+     "why": "TMDB: Total Drama Island, first aired 2007-07-08, 1 season, 27 episodes. Q754334 is Total Drama Island: P1113 27, P580 2007-07-08, P179 Total Drama. Q116195 is the whole Total Drama franchise, 120 episodes, with Total Drama Island as one of its parts.",
+     "upstream": "Q116195 (Total Drama, the franchise) states P4983 6618 and P345 tt1173427, both Total Drama Island's."},
+    {"mediaType": "tv", "tmdbId": 46195, "item": "Q124309972",
+     "why": "TMDB: Monogatari (化物語), 5 seasons, 73 episodes, first aired 2009-07-03. Q124309972 is the Monogatari anime series, its seasons as parts. Q124309985 is Bakemonogatari, 15 episodes, a part of Monogatari Series: First Season.",
+     "upstream": "Q124309985 (Bakemonogatari) states the series' P4983 46195 and P345 tt1480925."},
+    {"mediaType": "tv", "tmdbId": 63915, "item": "Q1210893",
+     "why": "TMDB: The Adventures of Sherlock Holmes and Dr. Watson, first aired 1980-03-22, 5 seasons, 11 episodes. Q1210893 is that film series: P2437 5, P1113 11, 19 sitelinks. Q2278391 is its first installment, Sherlock Holmes and Dr. Watson, 2 episodes (P179 the series).",
+     "upstream": "Q2278391 (Sherlock Holmes and Dr. Watson, 1980) states the series' P4983 63915, and P4947 584549 is stated on both items."},
+    {"mediaType": "tv", "tmdbId": 70837, "item": "Q23815652",
+     "why": "TMDB: Charité, 4 seasons, 24 episodes, IMDb tt5337806. Q23815652 is the series: P2437 4, P1113 24, its seasons as parts, 11 sitelinks. Q85751527 is Charité at War, one season (P155 Charité).",
+     "upstream": "Q85751527 (Charité at War) states the series' P4983 70837 and P345 tt5337806."},
+    {"mediaType": "tv", "tmdbId": 77459, "item": "Q55533118",
+     "why": "TMDB: The Passage, first aired 2019-01-14, 1 season, 10 episodes, IMDb tt1074206. Q55533118 is the American thriller series: P580 2019-01-14, P1113 10. Q65213388 is Lorong Waktu, an Indonesian animated series first aired 2019-05-11, 18 episodes.",
+     "upstream": "Q65213388 (Lorong Waktu) states P4983 77459 and P345 tt1074206, both The Passage's."}
+  ]
+}

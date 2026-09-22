@@ -19,6 +19,7 @@ shipped corpus. Reformatting it is a re-scrape of ~770 requests.
 """
 import json
 import math
+import os
 import re
 import urllib.parse
 
@@ -854,25 +855,62 @@ def choose(candidates, evidence, tmdb):
     return None, "ambiguous"
 
 
-def resolve(ids, media, cache=None, tmdb=None):
+#: A person's choice for the contested titles no rule decides, read before the rules.
+DECISIONS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data",
+                         "wikidata-item-decisions.json")
+
+
+class DecisionError(RuntimeError):
+    """A committed decision that no longer fits Wikidata: its id is not contested any more, or its item no
+    longer claims the id. Refused rather than applied or ignored — either would keep a judgement nobody
+    re-made alive, the way a stale alias decision would."""
+
+
+def load_decisions(path=DECISIONS):
+    """`(media, tmdbId) -> Q-id` from the committed decisions file; `{}` when there is none."""
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as handle:
+        rows = json.load(handle).get("decisions") or []
+    return {(row["mediaType"], int(row["tmdbId"])): row["item"] for row in rows}
+
+
+def resolve(ids, media, cache=None, tmdb=None, decisions=None):
     """`tmdbId -> {"item", "candidates", "rule"}` for every id an item states: which ONE item every
     per-title query answers from.
 
     An uncontested id is `{"item": Q}`. A contested one also carries its sorted `candidates` and the `rule`
-    that chose, and `item` is None when no rule did. `tmdb(tmdb_id)` returns TMDB's `{"imdb", "year"}` for a
-    title and is asked only about contested ids — about one title in a few hundred.
+    that chose: `decision` when `data/wikidata-item-decisions.json` names the item, else the first of
+    `RULES` that singles one out, else `ambiguous` with `item` None. `tmdb(tmdb_id)` returns TMDB's
+    `{"imdb", "year"}` for a title and is asked only about contested ids no decision covers. `decisions`
+    is `load_decisions()`'s map, read from the committed file when not given. Raises `DecisionError` for a
+    decision about an id among `ids` that it no longer fits.
     """
+    decisions = load_decisions() if decisions is None else decisions
     claimed = {tmdb_id: sorted(set(qids), key=lambda q: (len(q), q))
                for tmdb_id, qids in claimants(ids, media, cache).items() if qids}
     contested = {tmdb_id: qids for tmdb_id, qids in claimed.items() if len(qids) > 1}
-    evidence = item_evidence([q for qids in contested.values() for q in qids], media, cache) if contested else {}
+    for tmdb_id in sorted(set(int(i) for i in ids)):
+        decided = decisions.get((media, tmdb_id))
+        if decided is None:
+            continue
+        if tmdb_id not in contested:
+            raise DecisionError(f"{DECISIONS} decides {media}:{tmdb_id}, which only "
+                                f"{claimed.get(tmdb_id) or 'no item'} now claims. Remove the stale entry.")
+        if decided not in contested[tmdb_id]:
+            raise DecisionError(f"{DECISIONS} chooses {decided} for {media}:{tmdb_id}, which is no longer one "
+                                f"of its claimants {contested[tmdb_id]}. Decide it again.")
+    undecided = {tmdb_id: qids for tmdb_id, qids in contested.items() if (media, tmdb_id) not in decisions}
+    evidence = item_evidence([q for qids in undecided.values() for q in qids], media, cache) if undecided else {}
     out = {}
     for tmdb_id, qids in claimed.items():
         if tmdb_id not in contested:
             out[tmdb_id] = {"item": qids[0]}
-            continue
-        chosen, rule = choose(qids, evidence, (tmdb(tmdb_id) if tmdb else None) or {})
-        out[tmdb_id] = {"item": chosen, "candidates": qids, "rule": rule}
+        elif tmdb_id not in undecided:
+            out[tmdb_id] = {"item": decisions[(media, tmdb_id)], "candidates": qids, "rule": "decision"}
+        else:
+            chosen, rule = choose(qids, evidence, (tmdb(tmdb_id) if tmdb else None) or {})
+            out[tmdb_id] = {"item": chosen, "candidates": qids, "rule": rule}
     return out
 
 

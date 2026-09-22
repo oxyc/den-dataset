@@ -139,6 +139,8 @@ meta = {
     # What the store build stamps: the committed decisions applied, and no collision left undecided.
     "aliasDecisions": {"sha256": hashlib.sha256(open(decisions, "rb").read()).hexdigest(),
                        "dropped": 0, "undecided": 0},
+    # And every title several Wikidata items claim has its item chosen.
+    "wikidataItems": {"ambiguous": []},
 }
 if extra:
     meta.update(json.loads(extra))
@@ -723,6 +725,55 @@ if run_publish; then
 else
   grep -q "records no aliasDecisions" "$WORK/err.log" \
     && ok "a store that does not say it applied the alias decisions is refused" \
+    || bad "refused, but not for the missing record: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
+# --- wikidata items: a contested title nothing chose an item for ------------------------------------------
+#
+# Several Wikidata items claim one TMDB id and neither a rule nor a committed decision chose between them,
+# so the title was written with no Wikidata fields and has no card.
+
+# `$1` replaces the stamped wikidataItems record; `null` removes it.
+set_item_record() {
+  python3 - "$DIR/dataset.meta.json" "$1" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+record = json.loads(sys.argv[2])
+if record is None:
+    meta.pop("wikidataItems")
+else:
+    meta["wikidataItems"] = record
+json.dump(meta, open(sys.argv[1], "w"))
+PY
+}
+
+setup
+write_meta
+publish_baseline
+set_item_record '{"ambiguous": ["tv:6618", "tv:70837"]}'
+if run_publish; then
+  bad "a store shipping titles with no Wikidata item chosen published anyway"
+else
+  grep -q "2 title(s) ship with no Wikidata fields" "$WORK/err.log" && grep -q "tv:6618, tv:70837" "$WORK/err.log" \
+    && ok "a store shipping a contested title with no item chosen is refused, naming it" \
+    || bad "refused, but not for the items: $(tail -3 "$WORK/err.log")"
+  grep -q "data/wikidata-item-decisions.json" "$WORK/err.log" \
+    && ok "and the refusal points at the decisions file" \
+    || bad "the item refusal did not name the decisions file"
+fi
+[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
+teardown
+
+setup
+write_meta
+publish_baseline
+set_item_record null
+if run_publish; then
+  bad "a store with no wikidataItems record published anyway"
+else
+  grep -q "records no wikidataItems" "$WORK/err.log" \
+    && ok "a store that does not say how many titles lack an item is refused" \
     || bad "refused, but not for the missing record: $(tail -3 "$WORK/err.log")"
 fi
 teardown
