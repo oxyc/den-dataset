@@ -137,6 +137,80 @@ class CombinedAuditTests(unittest.TestCase):
         self.assertEqual(summary["run"]["calls"], 2)
 
 
+class ManifestFileTests(unittest.TestCase):
+    """How a manifest's committed inputs are found again.
+
+    The taxonomy moved out of `Sources/` (oxyc/den-dataset#27) and is recorded repo-relative from then
+    on. A manifest older than the move names an absolute path in whatever checkout bought the shard, and
+    the shards it describes were paid for once — so the audit has to reach the file they name. What it
+    holds them to is the digest recorded beside the path, which the move did not touch.
+    """
+
+    def manifest_for(self, **overrides):
+        prompt_sha = run_combined.sha256_file(combined_questions.PROMPT)
+        taxonomy_sha = run_combined.sha256_file(combined_questions.TAXONOMY)
+        config = {
+            "schemaVersion": run_combined.SCHEMA_VERSION,
+            "articlesSha256": "articles-sha", "enrichedEvidenceSha256": "enriched-sha",
+            "prompt": combined_questions.PROMPT, "promptSha256": prompt_sha,
+            "taxonomy": os.path.join("data", "taxonomy-t02.swift"), "taxonomySha256": taxonomy_sha,
+            "globalQuestions": {}, "globalQuestionsSha256": audit_combined.sha256_text(
+                run_combined.canonical({})),
+            "sectionQuestionTemplate": audit_combined.section_question("SECTION_ID"),
+            "sectionQuestionTemplateSha256": audit_combined.sha256_text(run_combined.canonical(
+                audit_combined.section_question("SECTION_ID"))),
+            "labelQuestionMapping": {}, "labelQuestionMappingSha256": audit_combined.sha256_text(
+                run_combined.canonical({})),
+            "implementationSha256": {},
+        }
+        config.update(overrides)
+        return {"configSha256": audit_combined.sha256_text(run_combined.canonical(config)),
+                "config": config}
+
+    def validate(self, manifest):
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
+            articles = fh.name
+        self.addCleanup(os.remove, articles)
+        manifest["config"]["articlesSha256"] = run_combined.sha256_file(articles)
+        manifest["configSha256"] = audit_combined.sha256_text(
+            run_combined.canonical(manifest["config"]))
+        audit_combined.validate_manifest(manifest, articles, "enriched-sha")
+
+    def test_a_repo_relative_taxonomy_resolves_against_the_repo(self):
+        """The recorded spelling since the move, and the reason a checkout elsewhere can audit a shard."""
+        config = self.manifest_for()["config"]
+        self.assertEqual(audit_combined.manifest_file(config, "taxonomy"),
+                         os.path.join(audit_combined.ROOT, "data", "taxonomy-t02.swift"))
+        self.validate(self.manifest_for())
+
+    def test_a_manifest_that_names_the_pre_move_path_is_still_auditable(self):
+        """Every shard in `out-repass` names `<checkout>/Sources/DenDataset/Taxonomy.swift`, which is not
+        a file anywhere any more. The digest beside it is the shipped vocabulary's, so the file the pass
+        reads today answers for it — and those shards keep the readback they were bought with."""
+        pre_move = "/gone/Sources/DenDataset/Taxonomy.swift"
+        self.assertEqual(audit_combined.manifest_file({"taxonomy": pre_move}, "taxonomy"),
+                         combined_questions.TAXONOMY)
+        self.validate(self.manifest_for(taxonomy=pre_move))
+
+    def test_a_vocabulary_that_really_changed_is_still_refused(self):
+        """What the fallback must not become: a path nobody can resolve is forgiven, a digest is not."""
+        with self.assertRaisesRegex(ValueError, "taxonomy artifact hash differs"):
+            self.validate(self.manifest_for(taxonomySha256="0" * 64))
+
+    def test_a_manifest_that_names_no_taxonomy_at_all_is_refused(self):
+        self.assertIsNone(audit_combined.manifest_file({}, "taxonomy"))
+        with self.assertRaisesRegex(ValueError, "taxonomy artifact hash differs"):
+            self.validate(self.manifest_for(taxonomy=None))
+
+    def test_a_recorded_change_prints_a_reference_it_cannot_abbreviate(self):
+        """A lineage entry written by the commit that supersedes it names the change rather than a hash
+        it cannot know, and cutting that to seven characters would print a fragment of a sentence."""
+        self.assertEqual(audit_combined.short_ref("c03afa0c4e8dbad44b829101b6d52fdb4485c105"), "c03afa0")
+        self.assertEqual(audit_combined.short_ref("the commit that moved the taxonomy"),
+                         "the commit that moved the taxonomy")
+        self.assertEqual(audit_combined.short_ref(None), "?")
+
+
 class ImplementationLineageTests(unittest.TestCase):
     """The recorded exceptions to the implementation-hash refusal.
 

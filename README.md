@@ -141,9 +141,14 @@ the other 421 would be dropped by the ToS rule regardless.
   it reads and writes; `./den stages` prints it.
 - `lib/` — what a stage needs from outside the machine: HTTP with retry, the response cache, and the
   upstream clients (TMDB, Wikidata, Wikipedia — the whole article in `wikipedia.py`, the plot in `plot.py`).
-- `Sources/DenDataset/Taxonomy.swift` — all that is left of the Swift producer, and not compiled: it is the
-  taxonomy as data. `scripts/v2/combined_questions.py` parses it as the classify pass's vocabulary and
-  hashes it into that pass's manifest, so it stays where that hash says it is.
+- `data/` — the committed inputs. `data/taxonomy-t02.swift` is all that is left of the Swift producer and
+  nothing compiles it: it is the genres & moods vocabulary as data, which
+  `scripts/v2/combined_questions.py` parses and hashes into the classify pass's manifest. The manifest
+  pins the vocabulary by that DIGEST, not by where the file sits, so moving it costs a recorded
+  allowance in `scripts/v2/implementation-lineage.json` for the one constant that names the path — not a
+  reclassification. Converting it to JSON would change the digest for no change in vocabulary; do that
+  when a taxonomy bump is reclassifying anyway, and make the hash canonical over the parsed vocabulary
+  then.
 - `scripts/` — the operator's drivers, the publisher and its guards. The weekly re-cluster is
   `scripts/recluster.py`, driven by `scripts/recluster-run.sh`: it is in no build order. It takes ~15
   minutes over the corpus at k=800 (the Swift took ~2) and needs Python 3.12, whose `math.sumprod` is what

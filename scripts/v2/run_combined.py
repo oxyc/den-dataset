@@ -21,11 +21,14 @@ import uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from article_sections import (encoded_chars, is_oversized, parse_sections, public_section, section_groups,
                               select_global_sections, sha256_text, state_for)
-from combined_questions import (PINNED_MODEL, PROMPT, TAXONOMY, global_questions, section_question)
+from combined_questions import (PINNED_MODEL, PROMPT, ROOT, TAXONOMY, global_questions, section_question)
 from typesafe_client import TypeSafe, TypeSafeError
 
 SCHEMA_VERSION = "combined-jev-v1"
-PLANNER_VERSION = "whole-or-role-selected-v1"
+#: Bumped when the shape of the recorded configuration changes rather than when the questions do. `-v2`
+#: records the taxonomy repo-relative (see `manifest_config`), so a manifest written before it cannot be
+#: resumed — `load_or_create_manifest` says so in those words.
+PLANNER_VERSION = "whole-or-role-selected-v2"
 DEFAULT_MAX_STATE_CHARS = 110_000
 
 
@@ -193,6 +196,25 @@ def attach_enriched_evidence(records, directory):
     return sha256_text(canonical(evidence))
 
 
+def repo_relative(path):
+    """A path inside the repo, spelled from its root; anything outside it stays absolute.
+
+    The taxonomy is a committed file, so where the checkout sits is not part of what a run bought. It was
+    recorded absolute, which put `/Users/<somebody>/…` inside `configSha256` and made the same pass in two
+    checkouts two configurations — and made moving the file (oxyc/den-dataset#27) a change to the run's
+    identity rather than to a filename.
+
+    The article dump and the enriched batches keep their absolute spelling: they are out-dir working
+    files that genuinely live wherever they were written, and `audit_combined_bundle.py` reopens a
+    shard's own inputs by those recorded paths. The prompt is committed like the taxonomy and would read
+    the same way here, but it has not moved, and every field of this config is part of what a paid run
+    is — so it is left as it was recorded rather than respelled for tidiness.
+    """
+    absolute = os.path.abspath(path)
+    inside = os.path.join(ROOT, "")
+    return os.path.relpath(absolute, ROOT) if absolute.startswith(inside) else absolute
+
+
 def manifest_config(args, global_qs, label_mapping, tax, enriched_evidence_sha):
     with open(args.prompt, encoding="utf-8") as fh:
         prompt_sha = sha256_text(fh.read())
@@ -210,7 +232,7 @@ def manifest_config(args, global_qs, label_mapping, tax, enriched_evidence_sha):
         "enrichedEvidenceSha256": enriched_evidence_sha,
         "prompt": os.path.abspath(args.prompt),
         "promptSha256": prompt_sha,
-        "taxonomy": os.path.abspath(args.taxonomy),
+        "taxonomy": repo_relative(args.taxonomy),
         "taxonomySha256": sha256_file(args.taxonomy),
         "taxonomyVersion": tax["version"],
         "requestedModel": args.model,
@@ -224,13 +246,51 @@ def manifest_config(args, global_qs, label_mapping, tax, enriched_evidence_sha):
     }
 
 
+def config_differences(recorded, config):
+    """The config keys that differ, as `[(key, recorded, now)]`, so a refusal can name them."""
+    if not isinstance(recorded, dict):
+        return [("<config>", type(recorded).__name__, "object")]
+    return [(key, recorded.get(key, "<absent>"), config.get(key, "<absent>"))
+            for key in sorted(set(recorded) | set(config))
+            if recorded.get(key, "<absent>") != config.get(key, "<absent>")]
+
+
+def brief(value):
+    """One line of a config value, for a refusal message."""
+    text = value if isinstance(value, str) else canonical(value)
+    return text if len(text) <= 80 else text[:77] + "..."
+
+
+def taxonomy_moved(differences):
+    """Whether the only difference is this commit's: the planner bump and the taxonomy's new spelling.
+
+    `taxonomySha256` is in the same config, so an unchanged digest beside a changed path says the
+    vocabulary is byte-identical and only where it is written down moved.
+    """
+    return {key for key, _, _ in differences} == {"plannerVersion", "taxonomy"}
+
+
 def load_or_create_manifest(path, config):
     config_sha = sha256_text(canonical(config))
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
             manifest = json.load(fh)
         if manifest.get("configSha256") != config_sha or manifest.get("config") != config:
-            raise SystemExit(f"{path} belongs to a different input/question/model/planner configuration")
+            differences = config_differences(manifest.get("config"), config)
+            lines = [f"{path} belongs to a different input/question/model/planner configuration:"]
+            lines += [f"  {key}: manifest {brief(was)} != this run {brief(now)}"
+                      for key, was, now in differences]
+            if taxonomy_moved(differences):
+                lines.append(
+                    "  The vocabulary itself is unchanged — taxonomySha256 is the same file, which moved "
+                    "from Sources/DenDataset/Taxonomy.swift to data/taxonomy-t02.swift "
+                    "(oxyc/den-dataset#27) and is now recorded repo-relative.")
+            lines.append(
+                "  The rows already in the output were bought under the manifest's configuration and "
+                "stay valid; re-stamping the manifest onto this one would erase what produced them. "
+                "Finish the remaining titles in a separately manifested shard beside this one and check "
+                "the set with scripts/v2/audit_combined_bundle.py.")
+            raise SystemExit("\n".join(lines))
         return manifest
     manifest = {
         "runId": str(uuid.uuid4()),

@@ -103,7 +103,7 @@ def audit_bundles(ctx):
     for (name, digest), entries in by_exception.items():
         first = entries[0]
         print(f"    {len(entries)} shard(s) bought on {name} {digest[:12]} ({first.get('commit', '?')}), "
-              f"superseded by {first.get('supersededBy', '?')[:7]}: "
+              f"superseded by {audit_combined.short_ref(first.get('supersededBy'))}: "
               f"{first.get('why', 'no reason recorded')}", file=sys.stderr)
     return granted
 

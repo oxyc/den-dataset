@@ -76,7 +76,28 @@ def record(text):
     }
 
 
+#: What the shipped pass recorded: `combined-v1-r2.jsonl.manifest.json`'s `taxonomySha256` and
+#: `globalQuestionsSha256`. The vocabulary moved out of `Sources/` in oxyc/den-dataset#27 with `git mv`,
+#: so both are pins on the move having changed nothing a question is built from.
+SHIPPED_TAXONOMY_SHA = "dd048e59177955307d1bbff7bf88c79f4a66e8bec053c96a32769406d6172f49"
+SHIPPED_GLOBAL_QUESTIONS_SHA = "8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964"
+
+
 class QuestionTests(unittest.TestCase):
+    def test_the_vocabulary_is_the_committed_data_file_and_its_bytes_are_the_shipped_ones(self):
+        """The vocabulary is data, not code: nothing compiles it, and it sits beside the other committed
+        inputs. What a manifest pins is its DIGEST, so the move is only safe while that digest holds."""
+        self.assertEqual(os.path.relpath(combined_questions.TAXONOMY, combined_questions.ROOT),
+                         os.path.join("data", "taxonomy-t02.swift"))
+        self.assertEqual(run_combined.sha256_file(combined_questions.TAXONOMY), SHIPPED_TAXONOMY_SHA)
+
+    def test_the_questions_built_from_it_are_the_ones_the_paid_pass_asked(self):
+        """The $20.47 pass will not be run again, so the question set it bought answers to is the oracle:
+        a taxonomy edit that reached a question would show up here as a different digest."""
+        questions, _, _ = combined_questions.global_questions()
+        self.assertEqual(run_combined.sha256_text(run_combined.canonical(questions)),
+                         SHIPPED_GLOBAL_QUESTIONS_SHA)
+
     def test_canonical_taxonomy_and_question_counts(self):
         questions, mapping, taxonomy = combined_questions.global_questions()
         self.assertEqual(taxonomy["version"], "t02")
@@ -187,6 +208,73 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(first["runId"], again["runId"])
             with self.assertRaisesRegex(SystemExit, "different"):
                 run_combined.load_or_create_manifest(path, {"model": "jev-latest"})
+
+    def config_for(self, directory):
+        """The configuration a real run would record, over a one-title article dump."""
+        articles = os.path.join(directory, "articles.jsonl")
+        with open(articles, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(record("Lead\n\n== Plot ==\nStory")) + "\n")
+        args = run_combined.argument_parser().parse_args(
+            ["--articles", articles, "--out", os.path.join(directory, "out.jsonl")])
+        global_qs, mapping, tax = combined_questions.global_questions(args.prompt, args.taxonomy)
+        return run_combined.manifest_config(args, global_qs, mapping, tax, "enriched-sha")
+
+    def test_the_manifest_records_the_taxonomy_repo_relative(self):
+        """Where a committed file sits is not part of what a run bought. Recorded absolute, one pass in
+        two checkouts hashed to two configurations, and moving the file was a change to the run's
+        identity rather than to a filename."""
+        with tempfile.TemporaryDirectory() as directory:
+            config = self.config_for(directory)
+        self.assertEqual(config["taxonomy"], os.path.join("data", "taxonomy-t02.swift"))
+        self.assertFalse(os.path.isabs(config["taxonomy"]))
+        self.assertTrue(os.path.isfile(os.path.join(combined_questions.ROOT, config["taxonomy"])))
+        self.assertEqual(config["taxonomySha256"], SHIPPED_TAXONOMY_SHA)
+        self.assertEqual(config["plannerVersion"], run_combined.PLANNER_VERSION)
+
+    def test_a_taxonomy_outside_the_repo_keeps_its_absolute_path(self):
+        """`repo_relative` spells a path from the root only when it is under it. A `../..` walk out of the
+        repo would be neither absolute nor repo-relative — it would depend on where the checkout sits,
+        which is the property being removed."""
+        outside = os.path.join(os.path.dirname(combined_questions.ROOT), "elsewhere", "taxonomy.swift")
+        self.assertEqual(run_combined.repo_relative(outside), outside)
+
+    def test_a_manifest_from_before_the_taxonomy_moved_is_refused_and_says_what_to_do(self):
+        """The shards already bought. The planner bump makes their configuration a different one, so a
+        resume stops — and the refusal has to distinguish this from a real change, because the rows are
+        fine: the vocabulary is the same bytes at a new path.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "manifest.json")
+            config = self.config_for(directory)
+            before = {**config, "plannerVersion": "whole-or-role-selected-v1",
+                      "taxonomy": "/somewhere/else/Sources/DenDataset/Taxonomy.swift"}
+            created = run_combined.load_or_create_manifest(path, before)
+            with self.assertRaises(SystemExit) as refused:
+                run_combined.load_or_create_manifest(path, config)
+            message = str(refused.exception)
+            self.assertIn("plannerVersion", message)
+            self.assertIn("taxonomy", message)
+            self.assertIn("data/taxonomy-t02.swift", message)
+            self.assertIn("vocabulary itself is unchanged", message)
+            self.assertIn("audit_combined_bundle.py", message)
+            with open(path, encoding="utf-8") as fh:
+                on_disk = json.load(fh)
+            self.assertEqual(on_disk["configSha256"], created["configSha256"],
+                             "the refusal re-stamped the manifest it was supposed to preserve")
+
+    def test_a_refusal_that_is_not_the_move_names_the_keys_and_claims_nothing_about_the_vocabulary(self):
+        """The same refusal for any other drift. Saying the vocabulary is unchanged when the model or the
+        article dump moved would excuse the change it is there to catch."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "manifest.json")
+            config = self.config_for(directory)
+            run_combined.load_or_create_manifest(path, config)
+            with self.assertRaises(SystemExit) as refused:
+                run_combined.load_or_create_manifest(path, {**config, "requestedModel": "jev-9.9.9"})
+            message = str(refused.exception)
+            self.assertIn("requestedModel", message)
+            self.assertIn("jev-9.9.9", message)
+            self.assertNotIn("vocabulary itself is unchanged", message)
 
     def test_plan_does_not_create_output_or_need_api_key(self):
         with tempfile.TemporaryDirectory() as directory:

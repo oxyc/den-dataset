@@ -9,12 +9,13 @@ import argparse
 from collections import Counter, defaultdict
 import json
 import os
+import re
 import statistics
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from article_sections import encoded_chars, is_oversized, public_section, select_global_sections, sha256_text, state_for
-from combined_questions import section_question
+from combined_questions import PROMPT, ROOT, TAXONOMY, section_question
 from run_combined import (SCHEMA_VERSION, article_key, attach_enriched_evidence, canonical, load_articles,
                           sections_for_record, sha256_file, validate_answers)
 from typesafe_client import TypeSafe
@@ -24,6 +25,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 #: Superseded digests of the source files the pass hashes into every manifest, each with the commit that
 #: superseded it and why its rows still mean the same thing. See `validate_implementation`.
 LINEAGE = os.path.join(HERE, "implementation-lineage.json")
+
+#: Where the pass keeps each committed input today, for a manifest that names it somewhere else. See
+#: `manifest_file`.
+CURRENT_FILE = {"prompt": PROMPT, "taxonomy": TAXONOMY}
 
 PLOT_AXES = {
     "archetype", "chronology", "conflict", "continuity", "ending", "ensemble", "era", "pacing",
@@ -189,6 +194,16 @@ def validate_row(row, rec, manifest, global_questions):
     return sections, section_answers, calls
 
 
+def short_ref(ref):
+    """A lineage entry's superseding commit, abbreviated — unless it is not a hash.
+
+    An entry recorded by the commit that supersedes it cannot name that commit's own hash, so it names
+    the change instead; cutting a sentence to seven characters would print a fragment of one.
+    """
+    ref = ref or "?"
+    return ref[:7] if re.fullmatch(r"[0-9a-f]{7,64}", ref) else ref
+
+
 def load_lineage(path=LINEAGE):
     """The recorded exceptions, `{filename: [entry, …]}`. An absent file means no exception is allowed."""
     if not os.path.exists(path):
@@ -229,6 +244,25 @@ def validate_implementation(where, config, lineage=None):
     return allowed
 
 
+def manifest_file(config, name):
+    """The committed file a manifest names, resolved against the repo, or None if it is not there.
+
+    A relative path is repo-relative by construction — that is how the taxonomy is recorded since it
+    moved into `data/` (oxyc/den-dataset#27). An absolute one was written by a checkout that need not be
+    this one and by a layout that may have moved since, so when nothing is at it the file the pass uses
+    for that role today stands in. What decides the audit either way is the digest beside the path: a
+    vocabulary or a prompt that really changed still fails, and only a file that moved is forgiven.
+    """
+    path = config.get(name)
+    if not isinstance(path, str):
+        return None
+    resolved = path if os.path.isabs(path) else os.path.join(ROOT, path)
+    if os.path.isfile(resolved):
+        return resolved
+    fallback = CURRENT_FILE.get(name)
+    return fallback if fallback and os.path.isfile(fallback) else None
+
+
 def validate_manifest(manifest, articles, enriched_sha):
     config = manifest.get("config")
     if not isinstance(config, dict) or manifest.get("configSha256") != sha256_text(canonical(config)):
@@ -240,8 +274,8 @@ def validate_manifest(manifest, articles, enriched_sha):
     if config.get("enrichedEvidenceSha256") != enriched_sha:
         fail("manifest", "enriched evidence hash differs")
     for path_name, hash_name in (("prompt", "promptSha256"), ("taxonomy", "taxonomySha256")):
-        path = config.get(path_name)
-        if not isinstance(path, str) or not os.path.isfile(path) or sha256_file(path) != config.get(hash_name):
+        path = manifest_file(config, path_name)
+        if path is None or sha256_file(path) != config.get(hash_name):
             fail("manifest", f"{path_name} artifact hash differs")
     validate_implementation("manifest", config)
     if config.get("globalQuestionsSha256") != sha256_text(canonical(config.get("globalQuestions"))):

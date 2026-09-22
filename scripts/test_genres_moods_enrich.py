@@ -1,7 +1,8 @@
 """`./den genres-moods prepare|merge` against a fixture out-dir, curated file, golden set and floors.
 
 No network and no agent: the answers an agent would write are written here. The vocabulary is the real
-Taxonomy.swift and `data/genres-moods-definitions.json`, so a taxonomy change reaches these tests.
+`data/taxonomy-t02.swift` and `data/genres-moods-definitions.json`, so a taxonomy change reaches these
+tests.
 """
 import hashlib
 import json

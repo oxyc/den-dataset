@@ -5,7 +5,8 @@ derived from sources with their own terms. A single repository licence would mis
 
 | asset | licence | why |
 |---|---|---|
-| everything in `pipeline/`, `lib/`, `store/`, `guards/`, `scripts/`, `Sources/` | MIT | ours |
+| everything in `pipeline/`, `lib/`, `store/`, `guards/`, `scripts/` | MIT | ours |
+| `data/taxonomy-t02.swift` — the genres & moods vocabulary | MIT | ours; a controlled vocabulary we wrote, in Swift nothing compiles |
 | `data/*.json` — premise tags, eval rulers, corpus ids, alias decisions | MIT — but read the note below on the premise tags | LLM output and our own derivations over text we do not redistribute |
 | `data/plots-sidecar-v1.json` | MIT | hashes and lengths; carries no source text |
 | release `articles-<date>` — Wikipedia article text | **CC BY-SA 4.0** | it IS Wikipedia text |

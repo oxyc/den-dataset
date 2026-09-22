@@ -13,7 +13,7 @@ writes the bytes the hand-typed command writes" settles it; this one's output is
 no bytes to compare. What can be pinned is the INVOCATION, and three parts of it are both load-bearing and
 easy to get wrong:
 
-  * the WORKING DIRECTORY. The ownership guard resolves producer paths (`Sources/…`, `scripts/…`) and
+  * the WORKING DIRECTORY. The ownership guard resolves producer paths (`pipeline/…`, `scripts/…`) and
     `git ls-files` against it, so the script only works from the repo root. The stage runs it there
     whatever directory `den` was typed in — and therefore hands it an ABSOLUTE publish dir, or moving the
     invocation would move which directory gets published.

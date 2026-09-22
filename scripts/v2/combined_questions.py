@@ -11,7 +11,10 @@ from facet_questions import questions as facet_questions
 from run_facets import VALIDITY
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TAXONOMY = os.path.join(ROOT, "Sources", "DenDataset", "Taxonomy.swift")
+#: The controlled vocabulary, as data. It is Swift source that nothing compiles — the repo has no Swift
+#: toolchain left (oxyc/den-dataset#27) — so it lives under `data/` with the other committed inputs and
+#: keeps the extension its contents honestly are.
+TAXONOMY = os.path.join(ROOT, "data", "taxonomy-t02.swift")
 PROMPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "facets-v2.md")
 PINNED_MODEL = "jev-1.13.0"
 

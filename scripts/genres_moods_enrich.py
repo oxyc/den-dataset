@@ -24,7 +24,7 @@ which the out-dir's gitignore covers): `in/batch-NNN.json`, `SPEC.md` with the v
   counted under its reason, when it has no classify row, the pass found the article is not about the
   requested work, it has no article, the article changed since the pass judged its sections, or it is new
   to the curated file and has no enrichment row to take `animated` from.
-- **The vocabulary** is Taxonomy.swift's, the file the classify pass hashes; the definitions are
+- **The vocabulary** is `data/taxonomy-t02.swift`'s, the file the classify pass hashes; the definitions are
   `data/genres-moods-definitions.json`, refused unless it defines exactly that vocabulary.
 
 `merge` (`genres_moods_merge.py`) validates the answers, keeps labels by July's `assemble` rule and writes
