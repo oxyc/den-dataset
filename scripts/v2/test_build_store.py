@@ -987,6 +987,60 @@ class EverySeriesATitleIsPartOfShips(StoreFixture, unittest.TestCase):
         self.assertEqual(struct.unpack("<I", store.blob[8:12])[0], 2, "a list franchise is format 2")
 
 
+class IconicStudiosShip(StoreFixture, unittest.TestCase):
+    """`data/iconic-studios.json` reaches the store as the studios the corpus credits (oxyc/den#132).
+
+    Run against the committed file: Toho is Q875920, and Toho Animation (Q17220720) is listed under it, so
+    a title crediting only the anime label is still one of Toho's.
+    """
+
+    def studios_module(self):
+        build_store_module()  # puts the repo root, and so the `store` package, on the path
+        from store import studios
+        return studios
+
+    def test_a_credited_studio_ships_with_every_item_that_is_the_same_studio(self):
+        titles = [
+            dict(self.TITLES[0], facts=dict(self.TITLES[0]["facts"],
+                                            productionCompanies=["Q106", "Q17220720"])),
+            dict(self.TITLES[1], facts=dict(self.TITLES[1]["facts"],
+                                            productionCompanies=["Q875920", "Q127552"])),
+        ]
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, titles=titles)
+        ent_qid = store.ints("ent_qid")
+        offsets, ents = store.ints("studio_ent_o"), store.ints("studio_ent_v")
+        got = {qid: (store.text(name), [ent_qid[e] for e in ents[offsets[i]:offsets[i + 1]]])
+               for i, (qid, name) in enumerate(zip(store.ints("studio_qid"), store.ints("studio_name")))}
+        self.assertEqual(got, {127552: ("Pixar", [127552]), 875920: ("Toho", [875920, 17220720])},
+                         "sorted by the studio's own item; Toho Animation counts as Toho")
+        interned = {store.text(i) for i in range(len(store.str_off) - 1)}
+        self.assertNotIn("Studio Ghibli", interned, "a studio no title credits left its name behind")
+
+    def test_a_corpus_crediting_no_listed_studio_writes_the_sections_empty(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out)
+        self.assertEqual(store.ints("studio_qid"), [])
+        self.assertEqual(store.ints("studio_ent_o"), [0])
+
+    def test_the_committed_list_is_well_formed(self):
+        curated = self.studios_module().load()
+        names = [name for _, name, _ in curated]
+        self.assertEqual(len(names), len(set(names)), "two studios share a name")
+        self.assertGreaterEqual(len(curated), 30)
+
+    def test_an_item_listed_under_two_studios_is_refused(self):
+        studios = self.studios_module()
+        with tempfile.TemporaryDirectory() as out:
+            path = os.path.join(out, "studios.json")
+            with open(path, "w") as fh:
+                json.dump({"studios": [{"qid": "Q1", "name": "A", "why": "a"},
+                                       {"qid": "Q2", "also": ["Q1"], "name": "B", "why": "b"}]}, fh)
+            with self.assertRaises(SystemExit) as caught:
+                studios.load(path)
+        self.assertIn("Q1 is listed twice", str(caught.exception))
+
+
 class OnlyATitleIdReachesTheImdbColumn(unittest.TestCase):
     """IMDb's id space is namespaced by prefix and Wikidata's P345 is not checked against it.
 

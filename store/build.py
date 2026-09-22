@@ -17,7 +17,8 @@ import json
 import os
 import sys
 
-from . import aliases, cards, entities, facets, facts, format, identity, labels, makers, scores, vectors
+from . import (aliases, cards, entities, facets, facts, format, identity, labels, makers, scores, studios,
+               vectors)
 from .inputs import corpus_rows, labels_by_key, read_json
 
 
@@ -89,6 +90,12 @@ def run(args, inputs, prose_check, provenance_check):
     entity_index = entities.Entities(entity_table, rows.values())
     entity_index.intern_unnamed(strings)
 
+    studio_list = studios.Studios(studios.load())
+    studio_list.resolve(rows.values(), entity_index)
+    studio_list.intern(strings)
+    print(f"  iconic studios: {len(studio_list.kept)} of {len(studio_list.curated)} in "
+          f"data/iconic-studios.json are credited by the corpus", file=sys.stderr)
+
     ordered_strings = strings.freeze()
     prose_complaint = prose_check(ordered_strings)
     if prose_complaint:
@@ -121,6 +128,7 @@ def run(args, inputs, prose_check, provenance_check):
 
     entity_index.put(sec, strings, fact_columns.makers, fact_columns.entity_lists["cast"])
     makers.put(sec, fact_columns.makers)
+    studio_list.put(sec, strings)
 
     plot_hits, plot_rows, premise_hits, premise_rows = vectors.put(
         sec, keys, args, labels_source, premise_labels_source)
@@ -158,7 +166,8 @@ def run(args, inputs, prose_check, provenance_check):
     print(json.dumps({"titles": n, "withLabels": label_columns.with_labels,
                       "withNames": card_columns.named, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
-                      "entities": len(entity_index.qids), "strings": len(ordered_strings),
+                      "entities": len(entity_index.qids), "iconicStudios": len(studio_list.kept),
+                      "strings": len(ordered_strings),
                       "sections": len(sec.order)}, indent=1), file=sys.stderr)
 
     # ---- assemble --------------------------------------------------------------------------------
