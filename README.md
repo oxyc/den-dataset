@@ -171,7 +171,13 @@ It and the drain hit TMDB and need `TMDB_API_KEY`; one drain batch is `python3 -
 labels and facets come from the `classify` stage — the decision-only pass in `scripts/v2/run_combined.py`,
 which reads the dumped articles and writes the `combined-v1-r2*.jsonl` shards the corpus join consumes.
 `embed-corpus` composes and embeds those already-decided labels; `finalize` writes the shipped artifacts.
-Label quality is scored by `scripts/eval-taxonomy.py`, which CI runs and which gates a publish.
+Label quality is scored by `scripts/eval-taxonomy.py` against the golden set in `data/eval/golden-large.json`.
+CI tests the scorer; the labels themselves are not in git, so they are scored at publish time.
+`publish-dataset.sh` refuses a publish whose labels score below any floor in `data/eval/quality-floors.json`.
+The floors are the scores of the labels that currently ship, recorded with the date and the labels' sha256,
+so they work as a ratchet: the labels can stay the same or improve, never get worse without a decision.
+To accept a drop, or to raise the floors after an improvement ships, run
+`scripts/eval-taxonomy.py <out-dir>/labels-t02.json --record` and commit the result.
 
 ## `finalize` outputs
 

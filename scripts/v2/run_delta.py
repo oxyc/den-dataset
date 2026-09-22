@@ -2,7 +2,11 @@
 """Run the delta question set over an article dump, reusing `run_combined`'s machinery.
 
   scripts/v2/run_delta.py --articles out-repass/delta-pilot-articles.jsonl \
-      --out out-repass/delta-pilot.jsonl --model jev-1.13.0 [--plan]
+      --out out-repass/delta-pilot.jsonl --model jev-1.13.0 [--plan | --spend]
+
+**It buys from a paid provider**, so it refuses to call it without `--spend`, the same opt-in `den run`
+asks for before the classify pass. Without either flag it prints the plan's estimate and stops. It runs
+outside the stage order, so `den run`'s gate never reaches it: the flag is here or nowhere.
 
 Only the QUESTIONS differ from the corpus pass. State building, validation, resume, the output lock and
 the manifest are `run_combined`'s, unchanged — a second implementation of any of those is a second thing to
@@ -40,6 +44,8 @@ def main(argv=None):
     parser.add_argument("--limit", type=int)
     parser.add_argument("--only-key")
     parser.add_argument("--plan", action="store_true", help="validate and report; make no API calls")
+    parser.add_argument("--spend", action="store_true",
+                        help="buy the answers from the paid provider; without it the run stops at the estimate")
     args = parser.parse_args(argv)
 
     if args.model.endswith("-latest") and not args.allow_mutable_model:
@@ -54,13 +60,23 @@ def main(argv=None):
         if not selected:
             raise SystemExit(f"--only-key {args.only_key} is absent from the article input")
 
+    # No section questions in the delta, so nothing consults `sections_for_record`. Patching it to return
+    # nothing keeps `classify` on its existing path rather than forking it. It is patched BEFORE the plan,
+    # which consults it too: patched after, the plan priced every title's section questions and split long
+    # articles into section groups the delta never sends.
+    rc.sections_for_record = lambda rec: []
+    estimate = rc.plan(selected, questions, args.max_state_chars)
+
     if args.plan:
-        print(json.dumps(rc.plan(selected, questions, args.max_state_chars), ensure_ascii=False, indent=2))
+        print(json.dumps(estimate, ensure_ascii=False, indent=2))
         return 0
 
-    # No section questions in the delta, so nothing consults `sections_for_record`. Patching it to return
-    # nothing keeps `classify` on its existing path rather than forking it.
-    rc.sections_for_record = lambda rec: []
+    if not args.spend:
+        print(f"refusing to buy without --spend: this run would pay for {estimate['calls']:,} calls over "
+              f"{estimate['titles']:,} titles, roughly ${estimate['roughCostUSD']:,.2f} "
+              f"({estimate['estimateCaveat']}). Titles already answered in {args.out} are not bought again.\n"
+              f"  --plan prints the whole plan; --spend buys it.", file=sys.stderr)
+        return 2
 
     lock = rc.acquire_output_lock(args.out + ".lock")
     try:

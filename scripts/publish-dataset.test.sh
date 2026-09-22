@@ -88,12 +88,22 @@ write_meta() {
   # The record COUNT has to be real: `manifest-counts.py --consistent` compares what the manifest
   # advertises against what the file holds, so a fixture with an empty records array is refused for that
   # rather than for the thing each case is testing — which is how this fixture was wrong the first time.
-  python3 - "$DIR/labels-t02.json" "$labels_records" <<'MKLABELS'
+  #
+  # The labels also carry the golden set's own answers, so the quality gate scores them 1.0 against the
+  # committed golden set and floors — the real gate, passing, rather than a stubbed one. `$MOOD` replaces
+  # every mood, which is how a case makes the labels worse than what ships.
+  python3 - "$DIR/labels-t02.json" "$labels_records" "$HERE/../data/eval/golden-large.json" "${MOOD:-}" <<'MKLABELS'
 import json, sys
-path, n = sys.argv[1], int(sys.argv[2])
-rows = [{"tmdbId": i + 1, "mediaType": "movie", "primaryGenre": "Crime"} for i in range(n)]
+path, n, golden_path, mood = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+rows = {("movie", i + 1): {"tmdbId": i + 1, "mediaType": "movie", "primaryGenre": "Crime"} for i in range(n)}
+for t in json.load(open(golden_path))["titles"]:
+    moods = [mood] if mood else t.get("moods") or []
+    rows[(t["mediaType"], t["tmdbId"])] = {
+        "tmdbId": t["tmdbId"], "mediaType": t["mediaType"], "primaryGenre": t["primaryGenre"],
+        "subgenres": [{"label": l, "confidence": 1.0} for l in (t.get("subgenres") or []) + (t.get("themes") or [])],
+        "moods": [{"label": l, "confidence": 1.0} for l in moods]}
 with open(path, "w") as fh:
-    json.dump({"taxonomyVersion": "t02", "records": rows}, fh)
+    json.dump({"taxonomyVersion": "t02", "records": list(rows.values())}, fh)
 MKLABELS
   labels_sha="$(shasum -a 256 "$DIR/labels-t02.json" | cut -d' ' -f1)"
   # A REAL store-v1 header. `manifest-counts.py` reads `row_count` from the file rather than trusting
@@ -176,9 +186,34 @@ if run_publish; then
   else
     ok "the meta it publishes no longer declares a blob the release does not carry"
   fi
+  grep -q '"microF1"' "$WORK/out.log" \
+    && ok "the labels were scored against the golden set and passed the quality floors" \
+    || bad "the happy path published without scoring the labels"
 else
   bad "the happy path failed: $(tail -3 "$WORK/err.log")"
 fi
+teardown
+
+# --- labels that score below what ships ------------------------------------------------------------
+#
+# The quality gate ran as `|| true` for as long as it existed here, so a publish went out whatever the
+# labels scored. The floors are now the recorded scores of the shipped labels, and falling below any of
+# them refuses before anything uploads.
+
+setup
+MOOD="Wrong" write_meta
+publish_baseline
+if run_publish; then
+  bad "labels below the quality floors published anyway"
+else
+  grep -q "below the floors recorded" "$WORK/err.log" \
+    && ok "labels scoring below the recorded quality floors are refused" \
+    || bad "refused, but not for the quality: $(tail -3 "$WORK/err.log")"
+  grep -q "\-\-record" "$WORK/err.log" \
+    && ok "and the refusal says how to accept a deliberate drop" \
+    || bad "the quality refusal offered no way forward"
+fi
+[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
 teardown
 
 # --- the cutover: every retired key goes, and none of them reads as a dropped blob ------------------

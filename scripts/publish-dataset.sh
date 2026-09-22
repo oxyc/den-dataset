@@ -287,8 +287,8 @@ python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
 #
 # WARNS on the standing count and REFUSES an increase, which is the record-count guard's shape rather than
 # the identity guard's: an absolute floor of zero would refuse every publish over a defect that has already
-# shipped, and a gate like that gets switched off — the reasoning `check-plot-invariants.py` was written with
-# and the same one the quality gate below still runs under. What must not happen silently is the number
+# shipped, and a gate like that gets switched off — the reasoning `check-plot-invariants.py` was written with,
+# and the reason the quality gate below ratchets from the shipped scores. What must not happen silently is the number
 # going UP, because the only thing that makes it worse is a re-ground, and #27 proposes running one daily.
 #
 # What it COUNTS is the borrowers: 336 of the 1,066 are the article's own subject and appear only because
@@ -405,20 +405,20 @@ done
 
 # QUALITY GATE. Every check above asks whether the right number of records arrived in the right shape.
 # This one asks whether they are CORRECT: the committed golden set, scored against these labels, per label
-# family, against floors measured on the generation that set them.
+# family, against the floors in `data/eval/quality-floors.json`.
 #
 # It moved here from the tvOS app (`ShippedDatasetEvalTests`), which scored the 45.8 MB index that app
 # bundled. oxyc/den#113 Phase 2 deletes that bundle, and the only quality signal in the whole system would
 # have gone with it as a side effect of a delivery change.
 #
-# Reported, not enforced, for now: the current labels' MOOD family is already under its floor
-# (micro .639 vs .640, macro .564 vs .580), so gating would block every publish over a regression that has
-# already shipped. Add --gate once that is resolved, which is the point of printing it every time.
+# ENFORCED, as a ratchet. The floors are the scores of the labels that ship, recorded with the date and
+# the labels' sha256, and a publish whose labels score below any of them is refused. The fixed floors this
+# replaced sat above the shipped mood scores (micro .639 vs .640, macro .564 vs .580), so enforcing them
+# would have refused a publish of unchanged labels, and the gate ran as a report that nothing acted on.
+# Accepting a drop is `eval-taxonomy.py --record` and a commit, which the refusal prints.
 #
 # The labels are read from the OUT-DIR, not from `labelsFile` — the prune above retires that key, and
-# reading it here would have handed the scorer an empty path, which `|| true` then swallows. The quality
-# signal would have gone dark as a side effect of a delivery change, which is the second time that exact
-# thing would have happened to this check. `finalize` names the file after the taxonomy (`labels-<tax>.json`)
+# reading it here would hand the scorer an empty path. `finalize` names the file after the taxonomy (`labels-<tax>.json`)
 # and rewrites it in place every run, so the name is derivable and carries no version to go stale; naming it
 # by glob instead would also match `labels-cc0.json`, the experimental index that scores a different corpus.
 labels="$DIR/labels-$(python3 -c '
@@ -426,8 +426,11 @@ import json, sys
 print(json.load(open(sys.argv[1])).get("taxonomyVersion") or "")
 ' "$meta").json"
 if [ -f "$labels" ]; then
-  python3 "$(dirname "$0")/eval-taxonomy.py" "$labels" \
-    --golden "$(dirname "$0")/../data/eval/golden-large.json" || true
+  if ! python3 "$(dirname "$0")/eval-taxonomy.py" "$labels" --gate \
+       --golden "$(dirname "$0")/../data/eval/golden-large.json"; then
+    echo "       quality gate: the labels in $DIR score below what ships. Nothing uploaded." >&2
+    exit 1
+  fi
 else
   echo "quality gate: SKIPPED — $labels is not in $DIR. The labels are no longer published, but they are" >&2
   echo "              still the store's input and the only thing the golden set can be scored against." >&2
@@ -521,4 +524,6 @@ done < "$manifest_files"
 # consumers keep serving the last-good dataset instead of a version that 404s. NEVER upload the meta on its own.
 echo "→ dataset.meta.json (commit)"
 upload_one "$meta" || exit 1
-echo "done — consumers: den-atlas scripts/fetch-dataset.sh · Den app 'make sync-dataset'."
+# den-atlas is the only thing that fetches the release. The Den app does not: it reads den-atlas's
+# /dataset.json and queries den-atlas for everything the store holds.
+echo "done — consumer: den-atlas (scripts/fetch-dataset.sh). The Den app reads it through den-atlas's /dataset.json."
