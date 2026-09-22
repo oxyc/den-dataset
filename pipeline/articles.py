@@ -39,6 +39,9 @@ import re
 import sys
 
 from . import artifacts
+# Aliased: this module has its own `fetch`, and the stage that owns the enriched batches is only needed
+# for the rule its refusal points at.
+from . import fetch as fetch_stage
 from .contract import StageError
 from lib import http, wikipedia
 
@@ -191,7 +194,10 @@ def run(ctx, cache=None):
         raise StageError(
             f"articles: {enriched} holds no title with a recorded Wikipedia article, so there is nothing "
             f"to dump and the classify pass would have nothing to read. Enrichment records `plotArticle` "
-            f"when it grounds a title — build the batches with: scripts/enrich-run.sh movie 150")
+            # Read off the stage that owns the batches rather than spelled here. It was
+            # `scripts/enrich-run.sh` until the drain became a stage, and a copy of that string would have
+            # gone on sending an operator to a script the pipeline no longer runs.
+            f"when it grounds a title — build the batches with: {fetch_stage.HOW}")
 
     cache = wikipedia.cache_for() if cache is None else cache
     written = missing = 0

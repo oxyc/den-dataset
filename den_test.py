@@ -34,17 +34,20 @@ class Listing(unittest.TestCase):
         result = den("stages")
         self.assertEqual(result.returncode, 0, result.stderr)
         # The order, and that it is the real one: the universe is built before anything is drawn from it,
-        # the articles are dumped before the pass that reads them, classified before the vectors are
-        # embedded, the vectors before the corpus is joined, the corpus before the store is built from it,
-        # and the publish that uploads it is last.
-        expected = ("worklist", "articles", "classify", "docfacts", "embed", "corpus", "store",
-                    "metadata", "publish")
+        # the titles are enriched before anything reads their plots, the articles dumped before the pass
+        # that reads them, classified before the vectors are embedded, the vectors before the facts passes
+        # are merged over their ids, the merged facts before the corpus that joins them, the corpus before
+        # the store built from it, the sidecar after the store whose version it carries, and the publish
+        # that uploads the store is last.
+        expected = ("worklist", "fetch", "articles", "classify", "docfacts", "embed", "facts", "corpus",
+                    "store", "metadata", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
         self.assertEqual(order, sorted(order), "den stages printed them out of order")
-        for line in ("premise_labels", "scripts/v2/build_store.py", "scripts/v2/consolidate_corpus.py",
-                     "scripts/v2/run_combined.py", "scripts/publish-dataset.sh"):
+        for line in ("premise_labels", "universe-movie.json", "scripts/v2/build_store.py",
+                     "scripts/v2/consolidate_corpus.py", "scripts/v2/run_combined.py",
+                     "scripts/publish-dataset.sh"):
             self.assertIn(line, result.stdout)
         # The optional input is marked as such: "the writer needs this" and "the writer can do without
         # it" are different answers to the same question. So is a flag that takes a set of shards.
@@ -116,21 +119,43 @@ class Dispatch(unittest.TestCase):
     def test_den_run_leaves_out_the_stage_that_buys(self):
         """`den run` must not reach the paid pass unless asked for it by name.
 
-        Every stage BEFORE classify has to succeed for this to say anything. An out-dir holding nothing
+        EVERY unpaid stage before it has to SUCCEED for this to say anything. An out-dir holding nothing
         refuses at stage one, and then classify is unreached whether or not the gate works — the assertion
         passes while testing nothing, which is the shape the publish gate's own test has to live with
-        because publish is last. So the stages ahead of it are given inputs they can finish on, and the
-        two runs are compared at classify.
+        because publish is last. This test has now been falsified twice that way, each time a stage landed
+        ahead of classify, so it seeds every one of them and asserts it got past the last.
+
+        Three stages run first and they need different things. `worklist` and `articles` are Python and
+        read files, so they are given files: a one-row TMDB dump apiece, and an enriched batch naming a
+        grounded title plus an `articles.jsonl` row for it, because a row already in the dump's output is
+        a row it resumes past rather than fetches. `fetch` still wraps the binary, so it gets a stub that
+        reports the universe already drained, with credentials in the environment so the drain does not go
+        hunting for a `den.env` this checkout has no reason to own. Nothing here reaches TMDB.
         """
         with tempfile.TemporaryDirectory() as out:
+            stub = os.path.join(out, "stub")
+            with open(stub, "w", encoding="utf-8") as fh:
+                fh.write("#!/usr/bin/env python3\n"
+                         "import json, os, sys\n"
+                         "argv = sys.argv[1:]\n"
+                         "where = argv[argv.index('--out-dir') + 1]\n"
+                         "os.makedirs(os.path.join(where, 'enriched'), exist_ok=True)\n"
+                         "with open(os.path.join(where, 'enrich-checkpoint.json'), 'w') as fh:\n"
+                         "    json.dump({'processed': [], 'nextBatch': 1}, fh)\n"
+                         "print(json.dumps({'remaining': 0, 'count': 0}))\n")
+            os.chmod(stub, 0o755)
+            for name, value in (("DEN_BACKFILL_BIN", stub),
+                                ("TMDB_API_KEY", "stub-key-nothing-here-calls-tmdb"),
+                                ("WIKIMEDIA_ENTERPRISE_TOKEN", "stub-bearer")):
+                previous = os.environ.get(name)
+                os.environ[name] = value
+                self.addCleanup(os.environ.__setitem__, name, previous or "")
             # `export` because it is the one mode that touches no network — this test is about which
             # stages run, not about what TMDB answers.
             for name in ("movie_ids.json", "tv_series_ids.json"):
                 with open(os.path.join(out, name), "w", encoding="utf-8") as fh:
                     fh.write('{"id":11,"popularity":1.0}\n')
-            # The article dump has to find a grounded title, and must not then fetch one: a row already in
-            # its output is a row it resumes past.
-            os.makedirs(os.path.join(out, "enriched"))
+            os.makedirs(os.path.join(out, "enriched"), exist_ok=True)
             with open(os.path.join(out, "enriched", "batch-1.json"), "w", encoding="utf-8") as fh:
                 json.dump([{"tmdbId": 11, "mediaType": "movie", "title": "t", "year": 1977,
                             "hasWikiPlot": True, "plotArticle": "Star Wars (film)"}], fh)
@@ -140,6 +165,8 @@ class Dispatch(unittest.TestCase):
 
             gated = den(*run)
             self.assertIn("==> worklist", gated.stderr, "the stub did not get the run past stage one")
+            self.assertIn("==> fetch: ", gated.stderr, "the drain did not finish, so classify is "
+                                                       "unreached for a reason that is not the gate")
             self.assertNotIn("==> classify", gated.stderr)
 
             asked = den(*run, "--spend")

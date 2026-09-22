@@ -177,6 +177,12 @@ python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popu
 #    The Wikipedia plot REPLACES the TMDB overview where found (re-grounding); each batch prints wikiPlot vs
 #    tagsOnly. The wrapper logs into Enterprise (if creds present) for a fresh 24h token, then runs ONE batch.
 #    Resumable via the enrich checkpoint — loop until "remaining":0.
+#    `./den stage fetch --out-dir out --dataset-version <ver>` runs the whole drain — both worklists, batch
+#    after batch, until nothing remains — which is what `scripts/enrich-all.sh` did per media. The loop is
+#    the stage's now, with the same three stopping rules: an aborted batch is retried, a batch that exits
+#    clean having moved `remaining` not at all is a stall, and a batch where every title fell below the vote
+#    floor says so instead of blaming the upstream. `--media movie|tv` does one; `--vote-floor 0` re-includes
+#    the low-vote tail. One batch by hand is still scripts/enrich-run.sh:
 scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. Then: scripts/enrich-run.sh tv 150
 #    (Observed on the popular tier: ~96% wikiPlot hit; the misses are recent/obscure titles with no enwiki article.)
 
@@ -187,31 +193,18 @@ scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. 
 ./den stage articles --out-dir out --dataset-version <ver>            # the whole article per grounded title
 ./den stage classify --out-dir out --dataset-version <ver> --plan     # then again without --plan
 
-# 4. [Agent] Haiku vote passes over each scratch batch -> out/votes/batch-<id>-pass<N>.json
-#    (Opus orchestrates the subagents; see `tickets/DT-classification-prompt.md` in the **den app** repo. Escalate the hard cases with
-#    `$BIN escalation --batch-id <id> --out-dir out` before pass 2/3.)
-
-# 5. Assemble — compose(facts + classified tags + Wikipedia plot) -> den-embed -> int8[1024]; append to index.
-#
-#    `assemble` IS STEP 4's SECOND HALF, NOT A GENERAL "APPLY LABELS" STEP. It reads the vote passes in
-#    out/votes/ and runs the calibrated classifier over them. It cannot see labels that arrived any other
-#    way, and there is no --labels flag to give it any. If your labels came from somewhere else — a direct
-#    classification pass, a merge, a hand edit — `assemble` is the wrong command and will ignore them.
-#    What applies already-decided labels is `embed-corpus --labels <labels-t02.json>` (step 5b).
-export DEN_EMBED_URL=http://127.0.0.1:8791     # default; set if the service is elsewhere
-$BIN assemble --batch-id <id> --out-dir out    # per batch (default embedder = den-embed)
-#    First run in a fresh out-dir records the service's identity to out/index/embedder.json; later runs
-#    refuse if the service no longer matches it. An out-dir with a store but no embedder.json also refuses —
-#    what built it is unknown, and guessing is how the corpus/query drift went unnoticed in the first place.
-#    The same now holds for out/index/composition.json, which records how the DOCUMENT was composed —
-#    docShape, dropDirector, plotCap. The embedder identity cannot see any of those, and they change the
-#    vector completely: `assemble` composes the FULL shape, `embed-corpus --doc-facts` the CC0 lean one.
-
-# 5b. embed-corpus — the path for labels that are ALREADY DECIDED. Reads labels-t02.json instead of votes,
-#     composes the same document, embeds, appends to the same store. Use this after a classification pass
-#     that wrote labels directly (`scripts/v2/merge_classify_labels.py`), or to re-embed a corpus whose
-#     labels did not change. The flags must match out/index/composition.json or the run refuses — two doc
+# 4. embed-corpus — compose(facts + already-decided tags + Wikipedia plot) -> den-embed -> int8[1024];
+#     append to the index store. Reads labels-t02.json, so run it after a classification pass that wrote
+#     labels (step 3a, or `scripts/v2/merge_classify_labels.py`), or to re-embed a corpus whose labels did
+#     not change. The flags must match out/index/composition.json or the run refuses — two doc
 #     shapes in one vector space is the failure that record exists to prevent.
+#     First run in a fresh out-dir records the service's identity to out/index/embedder.json; later runs
+#     refuse if the service no longer matches it. An out-dir with a store but no embedder.json also refuses —
+#     what built it is unknown, and guessing is how the corpus/query drift went unnoticed in the first place.
+#     The same holds for out/index/composition.json, which records how the DOCUMENT was composed —
+#     docShape, dropDirector, plotCap. The embedder identity cannot see any of those, and they change the
+#     vector completely.
+export DEN_EMBED_URL=http://127.0.0.1:8791     # default; set if the service is elsewhere
 #     `./den stage embed --out-dir out --dataset-version <ver>` runs exactly this, with the composition
 #     pinned rather than typed — `--doc-facts`, `--doc-drop-director` and `--plot-cap 3500` are what the
 #     shipped index was built with, and the stage checks the run's own index/composition.json against them
@@ -231,7 +224,7 @@ $BIN embed-corpus --out-dir out --labels out/labels-t02.json \
 #     arm64/x86_64 split means the documents travel to the serving box rather than the vectors coming back.
 #     It needs no embedder: gating it on one would mean standing up a service purely to write text.
 
-# 5c. The other half of --dump-docs: embed the documents ON THE BOX, against the service that answers live
+# 4a. The other half of --dump-docs: embed the documents ON THE BOX, against the service that answers live
 #     queries. The canary is mounted alongside the script because it is the thing that decides whether any
 #     of this may be written — embed_docs.py verifies it and writes nothing if it fails.
 #     Copy docs.jsonl, embed_docs.py, embed_canary.py and data/embed-canary.json into the container's /tmp
@@ -252,6 +245,20 @@ python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels ou
 
 # 6. Finalize — index store -> labels-t02.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
 $BIN finalize --out-dir out
+
+# 6a. The FACTS the store ranks on — the two scrape passes merged. The scrape runs TWICE and cannot run
+#     once: the corpus pass covers the ids in labels-t02.json and is stamped --has-vector, the delta pass
+#     covers ids given outright and is not, and /recommend must never let a vectorless record into an ANN
+#     path. Both passes and the merge all write facts-<ver>.json, so move the corpus pass aside first —
+#     without that the delta pass overwrites it and the merged file is short by every delta title, which
+#     is how a rebuild once dropped 137 of them and nothing but /recommend noticed.
+$BIN facts --out-dir out --labels out/labels-t02.json --has-vector
+mv out/facts-<ver>.json out/facts-<ver>.pre-merge.json
+$BIN facts --out-dir out --ids <the delta ids>     # writes out/facts-unversioned.json
+./den stage facts --out-dir out --dataset-version <ver>
+#     The stage runs scripts/merge-facts.py with those two files and --version, built from
+#     `pipeline/facts.py`'s declaration rather than retyped; `pipeline/facts_test.py` holds the two to the
+#     same bytes. A missing pass is a refusal naming what writes it, not a smaller merge.
 
 # 7. Metadata sidecar — poster/title/year per shipped id, so a neighbour renders without a TMDB detail call.
 #    Its filename carries the datasetVersion, which step 6 just changed, so this belongs after EVERY finalize
@@ -305,7 +312,6 @@ python3 scripts/v2/build_store.py \
 
 `$BIN` is `.build/release/taxonomy-backfill` (`swift build -c release`).
 
-`assemble --embedder fnv` falls back to the offline FNV embedder (float → local int8) for a network-free run;
 `finalize --embedding-version <v>` overrides the artifact label. The default path is the bge-m3 build above.
 
 ## Recovering a store's composition
@@ -342,10 +348,11 @@ it and this document already prescribed it.
 Don't re-embed 30k for a handful of new/changed titles:
 
 - **New films**: discover freshly-changed entities with a Wikidata `schema:dateModified` filter *on the
-  entity* (bound in the SPARQL WHERE), enrich just those ids, and assemble/finalize as an additive batch.
+  entity* (bound in the SPARQL WHERE), enrich just those ids, then classify/embed/finalize them as an
+  additive batch.
 - **Changed plots**: a title needs re-embedding only when its Wikipedia article changed — track the article
-  `revid` (`action=parse&prop=revid`) and re-enrich + re-assemble (`assemble --force`) the ids whose revid
-  moved. `finalize` de-dups by `(mediaType, tmdbId)` keeping the newest record + its aligned vector.
+  `revid` (`action=parse&prop=revid`) and re-enrich + re-embed the ids whose revid moved. `finalize`
+  de-dups by `(mediaType, tmdbId)` keeping the newest record + its aligned vector.
 
 Re-embed the changed ids through the **same** `den-embed` service the full run used (the alignment rule).
 

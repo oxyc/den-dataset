@@ -106,8 +106,17 @@ DELTA = Artifact(
 ENRICHED = Artifact(
     name="enriched",
     filename="enriched",
-    producer="scripts/enrich-run.sh",
-    how="scripts/enrich-run.sh movie 150",
+    dedicated=False,
+)
+
+#: What a resumed enrichment resumes FROM: the ids already processed, and the next batch number. Declared
+#: rather than left as a file the command happens to keep, because it is the only thing that separates a
+#: second drain from a second full scrape — and because an absent one is not proof of a first run (an
+#: out-dir with 153 batches and no checkpoint restarted at batch 1 and overwrote two of them).
+ENRICH_CHECKPOINT = Artifact(
+    name="enrich_checkpoint",
+    filename="enrich-checkpoint.json",
+    dedicated=False,
 )
 
 #: Wikidata's director (P57) and genre (P136) per title: the two clauses of the lean document that used to
@@ -169,12 +178,36 @@ EMBEDDING_SPACE = Artifact(
     dedicated=False,
 )
 
+#: The corpus pass's scrape: the titles that have a vector, written with `--has-vector`. It lands under
+#: `facts-<version>.json` — the name the merge's output takes back — so it is moved aside first, under the
+#: suffix `doc-facts.pre-merge.json` and `labels-t02.pre-classify.json` already use for the copy of an
+#: artifact from before the step that consumes it.
+CORPUS_FACTS = Artifact(
+    name="corpus_facts",
+    filename="facts-{version}.pre-merge.json",
+    producer=BACKFILL,
+    how="taxonomy-backfill facts --labels labels-t02.json --has-vector, then move the "
+        "facts-<version>.json it wrote aside to facts-<version>.pre-merge.json",
+    dedicated=False,
+)
+
+#: The delta pass: ids given outright, scraped WITHOUT `--has-vector`. These titles have no vector, no
+#: labels and no facets row — which is not the same as new. The Wire, Lost and Black Mirror are in this set
+#: because they have no plot. The name is what the pass writes when the out-dir holds no manifest to take a
+#: version from, and it is the one of the two passes that needs no renaming.
+DELTA_FACTS = Artifact(
+    name="delta_facts",
+    filename="facts-unversioned.json",
+    producer=BACKFILL,
+    how="taxonomy-backfill facts --ids <the delta ids>",
+    dedicated=False,
+)
+
+#: What ships, and what the corpus join and the store read: the two passes merged. The MERGE owns it, not
+#: either scrape — a facts file rebuilt from one pass is the rebuild that dropped 137 delta titles.
 FACTS = Artifact(
     name="facts",
     filename="facts-{version}.json",
-    producer=BACKFILL,
-    how="taxonomy-backfill facts",
-    dedicated=False,
     manifest_key="factsFile",
 )
 
@@ -264,6 +297,7 @@ RELEASE = Artifact(
 )
 
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
-             COMBINED_MANIFEST, DELTA, ENRICHED, DOC_FACTS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
-             EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, FACTS, VECTORS, VECTOR_LABELS,
-             PREMISE_VECTORS, PREMISE_LABELS, STORE, METADATA, MANIFEST, RELEASE)
+             COMBINED_MANIFEST, DELTA, ENRICHED, ENRICH_CHECKPOINT, DOC_FACTS, EMBED_LABELS,
+             EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
+             DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, PREMISE_VECTORS, PREMISE_LABELS, STORE,
+             METADATA, MANIFEST, RELEASE)

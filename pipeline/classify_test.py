@@ -31,7 +31,7 @@ import unittest
 
 import pipeline
 
-from . import artifacts, classify, corpus, embed
+from . import artifacts, classify, corpus, embed, fetch
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -184,7 +184,9 @@ class CommandLine(unittest.TestCase):
             os.rmdir(os.path.join(out, artifacts.ENRICHED.filename))
             with self.assertRaises(StageError) as refused:
                 classify.argv(context(out))
-            self.assertIn("enrich-run.sh", str(refused.exception))
+            # The drain is a stage, so the batches are owned rather than answering for themselves: the
+            # refusal names what the pipeline runs, not the shell driver that stage replaced.
+            self.assertIn("./den stage fetch", str(refused.exception))
 
     def test_the_dry_run_is_only_asked_for_when_it_is_asked_for(self):
         """`--plan` decides whether the stage buys anything. Passing it unasked would make every run a
@@ -286,13 +288,17 @@ class Topology(unittest.TestCase):
         self.assertEqual(classify.SCRIPT, os.path.join(REPO, classify.PRODUCER))
         self.assertTrue(os.path.isfile(classify.SCRIPT))
 
-    def test_an_input_no_stage_produces_still_names_its_own_producer(self):
-        """The seam, at what is left of it. The enrichment comes from a stage that is not ported, so it
-        answers for itself; the article dump used to and no longer does, because the stage that writes it
-        landed and took the ownership with it."""
-        self.assertEqual(pipeline.producers()["enriched"],
-                         (artifacts.ENRICHED.producer, artifacts.ENRICHED.how, True))
+    def test_both_of_its_inputs_are_owned_by_the_stages_that_write_them(self):
+        """The seam is CLOSED on both. Each was an artifact answering for itself because no stage wrote
+        it; the enrichment drain and the article dump landed, and the ownership moved with them, so the
+        registry names a stage rather than a script an operator would have to find.
+
+        Kept as an assertion rather than deleted: an artifact going back to naming a producer would mean
+        a stage stopped running what it claims to, and the derived registry is what would notice."""
+        self.assertEqual(artifacts.ENRICHED.producer, "")
         self.assertEqual(artifacts.ARTICLES.producer, "")
+        self.assertEqual(pipeline.producers()["enriched"][0], fetch.PRODUCER)
+        self.assertEqual(pipeline.producers()["articles"][0], "pipeline/articles.py")
 
     def test_the_delta_pass_is_a_different_rule_and_keeps_its_own_producer(self):
         """`delta` is a second pass over a second article dump, run by a second script. This stage writes

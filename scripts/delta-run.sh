@@ -11,19 +11,16 @@
 #                           → new titles since the window, above the vote floor, minus what's published
 #   enrich                  → TMDB + Wikipedia plot for those ids only
 #   ---- THE PASS STOPS HERE ----
-#   assemble                → classify + embed + append to the index store
-#   finalize                → labels + vectors + meta, with a bumped datasetVersion
-#   publish-dataset.sh      → clobber the data-latest release; the homelab timer picks it up within 4h
+#   classify → embed → finalize → publish
 #
-# WHY IT STOPS: `assemble` needs Haiku vote passes at votes/batch-<id>-pass<n>.json, and nothing in this repo
-# produces them — they come from a Claude Code run over DT-classification-prompt.md (in the den app repo). So
-# the second half genuinely cannot be unattended. This script now ends at that boundary and prints the
-# commands to finish, naming the batch ids it actually wrote.
+# WHY IT STOPS: the second half BUYS — the classify stage is the one step that spends at a paid provider —
+# so it is deliberately not unattended. This script ends at that boundary and prints the commands to finish,
+# naming the batch ids it actually wrote.
 #
-# It used to run the whole chain and fail every single time: it assembled `--batch-id 0`, an id `enrich` never
-# assigns (batches start at 1), after already spending the TMDB and Wikipedia calls and checkpointing those
-# ids as enriched. The titles were left enriched-but-unclassified and never published, and the next day did
-# the same thing again.
+# It used to run the whole chain and fail every single time: it ran the label step against `--batch-id 0`,
+# an id `enrich` never assigns (batches start at 1), after already spending the TMDB and Wikipedia calls and
+# checkpointing those ids as enriched. The titles were left enriched-but-unclassified and never published,
+# and the next day did the same thing again.
 #
 # Costs real money per run — the vote floor is what keeps that bounded (a brand-new release with no votes has
 # no plot worth classifying and would be re-billed daily until it earned some).
@@ -105,14 +102,15 @@ echo "== enriched $total new title(s) into batch(es):$batches =="
 [ "$left" -gt 0 ] && echo "   ($left still pending — re-run, or raise LIMIT)"
 cat <<EOF
 
-Next, by hand — these need the Haiku vote passes this repo cannot generate:
+Next, by hand — the classify stage BUYS, so it is not run unattended:
 
-  1. For each batch above, run the DT classification prompt over
-     $OUT_DIR/enriched/batch-<id>.json, saving each pass to
-     $OUT_DIR/votes/batch-<id>-pass<n>.json
-  2. Then, per batch:
-       $BIN assemble --batch-id <id> --out-dir $OUT_DIR --require-wiki-plot
-  3. Then once:
+  1. Dump the articles the classify pass reads:
+       $BIN dump-articles --enriched-dir $OUT_DIR/enriched --out $OUT_DIR/articles.jsonl
+  2. Classify — with --plan first, to see the call and cost plan:
+       ./den stage classify --out-dir $OUT_DIR --dataset-version <ver> --plan
+       ./den stage classify --out-dir $OUT_DIR --dataset-version <ver>
+  3. Then embed, finalize and publish:
+       ./den stage embed --out-dir $OUT_DIR --dataset-version <ver>
        $BIN finalize --out-dir $OUT_DIR
        ./den stage metadata --out-dir $OUT_DIR --dataset-version <what finalize printed>
        scripts/publish-dataset.sh $OUT_DIR
@@ -123,7 +121,6 @@ Next, by hand — these need the Haiku vote passes this repo cannot generate:
      render with no poster metadata. Forever, and silently. (The stage refuses a --dataset-version the
      manifest does not name, which catches the same mistake one step earlier.)
 
-(\`assemble\` classifies AND embeds — there is no separate embed step. \`embed-corpus\` is the whole-corpus
-re-embed path; pointing it at a delta skips every new title as \`missingLabel\`, because new ids are not in
-the shipped labels blob until \`finalize\` runs.)
+(\`embed-corpus\` reads the shipped labels blob, so a new id is only embeddable once the classify pass's
+rows have reached it — see docs/OPERATE.md for the order.)
 EOF

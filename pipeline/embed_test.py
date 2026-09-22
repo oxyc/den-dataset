@@ -28,7 +28,7 @@ import unittest
 
 import pipeline
 
-from . import artifacts, corpus, embed, store
+from . import artifacts, corpus, embed, fetch, store
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -192,7 +192,7 @@ class CommandLine(Staged):
         os.rmdir(os.path.join(self.out, "enriched"))
         with self.assertRaises(StageError) as refused:
             embed.argv(context(self.out))
-        self.assertIn("enrich-run.sh", str(refused.exception))
+        self.assertIn(fetch.HOW, str(refused.exception))
 
     def test_the_pause_and_the_limit_are_only_passed_when_they_are_named(self):
         """Neither has a safe default to pass unasked: a pause nobody chose costs hours over a corpus, and
@@ -282,12 +282,15 @@ class Topology(unittest.TestCase):
         self.assertLess(pipeline.STAGES.index("corpus"), pipeline.STAGES.index("store"))
 
     def test_an_input_no_stage_produces_still_names_its_own_producer(self):
-        """The seam, at what is left of it: the enrichment is a stage that is not ported, so it answers
-        for itself. The Wikidata scrape used to and no longer does — `pipeline/docfacts.py` writes it now,
-        and the ownership moved with the stage."""
+        """The seam, CLOSED on both of this stage's inputs. Each was an artifact that answered for itself
+        because no stage wrote it; each is now owned, and the registry names the owning stage's rule —
+        which is what an operator handed a missing file is sent to run. Asserted rather than deleted,
+        because the seam closing is the thing #27 is for, and an artifact that quietly went back to naming
+        a script would mean a stage stopped running what it claims to."""
         self.assertEqual(artifacts.DOC_FACTS.producer, "")
         self.assertEqual(pipeline.producers()["doc_facts"][0], "pipeline/docfacts.py")
-        self.assertEqual(pipeline.producers()["enriched"][0], artifacts.ENRICHED.producer)
+        self.assertEqual(artifacts.ENRICHED.producer, "")
+        self.assertEqual(pipeline.producers()["enriched"], (fetch.PRODUCER, fetch.HOW, False))
         self.assertIn(artifacts.VECTOR_LABELS, [bind(e).artifact for e in corpus.INPUTS])
 
 

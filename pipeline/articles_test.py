@@ -23,7 +23,7 @@ import unittest
 
 import pipeline
 
-from . import articles, artifacts
+from . import articles, artifacts, fetch
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -190,13 +190,13 @@ class Refusal(Staged):
         self.batch(1, [record(1, plot=False)])
         with self.assertRaises(StageError) as refused:
             articles.run(self.context())
-        self.assertIn("enrich-run.sh", str(refused.exception))
+        self.assertIn(fetch.HOW, str(refused.exception))
 
     def test_a_missing_enrichment_is_refused_with_what_builds_it(self):
         os.rmdir(self.enriched)
         with self.assertRaises(StageError) as refused:
             articles.run(self.context())
-        self.assertIn("enrich-run.sh", str(refused.exception))
+        self.assertIn(fetch.HOW, str(refused.exception))
 
 
 class Topology(unittest.TestCase):
@@ -214,11 +214,16 @@ class Topology(unittest.TestCase):
         reader = pipeline.stage("classify")
         self.assertIn("articles", [bind(e).name for e in reader.INPUTS])
 
-    def test_the_enrichment_answers_for_itself_until_that_stage_lands(self):
-        """The seam: the batches come from `enrich`, which is not ported."""
+    def test_the_enrichment_is_owned_by_the_stage_that_drains_it(self):
+        """The seam this input used to sit on is CLOSED: the batches were `scripts/enrich-run.sh`'s and
+        are the fetch stage's now, so the registry names that stage's rule — which is what an operator
+        handed a missing `out/enriched` is sent to run.
+
+        Asserted rather than deleted. An artifact quietly going back to naming a script would mean a stage
+        stopped running what it claims to, and the derived registry is the only thing that would notice."""
+        self.assertEqual(artifacts.ENRICHED.producer, "")
         producer, how, _ = pipeline.producers()["enriched"]
-        self.assertEqual(producer, "scripts/enrich-run.sh")
-        self.assertIn("enrich-run.sh", how)
+        self.assertEqual((producer, how), (fetch.PRODUCER, fetch.HOW))
 
 
 if __name__ == "__main__":

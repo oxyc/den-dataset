@@ -15,9 +15,13 @@ prose somewhere that can go stale without anything failing.
 
 ## The part that is still being rebuilt
 
-`pipeline/` holds **nine** stages today — the worklist, the article dump, the classify pass, the Wikidata
-doc facts, the embed pass, the corpus join, the store build, the poster sidecar and the publish. Only the
-enrichment drain still runs from `docs/OPERATE.md` under `scripts/`.
+`pipeline/` holds **eleven** stages today — the worklist, the enrichment drain, the article dump, the
+classify pass, the Wikidata doc facts, the embed pass, the facts merge, the corpus join, the store build,
+the poster sidecar and the publish. Every step `docs/OPERATE.md` walks through is one of them. What is left
+outside are the side passes nothing here runs but two stages read —
+the second classify pass and the premise tags under `scripts/v2/` — and each still answers for itself in
+`pipeline/artifacts.py` until it lands.
+>>>>>>> origin/main
 That is the migration in oxyc/den-dataset#27, not a second generation: stages join `STAGES` one at a
 time, and the old tree is deleted in the commit that makes the new one authoritative.
 

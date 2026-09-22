@@ -86,9 +86,10 @@ PRODUCERS = {
 # producer is a real tracked file — so a stale entry breaks the test rather than protecting anything.
 #
 # `factsFile` stays, now as the `manifest_key` on the `facts` entry in `pipeline/artifacts.py`. Its producer
-# is `taxonomy-backfill facts`, which is the same binary that makes labels, vectors and metadata, and the key
-# is merely unpublished — not unbuildable. The loop below only visits keys the manifest actually names, so
-# the entry costs nothing and covers a generation that publishes facts again.
+# is `scripts/merge-facts.py`, the stage that merges the two scrape passes — the scrape builds the halves and
+# the merge builds the file, which is the distinction the 137 lost delta records were bought with. The key is
+# merely unpublished, not unbuildable: the loop below only visits keys the manifest actually names, so the
+# entry costs nothing and covers a generation that publishes facts again.
 #
 # WHAT THIS GUARD NOW SEES, AND WHAT IT DOES NOT. `publish-dataset.sh` prunes the manifest down to the
 # store (oxyc/den#113), so the only registered key the loop visits is `storeFile` — plus the corpus below,
