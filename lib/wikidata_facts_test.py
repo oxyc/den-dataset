@@ -191,6 +191,16 @@ class Lookups(unittest.TestCase):
         self.assertEqual(got["Q9"], {"name": None, "tmdbPersonId": "55", "aliases": ["Nine"]})
         self.assertEqual(got["Q8"]["name"], "Ada Director")
 
+    def test_a_person_with_two_tmdb_ids_ships_the_lowest_whatever_the_row_order(self):
+        """Measured: Claudine Dupuis (Q2978480) states 1118633 and 142921. The lowest by NUMBER, which the
+        least string ("1118633") is not."""
+        rows = [{"item": ENTITY + "Q2978480", "itemLabel": "Claudine Dupuis", "pid": "1118633"},
+                {"item": ENTITY + "Q2978480", "itemLabel": "Claudine Dupuis", "pid": "142921"}]
+        for order in (rows, rows[::-1]):
+            with self.subTest(first=order[0]["pid"]):
+                self.answers = {"main": body(*order), "alias": body()}
+                self.assertEqual(wd.entity_details(["Q2978480"])["Q2978480"]["tmdbPersonId"], "142921")
+
     def test_an_unlabelled_type_is_not_a_type_name(self):
         """It answers with the TYPE's Q-id — kept, it would fold to `other` and outrank nothing, or stand
         alone as the source's kind."""

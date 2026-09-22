@@ -353,7 +353,12 @@ def titles(ids, media, languages=None):
 def entity_details(qids, batch=200):
     """`Q-id -> {name, tmdbPersonId, aliases}`. The aliases are what let a search answer "tom hanks" from a
     record holding only a Q-id; P4985 opens a person page with no name lookup. A label the service could
-    not resolve comes back as the Q-id itself and is not a name."""
+    not resolve comes back as the Q-id itself and is not a name.
+
+    A person can carry two TMDB ids (TMDB kept a duplicate record; about 0.15% of the shipped people), and
+    WDQS returns the rows in no fixed order, so the first row's id changed from one scrape to the next. The
+    lowest id wins: it is the older TMDB record. The ids are unsigned digit strings, so (length, string)
+    order is numeric order."""
     out = {}
     for start in range(0, len(qids), batch):
         values = " ".join(f"wd:{q}" for q in qids[start:start + batch])
@@ -372,8 +377,10 @@ def entity_details(qids, batch=200):
             name = _value(binding, "itemLabel")
             if name is not None and name != qid:
                 row["name"] = name
-            if row["tmdbPersonId"] is None:
-                row["tmdbPersonId"] = _value(binding, "pid")
+            pid = _value(binding, "pid")
+            if pid is not None and (row["tmdbPersonId"] is None
+                                    or (len(pid), pid) < (len(row["tmdbPersonId"]), row["tmdbPersonId"])):
+                row["tmdbPersonId"] = pid
         for binding in run("?alias", "  ?item skos:altLabel ?alias . FILTER(LANG(?alias) IN ('en','mul'))"):
             uri, alias = _value(binding, "item"), _value(binding, "alias")
             if uri is None or alias is None:
