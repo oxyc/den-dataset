@@ -176,7 +176,7 @@ class CommandLine(unittest.TestCase):
             os.remove(os.path.join(out, artifacts.ARTICLES.filename))
             with self.assertRaises(StageError) as refused:
                 classify.argv(context(out))
-            self.assertIn("taxonomy-backfill dump-articles", str(refused.exception))
+            self.assertIn("./den stage articles", str(refused.exception))
 
     def test_a_missing_enrichment_stops_the_stage(self):
         with tempfile.TemporaryDirectory() as out:
@@ -287,9 +287,12 @@ class Topology(unittest.TestCase):
         self.assertTrue(os.path.isfile(classify.SCRIPT))
 
     def test_an_input_no_stage_produces_still_names_its_own_producer(self):
-        """The seam. The article dump comes from a stage that is not ported, so it answers for itself."""
-        self.assertEqual(pipeline.producers()["articles"],
-                         (artifacts.ARTICLES.producer, artifacts.ARTICLES.how, False))
+        """The seam, at what is left of it. The enrichment comes from a stage that is not ported, so it
+        answers for itself; the article dump used to and no longer does, because the stage that writes it
+        landed and took the ownership with it."""
+        self.assertEqual(pipeline.producers()["enriched"],
+                         (artifacts.ENRICHED.producer, artifacts.ENRICHED.how, True))
+        self.assertEqual(artifacts.ARTICLES.producer, "")
 
     def test_the_delta_pass_is_a_different_rule_and_keeps_its_own_producer(self):
         """`delta` is a second pass over a second article dump, run by a second script. This stage writes

@@ -25,9 +25,6 @@ BACKFILL = "Sources/taxonomy-backfill/main.swift"
 ARTICLES = Artifact(
     name="articles",
     filename="articles.jsonl",
-    producer=BACKFILL,
-    how="taxonomy-backfill dump-articles",
-    dedicated=False,
 )
 
 #: TMDB's daily ID export, one per media — the universe `worklist --mode export` parses. A public static

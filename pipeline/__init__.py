@@ -17,7 +17,8 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
                        registry, validate)
 
 #: The pipeline, in the order it runs. The worklist comes first because it is the universe everything after
-#: it is drawn from; classification next, because it reads the articles and nothing else here does;
+#: it is drawn from; the article dump next, because it is what the classify pass reads; classification
+#: after it, because nothing else here reads the articles;
 #: embedding before the corpus join, because its stores are what `finalize` turns into the vectors the
 #: store is built from; the corpus is joined before the store for the same reason; and publishing is last
 #: because it uploads what the store wrote. That ordering is the whole reason a stage can stop naming a
@@ -30,7 +31,7 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: One short of the whole pipeline: `fetch` — the enrichment drain that turns the worklist into the
 #: enriched batches — still lives under `scripts/` and runs from `docs/OPERATE.md`. It lands in the gap
 #: between the worklist and the classify pass (oxyc/den-dataset#27).
-STAGES = ("worklist", "classify", "embed", "corpus", "store", "publish")
+STAGES = ("worklist", "articles", "classify", "embed", "corpus", "store", "publish")
 
 
 def stage(name):

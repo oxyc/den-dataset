@@ -177,7 +177,7 @@ over story/premise, theme/subject, work context, and irrelevant production/recep
 
 The frozen article dump predates two fields needed by this audit: target year and the extractor's
 `plotSections`. The runner therefore requires `--enriched-dir out-repass/enriched` for that dump, folds batches
-newest-first exactly like the Swift readers, and hashes the effective evidence. Future `dump-articles` rows
+newest-first exactly like the Swift readers, and hashes the effective evidence. Future article-dump rows
 write `year`, `plotSections`, and `extractorArticleRevId` directly. The whole-article revision differs from the
 extractor revision for 17,101 rows, and 321 rows name at least one old extractor heading absent from the newer
 article. Results record both revision ids, `sectionAuditSameRevision`, and missing headings; those rows may be

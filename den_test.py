@@ -6,6 +6,7 @@ The acceptance this covers is small and specific: the pipeline can be LISTED and
 run.
 """
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -33,9 +34,10 @@ class Listing(unittest.TestCase):
         result = den("stages")
         self.assertEqual(result.returncode, 0, result.stderr)
         # The order, and that it is the real one: the universe is built before anything is drawn from it,
-        # the articles are classified before the vectors are embedded, the vectors before the corpus is
-        # joined, the corpus before the store is built from it, and the publish that uploads it is last.
-        expected = ("worklist", "classify", "embed", "corpus", "store", "publish")
+        # the articles are dumped before the pass that reads them, classified before the vectors are
+        # embedded, the vectors before the corpus is joined, the corpus before the store is built from it,
+        # and the publish that uploads it is last.
+        expected = ("worklist", "articles", "classify", "embed", "corpus", "store", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
@@ -113,11 +115,11 @@ class Dispatch(unittest.TestCase):
     def test_den_run_leaves_out_the_stage_that_buys(self):
         """`den run` must not reach the paid pass unless asked for it by name.
 
-        The first stage has to SUCCEED for this to say anything. An out-dir holding nothing refuses at
-        stage one, and then classify is unreached whether or not the gate works — the assertion passes
-        while testing nothing, which is the shape the publish gate's own test has to live with because
-        publish is last. So the worklist is given a real dump and the two runs are compared at the stage
-        after it.
+        Every stage BEFORE classify has to succeed for this to say anything. An out-dir holding nothing
+        refuses at stage one, and then classify is unreached whether or not the gate works — the assertion
+        passes while testing nothing, which is the shape the publish gate's own test has to live with
+        because publish is last. So the stages ahead of it are given inputs they can finish on, and the
+        two runs are compared at classify.
         """
         with tempfile.TemporaryDirectory() as out:
             # `export` because it is the one mode that touches no network — this test is about which
@@ -125,6 +127,14 @@ class Dispatch(unittest.TestCase):
             for name in ("movie_ids.json", "tv_series_ids.json"):
                 with open(os.path.join(out, name), "w", encoding="utf-8") as fh:
                     fh.write('{"id":11,"popularity":1.0}\n')
+            # The article dump has to find a grounded title, and must not then fetch one: a row already in
+            # its output is a row it resumes past.
+            os.makedirs(os.path.join(out, "enriched"))
+            with open(os.path.join(out, "enriched", "batch-1.json"), "w", encoding="utf-8") as fh:
+                json.dump([{"tmdbId": 11, "mediaType": "movie", "title": "t", "year": 1977,
+                            "hasWikiPlot": True, "plotArticle": "Star Wars (film)"}], fh)
+            with open(os.path.join(out, "articles.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write('{"mediaType":"movie","tmdbId":11,"text":"prose"}\n')
             run = ("run", "--dataset-version", "test", "--out-dir", out, "--mode", "export")
 
             gated = den(*run)

@@ -601,48 +601,6 @@ public struct WikipediaSource: Sendable {
         }
     }
 
-    /// The WHOLE article as prose, every section kept, headings preserved.
-    ///
-    /// The opposite of `plot(articleTitle:)`, deliberately. That one exists to give the EMBEDDER a document
-    /// about the story and nothing else, because embedding a Reception section clusters titles by critical
-    /// consensus rather than by what happens in them.
-    ///
-    /// A classifier wants the opposite. The section rules are a heuristic — hard and soft exclusion lists,
-    /// parent-scope inheritance, serial-heading detection — and they mis-fire; pre-filtering with a weaker
-    /// mechanism to protect a stronger one is backwards. More importantly the lead is the only thing that
-    /// says WHAT THE ARTICLE IS: given an extracted plot, nothing can tell that prose about Heathcliff came
-    /// from the novel's page rather than a film's, which is how six tmdbIds came to share 46,936 characters
-    /// of Wuthering Heights. Given the article, the first sentence settles it.
-    ///
-    /// Headings stay inline as `== Heading ==` so a caller can ask which sections are the story without a
-    /// second request — the structure is the point, not noise to strip.
-    public func articleProse(articleTitle: String, language: String = "en") async throws -> PlotFetch? {
-        guard let api = URL(string: "https://\(language).wikipedia.org/w/api.php") else { return nil }
-        let data = try await get(api, [
-            "action": "parse", "page": articleTitle, "prop": "wikitext|revid",
-            "format": "json", "formatversion": "2", "redirects": "1",
-        ])
-        guard let wikitext = Self.decodeWikitext(data) else { return nil }
-        var parts: [String] = []
-        var headings: [String] = []
-        for (heading, _, body) in Self.splitSections(wikitext) {
-            let prose = Self.cleanWikitext(body)
-            guard !prose.isEmpty else { continue }
-            if heading.isEmpty {
-                parts.append(prose)                      // the lead, which carries what the article IS
-            } else {
-                let name = Self.displayHeading(heading)
-                headings.append(name)
-                parts.append("== \(name) ==\n\(prose)")
-            }
-        }
-        guard !parts.isEmpty else { return nil }
-        let parsed = try? JSONDecoder().decode(WikitextResult.self, from: data)
-        return PlotFetch(text: parts.joined(separator: "\n\n"), revId: parsed?.parse.revid,
-                         resolvedArticle: parsed?.parse.title ?? articleTitle,
-                         sections: headings, language: language)
-    }
-
     /// The article's Plot/Synopsis section as plain prose, or nil if the article has no such section.
     /// The same extraction on another language's Wikipedia.
     ///

@@ -184,7 +184,7 @@ scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. 
 #     the dumped article, into the `combined-v1-r2*.jsonl` shards the corpus join reads. It is the only step
 #     here that costs money ($20.47 for 47,529 titles), so run it with --plan first; it resumes, so a repeat
 #     buys only what is missing. The questions, the planner and the audit are in `scripts/v2/FACETS-V2.md`.
-taxonomy-backfill dump-articles --enriched-dir out/enriched --out out/articles.jsonl
+./den stage articles --out-dir out --dataset-version <ver>            # the whole article per grounded title
 ./den stage classify --out-dir out --dataset-version <ver> --plan     # then again without --plan
 
 # 4. [Agent] Haiku vote passes over each scratch batch -> out/votes/batch-<id>-pass<N>.json

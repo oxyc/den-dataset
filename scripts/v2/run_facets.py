@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Classify every grounded title's facets with a System One model, one call per title.
 
-  taxonomy-backfill dump-articles --enriched-dir out-repass/enriched --out out-repass/articles.jsonl
+  ./den stage articles --out-dir out-repass --dataset-version <ver>
   scripts/v2/run_facets.py --articles out-repass/articles.jsonl --out out-repass/facets.jsonl [--limit N]
 
 ## Why this exists at all, and why it is not `llm_phase.py`
@@ -140,7 +140,7 @@ def answer_row(rec, answers, question_set, questions_sha256, prompt_sha256, mode
 
 def argument_parser():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--articles", required=True, help="JSONL from `taxonomy-backfill dump-articles`")
+    ap.add_argument("--articles", required=True, help="JSONL from `./den stage articles`")
     ap.add_argument("--out", required=True, help="JSONL, appended to; re-running resumes from it")
     ap.add_argument("--prompt", default=PROMPT,
                     help="versioned facet prompt (default: prompts/facets-v1.md)")

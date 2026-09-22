@@ -139,7 +139,7 @@ def load_articles(path):
 def attach_enriched_evidence(records, directory):
     """Attach newest-wins target year and extractor ``plotSections`` to an older article dump.
 
-    ``dump-articles`` historically wrote all article headings as ``sections`` but not the extractor's chosen
+    The article dump historically wrote all article headings as ``sections`` but not the extractor's chosen
     headings.  The enriched batches are the authoritative source for the diff and target year.  New dumps
     carry both directly; this fallback lets the complete frozen dump run without re-fetching Wikipedia.
     """
