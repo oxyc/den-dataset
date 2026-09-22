@@ -191,10 +191,11 @@ CORPUS_FACTS = Artifact(
     filename="facts-{version}.pre-merge.json",
 )
 
-#: The ids the delta pass scrapes: titles /recommend needs facts for that have no vector, no labels and no
-#: facets row — which is not the same as new. The Wire, Lost and Black Mirror are in this set because they
-#: have no plot. Nothing in this repo derives the list; it is assembled by whoever knows which titles
-#: atlas is missing (the last one was 8,949 ids), `movie:1` / `tv:2`, one per line or comma-separated.
+#: The ids the delta pass scrapes: titles /recommend needs facts for that have no vector — which is not the
+#: same as new: a title the classify pass drops from the labels loses its vector and lands here. No stage
+#: derives the list; docs/OPERATE.md step 6a gives the rule (the last published facts file's titles minus
+#: the new labels', plus what atlas is missing), `movie:1` / `tv:2`, one per line or comma-separated. An old
+#: list is not reusable: the 8,949 ids the last rebuild scraped as vectorless all have vectors now.
 DELTA_IDS = Artifact(
     name="delta_ids",
     filename="facts-delta-ids.txt",

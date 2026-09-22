@@ -245,10 +245,24 @@ python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels ou
 #     run once: the corpus pass covers the ids in labels-t02.json and is stamped hasVector, the delta pass
 #     covers the ids in out/facts-delta-ids.txt and is not, and /recommend must never let a vectorless record
 #     into an ANN path. The delta list is YOURS to write: the titles /recommend needs facts for that have no
-#     vector, no labels and no facets row (the last one was 8,949 ids), `movie:1` / `tv:2`, one per line or
-#     comma-separated. Nothing in this repo derives it, and the stage refuses to run without it — a merge
-#     missing the delta pass is short by every title only it covers, which is how a rebuild once dropped 137
-#     of them and nothing but /recommend noticed.
+#     vector, `movie:1` / `tv:2`, one per line or comma-separated. The stage refuses to run without it — a
+#     merge missing the delta pass is short by every title only it covers, which is how a rebuild once
+#     dropped 137 of them and nothing but /recommend noticed.
+#
+#     Derive it fresh for every rebuild; never reuse an old one. It is every title the LAST published facts
+#     file carries that the new labels do not — plus any new id atlas is missing, appended by hand:
+python3 - out/facts-<previous ver>.json out/labels-t02.json > out/facts-delta-ids.txt <<'PY'
+import json, sys
+facts, labels = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:3])
+vectors = {f"{r['mediaType']}:{r['tmdbId']}" for r in labels["records"]}
+print("\n".join(sorted({f"{r['mediaType']}:{r['tmdbId']}" for r in facts["records"]} - vectors)))
+PY
+#     The difference, not the previous file's vectorless records: a title the classify pass dropped from
+#     the labels has lost its vector and belongs here, and a title that has since been embedded does not.
+#     The list the last rebuild used (out-repass/facts-missing-ids.txt, 8,949 ids) is now wholly embedded;
+#     scraped again as the delta it would cost hours and leave out every title that is vectorless today.
+#     Measured on out-repass on 2026-09-22: 79 ids — 76 the shipped facts carry as vectorless and three it
+#     still stamps hasVector (movie:121329, movie:51870, tv:42680) whose vectors the classify pass dropped.
 ./den stage facts --out-dir out
 #     The version is read from out/dataset.meta.json, so no flag is needed; a --dataset-version that
 #     disagrees with it is refused. Each pass writes straight to the name the merge reads
