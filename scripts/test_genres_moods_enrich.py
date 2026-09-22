@@ -153,14 +153,44 @@ class Selection(Fixture):
             gm.prepare(out_dir=self.out, work=os.path.join(self.dir, "w2"), mode="since", since="2025",
                        curated=self.curated, out=lambda _: None)
 
-    def test_a_title_the_classify_shards_answer_twice_is_refused(self):
-        shard = os.path.join(self.out, "combined-v1-r2.jsonl")
-        with open(shard) as fh:
-            first = fh.readline()
-        with open(os.path.join(self.out, "combined-v1-r2-token-fallback.jsonl"), "w") as fh:
-            fh.write(first)
-        with self.assertRaisesRegex(StageError, "movie:1 is answered in both"):
+    def rerun(self, key, validity, started):
+        """A later classify run answering `key` again, as a re-grounded title gets, with its manifest."""
+        first = os.path.join(self.out, "combined-v1-r2.jsonl")
+        with open(first + ".manifest.json", "w") as fh:
+            json.dump({"runStartedAt": "2026-09-01T00:00:00Z"}, fh)
+        with open(first) as fh:
+            row = next(json.loads(line) for line in fh if json.loads(line)["tmdbId"] == int(key.split(":")[1]))
+        row["answers"]["validity"]["choice"] = validity
+        later = os.path.join(self.out, "combined-v1-r2-reground.jsonl")
+        with open(later, "w") as fh:
+            fh.write(json.dumps(row) + "\n")
+        if started is not None:
+            with open(later + ".manifest.json", "w") as fh:
+                json.dump({"runStartedAt": started}, fh)
+
+    def test_a_title_answered_twice_with_no_order_between_the_runs_is_refused(self):
+        """Two runs answer movie:1 and the second records no start, so nothing says which is later."""
+        self.rerun("movie:1", "correct-screen-work", started=None)
+        with self.assertRaisesRegex(StageError, "duplicate key across classify shards: movie:1"):
             self.prepare()
+
+    def test_a_later_run_answers_for_the_title(self):
+        """movie:4's first run judged its article another work; a re-run on its own article says it is the
+        requested one, so the later run decides — as the corpus join reads it. (The fixture has no
+        enrichment row for movie:4, so it is still skipped, now for that reason instead.)"""
+        self.rerun("movie:4", "correct-screen-work", started="2026-09-23T00:00:00Z")
+        _, printed = self.prepare()
+        self.assertNotRegex(printed, r"not about the requested work[^\n]*movie:4")
+        self.assertRegex(printed, r"no enrichment row[^\n]*movie:4")
+
+    def test_a_withdrawn_title_is_not_prepared(self):
+        with open(os.path.join(self.out, "combined-v1-r2.jsonl.manifest.json"), "w") as fh:
+            json.dump({"runStartedAt": "2026-09-01T00:00:00Z"}, fh)
+        with open(os.path.join(self.out, "withdrawn.jsonl"), "w") as fh:
+            fh.write(json.dumps({"mediaType": "movie", "tmdbId": 3, "reason": "lost its plot",
+                                 "withdrawnAt": "2026-09-23T00:00:00Z"}) + "\n")
+        record, _ = self.prepare()
+        self.assertNotIn("movie:3", [k for ks in record["batches"].values() for k in ks])
 
     def test_a_prepared_work_dir_is_not_prepared_over(self):
         self.prepare()
