@@ -67,6 +67,11 @@ def detail(tmdb_id, votes=500, overview="x" * 60, **extra):
     return body
 
 
+def tmdb_record(tmdb_id, **extra):
+    """A record as `lib/tmdb.title_record` builds it, plus whatever `extra` says it carries."""
+    return dict(enrich.tmdb_api.title_record(detail(tmdb_id), tmdb_id, "movie"), **extra)
+
+
 class StubTMDB:
     """`get(path, params)` over a dict of bodies; a value that is an exception is raised."""
 
@@ -95,13 +100,14 @@ class Batch(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.out = self.directory.name
         self.cache = caching.ResponseCache("wiki", os.path.join(self.out, "cache"), 3600)
-        self.mapping, self.plots, self.plot_calls = {}, {}, []
+        self.mapping, self.plots, self.plot_calls, self.mapping_calls = {}, {}, [], []
         for target, stub in ((enrich.wikidata, "mapping"), (enrich.plot, "plot")):
             patch = mock.patch.object(target, stub, getattr(self, stub + "_stub"))
             patch.start()
             self.addCleanup(patch.stop)
 
     def mapping_stub(self, ids, media, languages, cache=None):
+        self.mapping_calls.append((media, sorted(ids)))
         return {i: self.mapping[(media, i)] for i in ids if (media, i) in self.mapping}
 
     def plot_stub(self, article, language="en", cache=None, token=None):
@@ -202,6 +208,66 @@ class Batch(unittest.TestCase):
         self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
         self.assertIn(("Eigen", "de"), self.plot_calls, "999 is not enough, so the fallback is asked")
         self.assertEqual(self.rows()["movie:1"]["plotArticleRole"], "own", "a tie keeps the earlier")
+
+    def test_an_own_article_keeps_a_tie_with_its_source_work(self):
+        """Strictly longer wins, as the Swift pass's `>` had it, so at equal length the EARLIER candidate
+        stays. That is the right way round: the own article describes this title, the source work describes
+        the book, and nothing about equal length says the book is the better description."""
+        self.mapping[("movie", 1)] = {"article": "Own", "sourceArticle": "Book"}
+        self.plots[("Own", "en")] = found("o" * 500, resolved="Own")
+        self.plots[("Book", "en")] = found("b" * 500, resolved="Book")
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
+        row = self.rows()["movie:1"]
+        self.assertEqual((row["plotArticleRole"], row["plotArticle"]), ("own", "Own"))
+
+    def test_the_longest_other_language_article_wins_not_the_first(self):
+        """The fallback reads every sitelink until one is enough, and keeps the longest — the title's own
+        language is asked first, not preferred at any length."""
+        self.mapping[("movie", 1)] = {"articlesByLang": {"de": "Kurz", "fr": "Long"}}
+        self.plots[("Kurz", "de")] = found("d" * 300, resolved="Kurz", language="de")
+        self.plots[("Long", "fr")] = found("f" * 600, resolved="Long", language="fr")
+        self.run_batch({"/movie/1": detail(1, original_language="de")}, [("movie", 1)])
+        self.assertEqual(self.plot_calls, [("Kurz", "de"), ("Long", "fr")])
+        row = self.rows()["movie:1"]
+        self.assertEqual((row["plotLanguage"], row["plotArticle"], len(row["overview"])), ("fr", "Long", 600))
+
+    def test_another_language_beats_a_thin_english_article_when_it_is_longer(self):
+        """A thin English article is what the fallback is FOR: it runs below 1,000 characters, and what it
+        finds competes on length with what English gave."""
+        self.mapping[("movie", 1)] = {"article": "Thin", "articlesByLang": {"it": "Lungo"}}
+        self.plots[("Thin", "en")] = found("e" * 200, resolved="Thin")
+        self.plots[("Lungo", "it")] = found("i" * 500, resolved="Lungo", language="it")
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
+        row = self.rows()["movie:1"]
+        self.assertEqual((row["plotArticleRole"], row["plotLanguage"], row["plotArticle"]),
+                         ("own-other-language", "it", "Lungo"))
+
+    def test_the_fallback_stops_at_the_first_other_language_article_that_is_enough(self):
+        """The same stop as the English loop: once a sitelink gives 1,000 characters, the rest are not
+        fetched, even when one of them is longer."""
+        self.mapping[("movie", 1)] = {"articlesByLang": {"de": "Genug", "fr": "Plus"}}
+        self.plots[("Genug", "de")] = found("d" * 1000, resolved="Genug", language="de")
+        self.plots[("Plus", "fr")] = found("f" * 3000, resolved="Plus", language="fr")
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
+        self.assertEqual(self.plot_calls, [("Genug", "de")])
+        self.assertEqual(self.rows()["movie:1"]["plotLanguage"], "de")
+
+    def test_a_thin_article_found_only_in_another_language_is_below_the_floor(self):
+        """The class 04129a9 opened: a title whose ONLY article is on another Wikipedia, with a plot section
+        too short to ground on. Its section was found, so it is `belowFloor` — a threshold decision — and
+        not `noSection`, which sends it to whoever writes heading rules. ~5,778 titles take this path."""
+        self.mapping[("movie", 1)] = {"articlesByLang": {"de": "Dünn"}}
+        self.plots[("Dünn", "de")] = found("d" * 80, resolved="Dünn", language="de")
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
+        row = self.rows()["movie:1"]
+        self.assertEqual((row["hasWikiPlot"], row["noPlotReason"], row["overview"]), (False, "belowFloor", ""))
+
+    def test_a_plotless_title_starts_from_an_empty_overview_whatever_the_record_carries(self):
+        """`overview` holds a Wikipedia plot or nothing. Emptied outright rather than filtered, so a TMDB field
+        that some later change carries on the record under another name still cannot reach it."""
+        record = tmdb_record(1, overview="TMDB PROSE " * 5, tmdbOverview="TMDB PROSE " * 5)
+        verdict, row, _error = enrich.reground(record, {}, self.cache, None)
+        self.assertEqual((verdict, row["overview"], row["hasWikiPlot"]), ("noPlot", "", False))
 
     def test_the_floor_and_the_four_reasons(self):
         self.mapping.update({("movie", 1): {}, ("movie", 2): {"article": "Bare"},
@@ -305,6 +371,21 @@ class Batch(unittest.TestCase):
         self.run_batch({"/tv/95": detail(95), "/movie/95": detail(95)}, [("tv", 95), ("movie", 95)])
         rows = self.rows()
         self.assertEqual((rows["tv:95"]["plotArticle"], rows["movie:95"]["plotArticle"]), ("Buffy", "Armageddon"))
+
+    def test_each_media_is_asked_about_its_own_ids_only(self):
+        """The query TEXT is the mapping's cache key. Asking about the whole batch under each media returns
+        the same facts — WDQS answers only the ids that are that media — but hashes to a different key, so
+        every mapping the Swift pass cached for a single-media batch would be fetched again."""
+        self.run_batch({"/tv/7": detail(7), "/movie/95": detail(95), "/movie/3": detail(3)},
+                       [("tv", 7), ("movie", 95), ("movie", 3)])
+        self.assertEqual(self.mapping_calls, [("movie", [3, 95]), ("tv", [7])])
+
+    def test_the_limit_is_how_many_ids_one_batch_takes(self):
+        client = StubTMDB({f"/movie/{i}": detail(i) for i in range(1, 6)})
+        report = enrich.run(self.worklist(*[("movie", i) for i in range(1, 6)]), self.out, limit=2,
+                            client=client, cache=self.cache)
+        self.assertEqual(sorted(client.asked), ["/movie/1", "/movie/2"], "the first two, in worklist order")
+        self.assertEqual((report["count"], report["remaining"]), (2, 3))
 
     def test_a_failed_mapping_aborts_the_batch_and_writes_nothing(self):
         with mock.patch.object(enrich.wikidata, "mapping", side_effect=http.HTTPError(0, "x")):

@@ -199,6 +199,15 @@ class OtherLanguages(unittest.TestCase):
                          ("Dr. Bartok plays.", ["Handlung"], "de"))
         self.assertEqual(sent.call_args[0][0], "de.wikipedia.org", "the host is the language's")
 
+    def test_a_local_heading_is_matched_as_a_whole_word_prefix(self):
+        """"Handlung und Hintergrund" is the plot with more after it, and is read; "Handlungsort" shares the
+        letters and not the word, and is not."""
+        body = {"parse": {"title": "Film", "revid": 5, "wikitext": (
+            "Lead.\n== Handlung und Hintergrund ==\nSie flieht.\n== Handlungsort ==\nIn Wien gedreht.")}}
+        with mock.patch.object(http, "request", return_value=json.dumps(body).encode()):
+            found = plot.plot("Film", "de")
+        self.assertEqual((found["text"], found["sections"]), ("Sie flieht.", ["Handlung und Hintergrund"]))
+
     def test_the_mapping_asks_for_sitelinks_on_exactly_those_wikis(self):
         """An unrestricted sitelink query returns a row per language and multiplies the result set; English
         is the primary path, never a fallback."""
