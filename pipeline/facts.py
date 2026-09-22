@@ -40,8 +40,8 @@ import subprocess
 import sys
 import time
 
-from . import artifacts, jsonbytes
-from .contract import REPO, StageError, bind, how_to_build
+from . import artifacts, finalize, jsonbytes
+from .contract import REPO, StageError, bind
 from lib import cache as caching
 from lib import http, wikidata
 from lib import wikidata_facts as wd
@@ -328,27 +328,13 @@ def merge(ctx):
     return out
 
 
-def manifest_version(ctx):
-    """`datasetVersion` from the manifest finalize wrote — refusing a `--dataset-version` that disagrees."""
-    path = ctx.require(artifacts.MANIFEST)
-    try:
-        with open(path, encoding="utf-8") as handle:
-            version = json.load(handle).get("datasetVersion")
-    except (OSError, ValueError, AttributeError) as broken:
-        raise StageError(f"facts: {path} is not a readable manifest ({broken}), so the dataset version these "
-                         f"facts belong to is unknown.") from None
-    if not isinstance(version, str) or not version:
-        raise StageError(f"facts: {path} names no datasetVersion. Re-run: {how_to_build(artifacts.MANIFEST)}")
-    if ctx.dataset_version and ctx.dataset_version != version:
-        raise StageError(f"facts: --dataset-version {ctx.dataset_version} is not this out-dir's generation — "
-                         f"{path} says {version}, and the facts are named after the labels and vectors they "
-                         f"describe. Pass --dataset-version {version}, or leave it off.")
-    return version
-
-
 def run(ctx, cache=None):
     """Scrape both passes, then merge them into the file that ships. Returns its path."""
-    ctx = dataclasses.replace(ctx, dataset_version=manifest_version(ctx))
+    ctx.require(artifacts.MANIFEST)
+    try:
+        ctx = dataclasses.replace(ctx, dataset_version=finalize.manifest_version(ctx))
+    except StageError as refusal:
+        raise StageError(f"facts: {refusal}") from None
     labels = ctx.require(BOUND[artifacts.VECTOR_LABELS.name].artifact)
     delta = ctx.require(artifacts.DELTA_IDS)
     cache = wikidata.cache_for() if cache is None else cache

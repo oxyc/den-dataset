@@ -41,9 +41,10 @@ import math
 import os
 import sys
 import time
+import dataclasses
 
 from . import artifacts, jsonbytes
-from .contract import REPO, StageError
+from .contract import REPO, StageError, bind
 from lib import cache as caching
 
 sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
@@ -326,3 +327,39 @@ def run(ctx, now=None):
     genres = sorted(summary["report"]["byPrimaryGenre"].items(), key=lambda kv: (-kv[1], kv[0]))
     print("  primary-genre dist: " + " ".join(f"{g}:{n}" for g, n in genres), file=sys.stderr)
     return meta_path
+
+
+def manifest_version(ctx):
+    """`datasetVersion` from this out-dir's manifest, or None when there is no manifest yet.
+
+    The version names the files of the stages after this one, and it is derived here from what this stage
+    wrote, so an operator cannot know it before the run. A `--dataset-version` is therefore only a check:
+    one that disagrees with the manifest is refused rather than obeyed, because the stages would then look
+    for each other's files under two names.
+    """
+    path = ctx.path(artifacts.MANIFEST)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            version = json.load(handle).get("datasetVersion")
+    except (OSError, ValueError, AttributeError) as broken:
+        raise StageError(f"{path} is not a readable manifest ({broken}), so the dataset version is "
+                         f"unknown.") from None
+    if not isinstance(version, str) or not version:
+        raise StageError(f"{path} names no datasetVersion. Re-run: {HOW}")
+    if ctx.dataset_version and ctx.dataset_version != version:
+        raise StageError(f"--dataset-version {ctx.dataset_version} is not this out-dir's generation — "
+                         f"{path} says {version}, and every versioned file is named after the labels and "
+                         f"vectors it describes. Pass --dataset-version {version}, or leave it off.")
+    return version
+
+
+def versioned(module, ctx):
+    """`ctx` with the manifest's dataset version, for a stage that names a file with it; `ctx` unchanged
+    for one that does not, or when there is no manifest to read one from."""
+    declared = (bind(e).artifact for e in tuple(module.INPUTS) + tuple(module.OUTPUTS))
+    if not any("{version}" in artifact.filename for artifact in declared):
+        return ctx
+    version = manifest_version(ctx)
+    return dataclasses.replace(ctx, dataset_version=version) if version else ctx

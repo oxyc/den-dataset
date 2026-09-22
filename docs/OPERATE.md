@@ -57,10 +57,10 @@ it is a corpus decision: re-embed, then `den-update den-embed`.
 
 ## Building a generation
 
-`./den run --dataset-version <ver> --out-dir out` runs every stage in order. It skips the paid classify
-pass unless given `--spend`, and stops before publishing unless given `--publish`. Because `corpus` and
-`store` name files by the version finalize decides, a fresh generation is run stage by stage through
-finalize, then finished with the version in hand. The daily delta prints the same sequence.
+`./den run --out-dir out` runs every stage in order. It skips the paid classify pass unless given
+`--spend`, and stops before publishing unless given `--publish`. `facts`, `corpus` and `store` name their
+files by the version `finalize` derives, and read it from `out/dataset.meta.json`; a `--dataset-version`
+given to any of them is only checked against it. The daily delta prints the same sequence.
 
 ```sh
 # 1. Secrets. den.env is gitignored; the fetch stage reads it.
@@ -148,7 +148,7 @@ skipped.
 **7. The corpus** — the pass shards, facts and both label sets joined into one JSONL, the source of truth.
 
 ```sh
-./den stage corpus --out-dir out --dataset-version <ver> --expect <titles>
+./den stage corpus --out-dir out --expect <titles>
 ```
 
 `--expect` refuses a short join. `--set combined=<path>` (repeatable) points at a pass under another name.
@@ -157,7 +157,7 @@ skipped.
 manifest; without it the publish refuses.
 
 ```sh
-./den stage store --out-dir out --dataset-version <ver> --stamp-meta out/dataset.meta.json
+./den stage store --out-dir out --stamp-meta out/dataset.meta.json
 ```
 
 The same writer typed by hand, which `pipeline/store_test.py` holds to the same bytes:

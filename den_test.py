@@ -79,8 +79,9 @@ class Dispatch(unittest.TestCase):
             self.assertIn("consolidate_corpus.py", result.stderr)
 
     def test_the_version_is_asked_only_of_what_names_a_file_by_it(self):
-        """finalize names none of its files by it, so it is not asked for one; the store does, and without
-        one it is refused naming the flag, not written as `den-.store`. A run always reaches the store."""
+        """finalize names none of its files by it, so it is not asked for one; the store does, and with no
+        manifest to read one from and none given it is refused naming the flag, not written as
+        `den-.store`."""
         with tempfile.TemporaryDirectory() as out:
             unversioned = den("stage", "finalize", "--out-dir", out)
             self.assertNotIn("--dataset-version", unversioned.stderr)
@@ -88,7 +89,21 @@ class Dispatch(unittest.TestCase):
             versioned = den("stage", "store", "--out-dir", out)
             self.assertEqual(versioned.returncode, 1)
             self.assertIn("pass --dataset-version", versioned.stderr)
-            self.assertEqual(den("run", "--out-dir", out).returncode, 2, "argparse: the flag is required")
+
+    def test_the_version_is_the_manifests_and_a_given_one_is_only_a_check(self):
+        """`finalize` derives the version from what it writes, so nobody can pass the right value before a
+        run: `den run` does not ask for one, and a stage after `finalize` reads it from the manifest."""
+        with tempfile.TemporaryDirectory() as out:
+            self.assertNotEqual(den("run", "--out-dir", out).returncode, 2, "argparse demanded the version")
+            with open(os.path.join(out, "dataset.meta.json"), "w", encoding="utf-8") as fh:
+                json.dump({"datasetVersion": "abc123def456"}, fh)
+            derived = den("stage", "store", "--out-dir", out)
+            self.assertIn("corpus-abc123def456.jsonl.gz is missing", derived.stderr)
+            agreeing = den("stage", "store", "--out-dir", out, "--dataset-version", "abc123def456")
+            self.assertIn("corpus-abc123def456.jsonl.gz is missing", agreeing.stderr)
+            wrong = den("stage", "corpus", "--out-dir", out, "--dataset-version", "fixture")
+            self.assertEqual(wrong.returncode, 1)
+            self.assertIn("--dataset-version fixture is not this out-dir's generation", wrong.stderr)
 
     def test_run_stops_before_publishing_unless_asked(self):
         """`den run` is the exploratory command; publishing is the one step that leaves this machine.
@@ -99,7 +114,7 @@ class Dispatch(unittest.TestCase):
         one more command, and not having it costs a restore.
         """
         with tempfile.TemporaryDirectory() as out:
-            plain = den("run", "--out-dir", out, "--dataset-version", "test")
+            plain = den("run", "--out-dir", out)
             # It fails on the first stage's missing inputs either way — what matters is which stage the
             # refusal names. Reaching publish at all would mean the release was in the run.
             self.assertNotIn("publish-dataset.sh", plain.stderr + plain.stdout)
@@ -173,7 +188,7 @@ class Dispatch(unittest.TestCase):
             # client. Without it the drain asked TMDB about id 11 with the stub key.
             with open(os.path.join(out, "enrich-checkpoint.json"), "w", encoding="utf-8") as fh:
                 json.dump({"processed": ["movie:11", "tv:11"], "nextBatch": 2}, fh)
-            run = ("run", "--dataset-version", "test", "--out-dir", out, "--mode", "export")
+            run = ("run", "--out-dir", out, "--mode", "export")
 
             gated = den(*run)
             self.assertIn("==> worklist", gated.stderr, "the stub did not get the run past stage one")

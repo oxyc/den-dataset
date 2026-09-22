@@ -132,9 +132,9 @@ jobs:
       # next reads (oxyc/den-dataset#27, acceptance item 1). `den run` over the fixture corpus in
       # `pipeline/fixture-corpus/`, with TMDB, IMDb, Wikipedia and Wikidata answered from that directory,
       # den-embed a stand-in on a local port, and every other connection refused — offline end to end. It
-      # asserts where `den run` stops today and why, the six inputs no stage produces yet (seeded by hand,
-      # and failing here the day a stage produces one), and that the store, the manifest and the facts agree
-      # on every count.
+      # asserts that `den run`, given no dataset version, runs every stage but the two that buy or publish,
+      # the six inputs no stage produces yet (seeded by hand, and failing here the day a stage produces one),
+      # and that the store, the manifest and the facts agree on every count.
       - name: den run, end to end
         run: python3 -m unittest den_run_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The

@@ -29,17 +29,10 @@ own directory under `seeds/` so the kind is visible from the path:
     `den run` leaves it out without `--spend`; CI can never buy. `TheClassifyPassStillBuys` fails if that
     stops being true.
 
-**What `den run` does today, and where it stops.** It runs every stage from `worklist` through `finalize`
-— the fetch drain included, over a universe holding a title below every floor — and one seam bug stops it
-after that. It is asserted as the boundary it is, so that fixing it turns a test red and the workaround
-below it gets deleted rather than outliving the bug:
-
-  * `den run` requires `--dataset-version`, and `facts` refuses any value but the one `finalize` derives
-    from the labels and vectors it wrote (`pipeline/facts.py`, `manifest_version`) — a hash an operator
-    cannot know before the run. The stages from `facts` on are run with the manifest's version.
-
-From the refusal on, the remaining stages run one at a time with `den stage`, in `pipeline.STAGES` order and
-under `den run`'s own rules (no publishing, no buying), so a stage added to the order is run here too.
+**What `den run` does.** Every stage but the two that buy or publish, unattended, in one command: the
+fetch drain over a universe holding a title below every floor, and the stages from `facts` on under the
+version `finalize` derived, since it is given none (`test_den_run_runs_every_stage_it_is_allowed_to`). A
+version given by hand is only checked against that one (`test_a_given_version_is_only_a_check`).
 """
 import base64
 import contextlib
@@ -91,7 +84,8 @@ UNPRODUCED = {
     "premise_vectors": ("vectors-premise.json",),
 }
 
-#: What `den run` is told. Deliberately NOT the version `finalize` will derive — see the seam bug above.
+#: A version given by hand. It cannot be the one `finalize` derives, so a stage that names its files by the
+#: version must refuse it rather than obey it.
 GIVEN_VERSION = "fixture"
 DIMS = 1024
 BELOW_FLOOR = "movie:900004"
@@ -432,31 +426,24 @@ class DenRun(unittest.TestCase):
     @classmethod
     def drive(cls, den):
         common = ("--out-dir", cls.out, "--stamp-meta", cls.meta)
-        cls.run_code, cls.run_said = cls.den(den, "run", *common, "--dataset-version", GIVEN_VERSION,
-                                             "--mode", "export")
+        cls.run_code, cls.run_said = cls.den(den, "run", *common, "--mode", "export")
         #: The stages `den run` began, in the order it began them, read off its `==> <stage>` headers.
         cls.began = re.findall(r"^==> (\w+)$", cls.run_said, re.M)
-        cls.resumed = []
-        if cls.run_code == 0:
-            return  # The seam bug is fixed; the boundary test's docstring says what to delete.
+        cls.facts_refusal = cls.den(den, "stage", "facts", *common, "--dataset-version", GIVEN_VERSION)
 
-        order = [m.NAME for m in pipeline.stages()]
-        for module in pipeline.stages()[order.index("facts"):]:
-            if module.PUBLISHES or (module.SPENDS and not getattr(module, "FREE_WITHOUT_SPEND", False)):
-                continue
-            argv = ("stage", module.NAME, *common, "--dataset-version", read_json(cls.meta)["datasetVersion"])
-            cls.expect(*cls.den(den, *argv), argv)
-            cls.resumed.append(module.NAME)
+    # ---- how far `den run` gets -------------------------------------------------------------------------
 
-    # ---- the boundary `den run` stops at today ----------------------------------------------------------
+    def test_den_run_runs_every_stage_it_is_allowed_to(self):
+        """Unattended, given no version: the stages from `facts` on take the one `finalize` derived."""
+        self.assertEqual(self.run_code, 0, f"den run refused:\n{self.run_said[-3000:]}")
+        self.assertEqual(self.began, [m.NAME for m in pipeline.stages() if m.NAME not in ("classify", "publish")])
 
-    def test_den_run_stops_at_facts_on_the_dataset_version(self):
-        """`den run --dataset-version` must equal a hash of what `finalize` writes, so `facts` refuses the
-        version the run was given. When this fails because `den run` exited 0, delete the `den stage` loop
-        in `drive` and assert on `den run`'s outputs alone."""
-        self.assertEqual(self.run_code, 1, "den run no longer stops at facts — see this test's docstring")
-        self.assertEqual(self.began[-1], "facts", "the stage den run stopped at")
-        self.assertIn(f"--dataset-version {GIVEN_VERSION} is not this out-dir's generation", self.run_said)
+    def test_a_given_version_is_only_a_check(self):
+        """One given by hand that disagrees with the manifest is refused rather than obeyed: the facts would
+        be written under a name the corpus join and the store would not look for."""
+        code, said = self.facts_refusal
+        self.assertEqual(code, 1)
+        self.assertIn(f"--dataset-version {GIVEN_VERSION} is not this out-dir's generation", said)
 
     def test_den_run_drains_fetch_over_a_title_below_the_floor(self):
         """`enrich` once left a below-floor title pending for good, so `remaining` never reached 0 and the
@@ -474,8 +461,7 @@ class DenRun(unittest.TestCase):
 
     def test_den_run_leaves_out_exactly_the_stages_that_buy_or_publish(self):
         order = [m.NAME for m in pipeline.stages()]
-        ran = self.began + self.resumed
-        self.assertEqual([name for name in order if name not in ran], ["classify", "publish"])
+        self.assertEqual([name for name in order if name not in self.began], ["classify", "publish"])
 
     # ---- the published shapes agree with each other ---------------------------------------------------
 
@@ -519,6 +505,7 @@ class DenRun(unittest.TestCase):
     def test_the_corpus_is_the_facts_joined_with_the_passes(self):
         facts, corpus = keys_of(self.facts()["records"]), self.corpus()
         self.assertEqual({row["key"] for row in corpus}, facts)
+        self.assertTrue(os.path.exists(self.path(artifacts.STORE)), "the stages after it ran on the derived one")
         self.assertEqual(len(corpus), len(facts), "one row per title")
         premise = keys_of(read_json(self.path(artifacts.PREMISE_LABELS))["records"])
         self.assertEqual({r["key"] for r in corpus if r["labels"]}, self.labels())
