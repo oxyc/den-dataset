@@ -17,7 +17,6 @@ Wikipedia; premise tags are LLM output over Wikipedia text; facts are Wikidata.
 | `plots-sidecar-v1.json` | 38,460 plot IDENTITIES — `plotSHA`, length, shipped — and no prose | ~38k live article fetches |
 | `premise-tags-v1.json` | 37,533 titles × 4–12 structural premise tags | a full LLM pass over every plot |
 | `premise-tags-v1.SPEC.md` | the prompt that produced them | — |
-| `corpus-ids.json` | the id set the v2 corpus was built over | cheap, but pins what "the corpus" meant |
 | `eval/reco-cases.json` | 6,000 co-rating cases (nPMI), the recommendation ruler | a full co-rating derivation |
 | `eval/triplets-*.json` | LLM-judged similarity triplets at 1/2/3 blind passes | several blind LLM judging passes |
 
