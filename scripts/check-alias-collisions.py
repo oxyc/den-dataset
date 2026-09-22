@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Refuse to publish an alias that is really another title's name.
 
-`titles.aliases` comes from Wikidata's `skos:altLabel` (`WikipediaSource.swift:821`), and it is what lets
+`titles.aliases` comes from Wikidata's `skos:altLabel` (`lib/wikidata_facts.py`), and it is what lets
 "parasite" find 기생충 and "spirited away" find 千と千尋の神隠し. It is also unvetted: anyone may add an altLabel,
 and a wrong one is not a small error here. atlas takes `t` as a MAX over every name a title carries, and an
 exact hit scores `EXACT_TITLE + 0.4·pop` — the strongest signal the ranking has, built so a typed title always

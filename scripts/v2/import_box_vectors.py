@@ -16,9 +16,9 @@ why every check below runs BEFORE anything is written:
   - no duplicate keys (a key embedded twice would silently take one vector for both rows)
   - every vector must be 1024 ints in int8 range (a truncated or float row fails much later, as nonsense)
 
-`StoreIntegrity.alignedPrefix` re-checks the pairing on the Swift side, but only on `tmdbId`, so a movie
-row paired with the series of the same id passes it. This script is the only place the mediaType half of
-the key is still present, which makes it the only place that mistake can be caught.
+Downstream, `pipeline/finalize.py` re-checks the pairing when it reads the two files, but only on `tmdbId`,
+so a movie row paired with the series of the same id passes it. This script is the only place the mediaType
+half of the key is still present, which makes it the only place that mistake can be caught.
 
 Row ORDER is taken from the vector file, not from the labels artifact: those vectors were written in the
 order the box embedded them, and re-ordering them here would be a second chance to get the pairing wrong

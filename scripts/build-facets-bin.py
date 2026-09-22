@@ -6,7 +6,8 @@ Nothing in this repo produced this blob until now; it was generated once, elsewh
 when the corpus grew. Missing rows are not a soft failure — atlas orders browse rows by votes, so a title with
 no row sorts by tmdbId and *La Job* (tv:5) lands next to Game of Thrones.
 
-Format, read off the parser in DenKit `FacetSearch.swift` rather than from any doc:
+Format, read off the parser that consumes it — oxyc/den's `Sources/DenKit/Search/FacetSearch.swift`,
+in the app repo, not this one — rather than from any doc:
 
     "DFI2" | u32 count | count x 15-byte records, little-endian:
       +0  i32  tmdbId

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""RecoEval's metrics, in Python, for fast iteration.
+"""The offline ranking metrics `score_reco.py` scores a recommendation change with.
 
-These mirror `den/Sources/DenKit/Reco/RecoEval.swift` line for line, including the parts
-that look like quirks and are not:
+They were written against oxyc/den's `RecoEval.swift`, which no longer exists — so this is the
+only implementation of them, and these are decisions rather than a mirror of one. Each is a place
+a rewrite drifts without failing, which is why `test_reco_metrics.py` pins every one:
 
 - nDCG's ideal is capped at min(|relevant|, k), so a case with one relevant item scores 1.0
   when that item is placed first, instead of being unreachable.
@@ -14,9 +15,6 @@ that look like quirks and are not:
   diversity/novelty/coverage.
 
 `compare` reproduces the DT-E AC2 gate, including its rule that a tie FAILS.
-
-The Swift implementation stays authoritative; `score_v1_baseline.py --emit-swift-fixture`
-writes the same cases out for a run through it.
 """
 import math
 

@@ -94,7 +94,8 @@ Two things the judging established, both worth knowing before trusting a number 
 - **`out-t02/enriched/`** — the TMDB enrichment. It is TMDB Content (overviews, cast, genres, vote counts)
   and must not be published. It is also cheaply refetched with a key.
 - **The vectors and labels themselves** — those are the published release assets on `data-latest`, fetched
-  by `scripts/fetch-dataset.sh` (atlas) and `make sync-dataset` (the app). Committing them would duplicate
-  ~100 MB that already has a distribution channel.
+  by `scripts/fetch-dataset.sh` (den-atlas) and by the box's `deploy/atlas-dataset-sync.sh` (oxyc/den). The
+  app reads them through den-atlas and carries no copy. Committing them would duplicate ~100 MB that
+  already has a distribution channel.
 - **`premise-tags-wip/`** — 624 unmerged batch files, now consolidated into `premise-tags-v1.json` by
   `scripts/build-premise-tags.py`.

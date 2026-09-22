@@ -1,9 +1,6 @@
-.build/
 out/
 *.env
 .DS_Store
-*.xcodeproj
-.swiftpm/
 out-vecnow*/
 out-*/
 # No trailing slash, so a SYMLINK is covered too. `out-t02` is a symlink to `legacy/out-t02`, and git

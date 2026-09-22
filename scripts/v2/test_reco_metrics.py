@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Check the Python metrics against RecoEval's documented behaviour.
+"""Pin the ranking metrics' documented behaviour.
 
-These are not "does it run" tests. Each one pins a decision RecoEval's source calls out as
+These are not "does it run" tests. Each one holds a decision `reco_metrics.py` calls out as
 deliberate, because those are exactly the places a reimplementation drifts without failing:
 the capped ideal, the min() in average precision, nil-not-zero diversity, skipping unknown
-ids for novelty, and the gate's rule that a tie fails.
+ids for novelty, and the gate's rule that a tie fails. The Swift the metrics were first written
+against is gone, so this file is the only thing holding them to it.
 
 The checks run at import and collect into `FAILURES`; the case at the bottom is what reports them, so
 the file works under `python3 -m unittest` like every other suite here and as a script on its own.
