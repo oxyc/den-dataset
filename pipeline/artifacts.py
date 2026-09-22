@@ -106,5 +106,30 @@ STORE = Artifact(
     manifest_key="storeFile",
 )
 
+#: The manifest that describes the store, and the release's commit point — it is uploaded last, so what
+#: `data-latest` carries is whatever it names. `finalize` writes it and the publisher rewrites it in place
+#: (the prune, the record counts, `storeRebuild`, the shared-article census), which is why it is an input
+#: here and not an output: the stage that CREATES it is not ported, and a refusal for a missing one has to
+#: send an operator to finalize rather than back to the publisher. `dedicated` is false for the same
+#: reason `facts` is — one binary writes four things, so a staleness warning on it would fire for reasons
+#: that have nothing to do with the manifest.
+MANIFEST = Artifact(
+    name="manifest",
+    filename="dataset.meta.json",
+    producer=BACKFILL,
+    how="taxonomy-backfill finalize",
+    dedicated=False,
+)
+
+#: What a publish makes: the moving `data-latest` GitHub release den-atlas fetches. The only artifact here
+#: that is not a file in the out-dir — `filename` is the release TAG, and `Context.path` refuses to turn it
+#: into a local path. Declared because the pipeline's last stage still has to say what it produces, and
+#: because "what publishes the dataset" is then read off the order like every other ownership question.
+RELEASE = Artifact(
+    name="release",
+    filename="data-latest",
+    remote=True,
+)
+
 CATALOGUE = (COMBINED, DELTA, CORPUS, ENTITIES, FACTS, VECTORS, VECTOR_LABELS, PREMISE_VECTORS,
-             PREMISE_LABELS, STORE)
+             PREMISE_LABELS, STORE, MANIFEST, RELEASE)

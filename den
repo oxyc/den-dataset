@@ -87,7 +87,9 @@ def main(argv=None):
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
         return sub
 
-    with_options(commands.add_parser("run", help="run every stage, in order"))
+    with_options(commands.add_parser("run", help="run every stage, in order")).add_argument(
+        "--publish", action="store_true",
+        help="also run the publishing stage, which CLOBBERS the moving data-latest release")
     with_options(commands.add_parser("stage", help="run one stage")).add_argument("name")
 
     args = parser.parse_args(argv)
@@ -95,7 +97,15 @@ def main(argv=None):
         if args.command == "stages":
             return describe()
         ctx = context(args)
-        for module in ([pipeline.stage(args.name)] if args.command == "stage" else pipeline.stages()):
+        if args.command == "stage":
+            chosen = [pipeline.stage(args.name)]
+        else:
+            # `run` stops before the stages that publish unless asked. Every other stage writes into the
+            # out-dir and can be run again; publishing uploads to a moving public release, so a run that
+            # was meant to rebuild a store would replace the one people are serving. Naming the flag also
+            # makes the daily job say out loud that it publishes, rather than inheriting it from the order.
+            chosen = [m for m in pipeline.stages() if args.publish or not m.PUBLISHES]
+        for module in chosen:
             execute(module, ctx)
     except pipeline.StageError as refusal:
         print(f"error: {refusal}", file=sys.stderr)

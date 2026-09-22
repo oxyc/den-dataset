@@ -34,6 +34,8 @@ NAME = "corpus"
 #: against it, so what the pipeline says builds the corpus is what the pipeline executes.
 PRODUCER = "scripts/v2/consolidate_corpus.py"
 HOW = "scripts/v2/consolidate_corpus.py"
+#: Writes into the out-dir and nowhere else, so a repeat run costs only time.
+PUBLISHES = False
 SCRIPT = os.path.join(REPO, PRODUCER)
 
 #: In the join's own argument order, which `corpus_test.py` holds against `consolidate_corpus.INPUT_ARGS`.
