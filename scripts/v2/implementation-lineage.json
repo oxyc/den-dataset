@@ -13,6 +13,12 @@
         "commit": "b9e02ad",
         "supersededBy": "c03afa0c4e8dbad44b829101b6d52fdb4485c105",
         "why": "#60 added the delta pass's `state_section_ids` branch to `classify`, a refusal for a state carrying no article section, and a `sectionDecisions` figure in the PLAN summary. The `state_section_ids=None` path the corpus pass runs is unchanged, and none of it reaches a row, so combined-v1-r2's rows are what this file would still produce. #50 also retitled one docstring line."
+      },
+      {
+        "sha256": "c722cd65084b6fc9f027a228cd32be02d70828b59c146e83a85ee7d5032555b0",
+        "commit": "a42042a",
+        "supersededBy": "the commits that moved the pass out of scripts/ (oxyc/den-dataset#73)",
+        "why": "#73 moved the pass's modules into pipeline/ and lib/, one file per commit. What changed here is where things are found, not what is done: the import lines and the sys.path entries that find the other three modules, and `implementationSha256` hashing each of the four at its module's own path (`IMPLEMENTATION`) instead of all four in this file's directory — the keys are still the four file names, so a manifest reads the same. The state, the questions, the planner, the validator and the row are untouched."
       }
     ],
     "combined_questions.py": [

@@ -18,8 +18,7 @@ SUPERSEDED_TAXONOMY_SHA = "dd048e59177955307d1bbff7bf88c79f4a66e8bec053c96a32769
 
 def current_implementation():
     """`implementationSha256` as a shard bought on the pass in this tree records it."""
-    return {name: run_combined.sha256_file(os.path.join(audit_combined.HERE, name))
-            for name in audit_combined.IMPLEMENTATION}
+    return {name: run_combined.sha256_file(path) for name, path in audit_combined.SOURCES.items()}
 
 
 def answer_for(question):
@@ -299,7 +298,7 @@ class ImplementationLineageTests(unittest.TestCase):
         """A stale entry. The digest in the tree needs no exception, and one recorded for it would go on
         excusing that digest after the file moves on."""
         for name, entries in audit_combined.load_lineage().items():
-            current = run_combined.sha256_file(os.path.join(audit_combined.HERE, name))
+            current = run_combined.sha256_file(audit_combined.SOURCES[name])
             for entry in entries:
                 self.assertNotEqual(entry["sha256"], current, f"{name}: stale lineage entry")
 

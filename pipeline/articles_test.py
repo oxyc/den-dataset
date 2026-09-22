@@ -239,8 +239,8 @@ class Output(Staged):
         """`run_combined.py` builds `requestedTarget` from the row as it stands, and fills an ABSENT `year`
         from the enriched batches — TMDB's. A row this stage writes reaches the state as Wikidata's."""
         sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
-        import article_sections
         import run_combined
+        from pipeline import article_sections
         self.batch(1, [record(7, title="TMDB Title", year=1971), record(8, title="TMDB Other", year=1980)])
         self.named[("movie", 7)] = {"title": "Solaris", "year": 1972}
         self.named[("movie", 8)] = None   # Wikidata answers nothing for this one

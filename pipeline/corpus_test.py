@@ -69,9 +69,15 @@ PASS_KEYS = ("movie:1", "movie:2", "tv:9")
 FACTS_KEYS = PASS_KEYS + ("movie:77",)
 
 
-#: The source files `run_combined.py` hashes into every shard it writes, and which the stage's audit reads
-#: back. Spelled here rather than imported so a fixture manifest is built the way the pass builds one.
-IMPLEMENTATION = ("run_combined.py", "article_sections.py", "combined_questions.py", "typesafe_client.py")
+#: The source files `run_combined.py` hashes into every shard it writes, by the name it records each one
+#: under, and which the stage's audit reads back. Spelled here rather than imported so a fixture manifest is
+#: built the way the pass builds one.
+IMPLEMENTATION = {
+    "run_combined.py": os.path.join(V2, "run_combined.py"),
+    "article_sections.py": os.path.join(REPO, "pipeline", "article_sections.py"),
+    "combined_questions.py": os.path.join(V2, "combined_questions.py"),
+    "typesafe_client.py": os.path.join(V2, "typesafe_client.py"),
+}
 
 
 def sha256(path):
@@ -86,7 +92,7 @@ def write_manifest(shard, implementation=None, started=None):
     shards by it; the rest of a real manifest belongs to the row-level readback, which is not a
     precondition of a join.
     """
-    digests = {name: sha256(os.path.join(V2, name)) for name in IMPLEMENTATION}
+    digests = {name: sha256(path) for name, path in IMPLEMENTATION.items()}
     digests.update(implementation or {})
     manifest = {"runId": "corpus-stage-test", "configSha256": "config-test",
                 "config": {"implementationSha256": digests}}

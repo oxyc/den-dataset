@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import genres_moods_enrich as gm  # noqa: E402
 import genres_moods_merge as gmm  # noqa: E402
-from article_sections import parse_sections  # noqa: E402
+from pipeline.article_sections import parse_sections  # noqa: E402
 from pipeline.contract import StageError  # noqa: E402
 
 DEN = os.path.join(os.path.dirname(HERE), "den")

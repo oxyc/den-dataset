@@ -14,10 +14,12 @@ import statistics
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from article_sections import encoded_chars, is_oversized, public_section, select_global_sections, sha256_text, state_for
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from combined_questions import PROMPT, ROOT, TAXONOMY, section_question
-from run_combined import (SCHEMA_VERSION, article_key, attach_enriched_evidence, canonical, load_articles,
-                          sections_for_record, sha256_file, validate_answers)
+from pipeline.article_sections import (encoded_chars, is_oversized, public_section, select_global_sections,
+                                       sha256_text, state_for)
+from run_combined import (IMPLEMENTATION as SOURCES, SCHEMA_VERSION, article_key, attach_enriched_evidence,
+                          canonical, load_articles, sections_for_record, sha256_file, validate_answers)
 from typesafe_client import TypeSafe
 
 
@@ -27,8 +29,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LINEAGE = os.path.join(HERE, "implementation-lineage.json")
 
 #: The pass's own source files, which `run_combined.manifest_config` hashes into every shard's manifest
-#: under `implementationSha256`. A manifest must record every one of them: see `validate_implementation`.
-IMPLEMENTATION = ("run_combined.py", "article_sections.py", "combined_questions.py", "typesafe_client.py")
+#: under `implementationSha256`, by name. A manifest must record every one of them: see
+#: `validate_implementation`. Where each one lives is `SOURCES` — the paths the pass hashes, not a copy.
+IMPLEMENTATION = tuple(SOURCES)
 
 #: Where the pass keeps each committed input today, for a manifest that names it somewhere else. See
 #: `manifest_file`.
@@ -260,7 +263,9 @@ def validate_implementation(where, config, lineage=None):
                     f"shard's rows")
     allowed = []
     for name, expected in recorded.items():
-        path = os.path.join(HERE, name)
+        path = SOURCES.get(name)
+        if path is None:
+            fail(where, f"the manifest records a digest for {name}, which is not a source file of the pass")
         if sha256_file(path) == expected:
             continue
         entry = next((e for e in lineage.get(name, []) if e.get("sha256") == expected), None)

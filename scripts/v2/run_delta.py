@@ -28,10 +28,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import run_combined as rc  # noqa: E402
-from article_sections import sha256_text  # noqa: E402
+import run_combined as rc  # noqa: E402  — puts the repo on the path, for `pipeline.`
 from combined_questions import taxonomy  # noqa: E402
 from delta_questions import delta_questions  # noqa: E402
+from pipeline.article_sections import sha256_text  # noqa: E402
 
 
 def corpus_states(paths, records):

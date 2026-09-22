@@ -19,9 +19,13 @@ import threading
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from article_sections import (encoded_chars, is_oversized, parse_sections, public_section, section_groups,
-                              select_global_sections, sha256_text, state_for)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import combined_questions
+import typesafe_client
 from combined_questions import (PINNED_MODEL, PROMPT, ROOT, TAXONOMY, global_questions, section_question)
+from pipeline import article_sections
+from pipeline.article_sections import (encoded_chars, is_oversized, parse_sections, public_section,
+                                       section_groups, select_global_sections, sha256_text, state_for)
 from typesafe_client import TypeSafe, TypeSafeError
 
 SCHEMA_VERSION = "combined-jev-v1"
@@ -32,6 +36,17 @@ SCHEMA_VERSION = "combined-jev-v1"
 #: two values that moved with the file, `taxonomy` and `taxonomySha256`, are compared on their own.
 PLANNER_VERSION = "whole-or-role-selected-v2"
 DEFAULT_MAX_STATE_CHARS = 110_000
+
+#: The pass's own source files, which `manifest_config` hashes into every manifest under
+#: `implementationSha256`, and `audit_combined.validate_implementation` hashes again. Keyed by FILE NAME,
+#: which is what every shipped manifest records, so a file that moves keeps its key. The paths are each
+#: module's own rather than one shared directory: the four do not live together (oxyc/den-dataset#73).
+IMPLEMENTATION = {name: os.path.abspath(module.__file__) for name, module in (
+    ("run_combined.py", sys.modules[__name__]),
+    ("article_sections.py", article_sections),
+    ("combined_questions.py", combined_questions),
+    ("typesafe_client.py", typesafe_client),
+)}
 
 
 class RunAborted(RuntimeError):
@@ -223,11 +238,7 @@ def manifest_config(args, global_qs, label_mapping, tax, enriched_evidence_sha):
     return {
         "schemaVersion": SCHEMA_VERSION,
         "plannerVersion": PLANNER_VERSION,
-        "implementationSha256": {
-            name: sha256_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), name))
-            for name in ("run_combined.py", "article_sections.py", "combined_questions.py",
-                         "typesafe_client.py")
-        },
+        "implementationSha256": {name: sha256_file(path) for name, path in IMPLEMENTATION.items()},
         "articles": os.path.abspath(args.articles),
         "articlesSha256": sha256_file(args.articles),
         "enrichedDir": os.path.abspath(args.enriched_dir) if args.enriched_dir else None,

@@ -116,8 +116,8 @@ def stamp_implementation(path):
     this test with the audit's advice — record a lineage entry — which is meant for shards someone paid for.
     """
     manifest = read_json(path)
-    manifest["config"]["implementationSha256"] = {name: sha256(os.path.join(V2, name))
-                                                  for name in audit_combined.IMPLEMENTATION}
+    manifest["config"]["implementationSha256"] = {name: sha256(path)
+                                                  for name, path in audit_combined.SOURCES.items()}
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
 
