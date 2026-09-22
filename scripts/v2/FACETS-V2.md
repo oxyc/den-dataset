@@ -69,7 +69,7 @@ What the runner guarantees, and why each matters when every call is paid:
 - **A manifest per shard** hashing the questions, prompt (`data/prompts/facets-v2.md`), vocabulary, inputs and
   the runner's own source files. Resume refuses a changed manifest, so two configurations never share a
   file. Moving or editing one of those source files therefore needs an entry in
-  `scripts/v2/implementation-lineage.json` saying why no answer moved.
+  `data/implementation-lineage.json` saying why no answer moved.
 - **A circuit breaker.** Any exhausted retry, typed-response violation or model mismatch stops every
   worker from starting another paid call.
 - **A kernel lock on the output**, so a second agent cannot resume the same set and pay twice.

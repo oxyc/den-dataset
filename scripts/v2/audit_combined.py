@@ -27,7 +27,7 @@ from lib.typesafe_client import TypeSafe
 HERE = os.path.dirname(os.path.abspath(__file__))
 #: Superseded digests of the source files the pass hashes into every manifest, each with the commit that
 #: superseded it and why its rows still mean the same thing. See `validate_implementation`.
-LINEAGE = os.path.join(HERE, "implementation-lineage.json")
+LINEAGE = os.path.join(ROOT, "data", "implementation-lineage.json")
 
 #: The pass's own source files, which `run_combined.manifest_config` hashes into every shard's manifest
 #: under `implementationSha256`, by name. A manifest must record every one of them: see
@@ -273,7 +273,7 @@ def validate_implementation(where, config, lineage=None):
         if entry is None:
             fail(where, f"implementation hash differs for {name}: the shard was produced by {expected[:12]} "
                         f"and this tree holds {sha256_file(path)[:12]}. If that edit cannot change the rows, "
-                        f"record it in scripts/v2/implementation-lineage.json with the commit and the "
+                        f"record it in data/implementation-lineage.json with the commit and the "
                         f"reason; do not re-stamp the manifest.")
         allowed.append({"file": name, "sha256": expected, **{
             key: entry[key] for key in ("commit", "supersededBy", "why") if key in entry}})
@@ -331,7 +331,7 @@ def validate_inputs(where, config, lineage=None):
             fail(where, f"{role} artifact hash differs: the shard was bought from "
                         f"{str(recorded)[:12]} and this tree holds {actual[:12]}. If the file was "
                         f"rewritten without changing what the pass asked, record it under "
-                        f"supersededInputs in scripts/v2/implementation-lineage.json with the commit, "
+                        f"supersededInputs in data/implementation-lineage.json with the commit, "
                         f"the reason and the evidence; do not re-stamp the manifest.")
         allowed.append({"input": role, "sha256": recorded, **{
             key: entry[key] for key in ("file", "commit", "supersededBy", "why", "evidence")
