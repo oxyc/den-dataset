@@ -243,18 +243,39 @@ class CommandLine(Staged):
             fetch.argv(context(self.out), "movie")
         self.assertIn("swift build -c release", str(refused.exception))
 
-    def test_an_environment_that_already_has_the_key_does_not_go_through_the_shell(self):
-        """The credential bootstrap is the shell library's, run per batch because an Enterprise token
-        lasts a day and a drain can outlast one. A caller that already carries the key — the box's unit,
-        an operator who sourced their own — is not sent looking for a `den.env` it does not need."""
+    def test_the_two_credentials_are_asked_about_separately(self):
+        """`TMDB_API_KEY` says nothing about the Wikimedia ones, and they arrive together only on a
+        workstation: GitHub Actions supplies both as environment secrets with no `den.env` to read.
+
+        Keying the whole bootstrap on the TMDB key meant exporting it by hand skipped `enterprise_login`
+        too, and every plot came from the free action API. That is not a speed difference — the Enterprise
+        path records no revision id and no resolved article, so it is the one that CANNOT see a redirect,
+        and two runs of the same command would differ in what they know about their own rows.
+        """
         command = fetch.argv(context(self.out), "movie")
-        self.assertEqual(fetch.bootstrap(command), command)
+        os.environ.pop("WIKIMEDIA_ENTERPRISE_TOKEN", None)
+
+        # No TMDB key: the file is the only place it can come from, so read it, then log in.
         os.environ.pop("TMDB_API_KEY")
-        wrapped = fetch.bootstrap(command)
-        self.assertEqual(wrapped[:2], ["bash", "-c"])
-        self.assertIn("den_load_env", wrapped[2])
-        self.assertIn("enterprise_login", wrapped[2])
-        self.assertEqual(wrapped[4:], command)
+        full = fetch.bootstrap(command)
+        self.assertEqual(full[:2], ["bash", "-c"])
+        self.assertIn("den_load_env", full[2])
+        self.assertIn("enterprise_login", full[2])
+        self.assertEqual(full[4:], command)
+
+        # Key present, no bearer — the Actions shape. Still log in, but do NOT demand a den.env that run
+        # has no reason to own; insisting on the file is what would fail the job outright.
+        os.environ["TMDB_API_KEY"] = "k"
+        login = fetch.bootstrap(command)
+        self.assertEqual(login[:2], ["bash", "-c"])
+        self.assertNotIn("den_load_env", login[2])
+        self.assertIn("enterprise_login", login[2])
+        self.assertEqual(login[4:], command)
+
+        # Both already held: nothing left for the shell to mint.
+        os.environ["WIKIMEDIA_ENTERPRISE_TOKEN"] = "t"
+        self.addCleanup(os.environ.pop, "WIKIMEDIA_ENTERPRISE_TOKEN", None)
+        self.assertEqual(fetch.bootstrap(command), command)
 
 
 class Loop(Staged):

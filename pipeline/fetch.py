@@ -33,6 +33,7 @@ unasked would reinstate exactly that.
 import json
 import os
 import subprocess
+import sys
 import time
 
 from . import artifacts
@@ -81,11 +82,16 @@ BATCH = 500
 ABORTS = 6
 STALLS = 6
 
-#: The credential bootstrap, as `scripts/lib/den-env.sh` defines it — den.env into the environment, then a
-#: fresh 24h Wikimedia Enterprise bearer (which degrades to the free action API when there are no creds).
-#: Run per batch, like the driver ran it, because a token lasts a day and a drain can outlast one. The rules
-#: are the shell library's and are not restated here; this is the same two calls it documents.
-BOOTSTRAP = '. scripts/lib/den-env.sh; den_load_env || exit 1; enterprise_login; exec "$@"'
+#: The credential bootstrap, as `scripts/lib/den-env.sh` defines it. Two INDEPENDENT steps, and the split
+#: matters: `den_load_env` reads a `den.env` FILE and fails without one, while `enterprise_login` mints a
+#: 24h Wikimedia bearer from environment credentials. Run per batch, like the driver ran it, because a
+#: token lasts a day and a drain can outlast one.
+#:
+#: They are separate constants because the two credentials arrive together on a workstation and apart
+#: everywhere else — GitHub Actions puts both in the environment as secrets with no file to read, so a
+#: bootstrap that insisted on `den.env` would exit 1 there before fetching anything.
+LOAD_AND_LOGIN = '. scripts/lib/den-env.sh; den_load_env || exit 1; enterprise_login; exec "$@"'
+LOGIN_ONLY = '. scripts/lib/den-env.sh; enterprise_login; exec "$@"'
 
 
 def media_types(ctx):
@@ -125,14 +131,22 @@ def argv(ctx, media):
 def bootstrap(command):
     """`command`, run with the credentials the shell library mints.
 
-    An environment that already carries `TMDB_API_KEY` is left alone: the box's unit exports it, and so
-    does an operator who has already sourced their own. Only a checkout-relative `den.env` needs the shell,
-    and reaching for it when the key is already there would replace a working environment with a refusal
-    about a file that run does not need.
+    The two credentials are asked about SEPARATELY, because `TMDB_API_KEY` says nothing about the Wikimedia
+    ones. Keying the whole bootstrap on the TMDB key meant an operator who exported it by hand skipped
+    `enterprise_login` as well, and silently fetched every plot from the free action API — a run that
+    differs from the box's in what it records, not just in speed, since the Enterprise path reports no
+    revision id and no resolved article (`WikipediaSource.PlotFetch`) and is therefore the one that CANNOT
+    see a redirect. Nothing downstream could tell the two runs apart.
+
+    So: `den.env` is read only when the TMDB key is missing, and the Enterprise login runs whenever no
+    bearer is already held — it mints one from environment credentials where they exist, and says so on
+    stderr where they do not.
     """
-    if os.environ.get("TMDB_API_KEY"):
-        return command
-    return ["bash", "-c", BOOTSTRAP, NAME, *command]
+    if not os.environ.get("TMDB_API_KEY"):
+        return ["bash", "-c", LOAD_AND_LOGIN, NAME, *command]
+    if not os.environ.get("WIKIMEDIA_ENTERPRISE_TOKEN"):
+        return ["bash", "-c", LOGIN_ONLY, NAME, *command]
+    return command
 
 
 def pause(seconds):
@@ -153,6 +167,22 @@ def summary(stdout):
     except (IndexError, ValueError) as unreadable:
         raise StageError(f"fetch: the batch printed no report this loop could read ({unreadable}). Its last "
                          f"line decides whether anything remains, so a run cannot continue without it.")
+
+
+def announce_prose_source():
+    """Say which Wikipedia a drain is about to read, before it reads any of it.
+
+    `enterprise_login` announces its own outcome on stderr, but only on the runs that call it — a run
+    holding a bearer already says nothing at all, and the choice is invisible afterwards. It is not a
+    performance detail: the Enterprise path returns structured contents with no page title, so it records
+    no revision id and no resolved article, and a corpus enriched through it cannot report which of its
+    plots arrived via a redirect. Two runs of the same command against the same worklist can differ in what
+    they know about their own rows, so the log says which one this is.
+    """
+    held = os.environ.get("WIKIMEDIA_ENTERPRISE_TOKEN")
+    source = ("Wikimedia Enterprise (bearer already held; no revision ids, no redirect detection)"
+              if held else "resolved per batch by enterprise_login — see its line below")
+    print(f"==> {NAME}: plot prose from {source}", file=sys.stderr)
 
 
 def drain(ctx, media):
@@ -234,6 +264,7 @@ def run(ctx):
     finds everything enriched runs a single batch, fetches nothing and exits clean.
     """
     os.makedirs(os.path.abspath(ctx.out_dir), exist_ok=True)
+    announce_prose_source()
     ran = {media: drain(ctx, media) for media in media_types(ctx)}
     check_outputs(ctx)
     batches = ", ".join(f"{count} {media} batch(es)" for media, count in ran.items())
