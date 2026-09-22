@@ -194,6 +194,11 @@ $BIN assemble --batch-id <id> --out-dir out    # per batch (default embedder = d
 #     that wrote labels directly (`scripts/v2/merge_classify_labels.py`), or to re-embed a corpus whose
 #     labels did not change. The flags must match out/index/composition.json or the run refuses — two doc
 #     shapes in one vector space is the failure that record exists to prevent.
+#     `./den stage embed --out-dir out --dataset-version <ver>` runs exactly this, with the composition
+#     pinned rather than typed — `--doc-facts`, `--doc-drop-director` and `--plot-cap 3500` are what the
+#     shipped index was built with, and the stage checks the run's own index/composition.json against them
+#     afterwards because embed-corpus ignores a flag it does not recognise. It resumes the same way, adds
+#     `--pause-ms` and `--limit` for a long run, and refuses a run that recorded no verified space.
 $BIN embed-corpus --out-dir out --labels out/labels-t02.json \
     --doc-facts out/doc-facts.json --doc-drop-director --plot-cap 3500
 #     `--dump-docs <path>` writes the composed documents and embeds NOTHING, for embedding elsewhere — the

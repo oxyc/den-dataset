@@ -138,6 +138,16 @@ class Context:
     #: The title count a join is held to, when one is declared. The corpus join refuses a run that wrote
     #: a different number, which is how a missing shard stops being a quieter corpus.
     expect: int | None = None
+    #: Milliseconds the embed pass idles between requests, so a long run can share a machine. den-embed is
+    #: already nice 20, but nice only orders CPU contention — it does not stop bge-m3 holding its
+    #: activations resident, and a pause leaves real gaps the rest of the system can reclaim memory in. The
+    #: cost is linear and was priced at 15 documents a request: ~2,600 flushes over the corpus, so each
+    #: 1000ms adds ~45 minutes. This stage sends 7, so the same pause costs roughly twice that.
+    pause_ms: int = 0
+    #: Stop the embed pass after this many NEW titles. ONNX Runtime's memory arena grows to its peak and
+    #: never shrinks, so a long-lived den-embed creeps up until it OOMs the machine; the run is segmented
+    #: to let the service be restarted between segments, and the store is what makes that free.
+    limit: int | None = None
 
     def path(self, artifact):
         if artifact.shards:
