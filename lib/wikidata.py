@@ -53,12 +53,32 @@ class WikidataError(RuntimeError):
     "no bindings" because the two mean opposite things to a resumable scrape."""
 
 
-def query_text(ids, media, prop):
+def exclusion(ids, excluded):
+    """The line that keeps every per-title query on ONE item, or "" when no id in the batch needs it.
+
+    Every query here finds its title as `?film wdt:P4947 ?tmdb`, and two items can state the same TMDB id:
+    series 2559 is claimed by "Boon" (1986) and by "Bonn – Alte Freunde, neue Feinde" (2023). Keyed by
+    `?tmdb`, their answers merged into one row — the card title from one, the IMDb id from the other. The
+    MINUS drops the items `resolve` did not choose, pair by pair: an item set aside for one id may be the
+    only claimant of another in the same batch.
+
+    A batch with no such id gets NO line, so its text — the cache key — is the one already on disk.
+    """
+    pairs = [(tmdb_id, qid) for tmdb_id in sorted(set(int(i) for i in ids))
+             for qid in (excluded or {}).get(tmdb_id, ())]
+    if not pairs:
+        return ""
+    rows = " ".join(f'("{tmdb_id}" wd:{qid})' for tmdb_id, qid in pairs)
+    return f"  MINUS {{ VALUES (?tmdb ?film) {{ {rows} }} }}\n"
+
+
+def query_text(ids, media, prop, excluded=None):
     """The SPARQL this pipeline has always sent. Whitespace included — it is hashed into the cache key."""
     values = " ".join(f'"{tmdb_id}"' for tmdb_id in ids)
     return (f"SELECT ?tmdb ?vLabel WHERE {{\n"
             f"  VALUES ?tmdb {{ {values} }}\n"
             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"{exclusion(ids, excluded)}"
             f"  ?film wdt:{prop} ?v .\n"
             f'  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul". }}\n'
             f"}}\n"
@@ -118,14 +138,14 @@ def stripped_genre(label):
     return "" if text in MEDIA_SUFFIXES else text
 
 
-def fetch_property(ids, media, prop, cache=None):
+def fetch_property(ids, media, prop, cache=None, excluded=None):
     """One property over one batch of ids, from disk where the same batch was asked before.
 
     A caller's resume already skips ids present in its output file, so the cache earns its keep on a
     different axis: the two properties are two requests over the same id batch, and a re-run scoped to a
     different id list still repeats whole batches whose membership happens to coincide.
     """
-    query = query_text(ids, media, prop)
+    query = query_text(ids, media, prop, excluded)
     key = None
     if cache is not None:
         key = cache.key("sparql-docfacts", {"q": query})
@@ -145,7 +165,7 @@ def fetch_property(ids, media, prop, cache=None):
     return parsed
 
 
-def doc_facts(ids, media, cache=None):
+def doc_facts(ids, media, cache=None, excluded=None):
     """`tmdbId -> {"directors": [...], "genres": [...]}` for one batch.
 
     An id Wikidata states neither for is ABSENT from the result rather than present and empty: unknown is
@@ -154,8 +174,8 @@ def doc_facts(ids, media, cache=None):
     unique = sorted(set(int(value) for value in ids))
     if not unique:
         return {}
-    directors = fetch_property(unique, media, DIRECTOR, cache)
-    raw_genres = fetch_property(unique, media, GENRE, cache)
+    directors = fetch_property(unique, media, DIRECTOR, cache, excluded)
+    raw_genres = fetch_property(unique, media, GENRE, cache, excluded)
     out = {}
     for tmdb_id in unique:
         genres = sorted({stripped_genre(name) for name in raw_genres.get(tmdb_id, [])} - {""})
@@ -206,7 +226,7 @@ _INTEGER = re.compile(r"[+-]?[0-9]+")
 _BAD_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
-def mapping_query(ids, media, languages):
+def mapping_query(ids, media, languages, excluded=None):
     """The SPARQL that maps one batch of TMDB ids to their articles, and the facts that ride along.
 
     `languages` are the other Wikipedias a plot may be read from. They are the query's business too: an
@@ -214,7 +234,11 @@ def mapping_query(ids, media, languages):
     """
     values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
     wikis = " ".join(f"<https://{code}.wikipedia.org/>" for code in sorted(languages))
-    return "\n".join(_MAPPING).replace("{values}", values).replace(
+    lines = list(_MAPPING)
+    minus = exclusion(ids, excluded)
+    if minus:
+        lines.insert(3, minus.rstrip("\n"))
+    return "\n".join(lines).replace("{values}", values).replace(
         "{property}", ID_PROPERTY[media]).replace("{wikis}", wikis)
 
 
@@ -316,7 +340,7 @@ def parse_mapping(payload):
     return out
 
 
-def mapping(ids, media, languages, cache=None):
+def mapping(ids, media, languages, cache=None, excluded=None):
     """`tmdbId -> mapping` for one batch of one media type, from disk where the same batch was asked before.
 
     ONE media per call. TMDB's movie and series id spaces overlap — movie 95 is Armageddon, series 95 is
@@ -329,7 +353,7 @@ def mapping(ids, media, languages, cache=None):
     """
     if not ids:
         return {}
-    query = mapping_query(ids, media, languages)
+    query = mapping_query(ids, media, languages, excluded)
     key = None
     if cache is not None:
         key = cache.key("sparql", {"q": query})
@@ -348,7 +372,7 @@ def mapping(ids, media, languages, cache=None):
     return parsed
 
 
-def imdb_query(ids, media):
+def imdb_query(ids, media, excluded=None):
     """The SPARQL that maps one batch of TMDB ids to their IMDb ids (P345), and nothing else.
 
     Separate from the mapping query because it is asked BEFORE admission, of the titles TMDB's count left
@@ -359,6 +383,7 @@ def imdb_query(ids, media):
     return (f"SELECT ?tmdb ?imdb WHERE {{\n"
             f"  VALUES ?tmdb {{ {values} }}\n"
             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"{exclusion(ids, excluded)}"
             f"  ?film wdt:P345 ?imdb .\n"
             f"}}\n"
             f"ORDER BY ?tmdb ?imdb")
@@ -386,11 +411,11 @@ def parse_imdb(payload):
     return out
 
 
-def imdb_ids(ids, media, cache=None):
+def imdb_ids(ids, media, cache=None, excluded=None):
     """`tmdbId -> tt…` for one batch of one media type, from disk where the same batch was asked before."""
     if not ids:
         return {}
-    query = imdb_query(ids, media)
+    query = imdb_query(ids, media, excluded)
     key = None
     if cache is not None:
         key = cache.key("sparql-imdb", {"q": query})
@@ -409,7 +434,7 @@ def imdb_ids(ids, media, cache=None):
     return parsed
 
 
-def kind_query(ids, media):
+def kind_query(ids, media, excluded=None):
     """The SPARQL that names what one batch of TMDB ids ARE: the labels of their P136 genres and their P31
     types, in one result.
 
@@ -425,18 +450,19 @@ def kind_query(ids, media):
     return (f"SELECT ?tmdb ?vLabel WHERE {{\n"
             f"  VALUES ?tmdb {{ {values} }}\n"
             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"{exclusion(ids, excluded)}"
             f"  {{ ?film wdt:{GENRE} ?v . }} UNION {{ ?film wdt:{INSTANCE_OF} ?v . }}\n"
             f'  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul". }}\n'
             f"}}\n"
             f"ORDER BY ?tmdb ?vLabel")
 
 
-def kinds(ids, media, cache=None):
+def kinds(ids, media, cache=None, excluded=None):
     """`tmdbId -> [label]` — what one batch of titles are, by genre and by type, from disk where the same
     batch was asked before. An id Wikidata states neither for is absent."""
     if not ids:
         return {}
-    query = kind_query(ids, media)
+    query = kind_query(ids, media, excluded)
     key = None
     if cache is not None:
         key = cache.key("sparql-kind", {"q": query})
@@ -455,7 +481,7 @@ def kinds(ids, media, cache=None):
     return parsed
 
 
-def language_query(ids, media):
+def language_query(ids, media, excluded=None):
     """The SPARQL that names one batch of TMDB ids' original languages: P364, resolved to ISO 639-1 through
     P218, which is the code a Wikipedia sitelink is keyed by.
 
@@ -467,6 +493,7 @@ def language_query(ids, media):
     return (f"SELECT ?tmdb ?code WHERE {{\n"
             f"  VALUES ?tmdb {{ {values} }}\n"
             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"{exclusion(ids, excluded)}"
             f"  ?film wdt:P364 ?v .\n"
             f"  ?v wdt:P218 ?code .\n"
             f"}}\n"
@@ -497,12 +524,12 @@ def parse_languages(payload):
     return {tmdb_id: sorted(codes) for tmdb_id, codes in out.items()}
 
 
-def languages(ids, media, cache=None):
+def languages(ids, media, cache=None, excluded=None):
     """`tmdbId -> [ISO 639-1 code]` for one batch of one media type, from disk where the same batch was
     asked before. What a title is IN, Wikidata's and CC0, rather than TMDB's `original_language`."""
     if not ids:
         return {}
-    query = language_query(ids, media)
+    query = language_query(ids, media, excluded)
     key = None
     if cache is not None:
         key = cache.key("sparql-language", {"q": query})
@@ -528,7 +555,7 @@ def languages(ids, media, cache=None):
 SCREEN_CLASSES = ("Q11424", "Q15416", "Q526877")
 
 
-def source_query(ids, media):
+def source_query(ids, media, excluded=None):
     """The SPARQL that names, for one batch of TMDB ids, the English article of every work each is based on
     (P144), and whether that work is itself a film or a series.
 
@@ -541,6 +568,7 @@ def source_query(ids, media):
     return (f"SELECT DISTINCT ?tmdb ?sourceArticle ?screen WHERE {{\n"
             f"  VALUES ?tmdb {{ {values} }}\n"
             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"{exclusion(ids, excluded)}"
             f"  ?film wdt:P144 ?basedOn .\n"
             f"  ?sourceArticle schema:about ?basedOn ; schema:isPartOf <https://en.wikipedia.org/> .\n"
             f"  BIND(EXISTS {{ ?basedOn wdt:P31/wdt:P279* ?class . FILTER(?class IN ({classes})) }} AS ?screen)\n"
@@ -573,12 +601,12 @@ def parse_sources(payload):
     return out
 
 
-def sources(ids, media, cache=None):
+def sources(ids, media, cache=None, excluded=None):
     """`tmdbId -> {article: is a screen work}` for one batch of one media type, from disk where the same
     batch was asked before. What lets the source-work fallback tell a novel from a remake's original."""
     if not ids:
         return {}
-    query = source_query(ids, media)
+    query = source_query(ids, media, excluded)
     key = None
     if cache is not None:
         key = cache.key("sparql-source", {"q": query})
@@ -597,7 +625,7 @@ def sources(ids, media, cache=None):
     return parsed
 
 
-def target_query(ids, media):
+def target_query(ids, media, excluded=None):
     """The SPARQL that names one batch of TMDB ids: the item's label and its publication dates (P577),
     plus its start time (P580) for a series, whose first air date is what a series' year means."""
     values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
@@ -605,6 +633,7 @@ def target_query(ids, media):
     return (f"SELECT ?tmdb ?filmLabel ?released ?start WHERE {{\n"
             f"  VALUES ?tmdb {{ {values} }}\n"
             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"{exclusion(ids, excluded)}"
             f"  OPTIONAL {{ ?film wdt:P577 ?released . }}\n"
             f"{start}"
             f'  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul". }}\n'
@@ -647,13 +676,13 @@ def parse_targets(payload):
             for tmdb_id, entry in seen.items()}
 
 
-def targets(ids, media, cache=None):
+def targets(ids, media, cache=None, excluded=None):
     """`tmdbId -> {"title", "year"}` for one batch of one media type, from disk where the same batch was
     asked before. What names a title to anything that asks whether an article is about it — Wikidata's,
     CC0, rather than TMDB's."""
     if not ids:
         return {}
-    query = target_query(ids, media)
+    query = target_query(ids, media, excluded)
     key = None
     if cache is not None:
         key = cache.key("sparql-target", {"q": query})
@@ -670,6 +699,199 @@ def targets(ids, media, cache=None):
     if key is not None:
         cache.write(key, payload)
     return parsed
+
+
+#: Ids per claimant lookup and Q-ids per evidence lookup. Their own sizes, not a stage's: `resolve` is asked
+#: for a stage's whole id list up front, and membership is part of the cache key.
+CLAIM_BATCH = 200
+EVIDENCE_BATCH = 100
+
+
+def claimant_query(ids, media):
+    """Every item that states each TMDB id — usually one, sometimes two."""
+    values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
+    return (f"SELECT ?tmdb ?film WHERE {{\n"
+            f"  VALUES ?tmdb {{ {values} }}\n"
+            f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"}}\n"
+            f"ORDER BY ?tmdb ?film")
+
+
+def _item(uri):
+    qid = uri.rstrip("/").rsplit("/", 1)[-1]
+    return qid if QID.match(qid) else None
+
+
+def _bindings(payload):
+    try:
+        bindings = json.loads(payload.decode("utf-8"))["results"]["bindings"]
+        if not isinstance(bindings, list):
+            raise TypeError(bindings)
+    except (ValueError, KeyError, TypeError):
+        raise WikidataError(f"not a SPARQL result: {payload[:200]!r}") from None
+    return bindings
+
+
+def parse_claimants(payload):
+    """`tmdbId -> [Q-id]`, sorted, so the order WDQS returns rows in decides nothing."""
+    out = {}
+    for binding in _bindings(payload):
+        raw, film = _cell(binding, "tmdb"), _cell(binding, "film")
+        qid = _item(film) if film else None
+        if raw is None or not _INTEGER.fullmatch(raw) or qid is None:
+            continue
+        out.setdefault(int(raw), set()).add(qid)
+    return {tmdb_id: sorted(qids, key=lambda q: (len(q), q)) for tmdb_id, qids in out.items()}
+
+
+def evidence_query(qids, media):
+    """What tells two claimants of one TMDB id apart: each item's IMDb ids, its years, every TMDB id of this
+    media it states, and its English Wikipedia article. A UNION, so the multi-valued properties concatenate
+    rather than multiply."""
+    values = " ".join(f"wd:{qid}" for qid in sorted(set(qids)))
+    start = " UNION { ?film wdt:P580 ?date . }" if media == "tv" else ""
+    return (f"SELECT ?film ?imdb ?claim ?date ?article WHERE {{\n"
+            f"  VALUES ?film {{ {values} }}\n"
+            f"  {{ ?film wdt:P345 ?imdb . }} UNION {{ ?film wdt:{ID_PROPERTY[media]} ?claim . }}"
+            f" UNION {{ ?film wdt:P577 ?date . }}{start}\n"
+            f"  UNION {{ ?article schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/> . }}\n"
+            f"}}\n"
+            f"ORDER BY ?film")
+
+
+def parse_evidence(payload):
+    """`Q-id -> {"imdb": [tt…], "years": [int], "claims": [tmdbId], "articles": [title]}`, every list sorted."""
+    out = {}
+    for binding in _bindings(payload):
+        film = _cell(binding, "film")
+        qid = _item(film) if film else None
+        if qid is None:
+            continue
+        entry = out.setdefault(qid, {"imdb": set(), "years": set(), "claims": set(), "articles": set()})
+        imdb, claim, article = _cell(binding, "imdb"), _cell(binding, "claim"), _cell(binding, "article")
+        if imdb and imdb.startswith("tt"):
+            entry["imdb"].add(imdb)
+        if claim and _INTEGER.fullmatch(claim):
+            entry["claims"].add(int(claim))
+        if article and article_title(article):
+            entry["articles"].add(article_title(article))
+        found = _DATE_YEAR.match(_cell(binding, "date") or "")
+        if found:
+            entry["years"].add(int(found.group(1)))
+    return {qid: {name: sorted(values) for name, values in entry.items()} for qid, entry in out.items()}
+
+
+def _asked(query, namespace, parse, cache):
+    key = cache.key(namespace, {"q": query}) if cache is not None else None
+    if key is not None:
+        hit = cache.read(key)
+        if hit is not None:
+            try:
+                return parse(hit)
+            except WikidataError:
+                pass
+    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
+                           headers={"Content-Type": "application/sparql-query",
+                                    "Accept": "application/sparql-results+json"})
+    parsed = parse(payload)
+    if key is not None:
+        cache.write(key, payload)
+    return parsed
+
+
+def claimants(ids, media, cache=None):
+    """`tmdbId -> [Q-id]` for every id at least one item states, from disk where a batch was asked before."""
+    ordered = sorted(set(int(i) for i in ids))
+    out = {}
+    for start in range(0, len(ordered), CLAIM_BATCH):
+        out.update(_asked(claimant_query(ordered[start:start + CLAIM_BATCH], media), "sparql-claimant",
+                          parse_claimants, cache))
+    return out
+
+
+def item_evidence(qids, media, cache=None):
+    """`Q-id -> evidence` (`parse_evidence`) for the claimants of a contested id."""
+    ordered = sorted(set(qids))
+    out = {}
+    for start in range(0, len(ordered), EVIDENCE_BATCH):
+        out.update(_asked(evidence_query(ordered[start:start + EVIDENCE_BATCH], media), "sparql-evidence",
+                          parse_evidence, cache))
+    return out
+
+
+#: The order the evidence is weighed in. Each rule NARROWS the claimants to those it holds for, where it
+#: holds for any; the first that leaves one decides. `imdb`: the item's P345 is the IMDb id TMDB itself
+#: names for the title. `year`: a year the item states is TMDB's release or first-air year. `sole-claim`: the
+#: item states no other TMDB id — an item carrying two is usually one work with a second work's id pasted on.
+#: `article`: the item has an English Wikipedia article — the other is most often a stub, a season or a part
+#: of the work (`FLCL, season 1`, `Olympia Part One`, an unlabelled duplicate) sharing its IMDb id and year.
+#: Measured on series 2559: "Bonn" states 2559 and 215780 and carries Boon's 1986 start date, so the year
+#: alone would have picked it; TMDB's IMDb id (Boon's tt0090400) is what settles it, which is why it is first.
+RULES = ("imdb", "year", "sole-claim", "article")
+
+
+def choose(candidates, evidence, tmdb):
+    """`(Q-id, rule)`: the one claimant the evidence singles out, or `(None, "ambiguous")`.
+
+    `evidence` is `item_evidence`'s; `tmdb` is `{"imdb", "year"}` from TMDB's own record of the title, either
+    of them None when TMDB states none. The candidates are sorted first, so neither the order WDQS returned
+    them in nor the order the rows arrived decides anything. Nothing that singles one out is an answer too:
+    None, and the caller drops what it would otherwise have had to merge from two works.
+    """
+    pool = sorted(set(candidates), key=lambda q: (len(q), q))
+    tests = {"imdb": lambda q: tmdb.get("imdb") is not None and tmdb["imdb"] in evidence.get(q, {}).get("imdb", ()),
+             "year": lambda q: tmdb.get("year") is not None and tmdb["year"] in evidence.get(q, {}).get("years", ()),
+             "sole-claim": lambda q: len(evidence.get(q, {}).get("claims", ())) == 1,
+             "article": lambda q: bool(evidence.get(q, {}).get("articles"))}
+    if len(pool) == 1:
+        return pool[0], None
+    for rule in RULES:
+        narrowed = [q for q in pool if tests[rule](q)]
+        if narrowed:
+            pool = narrowed
+        if len(pool) == 1:
+            return pool[0], rule
+    return None, "ambiguous"
+
+
+def resolve(ids, media, cache=None, tmdb=None):
+    """`tmdbId -> {"item", "candidates", "rule"}` for every id an item states: which ONE item every
+    per-title query answers from.
+
+    An uncontested id is `{"item": Q}`. A contested one also carries its sorted `candidates` and the `rule`
+    that chose, and `item` is None when no rule did. `tmdb(tmdb_id)` returns TMDB's `{"imdb", "year"}` for a
+    title and is asked only about contested ids — about one title in a few hundred.
+    """
+    claimed = {tmdb_id: sorted(set(qids), key=lambda q: (len(q), q))
+               for tmdb_id, qids in claimants(ids, media, cache).items() if qids}
+    contested = {tmdb_id: qids for tmdb_id, qids in claimed.items() if len(qids) > 1}
+    evidence = item_evidence([q for qids in contested.values() for q in qids], media, cache) if contested else {}
+    out = {}
+    for tmdb_id, qids in claimed.items():
+        if tmdb_id not in contested:
+            out[tmdb_id] = {"item": qids[0]}
+            continue
+        chosen, rule = choose(qids, evidence, (tmdb(tmdb_id) if tmdb else None) or {})
+        out[tmdb_id] = {"item": chosen, "candidates": qids, "rule": rule}
+    return out
+
+
+def set_aside(resolution):
+    """`tmdbId -> [Q-id]`: the claimants every query must leave out (`exclusion`) — all of them where
+    nothing chose one, so an ambiguous title answers nothing rather than two works at once."""
+    return {tmdb_id: [q for q in found["candidates"] if q != found["item"]]
+            for tmdb_id, found in resolution.items() if found.get("candidates")}
+
+
+def provenance(found):
+    """What a row records about a contested title: the item chosen (absent when none was) and every item
+    that claimed its TMDB id. An uncontested title records nothing, so its row is unchanged."""
+    if not found or not found.get("candidates"):
+        return {}
+    out = {"wikidataCandidates": list(found["candidates"])}
+    if found.get("item"):
+        out["wikidataItem"] = found["item"]
+    return out
 
 
 def cache_for(env=None):

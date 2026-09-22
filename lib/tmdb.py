@@ -148,11 +148,44 @@ def title_record(body, tmdb_id, media):
     }
 
 
-class TMDB:
-    """A thin client over `lib/http`, with the detail cache `lib/cache` describes."""
+#: The detail call `identity` makes. A film's record names its IMDb id; a series' does not without
+#: `external_ids`, which is appended for a series only — the film's call is then the enrichment's own, and
+#: answered from the bodies already on disk.
+IDENTITY_APPEND = {"movie": APPEND, "tv": APPEND + ",external_ids"}
 
-    def __init__(self, key=None, cache=None):
-        self._key = key or api_key()
+
+def identity(body, media):
+    """`{"imdb", "year"}` — what TMDB says a title IS, beyond its id: the IMDb id it names and its release
+    (film) or first-air (series) year, each None when TMDB states none. Read only to choose between two
+    Wikidata items that claim one TMDB id (`lib/wikidata.resolve`); neither value is written anywhere."""
+    if media == "movie":
+        imdb, date = body.get("imdb_id"), body.get("release_date")
+    else:
+        imdb, date = (body.get("external_ids") or {}).get("imdb_id"), body.get("first_air_date")
+    year = int(date[:4]) if isinstance(date, str) and date[:4].isdigit() else None
+    return {"imdb": imdb if isinstance(imdb, str) and imdb.startswith("tt") else None, "year": year}
+
+
+def title_identity(client, media, tmdb_id):
+    """`identity` for one title through `client`, or `{}` for an id TMDB no longer has."""
+    try:
+        body = client.get(f"/{media}/{tmdb_id}", {"append_to_response": IDENTITY_APPEND[media]})
+    except http.HTTPError as error:
+        if error.status == 404:
+            return {}
+        raise
+    return identity(body, media)
+
+
+class TMDB:
+    """A thin client over `lib/http`, with the detail cache `lib/cache` describes.
+
+    `require_key=False` defers the key to the first request that has to go out: a stage that only reads
+    bodies the enrichment already cached (`title_identity`) then runs where no key is loaded, and refuses
+    only when it truly has to ask TMDB."""
+
+    def __init__(self, key=None, cache=None, require_key=True):
+        self._key = key or (api_key() if require_key else None)
         self.cache = caching.tmdb() if cache is None else cache
 
     def get(self, path, params=None):
@@ -164,7 +197,7 @@ class TMDB:
             hit = self.cache.read(key)
             if hit is not None:
                 return json.loads(hit.decode("utf-8"))
-        payload = http.request(HOST, BASE + path, dict(params, api_key=self._key))
+        payload = http.request(HOST, BASE + path, dict(params, api_key=self._key or api_key()))
         body = json.loads(payload.decode("utf-8"))
         if key is not None and is_title_record(body, "append_to_response" in params):
             self.cache.write(key, payload)

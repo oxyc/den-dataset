@@ -265,6 +265,9 @@ class Wikidata:
                 if f"<{site}>" in query:
                     rows.append({"anyArticle": wiki_url(language, title), "anySite": site})
             return rows
+        if head == "SELECT ?tmdb ?film":
+            # One item per id here, so nothing is contested and the evidence query is never asked.
+            return [{"film": ENTITY + qid}]
         if head == "SELECT ?tmdb ?imdb":
             return [{"imdb": imdb_id} for imdb_id in self.claims(qid, "P345")]
         if head == "SELECT ?tmdb ?code":

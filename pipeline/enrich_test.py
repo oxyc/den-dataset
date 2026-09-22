@@ -119,15 +119,26 @@ class Batch(unittest.TestCase):
         # dump does — a `Ratings`, or an exception to raise.
         self.imdb_ids, self.imdb_votes, self.imdb_id_calls = {}, {}, []
         self.dump = None
+        # Which Wikidata items state each (media, tmdbId), what each item states, and the items each lookup
+        # was told to leave out.
+        self.claimants, self.evidence, self.excluded = {}, {}, []
         for target, stub in ((enrich.wikidata, "mapping"), (enrich.plot, "plot"), (enrich.wikidata, "imdb_ids"),
                              (enrich.wikidata, "languages"), (enrich.wikidata, "kinds"),
-                             (enrich.wikidata, "sources"), (enrich.imdb, "ratings")):
+                             (enrich.wikidata, "sources"), (enrich.imdb, "ratings"),
+                             (enrich.wikidata, "claimants"), (enrich.wikidata, "item_evidence")):
             patch = mock.patch.object(target, stub, getattr(self, stub + "_stub"))
             patch.start()
             self.addCleanup(patch.stop)
 
-    def imdb_ids_stub(self, ids, media, cache=None):
+    def claimants_stub(self, ids, media, cache=None):
+        return {i: self.claimants[(media, i)] for i in ids if (media, i) in self.claimants}
+
+    def item_evidence_stub(self, qids, media, cache=None):
+        return {q: self.evidence[q] for q in qids if q in self.evidence}
+
+    def imdb_ids_stub(self, ids, media, cache=None, excluded=None):
         self.imdb_id_calls.append((media, sorted(ids)))
+        self.excluded.append(("imdb", media, excluded))
         return {i: self.imdb_ids[(media, i)] for i in ids if (media, i) in self.imdb_ids}
 
     def ratings_stub(self, minimum=0, env=None, request=None):
@@ -136,20 +147,24 @@ class Batch(unittest.TestCase):
         return self.dump or enrich.imdb.Ratings(
             {tt: n for tt, n in self.imdb_votes.items() if n >= minimum}, "unchanged")
 
-    def mapping_stub(self, ids, media, languages, cache=None):
+    def mapping_stub(self, ids, media, languages, cache=None, excluded=None):
         self.mapping_calls.append((media, sorted(ids)))
+        self.excluded.append(("mapping", media, excluded))
         return {i: self.mapping[(media, i)] for i in ids if (media, i) in self.mapping}
 
-    def languages_stub(self, ids, media, cache=None):
+    def languages_stub(self, ids, media, cache=None, excluded=None):
         self.language_calls.append((media, sorted(ids)))
+        self.excluded.append(("languages", media, excluded))
         return {i: self.languages[(media, i)] for i in ids if (media, i) in self.languages}
 
-    def kinds_stub(self, ids, media, cache=None):
+    def kinds_stub(self, ids, media, cache=None, excluded=None):
         self.kind_calls.append((media, sorted(ids)))
+        self.excluded.append(("kinds", media, excluded))
         return {i: self.kinds[(media, i)] for i in ids if (media, i) in self.kinds}
 
-    def sources_stub(self, ids, media, cache=None):
+    def sources_stub(self, ids, media, cache=None, excluded=None):
         self.source_calls.append((media, sorted(ids)))
+        self.excluded.append(("sources", media, excluded))
         return {i: self.sources[(media, i)] for i in ids if (media, i) in self.sources}
 
     def plot_stub(self, article, language="en", cache=None, token=None):
@@ -982,6 +997,50 @@ class Batch(unittest.TestCase):
         self.run_batch({"/tv/95": detail(95), "/movie/95": detail(95)}, [("tv", 95), ("movie", 95)])
         rows = self.rows()
         self.assertEqual((rows["tv:95"]["plotArticle"], rows["movie:95"]["plotArticle"]), ("Buffy", "Armageddon"))
+
+    # -- one Wikidata item per title ---------------------------------------------------------------------
+
+    def boon_and_bonn(self):
+        """Series 2559 as Wikidata has it: "Boon" (1986) states it, and so does "Bonn – Alte Freunde, neue
+        Feinde" (2023), which also states its own id 215780 and carries Boon's 1986 start date."""
+        self.claimants[("tv", 2559)] = ["Q132860965", "Q116226000"]
+        self.evidence.update({"Q116226000": {"imdb": ["tt13905034"], "years": [1986, 2022], "claims": [2559, 215780]},
+                              "Q132860965": {"imdb": ["tt0090400"], "years": [], "claims": [2559]}})
+        self.mapping[("tv", 2559)] = {"article": "Boon (TV series)"}
+        self.plots[("Boon (TV series)", "en")] = found("B" * 300)
+        return {"/tv/2559": detail(2559, first_air_date="1986-01-14", external_ids={"imdb_id": "tt0090400"})}
+
+    def test_a_tmdb_id_two_items_claim_is_answered_by_the_one_tmdb_names(self):
+        """Every query was keyed by the TMDB id, so series 2559 shipped Bonn's name beside Boon's IMDb id.
+        TMDB's own IMDb id picks Boon; every lookup leaves Bonn out, and the row records the choice."""
+        self.run_batch(self.boon_and_bonn(), [("tv", 2559)], exclude_anime=True)
+        row = self.rows()["tv:2559"]
+        self.assertEqual(row["wikidataItem"], "Q132860965")
+        self.assertEqual(row["wikidataCandidates"], ["Q116226000", "Q132860965"])
+        told = {name: excluded for name, media, excluded in self.excluded}
+        for name in ("mapping", "languages", "kinds"):
+            self.assertEqual(told[name], {2559: ["Q116226000"]}, name)
+
+    def test_a_title_nothing_singles_one_item_out_for_asks_neither(self):
+        """Two items, neither naming TMDB's IMDb id or year, both claiming only this id: the row keeps
+        both names and no item, and every lookup leaves both out rather than merging them."""
+        self.claimants[("movie", 5)] = ["Q2", "Q1"]
+        self.evidence.update({"Q1": {"imdb": ["tt1"], "years": [1990], "claims": [5]},
+                              "Q2": {"imdb": ["tt2"], "years": [1991], "claims": [5]}})
+        self.run_batch({"/movie/5": detail(5, imdb_id="tt9", release_date="2001-01-01")}, [("movie", 5)])
+        row = self.rows()["movie:5"]
+        self.assertNotIn("wikidataItem", row)
+        self.assertEqual(row["wikidataCandidates"], ["Q1", "Q2"])
+        self.assertEqual(dict((n, e) for n, m, e in self.excluded)["mapping"], {5: ["Q1", "Q2"]})
+
+    def test_an_uncontested_title_records_nothing_and_its_queries_are_unchanged(self):
+        self.claimants[("movie", 1)] = ["Q1"]
+        self.mapping[("movie", 1)] = {"article": "One"}
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
+        row = self.rows()["movie:1"]
+        self.assertNotIn("wikidataItem", row)
+        self.assertNotIn("wikidataCandidates", row)
+        self.assertEqual([excluded for _, _, excluded in self.excluded if excluded], [])
 
     def test_remaining_counts_a_series_and_a_film_that_share_an_id_apart(self):
         """`remaining` is how the drain decides it is finished. Counted by bare id, a processed movie 95

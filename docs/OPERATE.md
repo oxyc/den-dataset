@@ -147,6 +147,13 @@ its vector and belongs here. On `out-repass` on 2026-09-22 this was 79 ids. A ba
 whole and the merge refuses a pass that skipped one; `scripts/facts-run.sh out` loops until nothing is
 skipped.
 
+About one title in 560 has its TMDB id claimed by two Wikidata items (series 2559: "Boon" and "Bonn").
+Every stage that asks Wikidata by TMDB id — enrich, articles, docfacts, facts — answers from ONE of them,
+chosen by `lib/wikidata.resolve` on TMDB's own IMDb id and year, and the row records `wikidataItem` and
+`wikidataCandidates`. facts and docfacts read that TMDB record from the enrichment's cache; on a miss they
+need `TMDB_API_KEY` (`. scripts/lib/den-env.sh; den_load_env`). A checkpointed row that merged two items is
+scraped again on the next run.
+
 **7. The corpus** — the pass shards, facts and genres & moods joined into one JSONL, the source of truth.
 
 ```sh

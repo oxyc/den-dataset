@@ -32,6 +32,7 @@ from . import artifacts, genres_moods
 from .contract import StageError
 from lib import cache as caching
 from lib import http, wikidata
+from lib import tmdb as tmdb_api
 
 NAME = "docfacts"
 
@@ -111,26 +112,54 @@ def write(path, rows):
     caching.write_atomically(path, body.encode("utf-8"))
 
 
-def run(ctx, cache=None):
-    """Scrape what is missing. Returns the file."""
+def identities(titles, cache, client):
+    """`(key -> resolution, media -> items to leave out)`: which ONE Wikidata item answers for each title,
+    chosen as the enrichment and the facts stage choose (`lib/wikidata.resolve`), so the director and genres
+    composed into a document name the work its plot is about."""
+    found, excluded = {}, {}
+    try:
+        for media in sorted(titles):
+            resolved = wikidata.resolve(titles[media], media, cache,
+                                        lambda tmdb_id, media=media: tmdb_api.title_identity(client, media, tmdb_id))
+            found.update({f"{media}:{tmdb_id}": value for tmdb_id, value in resolved.items()})
+            excluded[media] = wikidata.set_aside(resolved)
+    except (wikidata.WikidataError, http.HTTPError) as refusal:
+        raise StageError(f"docfacts: choosing each title's Wikidata item failed ({refusal}); re-run.") from None
+    except tmdb_api.TMDBError as refusal:
+        raise StageError(f"docfacts: several Wikidata items claim one TMDB id, and TMDB's record of that title "
+                         f"is not cached, so choosing between them needs TMDB itself: {refusal}. "
+                         f"`scripts/lib/den-env.sh` loads it from den.env.") from None
+    return found, excluded
+
+
+def run(ctx, cache=None, client=None):
+    """Scrape what is missing. Returns the file. `client` is a `lib/tmdb.TMDB`, asked only about titles
+    several Wikidata items claim, and built with no key when not given."""
     labels = ctx.require(artifacts.GENRES_MOODS)
     path = ctx.path(artifacts.DOC_FACTS)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
 
+    cache = wikidata.cache_for() if cache is None else cache
+    client = client or tmdb_api.TMDB(require_key=False)
     rows = existing(path)
+    resolved, excluded = identities(outstanding(labels, {}), cache, client)
+    # A contested row written before the choice existed merged every claimant's directors and genres.
+    for key, found in resolved.items():
+        if found.get("candidates") and key in rows and "wikidataCandidates" not in rows[key]:
+            del rows[key]
     before = len(rows)
     todo = outstanding(labels, rows)
     wanted = sum(len(ids) for ids in todo.values())
     print(f"  doc-facts: {before} cached, {wanted} to fetch", file=sys.stderr)
 
-    cache = wikidata.cache_for() if cache is None else cache
     done = 0
     work = batches(todo)
     with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
         for index in range(0, len(work), CONCURRENCY):
             group = work[index:index + CONCURRENCY]
             try:
-                answers = list(pool.map(lambda job: wikidata.doc_facts(job[1], job[0], cache), group))
+                answers = list(pool.map(lambda job: wikidata.doc_facts(job[1], job[0], cache,
+                                                                       excluded=excluded.get(job[0])), group))
             except (wikidata.WikidataError, http.HTTPError) as refusal:
                 raise StageError(
                     f"docfacts: the scrape stopped at {done}/{wanted} ({refusal}). Everything it had "
@@ -139,7 +168,8 @@ def run(ctx, cache=None):
                 for tmdb_id in ids:
                     fact = found.get(tmdb_id) or {}
                     rows[f"{media}:{tmdb_id}"] = {"directors": fact.get("directors") or [],
-                                                  "genres": fact.get("genres") or []}
+                                                  "genres": fact.get("genres") or [],
+                                                  **wikidata.provenance(resolved.get(f"{media}:{tmdb_id}"))}
                 done += len(ids)
             # Written per group, not at the end: an interrupted scrape keeps everything it paid for.
             write(path, rows)

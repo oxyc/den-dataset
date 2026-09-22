@@ -147,7 +147,7 @@ class Facts(unittest.TestCase):
     def setUp(self):
         self.original = wikidata.fetch_property
         self.answers = {}
-        wikidata.fetch_property = lambda ids, media, prop, cache=None: self.answers.get(prop, {})
+        wikidata.fetch_property = lambda ids, media, prop, cache=None, excluded=None: self.answers.get(prop, {})
 
     def tearDown(self):
         wikidata.fetch_property = self.original
@@ -491,6 +491,110 @@ class Targets(unittest.TestCase):
         with mock.patch.object(wikidata.http, "request") as sent:
             self.assertEqual(wikidata.targets([], "movie"), {})
         sent.assert_not_called()
+
+
+BONN, BOON = "Q116226000", "Q132860965"
+ENTITY = "http://www.wikidata.org/entity/"
+#: Series 2559 as Wikidata states it: Bonn (2023) also states its own id 215780 and carries Boon's 1986
+#: start date; Boon states nothing but the id and its IMDb id.
+EVIDENCE = {BONN: {"imdb": ["tt13905034"], "years": [1986, 2022], "claims": [2559, 215780], "articles": []},
+            BOON: {"imdb": ["tt0090400"], "years": [], "claims": [2559], "articles": ["Boon (TV series)"]}}
+
+
+class OneItemPerTitle(unittest.TestCase):
+    """Two items can state one TMDB id, and every per-title query is keyed by that id — so without a choice,
+    a title's fields came from both works: series 2559 shipped Bonn's name beside Boon's IMDb id."""
+
+    def test_tmdbs_imdb_id_picks_the_item_whatever_order_the_claimants_arrive_in(self):
+        for order in ([BONN, BOON], [BOON, BONN]):
+            self.assertEqual(wikidata.choose(order, EVIDENCE, {"imdb": "tt0090400", "year": 1986}), (BOON, "imdb"))
+
+    def test_the_year_alone_would_pick_the_wrong_item_so_it_comes_second(self):
+        """Bonn carries Boon's 1986 start date; with no IMDb id from TMDB the year narrows to it."""
+        self.assertEqual(wikidata.choose([BOON, BONN], EVIDENCE, {"imdb": None, "year": 1986}), (BONN, "year"))
+
+    def test_the_item_claiming_no_other_tmdb_id_decides_when_tmdb_says_nothing(self):
+        self.assertEqual(wikidata.choose([BONN, BOON], EVIDENCE, {}), (BOON, "sole-claim"))
+
+    def test_nothing_that_singles_one_out_chooses_none(self):
+        """"Charité" and "Charité at War" both state series 70837, TMDB's IMDb id and year, and an article."""
+        evidence = {"Q1": {"imdb": ["tt1"], "years": [1990], "claims": [5], "articles": ["A"]},
+                    "Q2": {"imdb": ["tt1"], "years": [1990], "claims": [5], "articles": ["B"]}}
+        for order in (["Q1", "Q2"], ["Q2", "Q1"]):
+            self.assertEqual(wikidata.choose(order, evidence, {"imdb": "tt1", "year": 1990}), (None, "ambiguous"))
+
+    def test_the_item_with_an_article_beats_its_season_or_stub(self):
+        """Film 25623, House (1977): a second, unlinked item states the same IMDb id and year."""
+        evidence = {"Q1132905": {"imdb": ["tt0076162"], "years": [1977], "claims": [25623],
+                                 "articles": ["House (1977 film)"]},
+                    "Q64879501": {"imdb": ["tt0076162"], "years": [1977], "claims": [25623], "articles": []}}
+        self.assertEqual(wikidata.choose(["Q64879501", "Q1132905"], evidence, {"imdb": "tt0076162", "year": 1977}),
+                         ("Q1132905", "article"))
+
+    def test_a_rule_that_holds_for_none_does_not_narrow(self):
+        """TMDB's IMDb id matching neither item says nothing; the year still decides."""
+        evidence = {"Q1": {"imdb": ["tt1"], "years": [1990], "claims": [5, 6]},
+                    "Q2": {"imdb": ["tt2"], "years": [2001], "claims": [5, 7]}}
+        self.assertEqual(wikidata.choose(["Q1", "Q2"], evidence, {"imdb": "tt9", "year": 2001}), ("Q2", "year"))
+
+    def test_resolve_chooses_for_contested_ids_only_and_asks_tmdb_only_about_them(self):
+        asked = []
+        with mock.patch.object(wikidata, "claimants", return_value={2559: [BONN, BOON], 1399: ["Q23572"]}), \
+                mock.patch.object(wikidata, "item_evidence", return_value=EVIDENCE) as evidence:
+            resolved = wikidata.resolve([2559, 1399, 7], "tv", None,
+                                        lambda i: asked.append(i) or {"imdb": "tt0090400", "year": 1986})
+        self.assertEqual(asked, [2559])
+        evidence.assert_called_once_with([BONN, BOON], "tv", None)
+        self.assertEqual(resolved, {2559: {"item": BOON, "candidates": [BONN, BOON], "rule": "imdb"},
+                                    1399: {"item": "Q23572"}})
+        self.assertEqual(wikidata.set_aside(resolved), {2559: [BONN]})
+        self.assertEqual(wikidata.provenance(resolved[2559]),
+                         {"wikidataItem": BOON, "wikidataCandidates": [BONN, BOON]})
+        self.assertEqual(wikidata.provenance(resolved[1399]), {}, "an uncontested row is unchanged")
+
+    def test_an_ambiguous_title_sets_every_claimant_aside(self):
+        resolved = {5: {"item": None, "candidates": ["Q1", "Q2"], "rule": "ambiguous"}}
+        self.assertEqual(wikidata.set_aside(resolved), {5: ["Q1", "Q2"]})
+        self.assertEqual(wikidata.provenance(resolved[5]), {"wikidataCandidates": ["Q1", "Q2"]})
+
+    def test_the_claimants_are_sorted_by_qid_number(self):
+        payload = rows({"tmdb": cell("2559"), "film": cell(ENTITY + BOON)},
+                       {"tmdb": cell("2559"), "film": cell(ENTITY + BONN)},
+                       {"tmdb": cell("1"), "film": cell(ENTITY + "Q99")}, {"tmdb": cell("1"), "film": cell(ENTITY + "Q100")})
+        self.assertEqual(wikidata.parse_claimants(payload), {2559: [BONN, BOON], 1: ["Q99", "Q100"]})
+
+    def test_the_evidence_is_every_imdb_id_year_and_tmdb_id_an_item_states(self):
+        payload = rows({"film": cell(ENTITY + BONN), "claim": cell("215780")},
+                       {"film": cell(ENTITY + BONN), "claim": cell("2559")},
+                       {"film": cell(ENTITY + BONN), "date": cell("2022-10-22T00:00:00Z")},
+                       {"film": cell(ENTITY + BONN), "date": cell("1986-01-14T00:00:00Z")},
+                       {"film": cell(ENTITY + BONN), "imdb": cell("tt13905034")},
+                       {"film": cell(ENTITY + BOON), "claim": cell("2559")},
+                       {"film": cell(ENTITY + BOON), "imdb": cell("tt0090400")},
+                       {"film": cell(ENTITY + BOON), "article": cell("https://en.wikipedia.org/wiki/Boon_(TV_series)")})
+        self.assertEqual(wikidata.parse_evidence(payload), EVIDENCE)
+        self.assertIn("wdt:P580 ?date", wikidata.evidence_query([BONN], "tv"))
+        self.assertNotIn("P580", wikidata.evidence_query([BONN], "movie"))
+        self.assertIn("wdt:P4983 ?claim", wikidata.evidence_query([BONN], "tv"))
+
+    def test_every_per_title_query_leaves_the_set_aside_items_out_pair_by_pair(self):
+        excluded = {2559: [BONN]}
+        minus = '  MINUS { VALUES (?tmdb ?film) { ("2559" wd:Q116226000) } }'
+        for query in (wikidata.query_text([2559, 3], "tv", "P57", excluded),
+                      wikidata.mapping_query([2559, 3], "tv", LANGUAGES, excluded),
+                      wikidata.imdb_query([2559, 3], "tv", excluded), wikidata.kind_query([2559, 3], "tv", excluded),
+                      wikidata.language_query([2559, 3], "tv", excluded),
+                      wikidata.source_query([2559, 3], "tv", excluded), wikidata.target_query([2559, 3], "tv", excluded)):
+            self.assertIn("?film wdt:P4983 ?tmdb .\n" + minus + "\n", query)
+
+    def test_a_batch_with_no_contested_id_sends_the_text_already_on_disk(self):
+        """The query text is the cache key; a batch the choice does not touch must not be asked again."""
+        for build in (lambda e: wikidata.query_text([3], "tv", "P57", e),
+                      lambda e: wikidata.mapping_query([3], "tv", LANGUAGES, e),
+                      lambda e: wikidata.imdb_query([3], "tv", e), lambda e: wikidata.kind_query([3], "tv", e),
+                      lambda e: wikidata.language_query([3], "tv", e), lambda e: wikidata.source_query([3], "tv", e),
+                      lambda e: wikidata.target_query([3], "tv", e)):
+            self.assertEqual(build({2559: [BONN]}), build(None))
 
 
 if __name__ == "__main__":
