@@ -33,6 +33,9 @@ PATH = "/sparql"
 ID_PROPERTY = {"movie": "P4947", "tv": "P4983"}
 
 DIRECTOR, GENRE = "P57", "P136"
+#: What a title IS — `film`, `anime television series`. Asked beside P136 by `kind_query`, never by the
+#: doc-facts query, whose text is a cache key.
+INSTANCE_OF = "P31"
 
 #: A label the SERVICE could not resolve comes back as the bare Q-id.
 QID = re.compile(r"^Q\d+$")
@@ -401,6 +404,118 @@ def imdb_ids(ids, media, cache=None):
                            headers={"Content-Type": "application/sparql-query",
                                     "Accept": "application/sparql-results+json"})
     parsed = parse_imdb(payload)
+    if key is not None:
+        cache.write(key, payload)
+    return parsed
+
+
+def kind_query(ids, media):
+    """The SPARQL that names what one batch of TMDB ids ARE: the labels of their P136 genres and their P31
+    types, in one result.
+
+    A UNION rather than two OPTIONALs, and one request rather than two. Both properties are multi-valued,
+    so OPTIONALs return their cross product — the reason `doc_facts` asks one property per request — but a
+    UNION is a disjunction: each value is its own row, and the two sets simply concatenate.
+
+    LABELS, not Q-ids. Wikidata spreads anime across dozens of items (`anime film`, `anime television
+    series`, `fantasy anime and manga`, and a new one whenever an editor needs it), so a caller holding a
+    pinned list of Q-ids silently stops matching the ones minted after it was written.
+    """
+    values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
+    return (f"SELECT ?tmdb ?vLabel WHERE {{\n"
+            f"  VALUES ?tmdb {{ {values} }}\n"
+            f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"  {{ ?film wdt:{GENRE} ?v . }} UNION {{ ?film wdt:{INSTANCE_OF} ?v . }}\n"
+            f'  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul". }}\n'
+            f"}}\n"
+            f"ORDER BY ?tmdb ?vLabel")
+
+
+def kinds(ids, media, cache=None):
+    """`tmdbId -> [label]` — what one batch of titles are, by genre and by type, from disk where the same
+    batch was asked before. An id Wikidata states neither for is absent."""
+    if not ids:
+        return {}
+    query = kind_query(ids, media)
+    key = None
+    if cache is not None:
+        key = cache.key("sparql-kind", {"q": query})
+        hit = cache.read(key)
+        if hit is not None:
+            try:
+                return parse_labelled(hit)
+            except WikidataError:
+                pass
+    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
+                           headers={"Content-Type": "application/sparql-query",
+                                    "Accept": "application/sparql-results+json"})
+    parsed = parse_labelled(payload)
+    if key is not None:
+        cache.write(key, payload)
+    return parsed
+
+
+def language_query(ids, media):
+    """The SPARQL that names one batch of TMDB ids' original languages: P364, resolved to ISO 639-1 through
+    P218, which is the code a Wikipedia sitelink is keyed by.
+
+    Its own request rather than another OPTIONAL on the mapping query: the mapping's TEXT is its cache key
+    and ~770 of its bodies are already on disk, so adding a line to it re-asks WDQS for all of them. P364
+    is multi-valued too, and an OPTIONAL would multiply the mapping's sitelink rows by it.
+    """
+    values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
+    return (f"SELECT ?tmdb ?code WHERE {{\n"
+            f"  VALUES ?tmdb {{ {values} }}\n"
+            f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"  ?film wdt:P364 ?v .\n"
+            f"  ?v wdt:P218 ?code .\n"
+            f"}}\n"
+            f"ORDER BY ?tmdb ?code")
+
+
+def parse_languages(payload):
+    """`tmdbId -> [code]`, lower-cased and sorted. RAISES on a body that is not a SPARQL result.
+
+    Every code a title states, not one: a co-production has several, and the caller tries each of them
+    before the wikis the title says nothing about. A language with no P218 has no row — an ISO 639-1 code
+    is what a sitelink is keyed by, and there is no article to prefer without one.
+    """
+    try:
+        bindings = json.loads(payload.decode("utf-8"))["results"]["bindings"]
+        if not isinstance(bindings, list):
+            raise TypeError(bindings)
+    except (ValueError, KeyError, TypeError):
+        raise WikidataError(f"not a SPARQL result: {payload[:200]!r}") from None
+    out = {}
+    for binding in bindings:
+        raw, code = _cell(binding, "tmdb"), _cell(binding, "code")
+        if raw is None or not _INTEGER.fullmatch(raw) or not code:
+            continue
+        found = out.setdefault(int(raw), [])
+        if code.lower() not in found:
+            found.append(code.lower())
+    return {tmdb_id: sorted(codes) for tmdb_id, codes in out.items()}
+
+
+def languages(ids, media, cache=None):
+    """`tmdbId -> [ISO 639-1 code]` for one batch of one media type, from disk where the same batch was
+    asked before. What a title is IN, Wikidata's and CC0, rather than TMDB's `original_language`."""
+    if not ids:
+        return {}
+    query = language_query(ids, media)
+    key = None
+    if cache is not None:
+        key = cache.key("sparql-language", {"q": query})
+        hit = cache.read(key)
+        if hit is not None:
+            try:
+                return parse_languages(hit)
+            except WikidataError:
+                pass
+    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
+                           headers={"Content-Type": "application/sparql-query",
+                                    "Accept": "application/sparql-results+json"})
+    parsed = parse_languages(payload)
     if key is not None:
         cache.write(key, payload)
     return parsed

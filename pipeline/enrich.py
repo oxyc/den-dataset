@@ -11,9 +11,11 @@ the record's `overview`. Every one of those goes through `lib/`, so the response
 `.cache/` answer a re-run.
 
 **Admission is decided before any of the expensive work**, on TMDB's vote count OR IMDb's — see
-`pipeline/floors.py` for the floors and why there are four. A title TMDB's count leaves short costs one
-more thing: its IMDb id, one Wikidata SPARQL per media for all of them together. IMDb's counts are read,
-compared and forgotten; none is written into a batch, a log line or the report.
+`pipeline/floors.py` for the floors and why there are four. TMDB's count comes off the WORKLIST row, which
+`/discover` stated when the universe was built; only an export universe, whose dump states popularity and
+not votes, falls back to the detail call's. A title TMDB's count leaves short costs one more thing: its
+IMDb id, one Wikidata SPARQL per media for all of them together. IMDb's counts are read, compared and
+forgotten; none is written into a batch, a log line or the report.
 
 **TMDB's prose never enters the record.** `lib/tmdb.title_record` keeps only the overview's LENGTH, and a
 title with no Wikipedia plot is written `hasWikiPlot: false` with an empty `overview` — nothing downstream
@@ -54,11 +56,14 @@ WIKI_PLOT_FLOOR = 120
 #: of its own that clears `WIKI_PLOT_FLOOR` on any Wikipedia (see `reground`).
 OWN_ARTICLE_SUFFICIENT = 1000
 
-#: An overview shorter than this is a stub too thin to classify. Judged on the LENGTH only.
-STUB = 20
-
-#: TMDB keyword 210024 is "anime"; Japanese-language Animation (genre 16) is the catch-all.
-ANIME_KEYWORD, ANIMATION = 210024, 16
+#: Wikidata says anime in the LABEL of a P136 genre or a P31 type: `anime film`, `anime television series`,
+#: `<genre> anime and manga`, `anime/manga style`. The vocabulary is open — an editor mints a new
+#: `<genre> anime and manga` whenever one is needed — so the rule is the word, not a pinned list of Q-ids.
+ANIME = "anime"
+#: The one label carrying the word that says the opposite: western animation drawn in the style, which is
+#: not what someone excluding anime means. `lib/wikidata_facts.genre_map` sets `live-action/animated` aside
+#: from its animation rule for the same reason.
+NOT_ANIME = "anime-influenced animation"
 
 #: In-flight TMDB detail calls, and titles grounding at once — the second gentle on the public API.
 TMDB_WORKERS, WIKI_WORKERS = 8, 4
@@ -154,12 +159,22 @@ def read_checkpoint(path):
                          f"restore it, or delete it to intentionally start fresh")
 
 
-TOTALS = ("anime", "belowFloor", "failures", "noOverview")
+#: `noOverview` is gone with the stub check that counted it — see `run`. A checkpoint that carries one is
+#: read without it; the counter counted a rule that no longer exists.
+TOTALS = ("anime", "belowFloor", "failures")
 
 
-def is_anime(record):
-    return ANIME_KEYWORD in record["keywordIDs"] or (
-        ANIMATION in record["genreIDs"] and record["originalLanguage"] == "ja")
+def is_anime(labels):
+    """Whether Wikidata's P136 genres and P31 types say this title is anime.
+
+    Read off TMDB's keyword 210024 and its Japanese-language Animation catch-all before. Measured against
+    that rule over the 47,548 corpus titles with a facts row: 1,129 agree, 99 are TMDB's alone and 16
+    Wikidata's. Almost every one of the 99 is anime TMDB tags but Wikidata's P136 does not (`Devilman
+    Crybaby`), and the 16 are anime co-productions whose `original_language` is not `ja` — `Ulysses 31`
+    (French-Japanese), `Dogtanian` (Spanish-Japanese), `Ox Tales` (Dutch-Japanese). The flag is opt-IN and
+    `fetch` never passes it, so nothing shipped turns on the 115 either way.
+    """
+    return any(ANIME in label.lower() and label.lower() != NOT_ANIME for label in labels)
 
 
 def is_transient(error):
@@ -271,11 +286,18 @@ def reground(record, facts, cache, token):
     try:
         enough = bool(facts.get("article")) and consider(facts["article"], "en", "own")
         # No English article, or a thin one: two thirds of the plotless films have none, and half of THOSE
-        # have one elsewhere. The title's own language first — right 8 times in 15 — then the rest, since
+        # have one elsewhere. The title's own languages first — right 8 times in 15 — then the rest, since
         # four of the misses were English-language films covered by the German or Italian Wikipedia.
         # Still this title's OWN article — `articlesByLang` is its sitelinks, never the source work's.
+        #
+        # The languages are Wikidata's P364, ALL of them, where this read TMDB's single `original_language`.
+        # A co-production states several and TMDB picks one, so the list is the better ordering as well as
+        # the CC0 one. Measured over the 12,611 corpus titles grounded this way: 11,142 keep TMDB's code
+        # inside the preferred block, 1,164 have no P364 and fall through to code order, and 305 lose it —
+        # of which 87 were actually served by the language P364 does not name. The order only decides which
+        # wiki is READ first; the longest article still wins, so a miss costs a fetch, not a plot.
         if not enough and by_language:
-            preferred = [record["originalLanguage"]] if record["originalLanguage"] is not None else []
+            preferred = list(facts.get("languages") or ())
             for language in preferred + sorted(code for code in by_language if code not in preferred):
                 article = by_language.get(language)
                 if article and consider(article, language, "own-other-language"):
@@ -351,11 +373,19 @@ def unrecorded(out_dir, next_batch):
 
 
 def read_worklist(path):
-    """`[(media, tmdbId)]`, in the worklist's order."""
+    """`([(media, tmdbId)], {key: voteCount})`, in the worklist's order.
+
+    The counts are the TMDB votes `/discover` stated when the universe was built (`pipeline/worklist.entry`)
+    — what the admission gate judges by. A row that states none is absent from the map, never zero: the
+    export dump carries no count, and zero is below every floor.
+    """
     try:
         with open(path, encoding="utf-8") as handle:
-            return [("tv" if row["mediaType"] == "tv" else "movie", int(row["tmdbId"]))
-                    for row in json.load(handle)]
+            rows = json.load(handle)
+        entries = [("tv" if row["mediaType"] == "tv" else "movie", int(row["tmdbId"])) for row in rows]
+        votes = {key(*pair): int(row["voteCount"]) for pair, row in zip(entries, rows)
+                 if row.get("voteCount") is not None}
+        return entries, votes
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise StageError(f"enrich: {path} is not a worklist of {{tmdbId, mediaType}} rows ({error})")
 
@@ -377,15 +407,34 @@ def imdb_counts(floors):
     return ratings, ratings.note
 
 
-def admit(records, floors, ratings, cache):
-    """`(admitted, unidentified)`: key → which count admitted it (`TMDB`, `IMDB` or `BOTH`), and how many of
-    the titles TMDB left short have no IMDb id and were therefore judged on TMDB's count alone.
+def tmdb_votes(label, record, worklist_votes):
+    """The TMDB count the gate judges one title by, or None when nothing states one.
+
+    The WORKLIST's count first: `/discover` answered it when the universe was built, and it is the number
+    the query selected on. Only an `export` row has none — the daily dump states popularity — and those
+    fall back to the detail call's count while that call is still made (oxyc/den-dataset#53).
+
+    None where nothing states one, and the caller compares nothing rather than a number: a title neither
+    names a count for is judged on IMDb's count alone, which is the half of the union that exists for the
+    titles TMDB undercounts. The worklist is where the distinction is load-bearing — a row written with a
+    zero would refuse a title the detail call admits (`pipeline/worklist.entry`).
+    """
+    if label in worklist_votes:
+        return worklist_votes[label]
+    return record.get("voteCount")
+
+
+def admit(records, floors, ratings, cache, worklist_votes=None):
+    """`(admitted, unidentified, from_worklist)`: key → which count admitted it (`TMDB`, `IMDB` or `BOTH`),
+    how many of the titles TMDB left short have no IMDb id and were therefore judged on TMDB's count alone,
+    and how many titles were judged on a count their worklist row carried.
 
     A key absent from `admitted` is below every floor its tiers set. With `ratings` None the IMDb half is
     off and this is TMDB's floor alone. Raises what the IMDb-id lookup raises — the caller aborts on it, as
     it does on the mapping, which asks the same service.
     """
-    admitted, unidentified = {}, 0
+    worklist_votes = worklist_votes or {}
+    admitted, unidentified, from_worklist = {}, 0, 0
     ids = {}
     if ratings is not None:
         for media in sorted({record["mediaType"] for record in records}):
@@ -394,14 +443,16 @@ def admit(records, floors, ratings, cache):
     for record in records:
         label = key(record["mediaType"], record["tmdbId"])
         tmdb_floor, imdb_floor = floors.of(record)
-        by_tmdb = record["voteCount"] >= tmdb_floor
+        votes = tmdb_votes(label, record, worklist_votes)
+        from_worklist += label in worklist_votes
+        by_tmdb = votes is not None and votes >= tmdb_floor
         imdb_id = ids.get(label)
         by_imdb = imdb_id is not None and ratings.get(imdb_id) >= imdb_floor
         if by_tmdb or by_imdb:
             admitted[label] = BOTH if by_tmdb and by_imdb else TMDB if by_tmdb else IMDB
         if not by_tmdb and ratings is not None and imdb_id is None:
             unidentified += 1
-    return admitted, unidentified
+    return admitted, unidentified, from_worklist
 
 
 def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude_anime=False, client=None,
@@ -428,7 +479,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     if token:
         # Read now, so a malformed reserve refuses the run instead of being swallowed as a failed fast path.
         enterprise.gate.headroom()
-    worklist = read_worklist(worklist_path)
+    worklist, worklist_votes = read_worklist(worklist_path)
     ck_path = checkpoint_path(out_dir)
     present = os.path.exists(ck_path)
     checkpoint = read_checkpoint(ck_path)
@@ -468,10 +519,23 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
         print(f"  warning: the IMDb half of the admission gate is {gate}. This batch admits on TMDB's count "
               f"alone; a title only IMDb would admit stays pending for the next batch.", file=sys.stderr)
     try:
-        admitted, unidentified = admit(records, floors, ratings, cache)
+        admitted, unidentified, from_worklist = admit(records, floors, ratings, cache, worklist_votes)
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise Aborted(f"Wikidata IMDb-id lookup failed for batch {batch_id} after retries ({error}); nothing "
                       f"written — re-run to retry this batch") from error
+    # What each admitted title IS, for the anime rule — and ONLY when a run asked to exclude anime, since
+    # the flag is opt-in and this is a whole extra query per media otherwise.
+    kinds = {}
+    if exclude_anime:
+        admitted_records = [r for r in records if key(r["mediaType"], r["tmdbId"]) in admitted]
+        try:
+            for media in sorted({record["mediaType"] for record in admitted_records}):
+                ids = [r["tmdbId"] for r in admitted_records if r["mediaType"] == media]
+                for tmdb_id, labels in wikidata.kinds(ids, media, cache).items():
+                    kinds[key(media, tmdb_id)] = labels
+        except (http.HTTPError, wikidata.WikidataError) as error:
+            raise Aborted(f"Wikidata genre/type lookup failed for batch {batch_id} after retries ({error}); "
+                          f"nothing written — re-run to retry this batch") from error
     for found in records:
         label = key(found["mediaType"], found["tmdbId"])
         if label not in admitted:
@@ -480,22 +544,28 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
             # widened the window to months. The cache makes the re-judging nearly free.
             counts["belowFloor"] += 1
             below.add(label)
-        elif exclude_anime and is_anime(found):
+        elif exclude_anime and is_anime(kinds.get(label, ())):
             # Opt-IN: excluding anime by default silently cost the corpus 1,498 titles, the entire
             # Ghibli catalogue among them.
             counts["anime"] += 1
-        elif found["overviewChars"] < STUB:
-            counts["noOverview"] += 1
         else:
+            # No stub check here any more. It dropped a title whose TMDB overview was under 20 characters,
+            # judged on a length `lib/tmdb.title_record` carried across the boundary for that one reader.
+            # `overview` holds a Wikipedia plot or nothing, so the length said nothing about what this
+            # title would be grounded on, and every admitted title is grounded on Wikipedia or written
+            # plotless regardless: over the whole repass it refused 3 titles out of 59,209.
             titles.append(found)
 
-    # ONE mapping query per media type, keyed by both — see `lib/wikidata.mapping`.
+    # ONE mapping query per media type, keyed by both — see `lib/wikidata.mapping` — and one language query
+    # beside it. P364 is its own request rather than another OPTIONAL on the mapping, whose text is the
+    # cache key for ~770 bodies already on disk.
     facts = {}
     try:
         for media in sorted({record["mediaType"] for record in titles}):
             ids = [record["tmdbId"] for record in titles if record["mediaType"] == media]
+            spoken = wikidata.languages(ids, media, cache)
             for tmdb_id, found in wikidata.mapping(ids, media, plot.HEADINGS_BY_LANGUAGE, cache).items():
-                facts[key(media, tmdb_id)] = found
+                facts[key(media, tmdb_id)] = dict(found, languages=spoken.get(tmdb_id, []))
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise Aborted(f"Wikidata mapping failed for batch {batch_id} after retries ({error}); nothing "
                       f"written — re-run to retry this batch") from error
@@ -548,7 +618,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     # Which source SERVED each plot, not which was asked: a bearer can be throttled or expire mid-run, and the
     # two record different things (the Enterprise path names no revision and cannot see a redirect).
     report = {"batchId": batch_id, "count": len(survivors), "belowFloor": counts["belowFloor"],
-              "anime": counts["anime"], "noOverview": counts["noOverview"], "failures": counts["failures"],
+              "anime": counts["anime"], "failures": counts["failures"],
               "deferred": len(deferred), "remaining": sum(key(*e) not in processed for e in worklist),
               "wikiPlot": with_plot, "tagsOnly": len(survivors) - with_plot, "batch": path,
               "plotsFromEnterprise": from_enterprise, "plotsFromActionApi": with_plot - from_enterprise,
@@ -560,7 +630,11 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
               "admittedByTmdb": sum(v == TMDB for v in admitted.values()),
               "admittedByImdb": sum(v == IMDB for v in admitted.values()),
               "admittedByBoth": sum(v == BOTH for v in admitted.values()),
-              "shortOfImdbId": unidentified, "imdbGate": gate}
+              "shortOfImdbId": unidentified, "imdbGate": gate,
+              # How many titles were judged on the count their worklist row carried rather than on the
+              # detail call's. It is the whole batch for a discover or delta universe, and none of it for
+              # an export one — so this is what says how much of the gate still depends on that call.
+              "votesFromWorklist": from_worklist}
     if token and enterprise.gate.off:
         report["enterpriseOff"] = enterprise.gate.off
     return report

@@ -22,6 +22,27 @@ floor.
     worldwide   50           72 (non-regional)   2,110         2,302         2,000
     regional    15           469                 457           490           500
 
+**The tier is read off TMDB's `origin_country`, and that is a measured decision, not an oversight.**
+oxyc/den-dataset#53 is taking TMDB out of the title path, and Wikidata's P495 (country of origin) is the
+obvious replacement — the facts sidecar already carries it for 99.3% of the corpus. Measured over the
+47,548 enriched titles that corpus holds: swapping the tier to P495 moves 2,570 of them. 1,739 JOIN the
+regional tier, which only ever admits more; 831 LEAVE it and are judged at 50 TMDB votes instead of 15,
+and **272 of those then clear no floor at all** — below 50 on TMDB, below 2,000 on IMDb, out of the
+corpus. 239 of the 272 are co-productions TMDB files under several origins and Wikidata under one
+(`Doll & Em`: TMDB GB, P495 US), and 33 have no P495 at all. Those are precisely the regional titles the
+15 exists for, and a below-floor verdict is never checkpointed, so they would not fail — they would stay
+pending, re-fetched and re-refused every pass, silently. The tier therefore stays on TMDB's origins until
+something states a co-production's countries as fully as TMDB does. It is the one field keeping the
+per-title detail call alive.
+
+**Where each count comes from.** The TMDB count is the one on the title's WORKLIST row — `/discover`
+stated it when the universe was built, and it is the number that query selected on, so the gate does not
+ask TMDB for it again per title (oxyc/den-dataset#53). An export row carries none, because the daily dump
+states popularity; those fall back to the detail call while it is still made. A title nothing states a
+TMDB count for is judged on IMDb's count alone — the half of the union that exists for the titles TMDB
+undercounts — and a worklist row that stated no count is written without one rather than with a zero,
+which would be below every floor and refuse a title the detail call admits.
+
 2,000 is also the whole corpus's ±10% median at 50 (1,992), the figure the decision was made on. Rounded
 DOWN for the worldwide tier, since the union only ever adds: a floor a little low admits a few more titles
 IMDb rates, and costs a TMDB detail call and a plot fetch each, while a floor a little high silently keeps
@@ -50,6 +71,9 @@ class Floors:
 
         Every title is in the worldwide tier; a title whose TMDB origin is regional is in both. A title
         with no origin at all is judged worldwide, since nothing says it is regional.
+
+        `originCountry` is TMDB's, deliberately — the module docstring has the measurement that kept it
+        there, and it is the last per-title TMDB field the admission path reads.
         """
         if REGIONAL_ORIGINS & set(record.get("originCountry") or ()):
             return min(self.tmdb, self.regional_tmdb), min(self.imdb, self.regional_imdb)

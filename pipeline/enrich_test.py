@@ -109,11 +109,16 @@ class Batch(unittest.TestCase):
         self.out = self.directory.name
         self.cache = caching.ResponseCache("wiki", os.path.join(self.out, "cache"), 3600)
         self.mapping, self.plots, self.plot_calls, self.mapping_calls = {}, {}, [], []
+        # Wikidata P364 per (media, tmdbId): what orders the other-language plot fallback. And its P136
+        # genres and P31 types, which is what the opt-in anime exclusion reads.
+        self.languages, self.language_calls = {}, []
+        self.kinds, self.kind_calls = {}, []
         # IMDb: the id Wikidata names per (media, tmdbId), the dump's counts per id, and what loading the
         # dump does — a `Ratings`, or an exception to raise.
         self.imdb_ids, self.imdb_votes, self.imdb_id_calls = {}, {}, []
         self.dump = None
         for target, stub in ((enrich.wikidata, "mapping"), (enrich.plot, "plot"), (enrich.wikidata, "imdb_ids"),
+                             (enrich.wikidata, "languages"), (enrich.wikidata, "kinds"),
                              (enrich.imdb, "ratings")):
             patch = mock.patch.object(target, stub, getattr(self, stub + "_stub"))
             patch.start()
@@ -133,6 +138,14 @@ class Batch(unittest.TestCase):
         self.mapping_calls.append((media, sorted(ids)))
         return {i: self.mapping[(media, i)] for i in ids if (media, i) in self.mapping}
 
+    def languages_stub(self, ids, media, cache=None):
+        self.language_calls.append((media, sorted(ids)))
+        return {i: self.languages[(media, i)] for i in ids if (media, i) in self.languages}
+
+    def kinds_stub(self, ids, media, cache=None):
+        self.kind_calls.append((media, sorted(ids)))
+        return {i: self.kinds[(media, i)] for i in ids if (media, i) in self.kinds}
+
     def plot_stub(self, article, language="en", cache=None, token=None):
         self.plot_calls.append((article, language))
         answer = self.plots.get((article, language))
@@ -144,15 +157,23 @@ class Batch(unittest.TestCase):
             answer = dict(answer, resolvedArticle=article)
         return answer
 
-    def worklist(self, *entries):
+    def worklist(self, *entries, votes=None):
+        """An export-shaped worklist — two keys per row — unless `votes` names a count per `(media, id)`,
+        which is the shape `/discover` and the delta write."""
         path = os.path.join(self.out, "worklist.json")
+        rows = []
+        for media, tmdb_id in entries:
+            row = {"tmdbId": tmdb_id, "mediaType": media}
+            if votes and (media, tmdb_id) in votes:
+                row["voteCount"] = votes[(media, tmdb_id)]
+            rows.append(row)
         with open(path, "w") as fh:
-            json.dump([{"tmdbId": i, "mediaType": m} for m, i in entries], fh)
+            json.dump(rows, fh)
         return path
 
-    def run_batch(self, bodies, entries, **kwargs):
-        return enrich.run(self.worklist(*entries), self.out, client=StubTMDB(bodies), cache=self.cache,
-                          **kwargs)
+    def run_batch(self, bodies, entries, votes=None, **kwargs):
+        return enrich.run(self.worklist(*entries, votes=votes), self.out, client=StubTMDB(bodies),
+                          cache=self.cache, **kwargs)
 
     def rows(self, batch_id=1):
         with open(enrich.batch_path(self.out, batch_id)) as fh:
@@ -173,7 +194,8 @@ class Batch(unittest.TestCase):
         self.assertNotIn("TMDB PROSE", json.dumps(rows))
         self.assertEqual(rows["movie:1"]["overview"], "W" * 200)
         self.assertEqual((rows["movie:2"]["overview"], rows["movie:2"]["hasWikiPlot"]), ("", False))
-        self.assertEqual(rows["movie:2"]["overviewChars"], 54, "the length survives, trimmed")
+        self.assertEqual([name for name in rows["movie:2"] if "overview" in name.lower()], ["overview"],
+                         "not even the TMDB overview's LENGTH is carried any more")
 
     def test_creators_are_wikidatas_or_none_never_tmdbs(self):
         """`createdBy` is composed into the embedding document. With no Wikidata P170 it is EMPTY — TMDB's
@@ -257,11 +279,43 @@ class Batch(unittest.TestCase):
     def test_the_fallback_reads_the_titles_own_language_first_then_the_rest_in_order(self):
         self.mapping[("movie", 1)] = {"article": "Thin", "articlesByLang": {"it": "Film", "de": "Film",
                                                                              "fr": "Film"}}
+        self.languages[("movie", 1)] = ["fr"]
         self.plots[("Film", "de")] = found("d" * 300, language="de")
-        self.run_batch({"/movie/1": detail(1, original_language="fr")}, [("movie", 1)])
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
         self.assertEqual(self.plot_calls, [("Thin", "en"), ("Film", "fr"), ("Film", "de"), ("Film", "it")])
         row = self.rows()["movie:1"]
         self.assertEqual((row["plotArticleRole"], row["plotLanguage"]), ("own-other-language", "de"))
+
+    def test_the_order_is_wikidatas_languages_not_tmdbs(self):
+        """P364, and every code it states. TMDB names one `original_language` and a co-production has
+        several, so the list is the better ordering as well as the CC0 one."""
+        self.mapping[("movie", 1)] = {"article": "Thin",
+                                      "articlesByLang": {"it": "F", "de": "F", "fr": "F", "sv": "F"}}
+        self.mapping[("movie", 2)] = {"article": "Other"}
+        self.mapping[("tv", 3)] = {"article": "Series"}
+        self.languages[("movie", 1)] = ["fr", "sv"]
+        self.run_batch({"/movie/1": detail(1, original_language="it"), "/movie/2": detail(2),
+                        "/tv/3": detail(3)}, [("movie", 1), ("movie", 2), ("tv", 3)])
+        self.assertEqual(self.plot_calls[:5],
+                         [("Thin", "en"), ("F", "fr"), ("F", "sv"), ("F", "de"), ("F", "it")])
+        self.assertEqual(self.language_calls, [("movie", [1, 2]), ("tv", [3])],
+                         "one query for the batch, per media — never one per title")
+
+    def test_a_title_wikidata_states_no_language_for_reads_its_sitelinks_in_code_order(self):
+        """1,164 of the 12,611 corpus titles grounded this way have no P364. Nothing is preferred rather
+        than TMDB's code being preferred."""
+        self.mapping[("movie", 1)] = {"article": "Thin", "articlesByLang": {"it": "F", "de": "F"}}
+        self.run_batch({"/movie/1": detail(1, original_language="it")}, [("movie", 1)])
+        self.assertEqual(self.plot_calls, [("Thin", "en"), ("F", "de"), ("F", "it")])
+
+    def test_a_failed_language_lookup_aborts_the_batch_and_writes_nothing(self):
+        """It asks the same service as the mapping. Swallowed, it would silently reorder every fallback in
+        the batch to code order and record nothing about it."""
+        with mock.patch.object(enrich.wikidata, "languages", side_effect=http.HTTPError(0, "x")):
+            with self.assertRaises(enrich.Aborted):
+                self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
+        self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
+        self.assertFalse(os.path.exists(os.path.join(self.out, "enriched")))
 
     def test_a_title_with_no_english_article_reaches_the_fallback(self):
         """The case the fallback exists for — two thirds of the plotless films have no English article. The
@@ -288,9 +342,10 @@ class Batch(unittest.TestCase):
         """The fallback reads every sitelink until one is enough, and keeps the longest — the title's own
         language is asked first, not preferred at any length."""
         self.mapping[("movie", 1)] = {"articlesByLang": {"de": "Kurz", "fr": "Long"}}
+        self.languages[("movie", 1)] = ["de"]
         self.plots[("Kurz", "de")] = found("d" * 300, resolved="Kurz", language="de")
         self.plots[("Long", "fr")] = found("f" * 600, resolved="Long", language="fr")
-        self.run_batch({"/movie/1": detail(1, original_language="de")}, [("movie", 1)])
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
         self.assertEqual(self.plot_calls, [("Kurz", "de"), ("Long", "fr")])
         row = self.rows()["movie:1"]
         self.assertEqual((row["plotLanguage"], row["plotArticle"], len(row["overview"])), ("fr", "Long", 600))
@@ -472,6 +527,32 @@ class Batch(unittest.TestCase):
         report = self.run_batch(bodies, [("movie", 1)], floors=enrich.floor_rules.given(imdb=800))
         self.assertEqual(report["admittedByImdb"], 1)
 
+    def test_the_gate_judges_by_the_count_on_the_worklist_row(self):
+        """`/discover` stated it when the universe was built, and that is the query the floor selected on.
+        Reading it back off the detail call asks TMDB the same number a second time, per title."""
+        bodies = {"/movie/1": detail(1, votes=5), "/movie/2": detail(2, votes=500)}
+        report = self.run_batch(bodies, [("movie", 1), ("movie", 2)],
+                                votes={("movie", 1): 500, ("movie", 2): 5})
+        self.assertEqual(set(self.rows()), {"movie:1"}, "the worklist's count decides, not the record's")
+        self.assertEqual((report["admittedByTmdb"], report["belowFloor"]), (1, 1))
+        self.assertEqual(report["votesFromWorklist"], 2)
+
+    def test_a_row_that_states_no_count_falls_back_to_the_detail_call(self):
+        """An export universe is built from the daily dump, which states popularity and not votes."""
+        report = self.run_batch({"/movie/1": detail(1, votes=500)}, [("movie", 1)])
+        self.assertEqual(set(self.rows()), {"movie:1"})
+        self.assertEqual(report["votesFromWorklist"], 0)
+
+    def test_a_title_no_tmdb_count_is_stated_for_is_still_admitted_on_imdbs(self):
+        """The union's IMDb half exists for the titles TMDB undercounts, so a title neither the worklist
+        nor the record names a count for is judged on IMDb's alone — not compared against a floor."""
+        record = dict(tmdb_record(1), voteCount=None, originCountry=["US"])
+        ratings = enrich.imdb.Ratings({"tt1": 5000}, "unchanged")
+        self.imdb_ids[("movie", 1)] = "tt1"
+        admitted, _short, from_worklist = enrich.admit([record], enrich.floor_rules.DEFAULT, ratings,
+                                                       self.cache, {})
+        self.assertEqual((admitted, from_worklist), ({"movie:1": enrich.IMDB}, 0))
+
     def test_a_title_with_no_imdb_id_is_judged_on_tmdb_alone_and_counted(self):
         report, written = self.admission((1, 30, ["US"], None, 0), (2, 80, ["US"], None, 0))
         self.assertEqual(written, {"movie:2"})
@@ -535,11 +616,11 @@ class Batch(unittest.TestCase):
         self.plots[("Blip", "en")] = http.HTTPError(503, "x")
         report = self.run_batch({"/movie/1": http.HTTPError(429, "x"), "/movie/2": detail(2, votes=10),
                                  "/movie/3": http.HTTPError(404, "x"), "/movie/4": detail(4),
-                                 "/movie/5": detail(5, overview="stub")},
+                                 "/movie/5": detail(5)},
                                 [("movie", i) for i in range(1, 6)])
         self.assertEqual(sorted(self.checkpoint()["processed"]), ["movie:3", "movie:5"])
-        self.assertEqual((report["deferred"], report["belowFloor"], report["failures"], report["noOverview"],
-                          report["remaining"], report["count"]), (2, 1, 1, 1, 3, 0))
+        self.assertEqual((report["deferred"], report["belowFloor"], report["failures"],
+                          report["remaining"], report["count"]), (2, 1, 1, 3, 1))
 
     def test_a_refused_tmdb_key_stops_the_batch_and_checkpoints_nothing(self):
         """A revoked key answers 401 for every id. Read as per-title failures, one batch checkpointed 150 of
@@ -668,11 +749,62 @@ class Batch(unittest.TestCase):
 
     def test_anime_is_kept_unless_asked(self):
         """Excluding it by default silently cost the corpus 1,498 titles, the Ghibli catalogue among them."""
-        body = detail(1, original_language="ja", genres=[{"id": 16, "name": "Animation"}])
-        self.assertEqual(self.run_batch({"/movie/1": body}, [("movie", 1)])["count"], 1)
+        self.kinds[("movie", 1)] = ["anime television series"]
+        self.assertEqual(self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])["count"], 1)
+        self.assertEqual(self.kind_calls, [], "nothing is asked when the flag is not passed")
         os.remove(enrich.checkpoint_path(self.out))
-        report = self.run_batch({"/movie/1": body}, [("movie", 1)], exclude_anime=True)
+        report = self.run_batch({"/movie/1": detail(1)}, [("movie", 1)], exclude_anime=True)
         self.assertEqual((report["anime"], report["count"]), (1, 0))
+        self.assertEqual(self.kind_calls, [("movie", [1])], "one query for the batch, per media")
+
+    def test_anime_is_wikidatas_genres_and_types_not_tmdbs_keyword(self):
+        """TMDB tagged it with keyword 210024 or read Animation plus `original_language: ja`. Wikidata says
+        it in a P136 genre or a P31 type, which catches the co-productions TMDB's language test misses —
+        `Ulysses 31` is French-Japanese, `Dogtanian` Spanish-Japanese."""
+        self.kinds.update({("movie", 2): ["adventure anime and manga", "film"],
+                           ("movie", 3): ["animated film"]})
+        bodies = {"/movie/1": detail(1, original_language="ja", genres=[{"id": 16, "name": "Animation"}]),
+                  "/movie/2": detail(2, original_language="fr"), "/movie/3": detail(3)}
+        report = self.run_batch(bodies, [("movie", i) for i in (1, 2, 3)], exclude_anime=True)
+        self.assertEqual(sorted(self.rows()), ["movie:1", "movie:3"], "TMDB's tags decide nothing")
+        self.assertEqual(report["anime"], 1)
+        self.assertEqual(self.kind_calls, [("movie", [1, 2, 3])],
+                         "one query for the batch, per media — never one per title")
+
+    def test_a_title_the_gate_refused_is_never_asked_about(self):
+        """The same rule as the mapping: a refused title costs an id lookup, not a second query about what
+        it is."""
+        self.kinds[("movie", 2)] = ["anime film"]
+        self.run_batch({"/movie/1": detail(1, votes=500), "/movie/2": detail(2, votes=1)},
+                       [("movie", 1), ("movie", 2)], exclude_anime=True)
+        self.assertEqual(self.kind_calls, [("movie", [1])])
+
+    def test_anime_influenced_animation_is_not_anime(self):
+        """Western animation drawn in the style. `lib/wikidata_facts.genre_map` sets `live-action/animated`
+        aside from its animation rule for the same reason."""
+        self.kinds[("movie", 1)] = ["anime-influenced animation"]
+        report = self.run_batch({"/movie/1": detail(1)}, [("movie", 1)], exclude_anime=True)
+        self.assertEqual((report["anime"], sorted(self.rows())), (0, ["movie:1"]))
+
+    def test_a_failed_genre_lookup_aborts_the_batch_and_writes_nothing(self):
+        """Swallowed, the run would keep every anime in a batch a person asked to have it dropped from."""
+        with mock.patch.object(enrich.wikidata, "kinds", side_effect=http.HTTPError(0, "x")):
+            with self.assertRaises(enrich.Aborted):
+                self.run_batch({"/movie/1": detail(1)}, [("movie", 1)], exclude_anime=True)
+        self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
+        self.assertFalse(os.path.exists(os.path.join(self.out, "enriched")))
+
+    def test_a_title_with_a_tiny_tmdb_overview_is_enriched_like_any_other(self):
+        """The stub check read a length `title_record` carried across the TMDB boundary for it alone.
+        `overview` holds a Wikipedia plot or nothing, so the length said nothing about what the title would
+        be grounded on — and over the whole repass it refused 3 titles out of 59,209."""
+        self.mapping[("movie", 1)] = {"article": "One"}
+        self.plots[("One", "en")] = found("W" * 200)
+        report = self.run_batch({"/movie/1": detail(1, overview="."), "/movie/2": detail(2, overview="")},
+                                [("movie", 1), ("movie", 2)])
+        self.assertEqual(sorted(self.rows()), ["movie:1", "movie:2"])
+        self.assertEqual(self.rows()["movie:1"]["overview"], "W" * 200)
+        self.assertNotIn("noOverview", report)
 
     def test_both_media_in_one_worklist_are_mapped_apart(self):
         """Series 91545 looked up as a MOVIE grounded Young Wallander on "Sunday Drive (film)". The refusal

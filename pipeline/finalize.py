@@ -70,8 +70,10 @@ OUTPUTS = (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST, artif
            artifacts.FINALIZE_REPORT)
 
 #: What the enrichment's checkpoint tallies. The Swift decoded all four, so a malformed one of them made the
-#: whole checkpoint unreadable, which the report shows as zeros.
-ENRICH_TOTALS = ("belowFloor", "anime", "failures", "noOverview")
+#: whole checkpoint unreadable, which the report shows as zeros. `noOverview` was the fourth and is gone
+#: with the TMDB stub check that counted it (oxyc/den-dataset#53): a checkpoint written before that still
+#: carries the number, and reporting a counter no rule can move again would read as a rule still running.
+ENRICH_TOTALS = ("belowFloor", "anime", "failures")
 
 #: Every key the manifest this stage writes is authoritative for — including when it leaves one out. The
 #: three `metadata*` keys belong to the retired poster sidecar and stay OWNED so a rewrite drops them

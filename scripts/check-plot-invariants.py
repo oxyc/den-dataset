@@ -283,8 +283,9 @@ def report_shared_articles(groups, grounded, limit=10):
         for key in keys[:6]:
             rec = grounded[key]
             # The PLOT's length, which is `overview` once `groundedOnWikiPlot` has replaced it. Not
-            # `overviewChars`: that field keeps the TMDB overview's length across the swap, so it answers a
-            # different question and reads as a plot length that is wrong by an order of magnitude.
+            # `overviewChars`, which a batch written before oxyc/den-dataset#53 still carries: that field
+            # keeps the TMDB overview's length across the swap, so it answers a different question and
+            # reads as a plot length that is wrong by an order of magnitude.
             chars = len(rec.get("overview") or "")
             side = "owns it" if owns_its_article(rec) else ""
             print(f"            {key:16s} {chars:7,d} ch  {rec.get('title') or ''!r} {side}".rstrip())

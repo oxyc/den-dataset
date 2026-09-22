@@ -123,12 +123,12 @@ def _named(items, name, also=()):
 def title_record(body, tmdb_id, media):
     """The detail body as the enriched record's TMDB half. Raises ValueError on a body that is not one.
 
-    THE OVERVIEW STOPS HERE — its LENGTH crosses, its text does not. TMDB's terms (§1.C) speak directly to
-    using their content with a machine-learning application, and this record feeds a classifier and an
-    embedder. The pipeline only ever needed the overview to tell a stub too thin to classify from a real
-    title, which a character count answers. Dropping the text at the boundary makes that structural:
-    `overview` downstream holds a Wikipedia plot or nothing, so no later path can leak it by forgetting a
-    flag.
+    THE OVERVIEW STOPS HERE, LENGTH AND ALL. TMDB's terms (§1.C) speak directly to using their content
+    with a machine-learning application, and this record feeds a classifier and an embedder. The text was
+    dropped at this boundary first and its character count kept, for one reader: a stub check that refused
+    a title whose overview ran under 20 characters. That check is gone (oxyc/den-dataset#53) — `overview`
+    downstream holds a Wikipedia plot or nothing, so the length said nothing about what a title would be
+    grounded on, and over the whole repass it refused 3 titles out of 59,209 — so nothing crosses now.
     """
     if not isinstance(body, dict):
         raise ValueError("TMDB detail body is not an object")
@@ -154,7 +154,9 @@ def title_record(body, tmdb_id, media):
     # Billing order; a name with no `order` goes last, and ties keep TMDB's own order.
     billed = sorted(cast, key=lambda person: person["order"] if isinstance(person.get("order"), int)
                     else float("inf"))
-    overview = _field(body, "overview", str) or ""
+    # `overview` is read and DISCARDED: reading it still type-checks the field, so a body whose overview is
+    # not a string is refused here rather than decoded into half a record.
+    _field(body, "overview", str)
     return {
         "tmdbId": tmdb_id, "mediaType": media,
         "title": _first(_field(body, "title", str), _field(body, "name", str), ""),
@@ -165,12 +167,6 @@ def title_record(body, tmdb_id, media):
         "originCountry": countries, "originalLanguage": _field(body, "original_language", str),
         "voteCount": _field(body, "vote_count", int) or 0,
         "director": director, "topCast": [person["name"] for person in billed[:TOP_CAST]],
-        # CODE POINTS, where the Swift pass counted grapheme clusters (`String.count`) — here and for every
-        # other length it judged, the plot floor and the 1,000-character sufficiency included. The Python
-        # enrichment measures all of them with `len()`. They differ only where text carries combining marks
-        # or joined emoji: over all 47,529 grounded plots, 19 differ and none crosses 120 or 1,000. This
-        # count's only reader is the stub check below 20.
-        "overviewChars": len(overview.strip()),
     }
 
 

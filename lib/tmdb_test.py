@@ -130,13 +130,18 @@ SHAWSHANK = {"id": 278, "title": "The Shawshank Redemption", "release_date": "19
 
 
 class Record(unittest.TestCase):
-    def test_the_overview_never_crosses_only_its_length(self):
+    def test_the_overview_does_not_cross_at_all_not_even_its_length(self):
         """TMDB's terms (§1.C) speak to their content in a machine-learning application; this record feeds a
-        classifier and an embedder. The stub check needs a length and nothing else."""
+        classifier and an embedder. Its length crossed for one reader, the stub check, which is gone."""
         record = tmdb_api.title_record(SHAWSHANK, 278, "movie")
-        self.assertNotIn("overview", record)
         self.assertNotIn("Shawshank.", json.dumps(record))
-        self.assertEqual(record["overviewChars"], 43, "trimmed, in code points")
+        self.assertEqual([name for name in record if "overview" in name.lower()], [])
+
+    def test_an_overview_of_the_wrong_type_is_still_a_refusal(self):
+        """Read and discarded, not skipped: a body whose fields have the wrong types is a partial 200, and
+        the Swift decoder dropped the whole record rather than enriching half of one."""
+        with self.assertRaises(ValueError):
+            tmdb_api.title_record(dict(SHAWSHANK, overview=["a"]), 278, "movie")
 
     def test_the_facts_it_does_carry(self):
         record = tmdb_api.title_record(SHAWSHANK, 278, "movie")
