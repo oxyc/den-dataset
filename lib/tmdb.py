@@ -2,7 +2,7 @@
 """The two TMDB endpoints this pipeline reads: `/discover` and a title's detail record.
 
 Small on purpose. The app's client is a different thing with different needs; this one exists so the
-worklist can enumerate a universe and the poster sidecar can name a card, and nothing else belongs here.
+worklist can enumerate a universe, and nothing else belongs here until the enrichment moves across.
 
 Two rules are load-bearing and neither is obvious from the endpoint:
 
@@ -25,13 +25,6 @@ BASE = "/3"
 #: `/discover` pages 20 results each and serves at most 500 pages — the ceiling the year partition exists
 #: to page past.
 MAX_PAGES = 500
-
-#: The sub-resources `enrich` appends. Named here because the SIDECAR reads its detail record out of the
-#: entry that fetch left behind, and a cache key covers the query string: a bare `/movie/11` and
-#: `/movie/11?append_to_response=…` hash differently, so asking for the bare one meant a 100%-cached
-#: corpus still cost one live call per title. Measured: 47,541 of 47,542 titles are already cached under
-#: the enrichment key and none under the bare one.
-APPENDED = "keywords,credits"
 
 
 class TMDBError(RuntimeError):
@@ -68,12 +61,6 @@ def discover_params(media, vote_count_gte=None, release_date_gte=None, release_d
     if release_date_lte:
         params[f"{date_key}.lte"] = release_date_lte
     return params
-
-
-def year_of(row):
-    """The release year, from whichever date field this media carries."""
-    date = row.get("release_date") or row.get("first_air_date") or ""
-    return int(date[:4]) if date[:4].isdigit() else None
 
 
 def is_title_record(body, expecting_appended):
@@ -132,33 +119,3 @@ class TMDB:
                 f"empty page — treating it as one stops the paging loop and reports a universe of "
                 f"whatever was collected so far: {json.dumps(body)[:200]}")
         return rows, int(body.get("page") or 1), int(body.get("total_pages") or 1)
-
-    def poster_meta(self, media, tmdb_id):
-        """The sidecar row for one title: what a poster card needs and nothing else.
-
-        Read out of the ENRICHMENT payload when it is on disk. That response was fetched from the same
-        endpoint with `append_to_response=keywords,credits`, and the appended resources do not change the
-        detail fields — title, poster_path and the release/first-air date are all present in it. Artwork
-        moves over time, so this trades freshness for not re-requesting the whole corpus: the sidecar is a
-        synced cache of poster paths, not a source of truth, and a title whose poster changed is corrected
-        by the next enrichment of that title.
-        """
-        path = f"/{media}/{tmdb_id}"
-        body = None
-        if self.cache is not None:
-            hit = self.cache.read(self.cache.key(path, {"append_to_response": APPENDED}))
-            if hit is not None:
-                try:
-                    body = json.loads(hit.decode("utf-8"))
-                except ValueError:
-                    body = None
-        if body is None:
-            body = self.get(path)
-        row = {"tmdbId": int(tmdb_id), "mediaType": media,
-               "title": body.get("title") or body.get("name") or "",
-               "posterPath": body.get("poster_path"), "year": year_of(body)}
-        # A field with no value is OMITTED, not written as null. The 47,539-row sidecar already on disk is
-        # shaped that way — 4 of its rows carry no `posterPath` key and none carries an explicit null —
-        # and the app folds that file's sha into its syncKey, so a second spelling of "no poster" is a
-        # re-download of a file whose content did not change.
-        return {name: value for name, value in row.items() if value is not None}

@@ -23,8 +23,8 @@ WIKI_QUERY = {"action": "parse", "prop": "wikitext|revid", "format": "json",
               "formatversion": "2", "redirects": "1", "page": "Star Wars (film)"}
 WIKI_DIGEST = "da9f30f7d87e9687f88315085805043bfd5cf19cfc6873463b178e925e234972"
 
-#: `/movie/11` with the sub-resources `enrich` appends. Present as `.cache/tmdb/33/333e08….json`, and the
-#: entry the poster sidecar reads its detail record out of.
+#: `/movie/11` with the sub-resources `enrich` appends. Present as `.cache/tmdb/33/333e08….json` — the
+#: entry the enrichment wrote, which the Python port of it has to find under the same name.
 TMDB_DIGEST = "333e08246e09fd6059b081f999aa20f43bcf156ca165f6d189519efd982e1800"
 
 

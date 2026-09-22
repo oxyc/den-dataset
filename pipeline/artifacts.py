@@ -249,21 +249,6 @@ PREMISE_LABELS = Artifact(
     manifest_key="premiseLabelsFile",
 )
 
-#: The on-device poster sidecar: title, poster path and year per shipped title, so a card the index
-#: returns as a bare id renders without a per-result TMDB detail call. Its filename carries the dataset
-#: version, which is the whole reason it is rebuilt after every finalize — the manifest naming the
-#: PREVIOUS sidecar is a file that still hashes correctly, so both consumers accept it and never re-sync.
-#:
-#: `data-latest` no longer publishes it (oxyc/den#113 cut the release to the store, and #118 took the card
-#: fields into the store from Wikidata), so `prune-manifest.py` retires `metadataFile` on the way out. It
-#: is still declared here because the manifest is where a sidecar is named, and because the guard that
-#: asks "what builds this" reads the answer off the stage that writes it.
-METADATA = Artifact(
-    name="metadata",
-    filename="metadata-{version}.json",
-    manifest_key="metadataFile",
-)
-
 #: The only artifact a release carries (oxyc/den#113). Everything above is an input to it.
 STORE = Artifact(
     name="store",
@@ -300,4 +285,4 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              COMBINED_MANIFEST, DELTA, ENRICHED, ENRICH_CHECKPOINT, DOC_FACTS, EMBED_LABELS,
              EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
              DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, PREMISE_VECTORS, PREMISE_LABELS, STORE,
-             METADATA, MANIFEST, RELEASE)
+             MANIFEST, RELEASE)

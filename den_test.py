@@ -37,10 +37,9 @@ class Listing(unittest.TestCase):
         # the titles are enriched before anything reads their plots, the articles dumped before the pass
         # that reads them, classified before the vectors are embedded, the vectors before the facts passes
         # are merged over their ids, the merged facts before the corpus that joins them, the corpus before
-        # the store built from it, the sidecar after the store whose version it carries, and the publish
-        # that uploads the store is last.
+        # the store built from it, and the publish that uploads the store is last.
         expected = ("worklist", "fetch", "articles", "classify", "docfacts", "embed", "facts", "corpus",
-                    "store", "metadata", "publish")
+                    "store", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]

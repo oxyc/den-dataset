@@ -112,14 +112,7 @@ Next, by hand — the classify stage BUYS, so it is not run unattended:
   3. Then embed, finalize and publish:
        ./den stage embed --out-dir $OUT_DIR --dataset-version <ver>
        $BIN finalize --out-dir $OUT_DIR
-       ./den stage metadata --out-dir $OUT_DIR --dataset-version <what finalize printed>
        scripts/publish-dataset.sh $OUT_DIR
-
-     The metadata stage is not optional here. Its filename carries the datasetVersion that \`finalize\`
-     just changed, so skipping it leaves the manifest naming the PREVIOUS sidecar — which still hashes
-     correctly, so both consumers accept it and never re-sync, and the titles this pass just added
-     render with no poster metadata. Forever, and silently. (The stage refuses a --dataset-version the
-     manifest does not name, which catches the same mistake one step earlier.)
 
 (\`embed-corpus\` reads the shipped labels blob, so a new id is only embeddable once the classify pass's
 rows have reached it — see docs/OPERATE.md for the order.)

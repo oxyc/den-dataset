@@ -9,10 +9,8 @@ Both are 200s. Neither raises anywhere without a check written for it:
     sits in the cache for its whole TTL as a title with no keywords, no director and no cast.
 """
 import json
-import tempfile
 import unittest
 
-from . import cache as caching
 from . import tmdb as tmdb_api
 
 
@@ -97,67 +95,6 @@ class Body(unittest.TestCase):
 
     def test_a_series_carries_its_name_where_a_film_carries_its_title(self):
         self.assertTrue(tmdb_api.is_title_record({"id": 1399, "name": "Game of Thrones"}, False))
-
-
-class Sidecar(unittest.TestCase):
-    def setUp(self):
-        self.directory = tempfile.TemporaryDirectory()
-        self.cache = caching.ResponseCache("tmdb", self.directory.name, 3600)
-        self.client = tmdb_api.TMDB(key="test", cache=self.cache)
-
-    def tearDown(self):
-        self.directory.cleanup()
-
-    def test_it_reads_the_record_enrichment_already_paid_for(self):
-        """The cache key covers the query string, so a bare `/movie/11` and
-        `/movie/11?append_to_response=…` hash differently: asking for the bare one meant a 100%-cached
-        corpus still cost one live call per title. Measured, 47,541 of 47,542 titles are already on disk
-        under the enrichment key and none under the bare one."""
-        self.cache.write(self.cache.key("/movie/11", {"append_to_response": tmdb_api.APPENDED}),
-                         json.dumps({"id": 11, "title": "Star Wars", "poster_path": "/p.jpg",
-                                     "release_date": "1977-05-25"}).encode())
-        original = tmdb_api.http.request
-
-        def refuse(*args, **kwargs):
-            raise AssertionError("a cached title must not cost a request")
-
-        tmdb_api.http.request = refuse
-        try:
-            row = self.client.poster_meta("movie", 11)
-        finally:
-            tmdb_api.http.request = original
-        self.assertEqual(row, {"tmdbId": 11, "mediaType": "movie", "title": "Star Wars",
-                               "posterPath": "/p.jpg", "year": 1977})
-
-    def test_a_row_carries_only_the_fields_a_card_draws(self):
-        """Poster paths and titles are artwork and factual references, distinct from the expressive
-        overviews the pipeline strips at the client boundary."""
-        self.cache.write(self.cache.key("/movie/11", {"append_to_response": tmdb_api.APPENDED}),
-                         json.dumps({"id": 11, "title": "Star Wars", "poster_path": "/p.jpg",
-                                     "overview": "A long time ago…", "release_date": "1977-05-25"}).encode())
-        self.assertEqual(sorted(self.client.poster_meta("movie", 11)),
-                         ["mediaType", "posterPath", "title", "tmdbId", "year"])
-
-    def test_a_title_with_no_poster_is_still_a_row_and_omits_the_field(self):
-        """A missing poster is a fact about the title; a missing ROW is a card the app cannot render. The
-        field is left OUT rather than written as null, which is how the 47,539 rows already on disk are
-        shaped — and the app folds that file's sha into its syncKey."""
-        self.cache.write(self.cache.key("/tv/1399", {"append_to_response": tmdb_api.APPENDED}),
-                         json.dumps({"id": 1399, "name": "Game of Thrones",
-                                     "first_air_date": "2011-04-17"}).encode())
-        row = self.client.poster_meta("tv", 1399)
-        self.assertNotIn("posterPath", row)
-        self.assertEqual((row["title"], row["year"]), ("Game of Thrones", 2011))
-
-    def test_a_title_with_no_year_omits_the_year(self):
-        self.cache.write(self.cache.key("/movie/1", {"append_to_response": tmdb_api.APPENDED}),
-                         json.dumps({"id": 1, "title": "Untitled", "poster_path": "/p.jpg"}).encode())
-        self.assertNotIn("year", self.client.poster_meta("movie", 1))
-
-    def test_a_record_with_no_date_has_no_year_rather_than_a_wrong_one(self):
-        self.assertIsNone(tmdb_api.year_of({"id": 1}))
-        self.assertIsNone(tmdb_api.year_of({"id": 1, "release_date": ""}))
-        self.assertEqual(tmdb_api.year_of({"id": 1, "first_air_date": "2011-04-17"}), 2011)
 
 
 if __name__ == "__main__":

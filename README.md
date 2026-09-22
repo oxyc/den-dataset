@@ -48,7 +48,8 @@ it never reads:
 `labels-t02.json`, `labels-premise.json`, `metadata-<ver>.json`, `facets.bin`, `facts-<ver>.json`,
 `rail-facets-<ver>.json`, `plot-facets-<ver>.json`, every `.gz` twin. The store carries what they held.
 They are still BUILT — they are the store's inputs and they stay in the out-dir — but `publish-dataset.sh`
-prunes their keys out of the manifest, so nothing fetches them. They were all one row per title, keyed
+prunes their keys out of the manifest, so nothing fetches them. The exception is `metadata-<ver>.json`, the
+TMDB poster sidecar: nothing builds it any more, because posters are no longer fetched from TMDB at all. They were all one row per title, keyed
 identically, and nothing checked they agreed: eleven titles (House of the Dragon and Moon Knight among
 them) sat in `facts` and `labels` but not in `rail-facets` for a day, with no error anywhere. `facts-slim`
 is separately retired: it dropped `composers`, `cinematographers`, `narrativeLocations` and `mainSubjects`
@@ -161,7 +162,6 @@ swift test
 ./den stage docfacts  --out-dir <dir> --dataset-version <ver>
 taxonomy-backfill embed-corpus  --out-dir <dir> --labels labels-t02.json [--doc-facts …]
 taxonomy-backfill finalize      --out-dir <dir>
-./den stage metadata  --out-dir <dir> --dataset-version <ver>   # the poster sidecar; after EVERY finalize
 ```
 
 Or `./den run`, which is the whole order — see `./den stages`.

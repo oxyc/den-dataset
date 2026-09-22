@@ -260,14 +260,10 @@ $BIN facts --out-dir out --ids <the delta ids>     # writes out/facts-unversione
 #     `pipeline/facts.py`'s declaration rather than retyped; `pipeline/facts_test.py` holds the two to the
 #     same bytes. A missing pass is a refusal naming what writes it, not a smaller merge.
 
-# 7. Metadata sidecar — poster/title/year per shipped id, so a neighbour renders without a TMDB detail call.
-#    Its filename carries the datasetVersion, which step 6 just changed, so this belongs after EVERY finalize
-#    that adds titles. Skipping it leaves the manifest naming the previous version's sidecar: it still hashes
-#    correctly, so both consumers accept it and never re-sync — the new titles render with no poster forever.
-./den stage metadata --out-dir out --dataset-version <ver>   # <ver> = what step 6 just wrote
-#    The stage refuses a run whose --dataset-version is not the one dataset.meta.json names, which is that
-#    same failure caught one step earlier. `--limit N` is a PROBE: it fetches N, reports, and writes
-#    nothing — the cheap way to check the credential without re-syncing every device onto a gutted file.
+# 7. (retired) There used to be a poster sidecar here — `metadata-<ver>.json`, title/poster/year per
+#    shipped id, fetched from TMDB. The release stopped carrying it when the store took the card fields
+#    from Wikidata (oxyc/den#113, #118), and posters are no longer fetched from TMDB at all. Nothing builds
+#    it; `prune-manifest.py` still strips a `metadataFile` key an older manifest carries.
 
 # 7a. The CORPUS — the source of truth the store is built from, joining the pass shards, the facts and
 #     both label sets into one inspectable JSONL plus its entity sidecar. It was never written down here,
@@ -295,8 +291,8 @@ python3 scripts/v2/build_store.py \
 #     No --metadata and no --enriched: the card's title and year come from the corpus's own `facts`
 #     (`titles.en` and `released`), the poster path is not published, and the vote count is gone — a
 #     browse row is ordered by IMDb's public ratings dump, which den-atlas joins on `imdb` at run time
-#     (oxyc/den#118). Both metadata-<ver>.json and out/enriched are still BUILT and read by other things;
-#     they are simply no longer inputs to the store, which now reads no TMDB artifact at all.
+#     (oxyc/den#118). out/enriched is still BUILT and read by other stages; it is simply no longer an
+#     input to the store, which now reads no TMDB artifact at all.
 
 # 8. Publish — the moving `data-latest` GitHub release den-atlas fetches. It uploads the store and the
 #    manifest, and prunes every retired blob's keys out of that manifest first.
