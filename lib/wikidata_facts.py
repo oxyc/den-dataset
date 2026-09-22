@@ -346,18 +346,22 @@ def entity_details(qids, batch=200):
 
 def instance_of(qids, batch=200):
     """`Q-id -> its P31 labels`, for the targets of `basedOn` — what a source work IS, which the bare Q-id
-    cannot say."""
+    cannot say.
+
+    A type with no English label comes back labelled with its own Q-id, which is not a type name and would
+    fold to `other`. The Swift compared that label with the ITEM's Q-id, which it never is, so the type's
+    Q-id is selected here to compare against."""
     out = {}
     for start in range(0, len(qids), batch):
         values = " ".join(f"wd:{q}" for q in qids[start:start + batch])
-        query = ("SELECT ?item ?typeLabel WHERE {\n"
+        query = ("SELECT ?item ?type ?typeLabel WHERE {\n"
                  f"  VALUES ?item {{ {values} }}\n"
                  "  ?item wdt:P31 ?type .\n"
                  '  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }\n'
                  "}")
         for binding in bindings(_sparql(query)):
             uri, label = _value(binding, "item"), _value(binding, "typeLabel")
-            if uri is None or label is None or label == _qid(uri):
+            if uri is None or label is None or label == _qid(_value(binding, "type") or ""):
                 continue
             out.setdefault(_qid(uri), []).append(label)
     return out

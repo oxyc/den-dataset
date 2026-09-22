@@ -104,6 +104,41 @@ class Fetch(unittest.TestCase):
         self.assertIsNone(self.cache.read(key))
 
 
+ENTITY = "http://www.wikidata.org/entity/"
+
+
+class Lookups(unittest.TestCase):
+    """The three uncached hops, answered per query: the main request, then the aliases."""
+
+    def setUp(self):
+        self.answers = {}
+        patch = mock.patch.object(wd, "_sparql", lambda query: self.answers["alias" if "altLabel" in query else "main"])
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_a_titles_first_label_is_kept(self):
+        self.answers = {"main": body({"tmdb": "1", "label": "Amelie"}, {"tmdb": "1", "label": "Amélie"}),
+                        "alias": body()}
+        self.assertEqual(wd.titles([1], "movie")[1]["label"], "Amelie")
+
+    def test_an_unresolved_entity_label_is_not_a_name(self):
+        """The label service answers a miss with the item's own Q-id."""
+        self.answers = {"main": body({"item": ENTITY + "Q9", "itemLabel": "Q9", "pid": "55"},
+                                     {"item": ENTITY + "Q8", "itemLabel": "Ada Director"}),
+                        "alias": body({"item": ENTITY + "Q9", "alias": "Nine"})}
+        got = wd.entity_details(["Q9", "Q8"])
+        self.assertEqual(got["Q9"], {"name": None, "tmdbPersonId": "55", "aliases": ["Nine"]})
+        self.assertEqual(got["Q8"]["name"], "Ada Director")
+
+    def test_an_unlabelled_type_is_not_a_type_name(self):
+        """It answers with the TYPE's Q-id — kept, it would fold to `other` and outrank nothing, or stand
+        alone as the source's kind."""
+        self.answers = {"main": body({"item": ENTITY + "Q30", "type": ENTITY + "Q7725634", "typeLabel": "novel"},
+                                     {"item": ENTITY + "Q30", "type": ENTITY + "Q999", "typeLabel": "Q999"},
+                                     {"item": ENTITY + "Q31", "type": ENTITY + "Q998", "typeLabel": "Q998"})}
+        self.assertEqual(wd.instance_of(["Q30", "Q31"]), {"Q30": ["novel"]})
+
+
 class Vocabulary(unittest.TestCase):
     """The source-kind cases are the Swift `SourceKindTests`, carried over when the Swift went."""
 
