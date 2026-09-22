@@ -205,7 +205,12 @@ def reground(record, facts, cache, token):
                   runtimeMinutes=facts.get("runtimeMinutes"))
     candidates = [(facts[name], role) for name, role in (("article", "own"), ("sourceArticle", "source-work"))
                   if facts.get(name)]
-    if not candidates:
+    by_language = facts.get("articlesByLang") or {}
+    # `noArticle` only when there is no article ANYWHERE to read. The Swift pass returned it as soon as both
+    # English candidates were missing, before the other-language fallback — so the fallback never ran for
+    # the titles it was written for, the ones with no English article: in the replay, 215 of 348 `noArticle`
+    # titles had a sitelink on a wiki it reads.
+    if not candidates and not by_language:
         return "noPlot", dict(record, noPlotReason="noArticle"), None
     best, saw_section = None, False
     try:
@@ -221,7 +226,6 @@ def reground(record, facts, cache, token):
         # No English article, or a thin one: two thirds of the plotless films have none, and half of THOSE
         # have one elsewhere. The title's own language first — right 8 times in 15 — then the rest, since
         # four of the misses were English-language films covered by the German or Italian Wikipedia.
-        by_language = facts.get("articlesByLang") or {}
         if (best is None or len(best[0]["text"]) < OWN_ARTICLE_SUFFICIENT) and by_language:
             preferred = [record["originalLanguage"]] if record["originalLanguage"] is not None else []
             for language in preferred + sorted(code for code in by_language if code not in preferred):

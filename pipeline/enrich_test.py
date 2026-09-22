@@ -182,6 +182,19 @@ class Batch(unittest.TestCase):
         row = self.rows()["movie:1"]
         self.assertEqual((row["plotArticleRole"], row["plotLanguage"]), ("own-other-language", "de"))
 
+    def test_a_title_with_no_english_article_reaches_the_fallback(self):
+        """The case the fallback exists for — two thirds of the plotless films have no English article. The
+        Swift pass returned `noArticle` before trying it; 215 of 348 such titles in the replay had one."""
+        self.mapping.update({("movie", 1): {"articlesByLang": {"de": "Schachnovelle"}},
+                             ("movie", 2): {"articlesByLang": {"it": "Senza"}}})
+        self.plots[("Schachnovelle", "de")] = found("h" * 300, resolved="Schachnovelle", language="de")
+        self.run_batch({"/movie/1": detail(1), "/movie/2": detail(2)}, [("movie", 1), ("movie", 2)])
+        rows = self.rows()
+        self.assertEqual((rows["movie:1"]["plotArticleRole"], rows["movie:1"]["plotLanguage"]),
+                         ("own-other-language", "de"))
+        self.assertEqual(rows["movie:2"]["noPlotReason"], "noSection",
+                         "an article that exists and has no plot section is not `noArticle`")
+
     def test_the_fallback_is_skipped_when_english_already_has_enough(self):
         self.mapping[("movie", 1)] = {"article": "Own", "articlesByLang": {"de": "Eigen"}}
         self.plots[("Own", "en")] = found("o" * 999)
