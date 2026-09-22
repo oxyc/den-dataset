@@ -277,6 +277,10 @@ def load_done(output, manifest, input_keys):
 def call(client, state, questions, phase, section_ids, abort_event=None):
     if abort_event is not None and abort_event.is_set():
         raise RunAborted("another worker opened the circuit breaker")
+    # Every article parses to at least its lead, so a state with no section is a title sent without its
+    # article: the model would answer from the title alone and nothing downstream could tell.
+    if not state["article"]["sections"]:
+        raise ValueError(f"{phase}: refusing to send a state that carries no article section")
     answers, metadata = client.ask_with_metadata(state, questions)
     validate_answers(answers, questions)
     response_model = metadata.get("model")
@@ -305,11 +309,34 @@ def sections_for_record(rec):
     return sections
 
 
-def classify(rec, client, global_qs, manifest, max_state_chars, abort_event=None):
+def sections_by_id(rec, sections, section_ids):
+    """The named sections in source order, refusing a name the article lacks and an empty state."""
+    wanted = set(section_ids)
+    unknown = sorted(wanted - {section["id"] for section in sections})
+    if unknown or not wanted:
+        raise ValueError(f"{article_key(rec)}: the state names {unknown or 'no'} sections of an article "
+                         f"with {len(sections)}")
+    return [section for section in sections if section["id"] in wanted]
+
+
+def classify(rec, client, global_qs, manifest, max_state_chars, abort_event=None, state_section_ids=None):
+    """Answer ``global_qs`` about one article, and every section's role unless ``state_section_ids`` is given.
+
+    ``state_section_ids`` is for a pass that sends a state chosen by an earlier one (the delta pass sends the
+    sections the corpus pass sent): it asks no section question, and the state is those sections.
+    """
     sections = sections_for_record(rec)
     role_answers, calls = {}, []
     oversized = is_oversized(rec, sections, max_state_chars)
-    if not oversized:
+    if state_section_ids is not None:
+        global_sections = sections_by_id(rec, sections, state_section_ids)
+        oversized = len(global_sections) < len(sections)
+        global_answers, provenance = call(
+            client, state_for(rec, global_sections), global_qs,
+            "global-after-section-audit" if oversized else "global",
+            [s["id"] for s in global_sections], abort_event)
+        calls.append(provenance)
+    elif not oversized:
         section_qs = {f"section__{section['id']}": section_question(section["id"])
                       for section in sections}
         questions = {**global_qs, **section_qs}
@@ -373,12 +400,14 @@ def classify(rec, client, global_qs, manifest, max_state_chars, abort_event=None
                                    if section not in global_sections],
         "calls": calls,
         "answers": global_answers,
-        "sections": [public_section(section, role_answers[section["id"]]) for section in sections],
+        "sections": [public_section(section, role_answers.get(section["id"])) for section in sections],
     }
 
 
-def plan(records, global_qs, max_state_chars):
-    rows = calls = section_count = oversized_count = 0
+def plan(records, global_qs, max_state_chars, state_ids_by_key=None):
+    """Price a run. ``state_ids_by_key`` (article key -> state section ids) prices
+    ``classify(state_section_ids=...)``, refusing a title it has no state for."""
+    rows = calls = section_count = decisions = oversized_count = 0
     max_sections = 0
     article_chars = state_chars = question_chars = 0
     oversized_details = []
@@ -388,6 +417,21 @@ def plan(records, global_qs, max_state_chars):
         section_count += len(sections)
         max_sections = max(max_sections, len(sections))
         article_chars += len(rec["text"])
+        if state_ids_by_key is not None:
+            if article_key(rec) not in state_ids_by_key:
+                raise ValueError(f"{article_key(rec)} has no state to send")
+            chosen = sections_by_id(rec, sections, state_ids_by_key[article_key(rec)])
+            state_chars += encoded_chars(state_for(rec, chosen))
+            question_chars += len(canonical(global_qs))
+            calls += 1
+            if len(chosen) < len(sections):
+                oversized_count += 1
+                oversized_details.append({
+                    "key": article_key(rec), "title": rec.get("title"), "articleChars": len(rec["text"]),
+                    "sections": len(sections), "sectionsSent": len(chosen),
+                })
+            continue
+        decisions += len(sections)
         state = state_for(rec, sections)
         state_chars += min(encoded_chars(state), max_state_chars)
         section_qs = {f"section__{s['id']}": section_question(s["id"]) for s in sections}
@@ -408,7 +452,7 @@ def plan(records, global_qs, max_state_chars):
         "titles": rows,
         "calls": calls,
         "globalQuestions": len(global_qs),
-        "sectionDecisions": section_count,
+        "sectionDecisions": decisions,
         "meanSections": round(section_count / rows, 2) if rows else 0,
         "maxSections": max_sections,
         "oversizedTitles": oversized_count,
@@ -442,9 +486,12 @@ def release_output_lock(handle):
 
 
 def paid_run(args, global_qs, label_mapping, tax, enriched_evidence_sha,
-             records, input_keys, selected_records):
+             records, input_keys, selected_records, state_ids_by_key=None):
     manifest_path = args.manifest or args.out + ".manifest.json"
     config = manifest_config(args, global_qs, label_mapping, tax, enriched_evidence_sha)
+    if state_ids_by_key is not None:
+        # Which sections each state holds is part of what produced a row.
+        config["stateSectionIdsSha256"] = sha256_text(canonical(state_ids_by_key))
     manifest = load_or_create_manifest(manifest_path, config)
     done = load_done(args.out, manifest, input_keys)
     todo = [record for record in selected_records if article_key(record) not in done]
@@ -467,7 +514,8 @@ def paid_run(args, global_qs, label_mapping, tax, enriched_evidence_sha,
         if abort_event.is_set():
             return
         try:
-            row = classify(rec, client, global_qs, manifest, args.max_state_chars, abort_event)
+            state_ids = None if state_ids_by_key is None else state_ids_by_key[article_key(rec)]
+            row = classify(rec, client, global_qs, manifest, args.max_state_chars, abort_event, state_ids)
         except RunAborted:
             return
         except (TypeSafeError, ValueError) as exc:

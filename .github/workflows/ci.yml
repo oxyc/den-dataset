@@ -64,7 +64,7 @@ jobs:
         run: python3 -m py_compile scripts/v2/embed_canary.py scripts/v2/embed_docs.py scripts/v2/embed_premise_v2.py scripts/v2/import_box_vectors.py
       - name: Jev facet contracts
         run: |
-          python3 -m py_compile scripts/v2/build_facet_adversarial.py scripts/v2/run_facets.py scripts/v2/run_combined.py scripts/v2/audit_combined.py scripts/v2/consolidate_corpus.py
+          python3 -m py_compile scripts/v2/build_facet_adversarial.py scripts/v2/run_facets.py scripts/v2/run_combined.py scripts/v2/run_delta.py scripts/v2/audit_combined.py scripts/v2/consolidate_corpus.py
           # The auditor is included deliberately: it is the only thing standing between a corrupted bundle
           # and a published dataset, and the pass it audits cost $20.47 and will not be run again.
           python3 -m unittest scripts/v2/test_facets.py scripts/v2/test_combined.py scripts/v2/test_audit_combined.py scripts/v2/test_run_delta.py
