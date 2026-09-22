@@ -63,14 +63,28 @@ class Parse(unittest.TestCase):
                                         SPEC["countries"]), {1: ["FI"]})
 
     def test_a_date_is_the_earliest_cut_to_its_precision(self):
-        """A year-precision value is never read as the 1st of January. Earliest by STRING, so a bare year
-        sorts before any day in it — the Swift's rule, kept so the shipped file does not move."""
-        got = wd.parse_facts(body({"tmdb": "1", "v": "+2001-05-02T00:00:00Z", "prec": "11"},
-                                  {"tmdb": "1", "v": "+2001-01-01T00:00:00Z", "prec": "9"},
-                                  {"tmdb": "2", "v": "+1999-03-31T00:00:00Z", "prec": "10"},
-                                  {"tmdb": "3", "v": "+0800-01-01T00:00:00Z", "prec": "7"}), SPEC["released"])
-        self.assertEqual(got, {1: {"date": "2001", "precision": "year"},
-                               2: {"date": "1999-03", "precision": "month"}})
+        """A year-precision value is never read as the 1st of January, and a stated day inside a stated
+        year is the finer answer to the same question — not a later date. String order alone put "2001"
+        before "2001-05-02", which is the Swift's rule and shipped the year while the day was stated."""
+        rows = [{"tmdb": "1", "v": "+2001-05-02T00:00:00Z", "prec": "11"},
+                {"tmdb": "1", "v": "+2001-01-01T00:00:00Z", "prec": "9"},
+                {"tmdb": "2", "v": "+1999-03-31T00:00:00Z", "prec": "10"},
+                {"tmdb": "3", "v": "+0800-01-01T00:00:00Z", "prec": "7"},
+                {"tmdb": "4", "v": "+2001-01-01T00:00:00Z", "prec": "9"},
+                {"tmdb": "4", "v": "+2000-12-31T00:00:00Z", "prec": "11"},
+                {"tmdb": "5", "v": "+1999-05-02T00:00:00Z", "prec": "11"},
+                {"tmdb": "5", "v": "+1999-03-01T00:00:00Z", "prec": "10"},
+                {"tmdb": "5", "v": "+1999-03-31T00:00:00Z", "prec": "11"},
+                {"tmdb": "5", "v": "+1999-01-01T00:00:00Z", "prec": "9"}]
+        for seed in range(8):
+            shuffled = list(rows)
+            random.Random(seed).shuffle(shuffled)
+            with self.subTest(seed=seed):
+                self.assertEqual(wd.parse_facts(body(*shuffled), SPEC["released"]),
+                                 {1: {"date": "2001-05-02", "precision": "day"},
+                                  2: {"date": "1999-03", "precision": "month"},
+                                  4: {"date": "2000-12-31", "precision": "day"},
+                                  5: {"date": "1999-03-31", "precision": "day"}})
 
     def test_a_body_that_is_not_a_result_is_refused(self):
         with self.assertRaises(wd.WikidataError):

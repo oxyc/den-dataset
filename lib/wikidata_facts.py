@@ -183,9 +183,23 @@ def collapse(values, item):
     return number
 
 
+def earliest_date(stated):
+    """The earliest of a title's `(date, precision)` values, a stated finer date winning over a coarser one
+    that contains it.
+
+    String order alone puts "1999" before "1999-03-31", so a bare year beat every day stated inside it —
+    the Swift's rule, which shipped the year on 86 of the 1,621 films the facts oracle holds a release date
+    for while the day was right there. A value that another stated value refines says less than it, not
+    something earlier, so it is set aside first; the earliest of what is left is then the string least."""
+    dates = {date for date, _ in stated}
+    finest = [(date, precision) for date, precision in stated
+              if not any(other != date and other.startswith(date) for other in dates)]
+    return min(finest)
+
+
 def parse_facts(payload, item):
-    """`tmdbId -> value` for one spec. A date keeps the EARLIEST value: a festival premiere and a wide
-    release are both normal, and "newest first" needs something real to sort on."""
+    """`tmdbId -> value` for one spec. A date keeps the EARLIEST value (`earliest_date`): a festival
+    premiere and a wide release are both normal, and "newest first" needs something real to sort on."""
     lists, dates = {}, {}
     for binding in bindings(payload):
         tmdb_id = _int(_value(binding, "tmdb"))
@@ -197,11 +211,8 @@ def parse_facts(payload, item):
             if raw is None or precision is None:
                 continue
             trimmed = trim_date(raw, precision)
-            # String order, so "1999" sorts before "1999-03-31" and a year-precision value beats a
-            # day-precision one in the same year — what the Swift did, and what the shipped file holds.
-            if trimmed is None or (tmdb_id in dates and dates[tmdb_id][0] <= trimmed):
-                continue
-            dates[tmdb_id] = (trimmed, precision)
+            if trimmed is not None:
+                dates.setdefault(tmdb_id, set()).add((trimmed, precision))
             continue
         if item.kind == "iso":
             raw = _value(binding, "code")
@@ -220,7 +231,8 @@ def parse_facts(payload, item):
             found.append(value)
     out = {tmdb_id: collapse(sorted(values), item) for tmdb_id, values in lists.items() if values}
     out = {tmdb_id: value for tmdb_id, value in out.items() if value is not None}
-    for tmdb_id, (date, precision) in dates.items():
+    for tmdb_id, stated in dates.items():
+        date, precision = earliest_date(stated)
         out[tmdb_id] = {"date": date, "precision": precision}
     return out
 
