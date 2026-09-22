@@ -133,12 +133,15 @@ the other 421 would be dropped by the ToS rule regardless.
 
 ## Layout
 
+- `pipeline/` — the pipeline, in order (`pipeline/__init__.py`). One module per stage, each declaring what
+  it reads and writes; `./den stages` prints it.
+- `lib/` — what a stage needs from outside the machine: HTTP with retry, the response cache, and the
+  upstream clients.
 - `Sources/DenDataset/` — the library: the calibrated `TaxonomyClassifier`, the `t02` `Taxonomy`, the
   `TaxonomyScorer` + `GoldenSet`, the `HashingEmbedder` + `Quantizer`, the format + producer model types, the
-  baked `GroundingKeywords` map, and a thin `TMDBClient` (two endpoints only).
-- `Sources/taxonomy-backfill/` — the CLI that drives the resumable phases (`worklist`, `enrich`,
-  `enrich-ids`, `escalation`, `assemble`, `embed-corpus`, `doc-facts`, `facts`, `finalize`, `metadata`,
-  `score`, `recluster`).
+  baked `GroundingKeywords` map, and a thin `TMDBClient` (one endpoint only).
+- `Sources/taxonomy-backfill/` — the CLI that drives the phases not ported yet (`enrich`, `enrich-ids`,
+  `escalation`, `assemble`, `embed-corpus`, `facts`, `finalize`, `score`, `recluster`).
 - `Tests/DenDatasetTests/` — golden (embedder/quantizer determinism), conformance (artifact format), and a
   fixture-based end-to-end smoke test (no TMDB, no network).
 
@@ -152,7 +155,7 @@ swift test
 ## The tool — phases
 
 ```
-taxonomy-backfill worklist  --mode discover|export|delta --media movie|tv [--count N] --out <path>
+./den stage worklist --mode discover|export|delta --out-dir <dir> --dataset-version <ver>
 taxonomy-backfill enrich    --worklist <path> [--limit 150] --out-dir <dir>
 taxonomy-backfill escalation --batch-id <n> --out-dir <dir>
 taxonomy-backfill assemble  --batch-id <n> --out-dir <dir>
@@ -161,9 +164,10 @@ taxonomy-backfill metadata  --out-dir <dir> [--skip-fetch]   # the poster sideca
 taxonomy-backfill score     --labels labels-t02.json --golden golden.json [--gate]
 ```
 
-`worklist`/`enrich`/`enrich-ids` hit TMDB and need `TMDB_API_KEY`. The per-title labels come from Haiku
-subagents (the vote files under `out/votes/`), not an in-process LLM key. `assemble` runs the calibrated
-aggregation + embeds + quantizes; `finalize` writes the shipped artifacts.
+The worklist builds BOTH media in one call — `enrich` refuses a list that mixes them, so it writes one per
+media rather than taking a `--media`. It and `enrich`/`enrich-ids` hit TMDB and need `TMDB_API_KEY`. The
+per-title labels come from Haiku subagents (the vote files under `out/votes/`), not an in-process LLM key.
+`assemble` runs the calibrated aggregation + embeds + quantizes; `finalize` writes the shipped artifacts.
 
 ## `finalize` outputs
 

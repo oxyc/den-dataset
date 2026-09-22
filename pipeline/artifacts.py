@@ -62,13 +62,11 @@ EXPORT_TV = Artifact(
 UNIVERSE_MOVIE = Artifact(
     name="universe_movie",
     filename="universe-movie.json",
-    dedicated=False,
 )
 
 UNIVERSE_TV = Artifact(
     name="universe_tv",
     filename="universe-tv.json",
-    dedicated=False,
 )
 
 #: The classify pass, in shards. Three of them today, named by the run that wrote them rather than by the

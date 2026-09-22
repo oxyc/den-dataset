@@ -75,7 +75,7 @@ final class ArgsTests: XCTestCase {
     func testABareInvocationListsTheSubcommands() throws {
         let result = run([])
         XCTAssertNotEqual(result.status, 0, "naming no command is a usage error")
-        for command in ["worklist", "enrich", "assemble", "embed-corpus", "finalize", "metadata", "score"] {
+        for command in ["enrich", "assemble", "embed-corpus", "finalize", "score"] {
             XCTAssert(result.stderr.contains(command), "\(command) is missing from the overview")
         }
     }

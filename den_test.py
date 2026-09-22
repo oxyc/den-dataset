@@ -116,24 +116,16 @@ class Dispatch(unittest.TestCase):
         The first stage has to SUCCEED for this to say anything. An out-dir holding nothing refuses at
         stage one, and then classify is unreached whether or not the gate works — the assertion passes
         while testing nothing, which is the shape the publish gate's own test has to live with because
-        publish is last. So the worklist is stubbed past, and the two runs are compared at the stage
+        publish is last. So the worklist is given a real dump and the two runs are compared at the stage
         after it.
         """
         with tempfile.TemporaryDirectory() as out:
-            stub = os.path.join(out, "stub")
-            with open(stub, "w", encoding="utf-8") as fh:
-                fh.write("#!/usr/bin/env python3\n"
-                         "import json, sys\n"
-                         "argv = sys.argv[1:]\n"
-                         "json.dump([{'tmdbId': 1, 'mediaType': 'movie'}],\n"
-                         "          open(argv[argv.index('--out') + 1], 'w'))\n")
-            os.chmod(stub, 0o755)
-            previous = os.environ.get("DEN_BACKFILL_BIN")
-            os.environ["DEN_BACKFILL_BIN"] = stub
-            self.addCleanup(os.environ.__setitem__, "DEN_BACKFILL_BIN", previous or "")
-            # `discover` because it is the one mode that reads no input file — this test is about which
-            # stages run, not about feeding the first one a TMDB dump.
-            run = ("run", "--dataset-version", "test", "--out-dir", out, "--mode", "discover")
+            # `export` because it is the one mode that touches no network — this test is about which
+            # stages run, not about what TMDB answers.
+            for name in ("movie_ids.json", "tv_series_ids.json"):
+                with open(os.path.join(out, name), "w", encoding="utf-8") as fh:
+                    fh.write('{"id":11,"popularity":1.0}\n')
+            run = ("run", "--dataset-version", "test", "--out-dir", out, "--mode", "export")
 
             gated = den(*run)
             self.assertIn("==> worklist", gated.stderr, "the stub did not get the run past stage one")

@@ -50,108 +50,6 @@ struct ToolError: Error { let message: String }
 // MARK: - Commands
 
 enum Commands {
-    // worklist — the universe. `discover` (vote_count.desc, the highest-vote titles first — the pilot seed);
-    // `export` (TMDB's daily ID export, the full run). Anime is filtered uniformly at enrich, not here.
-    static func worklist(_ args: Args) async throws {
-        let mediaType: MediaType = args["--media"] == "tv" ? .tv : .movie
-        let out = try args.require("--out")
-        var entries: [WLEntry] = []
-
-        switch args["--mode"] ?? "discover" {
-        // DT-F — the daily freshness pass: titles released since `--since` that clear the vote floor and are
-        // NOT already in the published labels.
-        //
-        // Uses `discover` with a release-date window rather than `/movie/changes`. `/changes` is a firehose of
-        // ids with no vote or date signal, so it costs one detail lookup PER id just to discover that almost
-        // all of them are below the floor. A dated `vote_count.desc` slice selects the same titles in a few
-        // paged calls. The trade: a re-release or a late metadata fix on an OLD title won't be picked up —
-        // acceptable, because `assemble` re-reads whatever is in the worklist and a periodic full pass covers
-        // drift, whereas paying per-id daily does not scale.
-        case "delta":
-            let since = try args.require("--since")
-            let floor = args.int("--vote-floor") ?? 50
-            let tmdb = try TMDB.client()
-            // Titles already published are skipped: the point of a delta is to classify what is NEW, and
-            // re-running the catalogue daily is exactly the cost this pass exists to avoid.
-            var known = Set<Int>()
-            if let knownPath = args["--known"] {
-                struct KnownLabels: Decodable {
-                    struct Record: Decodable { let tmdbId: Int; let mediaType: String }
-                    let records: [Record]
-                }
-                let labels: KnownLabels = try JSON.read(knownPath)
-                known = Set(labels.records.filter { $0.mediaType == mediaType.rawValue }.map(\.tmdbId))
-            }
-            var seen = Set<Int>()
-            var page = 1
-            while page <= 500 {
-                let query = DiscoverQuery(mediaType: mediaType, voteCountGte: floor,
-                                          releaseDateGte: since, sortBy: "vote_count.desc")
-                let result = try await tmdb.discover(query, page: page)
-                for item in result.items where seen.insert(item.tmdbID.rawValue).inserted {
-                    guard !known.contains(item.tmdbID.rawValue) else { continue }
-                    entries.append(WLEntry(tmdbId: item.tmdbID.rawValue, mediaType: mediaType.rawValue))
-                }
-                if page >= result.totalPages { break }
-                page += 1
-            }
-            FileHandle.standardError.write(Data(
-                "delta: \(entries.count) new title(s) since \(since) at vote-floor \(floor) (skipped \(known.count) known)\n".utf8))
-        case "export":
-            let file = try args.require("--file")
-            guard let text = try? String(contentsOfFile: file, encoding: .utf8) else {
-                throw ToolError(message: "can't read export \(file)")
-            }
-            entries = Worklist.parse(jsonLines: text, mediaType: mediaType).map { WLEntry($0) }
-        default:
-            let count = args.int("--count") ?? 500
-            let floor = args.int("--vote-floor") ?? 50
-            let tmdb = try TMDB.client()
-            let origins = (args["--origins"] ?? "").split(separator: ",").map(String.init)
-            var seen = Set<Int>()
-            // Page one `vote_count.desc` query until exhausted or `target` reached.
-            func collect(_ query: DiscoverQuery, until target: Int) async throws {
-                var page = 1
-                while entries.count < target && page <= 500 {
-                    let result = try await tmdb.discover(query, page: page)
-                    for item in result.items where seen.insert(item.tmdbID.rawValue).inserted {
-                        entries.append(WLEntry(tmdbId: item.tmdbID.rawValue, mediaType: mediaType.rawValue))
-                    }
-                    if page >= result.totalPages { break }
-                    page += 1
-                }
-            }
-            if !origins.isEmpty {
-                // Foreign-depth expansion (DT-C region-aware floor): one `vote_count.gte` slice per origin
-                // country, fully paged. The expansion uses a low floor (e.g. 15) for EU/SA/AU-NZ origins —
-                // the band where regional titles live. The vote floor is re-checked at enrich; ids already in
-                // the base worklist / checkpoint are skipped there, so this is purely additive.
-                for country in origins {
-                    try await collect(DiscoverQuery(mediaType: mediaType, originCountry: [country],
-                                                    voteCountGte: floor, sortBy: "vote_count.desc"), until: .max)
-                }
-            } else if count <= 10_000 {
-                // A single global query suffices (TMDB serves ≤500 pages × 20 = 10k results) — highest vote first.
-                try await collect(DiscoverQuery(mediaType: mediaType, voteCountGte: floor, sortBy: "vote_count.desc"), until: count)
-            } else {
-                // Past 10k, partition by release year (newest first) to page beyond the per-query ceiling —
-                // each year's `vote_count.desc` slice, accumulated + de-duped until `count`.
-                let yearMax = args.int("--year-max") ?? 2026
-                let yearMin = args.int("--year-min") ?? 1920
-                for year in stride(from: yearMax, through: yearMin, by: -1) where entries.count < count {
-                    try await collect(DiscoverQuery(
-                        mediaType: mediaType, voteCountGte: floor,
-                        releaseDateGte: "\(year)-01-01", releaseDateLte: "\(year)-12-31",
-                        sortBy: "vote_count.desc"), until: count)
-                }
-            }
-            if origins.isEmpty { entries = Array(entries.prefix(count)) }
-        }
-
-        try JSON.writePretty(entries, to: out)
-        print("worklist: \(entries.count) \(mediaType.rawValue) ids → \(out)")
-    }
-
     // enrich — next `limit` un-enriched worklist ids → one TMDB call each (append_to_response=keywords),
     // bounded concurrency. Drops below the vote floor / anime / fetch failures (each logged + counted).
     // Writes one scratch batch file for Haiku + advances the resumable checkpoint.
@@ -2244,12 +2142,12 @@ enum Shell {
 
 // MARK: - DTOs
 
+/// A row of the universe `pipeline/worklist.py` writes, as `enrich` reads it back.
 struct WLEntry: Codable {
     let tmdbId: Int
     let mediaType: String
     var media: MediaType { mediaType == "tv" ? .tv : .movie }
     init(tmdbId: Int, mediaType: String) { self.tmdbId = tmdbId; self.mediaType = mediaType }
-    init(_ e: WorklistEntry) { tmdbId = e.tmdbId; mediaType = e.mediaType.rawValue }
 }
 
 /// The scratch enriched record (holds raw TMDB text → never shipped; gitignored). Captures the full
@@ -2695,29 +2593,6 @@ struct Subcommand {
 enum Spec {
     /// Every subcommand, in pipeline order — which is also the order `--help` lists them in.
     static let commands: [Subcommand] = [
-        Subcommand(
-            name: "worklist",
-            summary: "Build the universe of ids to classify → worklist-<media>.json.",
-            flags: [
-                .value("--out", "<path>", "where to write the worklist JSON", required: true),
-                .value("--mode", "<discover|export|delta>",
-                       "discover (default): TMDB /discover, vote_count.desc. export: parse TMDB's daily id "
-                       + "export. delta: the DT-F daily freshness pass over titles released since --since"),
-                .value("--media", "<movie|tv>", "movie (default) or tv — a worklist holds ONE media type"),
-                .value("--count", "<n>", "how many ids to collect in discover mode (default 500)"),
-                .value("--vote-floor", "<n>", "minimum TMDB vote count (default 50); re-checked at enrich"),
-                .value("--origins", "<cc,cc>",
-                       "discover: comma-separated origin countries, one fully-paged vote_count.gte slice each "
-                       + "— the foreign-depth expansion. Additive; --count is not applied"),
-                .value("--year-max", "<yyyy>",
-                       "discover past 10k results: newest release year to partition from (default 2026)"),
-                .value("--year-min", "<yyyy>", "discover past 10k results: oldest release year (default 1920)"),
-                .value("--since", "<yyyy-mm-dd>", "delta: only titles released on or after this date (required in delta)"),
-                .value("--known", "<labels-tNN.json>",
-                       "delta: already-published labels whose titles are skipped — a delta classifies what is NEW"),
-                .value("--file", "<export.json>", "export: the TMDB daily-export file to parse (required in export)"),
-            ],
-            run: { try await Commands.worklist($0) }),
         Subcommand(
             name: "enrich",
             summary: "Next N un-enriched worklist ids → one TMDB call each → a scratch batch for Haiku.",

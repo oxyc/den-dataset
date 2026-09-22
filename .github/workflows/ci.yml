@@ -87,6 +87,11 @@ jobs:
       # list, the pinned composition and what the stage does with the result. The worklist stage's oracle
       # is out for the same reason — the toolchain, and a 28 MB daily dump from files.tmdb.org.
       #
+      # `lib/` is tested here rather than beside a stage because two stages share it, and because its
+      # cache key is a CONTRACT with 2.1 GB of bodies already on disk: `lib/cache_test.py` pins two
+      # digests that name real files under `.cache/`, so a derivation that drifts fails here rather than
+      # silently re-fetching the whole corpus.
+      #
       # The classify stage's cannot be byte comparison at all: a provider answers the rows and each one
       # carries a fresh run id, so what runs here is the pass's own configuration hash — a manifest built
       # from the documented command's arguments, which a run the stage launches must accept unchanged —
@@ -97,7 +102,7 @@ jobs:
       # to; this fails the build on a module under `pipeline/` that no stage reaches, and on one under
       # `store/` that the writer the store stage runs does not reach.
       - name: The pipeline
-        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/classify_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/embed_test.py pipeline/publish_test.py store/build_test.py guards/reachable_test.py den_test.py
+        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/classify_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/embed_test.py pipeline/publish_test.py store/build_test.py lib/cache_test.py lib/tmdb_test.py guards/reachable_test.py den_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The
       # guards above are the pieces; this is whether the script wires them up — that it refuses a wrong
       # hash, a missing blob, a dropped key, a shrunk count and a blob from a dead generation, and that

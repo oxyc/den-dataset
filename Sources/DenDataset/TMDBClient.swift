@@ -1,8 +1,9 @@
 import Foundation
 
 // The producer's thin TMDB client + the minimal supporting types the backfill tool references. This is a
-// deliberate ~120-LOC reimplementation, NOT a copy of DenKit's 417-LOC TMDBWire: the tool needs only two
-// endpoints — `/discover` (worklist) and detail+keywords (enrich) — so the surface stays small.
+// deliberate reimplementation, NOT a copy of DenKit's 417-LOC TMDBWire: the tool needs one endpoint —
+// detail + keywords, for `enrich` — so the surface stays small. `/discover` left with the worklist, which
+// is `pipeline/worklist.py` now (oxyc/den-dataset#27).
 
 /// A TMDB id (movie/tv/person). `rawValue` is the integer the REST paths use.
 public struct TMDBID: Hashable, Codable, Sendable, RawRepresentable {
@@ -36,27 +37,6 @@ public struct Keyword: Hashable, Codable, Sendable {
     public let id: Int
     public let name: String
     public init(id: Int, name: String) { self.id = id; self.name = name }
-}
-
-/// A discovery list row — the worklist phase reads only `tmdbID.rawValue` (+ `year` for diagnostics).
-public struct MediaItem: Hashable, Sendable {
-    public let identifier: MediaIdentifier
-    public let year: Int?
-    public var tmdbID: TMDBID { identifier.id }
-    public init(identifier: MediaIdentifier, year: Int?) {
-        self.identifier = identifier
-        self.year = year
-    }
-}
-
-/// One page of TMDB results.
-public struct Page<Element: Sendable>: Sendable {
-    public let items: [Element]
-    public let page: Int
-    public let totalPages: Int
-    public init(items: [Element], page: Int, totalPages: Int) {
-        self.items = items; self.page = page; self.totalPages = totalPages
-    }
 }
 
 public enum TMDBError: Error, Sendable {
@@ -105,20 +85,6 @@ public final class TMDBClient: Sendable {
         self.session = session
         self.gate = AsyncSemaphore(maxConcurrent)
         self.cache = cache
-    }
-
-    /// `/discover/{movie,tv}` from a typed `DiscoverQuery` (DT-A).
-    public func discover(_ query: DiscoverQuery, page: Int = 1) async throws -> Page<MediaItem> {
-        var params = query.parameters()
-        params["page"] = String(page)
-        let data = try await get("/discover/\(query.mediaType.pathSegment)", params)
-        let paged = try Self.decoder.decode(PagedList.self, from: data)
-        let items = paged.results.map { row -> MediaItem in
-            let dateString = row.releaseDate ?? row.firstAirDate
-            let year = dateString.flatMap { Int($0.prefix(4)) }
-            return MediaItem(identifier: MediaIdentifier(row.id, query.mediaType), year: year)
-        }
-        return Page(items: items, page: paged.page, totalPages: paged.totalPages)
     }
 
     /// Single-request enrichment (DT-C) — detail + keywords + credits in ONE call via
@@ -246,31 +212,6 @@ public final class TMDBClient: Sendable {
     }()
 
     // MARK: - Wire
-
-    /// Internal, not private: `results` being REQUIRED is the guard that stops an error body decoding as
-    /// an empty page, and it shipped with nothing pinning it.
-    struct PagedList: Decodable {
-        let page: Int
-        let totalPages: Int
-        let results: [ListRow]
-        enum CodingKeys: String, CodingKey { case page, totalPages, results }
-        // `results` is REQUIRED. page/totalPages tolerate absence because a single-page response legitimately
-        // omits them, but defaulting `results` to [] turned every unexpected shape — an auth error body, a
-        // schema change — into a valid empty page. `worklist`'s collect loop then stops after page 1 and the
-        // delta pass reports "0 new titles" instead of failing, silently and daily.
-        init(from decoder: any Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            page = (try? c.decode(Int.self, forKey: .page)) ?? 1
-            totalPages = (try? c.decode(Int.self, forKey: .totalPages)) ?? 1
-            results = try c.decode([ListRow].self, forKey: .results)
-        }
-    }
-
-    struct ListRow: Decodable {
-        let id: Int
-        let releaseDate: String?   // movie
-        let firstAirDate: String?  // tv
-    }
 
     /// Detail + `append_to_response=keywords` in one payload. Movies key the title/date one way, TV another;
     /// this decodes both and normalizes into `EnrichedTitle`.

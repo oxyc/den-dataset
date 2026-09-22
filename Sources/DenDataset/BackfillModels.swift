@@ -6,16 +6,6 @@ import Foundation
 /// the same so the shipped JSON encodes identically. The published artifact is **derived labels + quantized
 /// vectors only** — never raw TMDB overviews/posters (ToS-clean).
 
-/// One item of work — a TMDB id to classify.
-public struct WorklistEntry: Sendable, Equatable, Hashable {
-    public let tmdbId: Int
-    public let mediaType: MediaType
-    public init(tmdbId: Int, mediaType: MediaType) {
-        self.tmdbId = tmdbId
-        self.mediaType = mediaType
-    }
-}
-
 /// Which of the enrich pass's plot candidates won — the thing that says whether a title's plot text is about
 /// that title at all.
 ///
@@ -276,20 +266,4 @@ public struct Checkpoint: Codable, Sendable, Equatable {
     public init(processed: Set<Int> = []) { self.processed = processed }
     public func contains(_ id: Int) -> Bool { processed.contains(id) }
     public mutating func mark(_ id: Int) { processed.insert(id) }
-}
-
-/// Parser for TMDB's **daily ID export** (`movie_ids_MM_DD_YYYY.json.gz` → JSONL of `{id, original_title,
-/// popularity, …}`). We take the worklist from this static export rather than crawling `/discover` to
-/// discover what exists (be light on TMDB). `vote_count` isn't in the export → it's filtered during enrich.
-public enum Worklist {
-    public static func parse(jsonLines: String, mediaType: MediaType) -> [WorklistEntry] {
-        let decoder = JSONDecoder()
-        return jsonLines.split(whereSeparator: \.isNewline).compactMap { line in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8),
-                  let row = try? decoder.decode(ExportRow.self, from: data) else { return nil }
-            return WorklistEntry(tmdbId: row.id, mediaType: mediaType)
-        }
-    }
-    private struct ExportRow: Decodable { let id: Int }
 }

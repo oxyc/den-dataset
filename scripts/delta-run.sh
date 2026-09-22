@@ -7,7 +7,8 @@
 # the same code (and thresholds) as the full backfill — a separate "fast path" would drift and start emitting
 # labels the main run wouldn't.
 #
-#   worklist --mode delta   → new titles since the window, above the vote floor, minus what's published
+#   den stage worklist --mode delta
+#                           → new titles since the window, above the vote floor, minus what's published
 #   enrich                  → TMDB + Wikipedia plot for those ids only
 #   ---- THE PASS STOPS HERE ----
 #   assemble                → classify + embed + append to the index store
@@ -33,6 +34,9 @@ cd "$(dirname "$0")/.." || exit 1
 
 DAYS_BACK="${1:-14}"
 OUT_DIR="${2:-out-t02}"
+# Applies to `enrich`, which re-checks the floor per title. The WORKLIST's floor is pinned in
+# `pipeline/worklist.py` (VOTE_FLOOR), so the universe a delta collects does not move with an environment
+# variable — the two agree at 50 and the test that holds them together is `worklist_test.py`.
 VOTE_FLOOR="${VOTE_FLOOR:-50}"
 # How many new titles to enrich per media per run. `enrich` defaults to 150 and silently defers the rest, so
 # a backlog would grow without ever saying so; state the limit and report what is left over.
@@ -58,10 +62,19 @@ mkdir -p "$OUT_DIR/delta"
 total=0
 batches=""
 left=0
+
+# One invocation for both media: the stage builds the whole universe, and the two lists are pointed into
+# `$OUT_DIR/delta/` with `--set` so a delta's forty rows are not written over the full run's 47k-title
+# worklists under the same names. `--dataset-version` is required by `den` and unused here — neither
+# worklist filename carries a version.
+./den stage worklist --mode delta --since "$SINCE" \
+     --out-dir "$OUT_DIR" --dataset-version delta \
+     --set "vector_labels=$LABELS" \
+     --set "universe_movie=$OUT_DIR/delta/universe-movie.json" \
+     --set "universe_tv=$OUT_DIR/delta/universe-tv.json"
+
 for media in movie tv; do
-  worklist="$OUT_DIR/delta/worklist-$media.json"
-  "$BIN" worklist --mode delta --media "$media" --since "$SINCE" \
-                  --vote-floor "$VOTE_FLOOR" --known "$LABELS" --out "$worklist"
+  worklist="$OUT_DIR/delta/universe-$media.json"
   count=$(python3 -c "import json;print(len(json.load(open('$worklist'))))")
   [ "$count" -eq 0 ] && { echo "  $media: nothing new"; continue; }
   echo "  $media: $count candidate(s) → enrich"

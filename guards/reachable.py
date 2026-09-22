@@ -9,7 +9,7 @@ So the rule has teeth here: **existence means reachability**. A file under a gua
 imported, transitively, from that package's entry points, or it is deleted. Then "is this live?" is
 answered by `ls` instead of by a search, which is the whole point of the layout.
 
-The roots always include `__init__` — every submodule import loads it — and beyond that the two guarded
+The roots always include `__init__` — every submodule import loads it — and beyond that the three guarded
 packages are entered differently, so they name their roots differently:
 
   pipeline/  the modules in `STAGES`, passed in. A stage that leaves the list stops being a root, and
@@ -21,6 +21,9 @@ packages are entered differently, so they name their roots differently:
              import block, free to drift from it. Which script is the entry is not a copy either: it is
              `pipeline.store.PRODUCER`, the same string the stage executes, so the chain from `STAGES` to
              a `store/` module is unbroken and a writer the pipeline stops running strands its package.
+  lib/       whatever the REACHABLE stages import from it. Read the same way and for the same reason,
+             over several entry files rather than one: the chain runs `STAGES` → a stage → a `lib/`
+             module, so a stage leaving the order strands the upstream client only it talked to.
 
 It reads the imports rather than running them. An import guarded by a flag or a try is still an import,
 and a module whose only path in is conditional is exactly the kind nobody can answer for.
@@ -86,17 +89,24 @@ def imports(package_dir, module):
                      relative=True)
 
 
-def roots(package_dir, entry):
-    """The package's modules an entry script outside it imports — the root set, read rather than kept.
+def roots(package_dir, *entries):
+    """The package's modules the entry files outside it import — the root set, read rather than kept.
 
-    A package nothing in the repo imports is entered from one file, and that file's import block already
-    says which modules are the way in. Asking it, instead of restating it here, is what keeps the root set
-    from being a copy that drifts.
+    A package nothing else in the repo imports is entered from one file, and that file's import block
+    already says which modules are the way in. Asking it, instead of restating it here, is what keeps the
+    root set from being a copy that drifts.
+
+    Several entries because a package can be entered from more than one place: `store/` has one writer,
+    while `lib/` is imported by whichever stages need to leave the machine. The union is the root set, and
+    a stage that stops importing a `lib/` module strands it the same commit.
     """
-    with open(entry, encoding="utf-8") as fh:
-        source = fh.read()
-    return sorted(_imported(source, os.path.basename(os.path.abspath(package_dir)),
-                            set(modules(package_dir)), relative=False))
+    found = set()
+    for entry in entries:
+        with open(entry, encoding="utf-8") as fh:
+            source = fh.read()
+        found |= _imported(source, os.path.basename(os.path.abspath(package_dir)),
+                           set(modules(package_dir)), relative=False)
+    return sorted(found)
 
 
 def reached(package_dir, roots):

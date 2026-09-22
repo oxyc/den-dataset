@@ -162,7 +162,7 @@ cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterpr
 #    the shipped labels (re-embeds exactly what we ship) and sort by TMDB daily-export popularity:
 python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popularity-sorted)
 #    THIS IS THE RE-EMBED'S UNIVERSE — the ids we already ship, reordered. It is not the same universe as
-#    `taxonomy-backfill worklist`, which is where new titles come from, and both write these two filenames:
+#    the worklist stage, which is where new titles come from:
 #      ./den stage worklist --mode export --out-dir out --dataset-version <ver>
 #        every id in TMDB's daily dump (put movie_ids.json / tv_series_ids.json in the out-dir first —
 #        `fetch_export` above leaves them gzipped, so gunzip them). The stage refuses a run that did not
