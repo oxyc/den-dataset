@@ -79,7 +79,6 @@ GOLDEN_MANIFEST = """{
   "float2" : 2,
   "labelsBytes" : 698,
   "labelsFile" : "labels-t02.json",
-  "labelsGzFile" : "labels-t02.json.gz",
   "labelsSha256" : "83b2c9d7346dd23d058c62a90ccfcacd06ab4ec99d93ce254959da90940f7ec0",
   "lastModifiedHttp" : "Tue, 22 Sep 2026 10:36:23 GMT",
   "neg" : -0.10000000000000001,
@@ -132,9 +131,6 @@ GOLDEN_REPORT = """{
   }
 }"""
 
-#: `/usr/bin/gzip -k` over the golden labels, with the file's mtime set to this.
-GZ_MTIME = 1790073383
-GZ_SHA = "a02e3b4a98cb472a2d3f791671b0a315311ea23e535cecb8880480865c488e80"
 VECTORS_SHA = "2d827280a25bd55a41322157dd6b48961f7da3844411cf92de3d4e37c3394a44"
 
 
@@ -199,14 +195,23 @@ class Bytes(Staged):
         self.assertEqual(read(os.path.join(self.out, "dataset.meta.json")), GOLDEN_MANIFEST)
         self.assertEqual(read(os.path.join(self.out, "report.json")), GOLDEN_REPORT)
 
-    def test_the_gzip_is_the_command_line_tools(self):
-        """The header carries the input's name and mtime, which is the only thing two runs disagree on."""
+    def test_the_precompressed_labels_are_not_written(self):
+        """`labels-t02.json.gz` was the copy den-atlas served to clients asking for gzip. The blobs were
+        retired for the store, `prune-manifest.py` drops every `*GzFile` key, and nothing in this repo, in
+        den-atlas or in the box's sync has looked for the file since — it was 11 MB a run for nobody."""
         lay_down(self.out)
         self.run_stage()
-        labels = os.path.join(self.out, "labels-t02.json")
-        os.utime(labels, (GZ_MTIME, GZ_MTIME))
-        finalize.gzip_like_the_cli(labels, labels + ".gz")
-        self.assertEqual(hashlib.sha256(read(labels + ".gz", "rb")).hexdigest(), GZ_SHA)
+        self.assertFalse(os.path.exists(os.path.join(self.out, "labels-t02.json.gz")))
+        self.assertNotIn("labelsGzFile", json.loads(read(os.path.join(self.out, "dataset.meta.json"))))
+
+    def test_a_previous_manifests_claim_to_one_is_dropped(self):
+        """`labelsGzFile` stays OWNED although nothing writes it: a rewrite has to drop the key rather
+        than carry forward a claim about a file that is no longer beside it."""
+        self.assertIn("labelsGzFile", finalize.OWNED)
+        self.assertIn("labelsGzFile", PREVIOUS)
+        lay_down(self.out)
+        self.run_stage()
+        self.assertNotIn("labelsGzFile", read(os.path.join(self.out, "dataset.meta.json")))
 
 
 class Report(Staged):
@@ -349,12 +354,12 @@ class Topology(unittest.TestCase):
         self.assertEqual(pipeline.STAGES.index("facts"), pipeline.STAGES.index("finalize") + 1)
 
     def test_it_owns_what_it_writes(self):
-        for artifact in (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST, artifacts.VECTOR_LABELS_GZ,
+        for artifact in (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST,
                          artifacts.FINALIZE_REPORT):
             self.assertEqual(artifact.producer, "")
             self.assertEqual(pipeline.producers()[artifact.name][0], finalize.PRODUCER)
         self.assertEqual([bind(e).name for e in finalize.OUTPUTS],
-                         ["vector_labels", "vectors", "manifest", "vector_labels_gz", "finalize_report"])
+                         ["vector_labels", "vectors", "manifest", "finalize_report"])
 
     def test_every_file_it_touches_is_declared(self):
         """Run it over a fixture and compare what changed on disk with the declaration. An undeclared read

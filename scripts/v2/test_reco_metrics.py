@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
-"""Check the Python metrics against RecoEval's documented behaviour.
+"""Pin the ranking metrics' documented behaviour.
 
-These are not "does it run" tests. Each one pins a decision RecoEval's source calls out as
+These are not "does it run" tests. Each one holds a decision `reco_metrics.py` calls out as
 deliberate, because those are exactly the places a reimplementation drifts without failing:
 the capped ideal, the min() in average precision, nil-not-zero diversity, skipping unknown
-ids for novelty, and the gate's rule that a tie fails.
+ids for novelty, and the gate's rule that a tie fails. The Swift the metrics were first written
+against is gone, so this file is the only thing holding them to it.
 
-Run: out-t02/v2/.venv/bin/python scripts/v2/test_reco_metrics.py
+The checks run at import and collect into `FAILURES`; the case at the bottom is what reports them, so
+the file works under `python3 -m unittest` like every other suite here and as a script on its own.
 """
 import math
+import os
 import sys
+import unittest
 
-from reco_metrics import average_precision, compare, diversity, evaluate, ndcg, novelty
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from reco_metrics import average_precision, compare, diversity, evaluate, ndcg, novelty  # noqa: E402
 
 FAILURES = []
 
@@ -89,9 +94,10 @@ within = dict(base, ndcg=0.12, diversity=0.4 * 0.99)
 if not compare(within, base)['passes']:
     FAILURES.append('gate: a 1% diversity dip inside tolerance was treated as a regression')
 
-if FAILURES:
-    print(f'{len(FAILURES)} FAILED:')
-    for f in FAILURES:
-        print('  ' + f)
-    sys.exit(1)
-print('all metric conformance checks pass')
+class MetricConformance(unittest.TestCase):
+    def test_every_documented_behaviour_holds(self):
+        self.assertEqual(FAILURES, [], '\n'.join(FAILURES))
+
+
+if __name__ == '__main__':
+    unittest.main()

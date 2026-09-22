@@ -80,6 +80,13 @@ jobs:
         run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py scripts/test_prune_manifest.py scripts/v2/test_consolidate_corpus.py scripts/test_eval_taxonomy.py scripts/v2/test_embed_canary.py scripts/test_check_plot_invariants.py scripts/test_backfill_plot_provenance.py scripts/test_recluster.py
         env:
           DEN_SPEC_DIR: ${{ github.workspace }}/den-spec-checkout
+      # The ranking metrics. `scripts/v2/reco_metrics.py` is what `score_reco.py` scores a ranking change
+      # with, and every case it pins is a place a reimplementation drifts quietly: the capped ideal, the
+      # min() in average precision, "not measurable" diversity, unknown ids skipped for novelty, and the
+      # gate's rule that a tie fails. Its suite was in no CI step and errored on import, so none of that
+      # was checked by anything.
+      - name: The ranking metrics
+        run: python3 -m unittest scripts/v2/test_reco_metrics.py
       # The pipeline skeleton (oxyc/den-dataset#27): the stage contract, the artifact catalogue, the
       # producer registry derived from the stage order, the corpus, embed and store stages against the
       # rules they wrap, and `den`.
@@ -110,12 +117,16 @@ jobs:
       # runs here is each rule on its own against stubbed upstreams, the batch file's bytes against the
       # Swift encoder's captured output, and the drain loop's three stopping rules.
       #
+      # `store/format_test.py` holds the two fixed-point encoders' refusals. Deleting either one leaves a
+      # store that passes every structural guard and quietly rounds the values it ships, which is the loss
+      # that already shipped once — so the refusal itself has to be asserted, not just the layout.
+      #
       # `guards/reachable_test.py` is the one that matters over time. `scripts/v2/` exists because
       # "delete what nothing runs" was a habit, and a habit loses to a branch someone might come back
       # to; this fails the build on a module under `pipeline/` that no stage reaches, and on one under
       # `store/` that the writer the store stage runs does not reach.
       - name: The pipeline
-        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/genres_moods_test.py pipeline/docfacts_test.py pipeline/compose_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/wikidata_facts_test.py lib/imdb_test.py lib/plot_test.py lib/enterprise_test.py lib/denembed_test.py guards/reachable_test.py den_test.py
+        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/genres_moods_test.py pipeline/docfacts_test.py pipeline/compose_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py store/format_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/wikidata_facts_test.py lib/imdb_test.py lib/plot_test.py lib/enterprise_test.py lib/denembed_test.py guards/reachable_test.py den_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The
       # guards above are the pieces; this is whether the script wires them up — that it refuses a wrong
       # hash, a missing blob, a dropped key, a shrunk count and a blob from a dead generation, and that

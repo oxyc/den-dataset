@@ -20,6 +20,11 @@ from run_combined import (SCHEMA_VERSION, article_key, attach_enriched_evidence,
 from typesafe_client import TypeSafe
 
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+#: Superseded digests of the source files the pass hashes into every manifest, each with the commit that
+#: superseded it and why its rows still mean the same thing. See `validate_implementation`.
+LINEAGE = os.path.join(HERE, "implementation-lineage.json")
+
 PLOT_AXES = {
     "archetype", "chronology", "conflict", "continuity", "ending", "ensemble", "era", "pacing",
     "scope", "setting", "timespan", "tone",
@@ -184,6 +189,46 @@ def validate_row(row, rec, manifest, global_questions):
     return sections, section_answers, calls
 
 
+def load_lineage(path=LINEAGE):
+    """The recorded exceptions, `{filename: [entry, …]}`. An absent file means no exception is allowed."""
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh).get("superseded", {})
+
+
+def validate_implementation(where, config, lineage=None):
+    """The pass's own source files, against the digests the shard's manifest recorded.
+
+    A digest that matches the working tree needs nothing. A digest that does not is one of two things and
+    the difference is the whole point of the check: the pass was edited in a way that changes what the rows
+    mean, or it was edited in a way that does not. Nothing can tell those apart by hashing, so the second
+    one has to be written down — `implementation-lineage.json`, naming the commit and the reason — and an
+    unrecorded difference is a refusal.
+
+    The alternative, re-stamping the manifest onto today's digests, is what this refuses to do: the
+    manifest is the provenance of a run that was paid for once and will not be repeated, and rewriting it
+    to keep a checker quiet destroys the only record of what produced those rows.
+
+    Returns the allowances it granted, so a caller can say out loud which ones it is running on.
+    """
+    lineage = load_lineage() if lineage is None else lineage
+    allowed = []
+    for name, expected in config.get("implementationSha256", {}).items():
+        path = os.path.join(HERE, name)
+        if sha256_file(path) == expected:
+            continue
+        entry = next((e for e in lineage.get(name, []) if e.get("sha256") == expected), None)
+        if entry is None:
+            fail(where, f"implementation hash differs for {name}: the shard was produced by {expected[:12]} "
+                        f"and this tree holds {sha256_file(path)[:12]}. If that edit cannot change the rows, "
+                        f"record it in scripts/v2/implementation-lineage.json with the commit and the "
+                        f"reason; do not re-stamp the manifest.")
+        allowed.append({"file": name, "sha256": expected, **{
+            key: entry[key] for key in ("commit", "supersededBy", "why") if key in entry}})
+    return allowed
+
+
 def validate_manifest(manifest, articles, enriched_sha):
     config = manifest.get("config")
     if not isinstance(config, dict) or manifest.get("configSha256") != sha256_text(canonical(config)):
@@ -198,10 +243,7 @@ def validate_manifest(manifest, articles, enriched_sha):
         path = config.get(path_name)
         if not isinstance(path, str) or not os.path.isfile(path) or sha256_file(path) != config.get(hash_name):
             fail("manifest", f"{path_name} artifact hash differs")
-    for name, expected in config.get("implementationSha256", {}).items():
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
-        if sha256_file(path) != expected:
-            fail("manifest", f"implementation hash differs for {name}")
+    validate_implementation("manifest", config)
     if config.get("globalQuestionsSha256") != sha256_text(canonical(config.get("globalQuestions"))):
         fail("manifest", "global question hash differs")
     template = config.get("sectionQuestionTemplate")
