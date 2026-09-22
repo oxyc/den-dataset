@@ -31,9 +31,10 @@ cd "$(dirname "$0")/.." || exit 1
 
 DAYS_BACK="${1:-14}"
 OUT_DIR="${2:-out-t02}"
-# Applies to `enrich`, which re-checks the floor per title. The WORKLIST's floor is pinned in
-# `pipeline/worklist.py` (VOTE_FLOOR), so the universe a delta collects does not move with an environment
-# variable — the two agree at 50 and the test that holds them together is `worklist_test.py`.
+# The worldwide tier's TMDB floor, passed to `enrich`, which admits per title on it, the regional tier's
+# floor, or IMDb's count (`pipeline/floors.py`). The WORKLIST enumerates lower — at the lowest floor any
+# tier uses, pinned in `pipeline/worklist.py` — so the universe a delta collects does not move with an
+# environment variable. `worklist_test.py` holds this default to `pipeline/floors.py`'s.
 VOTE_FLOOR="${VOTE_FLOOR:-50}"
 # How many new titles to enrich per media per run. `enrich` defaults to 150 and silently defers the rest, so
 # a backlog would grow without ever saying so; state the limit and report what is left over.

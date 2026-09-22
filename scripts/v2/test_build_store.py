@@ -893,6 +893,18 @@ class EverySectionDeclaresWhereItsBytesCameFrom(StoreFixture, unittest.TestCase)
         self.assertIn("primary_genre", message)
         self.assertIn("VENDOR_ALLOWED", message)
 
+    def test_a_section_carrying_imdb_counts_stops_the_build(self):
+        """The enrichment reads IMDb's vote counts to admit titles, and IMDb's licence does not allow them
+        to be passed on. A column declaring them is refused like a TMDB one."""
+        with tempfile.TemporaryDirectory() as out:
+            writer = self.mutated(out, 'mod.PROVENANCE["released"] = "imdb"')
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, build_store=writer)
+            self.assertFalse(os.path.exists(os.path.join(out, "test.store")))
+        message = str(caught.exception)
+        self.assertIn("released", message)
+        self.assertIn("VENDOR_ALLOWED", message)
+
     def test_an_allowlist_entry_for_a_column_that_is_gone_stops_the_build(self):
         """So removing a vendor column is two deliberate edits — the PROVENANCE entry and the allowlist
         entry — rather than one that leaves a permission behind. The allowlist is empty now, so the

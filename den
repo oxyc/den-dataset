@@ -16,7 +16,10 @@ Options (both run forms):
     --pause-ms N                   milliseconds the embed pass idles between requests
     --limit N                      stop the embed pass after N new titles
     --media movie|tv               enrich only this media type (default: both)
-    --vote-floor N                 the TMDB vote count the enrichment keeps a title above
+    --vote-floor N                 the TMDB vote count the enrichment keeps a title above (worldwide tier)
+    --regional-vote-floor N        the same, for European, South American and AU/NZ origins
+    --imdb-floor N                 the IMDb vote count that admits a title TMDB's floor left out
+    --regional-imdb-floor N        the same, for the regional tier
     --plan                         the classify pass validates and reports, and buys nothing
     --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
                                    NAME to name every shard of a set
@@ -74,7 +77,8 @@ def context(args):
                             mode=args.mode or "", since=args.since or "",
                             expect=args.expect, pause_ms=args.pause_ms, limit=args.limit,
                             media=args.media or "", vote_floor=args.vote_floor,
-                            plan=args.plan)
+                            regional_vote_floor=args.regional_vote_floor, imdb_floor=args.imdb_floor,
+                            regional_imdb_floor=args.regional_imdb_floor, plan=args.plan)
 
 
 def execute(module, ctx):
@@ -102,7 +106,13 @@ def main(argv=None):
         sub.add_argument("--media", choices=("movie", "tv"),
                          help="enrich only this media type; without it both worklists are drained")
         sub.add_argument("--vote-floor", type=int,
-                         help="the TMDB vote count the enrichment keeps a title above (default 50)")
+                         help="the worldwide tier's TMDB vote floor (default 50)")
+        sub.add_argument("--regional-vote-floor", type=int,
+                         help="the regional tier's TMDB vote floor (default 15)")
+        sub.add_argument("--imdb-floor", type=int,
+                         help="the worldwide tier's IMDb vote floor (default 2000)")
+        sub.add_argument("--regional-imdb-floor", type=int,
+                         help="the regional tier's IMDb vote floor (default 500)")
         sub.add_argument("--plan", action="store_true",
                          help="the classify pass validates and reports its call plan, and buys nothing")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")

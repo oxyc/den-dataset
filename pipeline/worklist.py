@@ -9,7 +9,7 @@ Which ids exist, in which order, and which of them are already published. The ru
   * `export` — TMDB's daily id dump, parsed. Every id that exists: the full run's universe. Offline, and
     the only mode that is deterministic end to end.
   * `discover` — `/discover` sorted `vote_count.desc`, the highest-vote titles first. The pilot seed.
-  * `delta` — titles released since `--since` that clear the vote floor and are NOT in the published
+  * `delta` — titles released since `--since` that clear the discovery floor and are NOT in the published
     labels. The daily freshness pass `scripts/delta-run.sh` drives.
 
 **The mode is not defaulted.** For a full run the cheapest-looking answer means enriching the 500
@@ -34,7 +34,7 @@ import json
 import os
 import sys
 
-from . import artifacts
+from . import artifacts, floors as floor_rules
 from .contract import StageError, bind
 from lib import cache as caching
 from lib import tmdb as tmdb_api
@@ -55,12 +55,13 @@ DISCOVER, EXPORT, DELTA = "discover", "export", "delta"
 #: In the order the stage's own refusal lists them.
 MODES = (DISCOVER, EXPORT, DELTA)
 
-#: The vote floor the shipped catalogue was built at, and the one `scripts/delta-run.sh` passes daily.
-#: Pinned rather than inherited from a default somewhere else, so the universe this stage builds does not
-#: move when that default does. `enrich` re-checks it per title, so this only decides how much gets looked
-#: at — a brand-new release with no votes has no plot worth classifying and would be re-billed every day
-#: it stayed in the list.
-VOTE_FLOOR = 50
+#: The TMDB count `/discover` enumerates at: the LOWEST floor any admission tier uses (`pipeline/floors.py`),
+#: not the worldwide 50. Discovery only enumerates; `enrich` admits, on TMDB's count or IMDb's. A title
+#: enumerated at 50 could never reach the regional tier's 15, nor be admitted on an IMDb count TMDB
+#: undercounts — `Elkürtük` has 44 TMDB votes and 40,939 on IMDb. Below this nothing is looked at at all:
+#: a brand-new release with no votes has no plot worth classifying, and every id listed costs a detail call
+#: each day it stays below the floors, since below-floor ids are never checkpointed.
+VOTE_FLOOR = floor_rules.DEFAULT.lowest_tmdb
 
 #: How many titles a `discover` seed collects. The pilot's number, pinned here for the same reason.
 DISCOVER_COUNT = 500

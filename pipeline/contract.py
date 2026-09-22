@@ -168,6 +168,11 @@ class Context:
     #: vote count only climbs — so a worklist full of them cannot drain at the default, and this is the
     #: knob the refusal for that sends an operator to.
     vote_floor: int | None = None
+    #: The other three admission floors (`pipeline/floors.py`): the regional tier's TMDB floor, and the IMDb
+    #: floor of each tier. None keeps the measured default.
+    regional_vote_floor: int | None = None
+    imdb_floor: int | None = None
+    regional_imdb_floor: int | None = None
 
     def path(self, artifact):
         if artifact.shards:

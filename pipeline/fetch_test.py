@@ -23,7 +23,7 @@ from unittest import mock
 
 import pipeline
 
-from . import artifacts, embed, enrich, fetch, worklist
+from . import artifacts, embed, enrich, fetch, floors, worklist
 from .contract import Context, StageError, bind
 
 VERSION = "testver"
@@ -100,7 +100,19 @@ class Declaration(unittest.TestCase):
             fetch.batch(context(directory.name), "movie")
         self.assertNotIn("exclude_anime", ran.call_args.kwargs)
         self.assertEqual(ran.call_args.kwargs["limit"], fetch.BATCH)
-        self.assertEqual(ran.call_args.kwargs["vote_floor"], enrich.VOTE_FLOOR)
+        self.assertEqual(ran.call_args.kwargs["floors"], floors.DEFAULT)
+
+    def test_every_floor_the_run_names_reaches_the_batch(self):
+        """Four floors, four flags: one that stops at `Context` is a run that says it lowered a floor and
+        judged every title by the default."""
+        with mock.patch.object(enrich, "run", return_value={"remaining": 0}) as ran, \
+                mock.patch.object(fetch, "credentials", return_value=("k", None)):
+            directory = tempfile.TemporaryDirectory()
+            self.addCleanup(directory.cleanup)
+            write_inputs(directory.name)
+            fetch.batch(context(directory.name, vote_floor=40, regional_vote_floor=10, imdb_floor=1500,
+                                regional_imdb_floor=300), "movie")
+        self.assertEqual(ran.call_args.kwargs["floors"], floors.Floors(40, 10, 1500, 300))
 
     def test_a_missing_worklist_stops_the_stage_and_names_who_builds_it(self):
         """A drain pointed at a worklist that is not there checkpoints nothing and reports `remaining` 0,
