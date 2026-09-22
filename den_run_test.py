@@ -29,18 +29,14 @@ own directory under `seeds/` so the kind is visible from the path:
     `den run` leaves it out without `--spend`; CI can never buy. `TheClassifyPassStillBuys` fails if that
     stops being true.
 
-**What `den run` does today, and where it stops.** Two seam bugs stop an unattended run, and each is
-asserted as the boundary it is, so that fixing one turns a test red and the workaround below it gets
-deleted rather than outliving the bug:
+**What `den run` does today, and where it stops.** It runs every stage from `worklist` through `finalize`
+— the fetch drain included, over a universe holding a title below every floor — and one seam bug stops it
+after that. It is asserted as the boundary it is, so that fixing it turns a test red and the workaround
+below it gets deleted rather than outliving the bug:
 
-  1. `fetch` cannot drain a universe holding a title below the vote floor. `enrich` never checkpoints a
-     below-floor id (`pipeline/enrich.py`, "NOT checkpointed either"), so `remaining` never reaches 0, and
-     the drain refuses the second batch as "every title below the vote floor" (`pipeline/fetch.py`,
-     `drain`). An export universe — every id TMDB has — is mostly such titles. The refusal also leaves the
-     OTHER media undrained, so the run resumes with `den stage fetch --media tv`.
-  2. `den run` requires `--dataset-version`, and `facts` refuses any value but the one `finalize` derives
-     from the labels and vectors it wrote (`pipeline/facts.py`, `manifest_version`) — a hash an operator
-     cannot know before the run. The stages after `finalize` are run with the manifest's version.
+  * `den run` requires `--dataset-version`, and `facts` refuses any value but the one `finalize` derives
+    from the labels and vectors it wrote (`pipeline/facts.py`, `manifest_version`) — a hash an operator
+    cannot know before the run. The stages from `facts` on are run with the manifest's version.
 
 From the refusal on, the remaining stages run one at a time with `den stage`, in `pipeline.STAGES` order and
 under `den run`'s own rules (no publishing, no buying), so a stage added to the order is run here too.
@@ -75,7 +71,9 @@ from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
 from pipeline import artifacts  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 
-sys.path.insert(0, os.path.join(HERE, "scripts", "v2"))
+V2 = os.path.join(HERE, "scripts", "v2")
+sys.path.insert(0, V2)
+import audit_combined  # noqa: E402
 import vector_blob  # noqa: E402
 
 FIXTURE = os.path.join(HERE, "pipeline", "fixture-corpus")
@@ -93,10 +91,28 @@ UNPRODUCED = {
     "premise_vectors": ("vectors-premise.json",),
 }
 
-#: What `den run` is told. Deliberately NOT the version `finalize` will derive — see seam bug 2.
+#: What `den run` is told. Deliberately NOT the version `finalize` will derive — see the seam bug above.
 GIVEN_VERSION = "fixture"
 DIMS = 1024
 BELOW_FLOOR = "movie:900004"
+
+
+#: The sidecars of the two seeded Jev shards, which the corpus stage audits before it joins.
+SEEDED_MANIFESTS = ("combined-v1-r2.jsonl.manifest.json", "delta-v2.jsonl.manifest.json")
+
+
+def stamp_implementation(path):
+    """Record, in a seeded shard's manifest, this tree's digests of the files the pass hashes.
+
+    The seed stands in for a shard bought on the pass as this tree holds it, which is what these digests
+    say. They are written at copy time rather than committed: committed, every edit to the pass would fail
+    this test with the audit's advice — record a lineage entry — which is meant for shards someone paid for.
+    """
+    manifest = read_json(path)
+    manifest["config"]["implementationSha256"] = {name: sha256(os.path.join(V2, name))
+                                                  for name in audit_combined.IMPLEMENTATION}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=2)
 
 
 def load_den():
@@ -372,6 +388,8 @@ class DenRun(unittest.TestCase):
         for kind in ("unproduced", "cycle", "unbought"):
             for name in os.listdir(os.path.join(SEEDS, kind)):
                 shutil.copy(os.path.join(SEEDS, kind, name), cls.out)
+        for name in SEEDED_MANIFESTS:
+            stamp_implementation(os.path.join(cls.out, name))
         spec = read_json(os.path.join(cls.out, "vectors-premise.json"))
         os.unlink(os.path.join(cls.out, "vectors-premise.json"))
         vector_blob.write(os.path.join(cls.out, artifacts.PREMISE_VECTORS.filename), spec["keys"],
@@ -416,40 +434,48 @@ class DenRun(unittest.TestCase):
         common = ("--out-dir", cls.out, "--stamp-meta", cls.meta)
         cls.run_code, cls.run_said = cls.den(den, "run", *common, "--dataset-version", GIVEN_VERSION,
                                              "--mode", "export")
+        #: The stages `den run` began, in the order it began them, read off its `==> <stage>` headers.
+        cls.began = re.findall(r"^==> (\w+)$", cls.run_said, re.M)
+        cls.resumed = []
         if cls.run_code == 0:
-            return  # Both seam bugs are fixed; `DenRunBoundary` says what to delete.
+            return  # The seam bug is fixed; the boundary test's docstring says what to delete.
 
-        argv = ("stage", "fetch", *common, "--media", "tv")
-        cls.expect(*cls.den(den, *argv), argv)
         order = [m.NAME for m in pipeline.stages()]
-        cls.skipped = []
-        for module in pipeline.stages()[order.index("fetch") + 1:]:
+        for module in pipeline.stages()[order.index("facts"):]:
             if module.PUBLISHES or (module.SPENDS and not getattr(module, "FREE_WITHOUT_SPEND", False)):
-                cls.skipped.append(module.NAME)
                 continue
-            version = read_json(cls.meta)["datasetVersion"] if os.path.exists(cls.meta) else GIVEN_VERSION
-            if module.NAME == "facts":
-                cls.facts_refusal = cls.den(den, "stage", "facts", *common, "--dataset-version", GIVEN_VERSION)
-            argv = ("stage", module.NAME, *common, "--dataset-version", version)
+            argv = ("stage", module.NAME, *common, "--dataset-version", read_json(cls.meta)["datasetVersion"])
             cls.expect(*cls.den(den, *argv), argv)
+            cls.resumed.append(module.NAME)
 
     # ---- the boundary `den run` stops at today ----------------------------------------------------------
 
-    def test_den_run_stops_at_fetch_on_a_title_below_the_floor(self):
-        """Seam bug 1. When this fails because `den run` exited 0, fetch drains below-floor ids and seam
-        bug 2 is fixed too: delete the `den stage` loop in `drive` and assert on `den run`'s outputs alone."""
-        self.assertEqual(self.run_code, 1, "den run no longer stops at fetch — see this test's docstring")
-        self.assertIn("fetch: every title in this movie batch is below the vote floor", self.run_said)
-        self.assertEqual(self.run_said.count("==> "), 3, "worklist ran, fetch began, and nothing after it")
+    def test_den_run_stops_at_facts_on_the_dataset_version(self):
+        """`den run --dataset-version` must equal a hash of what `finalize` writes, so `facts` refuses the
+        version the run was given. When this fails because `den run` exited 0, delete the `den stage` loop
+        in `drive` and assert on `den run`'s outputs alone."""
+        self.assertEqual(self.run_code, 1, "den run no longer stops at facts — see this test's docstring")
+        self.assertEqual(self.began[-1], "facts", "the stage den run stopped at")
+        self.assertIn(f"--dataset-version {GIVEN_VERSION} is not this out-dir's generation", self.run_said)
 
-    def test_the_version_den_run_was_given_is_refused_by_facts(self):
-        """Seam bug 2: `den run --dataset-version` must equal a hash of what `finalize` writes."""
-        code, said = self.facts_refusal
-        self.assertEqual(code, 1)
-        self.assertIn(f"--dataset-version {GIVEN_VERSION} is not this out-dir's generation", said)
+    def test_den_run_drains_fetch_over_a_title_below_the_floor(self):
+        """`enrich` once left a below-floor title pending for good, so `remaining` never reached 0 and the
+        drain refused its second batch as "every title below the vote floor", leaving the other media
+        undrained. The fixture's universe holds one, and `den run` goes on past fetch to finalize."""
+        self.assertLess(self.began.index("fetch"), self.began.index("finalize"))
+        self.assertIn(f"==> fetch: {os.path.join(self.out, artifacts.ENRICHED.filename)} "
+                      f"(1 movie batch(es), 1 tv batch(es))", self.run_said)
+
+    def test_fetch_writes_no_empty_batch(self):
+        """Each attempt that admitted nothing wrote a `batch-N.json` holding `[]`."""
+        enriched = os.path.join(self.out, artifacts.ENRICHED.filename)
+        for name in os.listdir(enriched):
+            self.assertTrue(read_json(os.path.join(enriched, name)), f"{name} holds no title")
 
     def test_den_run_leaves_out_exactly_the_stages_that_buy_or_publish(self):
-        self.assertEqual(self.skipped, ["classify", "publish"])
+        order = [m.NAME for m in pipeline.stages()]
+        ran = self.began + self.resumed
+        self.assertEqual([name for name in order if name not in ran], ["classify", "publish"])
 
     # ---- the published shapes agree with each other ---------------------------------------------------
 
@@ -604,6 +630,17 @@ class UnproducedSeeds(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(os.path.join(SEEDS, "unproduced"))),
                          sorted(f for files in UNPRODUCED.values() for f in files),
                          "a file in seeds/unproduced/ that UNPRODUCED does not name")
+
+
+class SeededManifests(unittest.TestCase):
+    def test_a_seed_manifest_as_committed_is_refused_by_the_audit(self):
+        """The seeds record no implementation digests of their own, and the audit refuses a manifest that
+        records none — so the run's audit passes only on what `stamp_implementation` wrote."""
+        for name in SEEDED_MANIFESTS:
+            path = next(os.path.join(SEEDS, kind, name) for kind in ("unbought", "unproduced")
+                        if os.path.isfile(os.path.join(SEEDS, kind, name)))
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "records no implementation"):
+                audit_combined.validate_implementation(name, read_json(path)["config"])
 
 
 class TheLabelsLoop(unittest.TestCase):

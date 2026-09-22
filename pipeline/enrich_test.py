@@ -577,12 +577,17 @@ class Batch(unittest.TestCase):
         report, _written = self.admission((1, 500, ["US"], "tt1", 5000))
         self.assertEqual((report["admittedByBoth"], report["admittedByTmdb"], report["admittedByImdb"]), (1, 0, 0))
 
-    def test_a_title_neither_admits_is_refused_and_stays_pending(self):
-        """Below every floor is a verdict about today, so it is not checkpointed — as before the union."""
+    def test_a_title_neither_admits_is_refused_and_judged_for_the_day(self):
+        """Below every floor is a verdict about today: not processed, which would make it permanent, but
+        recorded with what it was judged on, so this drain stops asking and a later day asks again."""
         report, written = self.admission((1, 49, ["US"], "tt1", 1999))
         self.assertEqual(written, set())
-        self.assertEqual((report["belowFloor"], report["count"], report["remaining"]), (1, 0, 1))
-        self.assertEqual(self.checkpoint()["processed"], [])
+        self.assertEqual((report["belowFloor"], report["count"], report["remaining"]), (1, 0, 0))
+        checkpoint = self.checkpoint()
+        self.assertEqual(checkpoint["processed"], [])
+        self.assertEqual(sorted(checkpoint["judgedBelow"]), ["movie:1"])
+        held = checkpoint["judgedBelow"]["movie:1"]
+        self.assertEqual((held["votes"], held["floors"], held["imdb"]), (49, [50, 15, 2000, 500], True))
 
     def test_each_tier_has_its_own_floors(self):
         """A regional origin clears at 15 TMDB or 500 IMDb; any other origin needs 50 or 2,000."""
@@ -673,20 +678,106 @@ class Batch(unittest.TestCase):
 
     def test_no_imdb_count_is_written_anywhere(self):
         """IMDb's licence is non-transferable: its counts decide admission and go nowhere. Not the batch,
-        which the corpus and the store are built from; not the log or the report either."""
-        report, _written = self.admission((1, 44, ["TR"], "tt1", 987654), (2, 500, ["US"], "tt2", 876543))
+        which the corpus and the store are built from; not the log or the report either; and not the
+        checkpoint, whose below-floor verdicts record the TMDB count they were judged on and no IMDb one."""
+        report, _written = self.admission((1, 44, ["TR"], "tt1", 987654), (2, 500, ["US"], "tt2", 876543),
+                                          (3, 10, ["US"], "tt3", 1777))
         with open(enrich.batch_path(self.out, 1), encoding="utf-8") as fh:
             batch = fh.read()
         with open(os.path.join(self.out, "enrich-log.txt"), "a+", encoding="utf-8") as fh:
             fh.seek(0)
             logged = fh.read()
-        for text in (batch, logged, json.dumps(report)):
+        with open(enrich.checkpoint_path(self.out), encoding="utf-8") as fh:
+            checkpoint = fh.read()
+        self.assertIn("movie:3", checkpoint, "the below-floor title must be in the checkpoint to prove this")
+        for text in (batch, logged, json.dumps(report), checkpoint):
             self.assertNotIn("987654", text)
             self.assertNotIn("876543", text)
+            self.assertNotIn("1777", text)
+
+    # -- below-floor verdicts: one run drains, a later day re-judges -------------------------------------
+
+    DAY, NEXT_DAY = "2026-09-22", "2026-09-23"
+
+    def below(self, votes=10, imdb_votes=100, today=DAY, **kwargs):
+        """One batch over movie 1: a worklist row stating `votes` TMDB votes, and `imdb_votes` on IMDb."""
+        self.imdb_ids[("movie", 1)] = "tt1"
+        self.imdb_votes["tt1"] = imdb_votes
+        self.mapping[("movie", 1)] = {"article": "One"}
+        self.plots[("One", "en")] = found("o" * 300)
+        client = StubTMDB({"/movie/1": detail(1, origin_country=["US"])})
+        report = enrich.run(self.worklist(("movie", 1), votes={("movie", 1): votes}), self.out, client=client,
+                            cache=self.cache, today=today, **kwargs)
+        return report, client.asked
+
+    def test_a_run_asks_about_a_below_floor_title_once(self):
+        """Left unrecorded, every batch of a drain asked it again, `remaining` never reached 0, and a
+        universe holding one below-floor title could never drain — an export universe is mostly those."""
+        report, asked = self.below()
+        self.assertEqual((report["belowFloor"], report["remaining"]), (1, 0))
+        self.assertEqual(asked, ["/movie/1"])
+        report, asked = self.below()
+        self.assertEqual((report, asked), ({"remaining": 0, "count": 0}, []), "judged today already")
+
+    def test_a_later_day_judges_it_again_and_admits_it_once_it_clears(self):
+        """A vote count only climbs: the verdict is about the day's counts, and the next day's dump can
+        carry the title over IMDb's floor."""
+        self.below()
+        report, asked = self.below(imdb_votes=5000, today=self.NEXT_DAY)
+        self.assertEqual(asked, ["/movie/1"])
+        self.assertEqual((report["admittedByImdb"], report["belowFloor"], report["batchId"]), (1, 0, 1))
+        self.assertEqual(set(self.rows()), {"movie:1"})
+        self.assertEqual((self.checkpoint()["processed"], self.checkpoint()["judgedBelow"]), (["movie:1"], {}))
+
+    def test_a_later_day_that_still_refuses_it_records_that_day(self):
+        self.below()
+        self.below(today=self.NEXT_DAY)
+        self.assertEqual(self.checkpoint()["judgedBelow"]["movie:1"]["on"], self.NEXT_DAY)
+
+    def test_a_changed_worklist_count_is_judged_again_the_same_day(self):
+        """A delta rebuilt later the same day can state a higher count; the verdict was about the old one."""
+        self.below(votes=10)
+        report, asked = self.below(votes=60)
+        self.assertEqual((asked, report["admittedByTmdb"]), (["/movie/1"], 1))
+
+    def test_a_lowered_floor_is_judged_again_the_same_day(self):
+        """`--vote-floor 0` is how an operator takes in the low-vote tail; a verdict made at 50 says nothing
+        about 5."""
+        self.below(votes=10)
+        report, asked = self.below(votes=10, floors=enrich.floor_rules.given(tmdb=5))
+        self.assertEqual((asked, report["admittedByTmdb"]), (["/movie/1"], 1))
+
+    def test_a_verdict_made_without_imdb_is_judged_again_once_a_dump_arrives(self):
+        """The IMDb half off makes an IMDb-only title below the floor for want of a count. It stands while
+        the dump is still missing, and falls the moment there is one."""
+        self.dump = enrich.imdb.Unavailable("HTTP 503")
+        with mock.patch("sys.stderr"):
+            self.below(imdb_votes=5000)
+            self.assertEqual(self.checkpoint()["judgedBelow"]["movie:1"]["imdb"], False)
+            _report, asked = self.below(imdb_votes=5000)
+        self.assertEqual(asked, [], "no dump yet, so nothing new to judge it by")
+        self.dump = None
+        report, asked = self.below(imdb_votes=5000)
+        self.assertEqual((asked, report["admittedByImdb"]), (["/movie/1"], 1))
+
+    def test_a_batch_that_admits_nothing_writes_no_batch_and_keeps_its_number(self):
+        """Each refused attempt wrote a `batch-N.json` holding `[]` and moved the numbering on."""
+        report, _asked = self.below()
+        self.assertFalse(os.path.exists(os.path.join(self.out, "enriched")))
+        self.assertNotIn("batchId", report)
+        self.assertEqual(self.checkpoint()["nextBatch"], 1)
+        report, _asked = self.below(imdb_votes=5000, today=self.NEXT_DAY)
+        self.assertEqual(report["batchId"], 1)
+        self.assertEqual(self.checkpoint()["nextBatch"], 2)
+
+    def test_a_malformed_verdict_map_is_a_refusal_not_a_reset(self):
+        put(enrich.checkpoint_path(self.out), json.dumps({"processed": [], "judgedBelow": ["movie:1"]}))
+        with self.assertRaises(StageError):
+            self.below()
 
     # -- the checkpoint -------------------------------------------------------------------------------
 
-    def test_transient_and_below_floor_ids_stay_pending_and_the_rest_are_checkpointed(self):
+    def test_transient_ids_stay_pending_below_floor_ids_are_judged_and_the_rest_are_checkpointed(self):
         self.mapping[("movie", 4)] = {"article": "Blip"}
         self.plots[("Blip", "en")] = http.HTTPError(503, "x")
         report = self.run_batch({"/movie/1": http.HTTPError(429, "x"), "/movie/2": detail(2, votes=10),
@@ -694,8 +785,9 @@ class Batch(unittest.TestCase):
                                  "/movie/5": detail(5)},
                                 [("movie", i) for i in range(1, 6)])
         self.assertEqual(sorted(self.checkpoint()["processed"]), ["movie:3", "movie:5"])
+        self.assertEqual(sorted(self.checkpoint()["judgedBelow"]), ["movie:2"])
         self.assertEqual((report["deferred"], report["belowFloor"], report["failures"],
-                          report["remaining"], report["count"]), (2, 1, 1, 3, 1))
+                          report["remaining"], report["count"]), (2, 1, 1, 2, 1))
 
     def test_a_refused_tmdb_key_stops_the_batch_and_checkpoints_nothing(self):
         """A revoked key answers 401 for every id. Read as per-title failures, one batch checkpointed 150 of

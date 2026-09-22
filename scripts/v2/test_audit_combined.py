@@ -16,6 +16,12 @@ import run_combined
 SUPERSEDED_TAXONOMY_SHA = "dd048e59177955307d1bbff7bf88c79f4a66e8bec053c96a32769406d6172f49"
 
 
+def current_implementation():
+    """`implementationSha256` as a shard bought on the pass in this tree records it."""
+    return {name: run_combined.sha256_file(os.path.join(audit_combined.HERE, name))
+            for name in audit_combined.IMPLEMENTATION}
+
+
 def answer_for(question):
     kind = question["type"]
     if kind == "noul":
@@ -166,7 +172,7 @@ class ManifestFileTests(unittest.TestCase):
                 audit_combined.section_question("SECTION_ID"))),
             "labelQuestionMapping": {}, "labelQuestionMappingSha256": audit_combined.sha256_text(
                 run_combined.canonical({})),
-            "implementationSha256": {},
+            "implementationSha256": current_implementation(),
         }
         config.update(overrides)
         return {"configSha256": audit_combined.sha256_text(run_combined.canonical(config)),
@@ -242,19 +248,43 @@ class ImplementationLineageTests(unittest.TestCase):
     carry the commit that superseded it and a reason somebody wrote.
     """
 
-    IMPLEMENTATION = ("run_combined.py", "article_sections.py", "combined_questions.py",
-                      "typesafe_client.py")
+    IMPLEMENTATION = audit_combined.IMPLEMENTATION
 
     def test_the_working_trees_digests_need_no_exception(self):
-        current = {name: run_combined.sha256_file(os.path.join(audit_combined.HERE, name))
-                   for name in self.IMPLEMENTATION}
         self.assertEqual(audit_combined.validate_implementation("here", {
-            "implementationSha256": current}), [])
+            "implementationSha256": current_implementation()}), [])
 
     def test_an_unrecorded_digest_is_refused(self):
         with self.assertRaisesRegex(ValueError, "implementation-lineage.json"):
             audit_combined.validate_implementation("here", {
-                "implementationSha256": {"run_combined.py": "0" * 64}})
+                "implementationSha256": dict(current_implementation(), **{"run_combined.py": "0" * 64})})
+
+    def test_a_manifest_that_records_no_implementation_hashes_is_refused(self):
+        """Nothing to compare is not a match: an empty map passed every file it did not name."""
+        for config in ({"implementationSha256": {}}, {}, {"implementationSha256": None}):
+            with self.subTest(config=config), \
+                    self.assertRaisesRegex(ValueError, "records no implementation"):
+                audit_combined.validate_implementation("here", config)
+
+    def test_a_manifest_missing_one_file_is_refused_by_name(self):
+        for name in self.IMPLEMENTATION:
+            recorded = {k: v for k, v in current_implementation().items() if k != name}
+            with self.subTest(name=name), \
+                    self.assertRaisesRegex(ValueError, f"no implementation hash for {name}"):
+                audit_combined.validate_implementation("here", {"implementationSha256": recorded})
+
+    def test_the_files_it_requires_are_the_ones_the_pass_hashes(self):
+        """Held against what `run_combined.manifest_config` writes, so a file the pass starts hashing is
+        required here too, and a manifest the pass writes today passes as it stands."""
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
+            articles = fh.name
+        self.addCleanup(os.remove, articles)
+        args = type("Args", (), {"prompt": combined_questions.PROMPT, "taxonomy": combined_questions.TAXONOMY,
+                                 "articles": articles, "enriched_dir": None, "model": "m",
+                                 "max_state_chars": 1})()
+        config = run_combined.manifest_config(args, {}, {}, {"version": "t"}, "enriched-sha")
+        self.assertEqual(sorted(config["implementationSha256"]), sorted(self.IMPLEMENTATION))
+        self.assertEqual(audit_combined.validate_implementation("here", config), [])
 
     def test_every_recorded_entry_names_a_commit_and_a_reason(self):
         for name, entries in audit_combined.load_lineage().items():

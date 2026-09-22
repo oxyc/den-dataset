@@ -193,8 +193,9 @@ when recorded: `scripts/eval-taxonomy.py out/labels-t02.json --record` after an 
 
 `scripts/delta-run.sh [DAYS_BACK] [OUT_DIR]` builds a delta worklist and enriches one batch per media. It
 **stops before the classify pass** — that step buys, so it never runs unattended — and prints steps 3a–8 with
-the batch ids it wrote. A title below the vote floor is not checkpointed, so it is judged again each run
-until it earns votes.
+the batch ids it wrote. A title below the vote floor is recorded as judged for that day and not counted as
+pending, so it is judged again the next day, or at once if its count or a floor changes, until it earns
+votes.
 
 ## Reading an enrich report
 

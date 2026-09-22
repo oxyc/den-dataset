@@ -29,6 +29,7 @@ readers need — see `lib/tmdb.title_record`.
 """
 import argparse
 import concurrent.futures
+import datetime
 import json
 import os
 import re
@@ -146,7 +147,7 @@ def read_checkpoint(path):
     """The resume state. ABSENT is a first run; present-but-unreadable is a refusal, not a reset — a bare
     fallback would reset a truncated checkpoint to empty and re-enrich the whole universe."""
     if not os.path.exists(path):
-        return {"processed": set(), "nextBatch": 1, "totals": {}}
+        return {"processed": set(), "nextBatch": 1, "totals": {}, "judgedBelow": {}}
     try:
         with open(path, encoding="utf-8") as handle:
             raw = json.load(handle)
@@ -154,8 +155,11 @@ def read_checkpoint(path):
         # The movie-only pilot stored bare ints; they are movie keys.
         processed = {item if isinstance(item, str) else key("movie", int(item)) for item in processed}
         totals = raw.get("totals") or {}
+        judged = raw.get("judgedBelow") or {}
+        if not isinstance(judged, dict) or not all(isinstance(v, dict) for v in judged.values()):
+            raise TypeError("judgedBelow is not a map of verdicts")
         return {"processed": processed, "nextBatch": int(raw.get("nextBatch", 1)),
-                "totals": {name: int(totals.get(name, 0)) for name in TOTALS}}
+                "totals": {name: int(totals.get(name, 0)) for name in TOTALS}, "judgedBelow": judged}
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise StageError(f"enrich checkpoint at {path} is unreadable ({error}); refusing to reset progress — "
                          f"restore it, or delete it to intentionally start fresh")
@@ -164,6 +168,43 @@ def read_checkpoint(path):
 #: `noOverview` is gone with the stub check that counted it — see `run`. A checkpoint that carries one is
 #: read without it; the counter counted a rule that no longer exists.
 TOTALS = ("anime", "belowFloor", "failures")
+
+
+def floor_values(floors):
+    """The four floors as the checkpoint records a verdict's: a list, so it compares equal after a JSON
+    round trip."""
+    return [floors.tmdb, floors.regional_tmdb, floors.imdb, floors.regional_imdb]
+
+
+def below_floor(votes, floors, today, imdb_on):
+    """One below-floor verdict as the checkpoint keeps it: the UTC day it was made, the TMDB count and the
+    floors it was judged by, and whether IMDb's half of the gate took part. Never IMDb's count — its
+    licence keeps that in this process (`lib/imdb`)."""
+    return {"on": today, "votes": votes, "floors": floor_values(floors), "imdb": imdb_on}
+
+
+def standing(judged, today, floors, worklist_votes):
+    """The keys whose below-floor verdict still holds for this batch, and so are not asked about again.
+
+    A below-floor verdict is about one day's counts. A vote count only climbs, so it must be judged again
+    later — checkpointing it as processed made the rejection permanent, and a 180-day cached detail record
+    widened that to months. But left entirely unrecorded it was asked again by every batch of the same
+    drain, `remaining` never reached 0, and a universe holding one below-floor title could never drain.
+
+    So a verdict holds only while nothing it was judged on can have moved: it was made TODAY (IMDb's dump
+    and `/discover`'s counts are daily), by the SAME floors (a run that lowers one re-judges at once), on
+    the TMDB count the worklist row still states (a row that states none — an export row — is judged on the
+    detail call's count, which the date covers), and with IMDb's half of the gate on unless it is still off.
+    Any of those changing re-asks the title, and a title that now clears a floor is admitted like any other.
+    """
+    same = {label for label, held in judged.items()
+            if held.get("on") == today and held.get("floors") == floor_values(floors)
+            and (label not in worklist_votes or worklist_votes[label] == held.get("votes"))}
+    # A verdict made without IMDb's counts stands only while there are still none to judge it by. Asked
+    # only when such a verdict would otherwise stand: the dump is read once per process anyway.
+    if any(not judged[label].get("imdb") for label in same) and imdb_counts(floors)[0] is not None:
+        same = {label for label in same if judged[label].get("imdb")}
+    return same
 
 
 def is_anime(labels):
@@ -425,10 +466,10 @@ def imdb_counts(floors):
 
     A dump that cannot be had turns the IMDb half of the gate OFF for the batch; it does not refuse it. The
     union's TMDB half is exactly the floor this pipeline ran on before IMDb was asked, so nothing it admits
-    is lost, and a title only IMDb would have admitted is judged below the floor — which is never
-    checkpointed, so the next batch with a dump judges it again. Refusing instead would stop the daily pass
-    on a third party's outage for titles that are merely deferred. Off is never SILENT: the note goes into
-    the report, the log and stderr.
+    is lost, and a title only IMDb would have admitted is judged below the floor — a verdict recorded as
+    made without IMDb, so the next batch with a dump judges it again (`standing`). Refusing instead would
+    stop the daily pass on a third party's outage for titles that are merely deferred. Off is never SILENT:
+    the note goes into the report, the log and stderr.
     """
     try:
         ratings = imdb.ratings(floors.lowest_imdb)
@@ -486,12 +527,16 @@ def admit(records, floors, ratings, cache, worklist_votes=None):
 
 
 def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude_anime=False, client=None,
-        cache=None, token=None):
+        cache=None, token=None, today=None):
     """One batch. Returns the report the drain reads by key.
 
     `client` is a `lib/tmdb.TMDB`, built from the environment when not given — and only once there is
     something to fetch, so a drained worklist needs no key. `cache` is the `wiki` cache, from the
-    environment when not given; `token` the Enterprise bearer, None for the free action API.
+    environment when not given; `token` the Enterprise bearer, None for the free action API. `today` is
+    the UTC date a below-floor verdict is recorded under (see `standing`), today's when not given.
+
+    A batch that admits no title writes no batch file and takes no batch number: an empty `batch-N.json`
+    holds nothing any reader wants, and each one moved the numbering on.
 
     Raises `Aborted` for a batch that wrote nothing and should simply run again, and `StageError` for one
     that running again cannot fix.
@@ -521,7 +566,11 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     processed = checkpoint["processed"]
     if present:
         processed |= unrecorded(out_dir, checkpoint["nextBatch"])
-    pending = [entry for entry in worklist if key(*entry) not in processed][:limit]
+    today = today or datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    judged = checkpoint["judgedBelow"]
+    held = standing(judged, today, floors, worklist_votes)
+    settled = processed | held
+    pending = [entry for entry in worklist if key(*entry) not in settled][:limit]
     if not pending:
         return {"remaining": 0, "count": 0}
 
@@ -569,11 +618,12 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     for found in records:
         label = key(found["mediaType"], found["tmdbId"])
         if label not in admitted:
-            # NOT checkpointed either. A vote count only climbs, so "below the floor" is a verdict about
-            # today; checkpointing it made the rejection permanent, and a 180-day cached detail record
-            # widened the window to months. The cache makes the re-judging nearly free.
+            # Not processed: recorded as a verdict about today's counts, which a later day re-judges — see
+            # `standing`. The cache makes the re-judging nearly free.
             counts["belowFloor"] += 1
             below.add(label)
+            judged[label] = below_floor(tmdb_votes(label, found, worklist_votes), floors, today,
+                                        imdb_on=ratings is not None)
         elif exclude_anime and is_anime(kinds.get(label, ())):
             # Opt-IN: excluding anime by default silently cost the corpus 1,498 titles, the entire
             # Ghibli catalogue among them.
@@ -623,39 +673,49 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
             survivors.append(written(found))
     survivors.sort(key=lambda row: row["tmdbId"])
 
-    # Never write over an existing batch: whatever was derived from it belongs to the titles it USED to hold.
     path = batch_path(out_dir, batch_id)
-    if os.path.exists(path):
-        raise StageError(f"refusing to overwrite {path}: it already holds an enriched batch, and anything "
-                         f"derived from batch {batch_id} belongs to those titles. The enrich checkpoint's "
-                         f"nextBatch is out of step with the batches on disk — fix it rather than clobbering.")
-    again = recovered(out_dir, batch_id, survivors)
-    if again:
-        sample = ", ".join(again[:5]) + (" …" if len(again) > 5 else "")
-        log(out_dir, f"re-covered {len(again)} key(s) already in earlier batches: {sample}")
-        print(f"  warning: {len(again)} key(s) here already exist in earlier batches — the newest wins on "
-              f"read, but the older records remain. {sample}", file=sys.stderr)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    if not present:
-        # With no checkpoint there is nothing for `unrecorded` to measure a batch against, so the number is
-        # reserved first: a death between the batch and the checkpoint below then leaves a checkpoint that
-        # says this batch was never recorded.
-        reserved = {"nextBatch": batch_id, "processed": sorted(checkpoint["processed"]), "totals": {}}
-        caching.write_atomically(ck_path, compact(reserved).encode("utf-8"))
-    caching.write_atomically(path, swift_json(survivors).encode("utf-8"))
+    if survivors:
+        # Never write over an existing batch: whatever was derived from it belongs to the titles it USED to
+        # hold.
+        if os.path.exists(path):
+            raise StageError(f"refusing to overwrite {path}: it already holds an enriched batch, and anything "
+                             f"derived from batch {batch_id} belongs to those titles. The enrich checkpoint's "
+                             f"nextBatch is out of step with the batches on disk — fix it rather than "
+                             f"clobbering.")
+        again = recovered(out_dir, batch_id, survivors)
+        if again:
+            sample = ", ".join(again[:5]) + (" …" if len(again) > 5 else "")
+            log(out_dir, f"re-covered {len(again)} key(s) already in earlier batches: {sample}")
+            print(f"  warning: {len(again)} key(s) here already exist in earlier batches — the newest wins on "
+                  f"read, but the older records remain. {sample}", file=sys.stderr)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if not present:
+            # With no checkpoint there is nothing for `unrecorded` to measure a batch against, so the number
+            # is reserved first: a death between the batch and the checkpoint below then leaves a checkpoint
+            # that says this batch was never recorded.
+            reserved = {"nextBatch": batch_id, "processed": sorted(checkpoint["processed"]), "totals": {}}
+            caching.write_atomically(ck_path, compact(reserved).encode("utf-8"))
+        caching.write_atomically(path, swift_json(survivors).encode("utf-8"))
 
-    # Every pending id EXCEPT those still owed another look: transient failures and below-floor verdicts.
+    # Every pending id EXCEPT those still owed another look: transient failures, and below-floor titles,
+    # which are recorded as today's verdicts instead.
     processed.update(key(*entry) for entry in pending if key(*entry) not in deferred | below)
+    # Only today's verdicts are kept: an older one no longer holds (`standing`), so dropping it re-asks
+    # nothing that would not be re-asked anyway, and the map stays one day's size.
+    judged = {label: kept for label, kept in judged.items()
+              if kept.get("on") == today and label not in processed}
     totals = {name: checkpoint["totals"].get(name, 0) + counts[name] for name in TOTALS}
-    state = {"nextBatch": batch_id + 1, "processed": sorted(processed), "totals": totals}
+    state = {"nextBatch": batch_id + 1 if survivors else batch_id, "processed": sorted(processed),
+             "judgedBelow": judged, "totals": totals}
     caching.write_atomically(ck_path, compact(state).encode("utf-8"))
 
     # Which source SERVED each plot, not which was asked: a bearer can be throttled or expire mid-run, and the
     # two record different things (the Enterprise path names no revision and cannot see a redirect).
-    report = {"batchId": batch_id, "count": len(survivors), "belowFloor": counts["belowFloor"],
+    settled = processed | held | below
+    report = {"count": len(survivors), "belowFloor": counts["belowFloor"],
               "anime": counts["anime"], "failures": counts["failures"],
-              "deferred": len(deferred), "remaining": sum(key(*e) not in processed for e in worklist),
-              "wikiPlot": with_plot, "tagsOnly": len(survivors) - with_plot, "batch": path,
+              "deferred": len(deferred), "remaining": sum(key(*e) not in settled for e in worklist),
+              "wikiPlot": with_plot, "tagsOnly": len(survivors) - with_plot,
               "plotsFromEnterprise": from_enterprise, "plotsFromActionApi": with_plot - from_enterprise,
               "enterpriseRequests": enterprise.gate.sent_this_run - requests_before,
               # Which count admitted each title that cleared the gate. Counts of titles, never a vote count:
@@ -670,6 +730,8 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
               # detail call's. It is the whole batch for a discover or delta universe, and none of it for
               # an export one — so this is what says how much of the gate still depends on that call.
               "votesFromWorklist": from_worklist}
+    if survivors:
+        report.update(batchId=batch_id, batch=path)
     if token and enterprise.gate.off:
         report["enterpriseOff"] = enterprise.gate.off
     return report
