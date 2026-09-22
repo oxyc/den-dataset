@@ -184,6 +184,18 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual(rows[1]["plotArticleRole"], backfill.OWN)
         self.assertEqual((counts["unrecoverable"], counts["own"]), (1, 1))
 
+    def test_a_mixed_batch_asked_as_one_media_is_attributed_to_that_media(self):
+        """Before a mixed batch was refused, the whole batch was asked as its first title's media: series
+        91545, Young Wallander, came back as the film with that id and was grounded on "Sunday Drive (film)".
+        That body is the MOVIE query's, so it cannot confirm the series row that recorded its article."""
+        self.cache.answered("movie", [1, 91545], [binding(1, article="Heat (1995 film)"),
+                                                  binding(91545, article="Sunday Drive (film)")])
+        counts, rows = self.run_backfill([title(1, "Heat (1995 film)"),
+                                          title(91545, "Sunday Drive (film)", mediaType="tv")])
+        self.assertEqual(rows[0]["plotArticleRole"], backfill.OWN)
+        self.assertNotIn("plotArticleRole", rows[1])
+        self.assertEqual((counts["own"], counts["unrecoverable"]), (1, 1))
+
     def test_an_unattributed_body_is_ambiguous_when_the_corpus_holds_both_titles(self):
         """Its query cannot be re-derived, so it may be the series' answer as easily as the film's."""
         self.cache.sparql("older query text", [binding(95, article="Buffy the Vampire Slayer")])
