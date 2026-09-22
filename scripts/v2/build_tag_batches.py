@@ -2,9 +2,9 @@
 """Build the Phase-2 tagging batches: every wiki-plot title, n passes, fixed paths.
 
 The compliance gate is asserted here and recorded in the manifest, not left to the prompt:
-a record only enters a batch if it came from the wiki-plot corpus, which
-`build_wikiplot_corpus.py` built by filtering on `hasWikiPlot is True` and refusing any
-row whose plot was empty. Nothing derived from a TMDB `overview` can reach a batch file.
+a record only enters a batch if it came from the wiki-plot corpus, which was built by
+filtering on `hasWikiPlot is True` and refusing any row whose plot was empty. Nothing
+derived from a TMDB `overview` can reach a batch file.
 
 Passes are separate directories (`pass1/`, `pass2/`, `pass3/`) over the SAME batching, so
 n=3 self-consistency aggregates three independent answers for identical inputs, and a

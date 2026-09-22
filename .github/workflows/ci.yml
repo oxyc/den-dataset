@@ -55,7 +55,7 @@ jobs:
         run: python3 -m py_compile scripts/v2/embed_canary.py scripts/v2/embed_docs.py scripts/v2/embed_premise_v2.py scripts/v2/import_box_vectors.py
       - name: Jev facet contracts
         run: |
-          python3 -m py_compile scripts/v2/build_facet_adversarial.py scripts/v2/run_facets.py scripts/v2/run_combined.py scripts/v2/run_delta.py scripts/v2/audit_combined.py scripts/v2/consolidate_corpus.py
+          python3 -m py_compile scripts/v2/run_facets.py scripts/v2/run_combined.py scripts/v2/run_delta.py scripts/v2/audit_combined.py scripts/v2/consolidate_corpus.py
           # The auditor is included deliberately: it is the only thing standing between a corrupted bundle
           # and a published dataset, and the pass it audits cost $20.47 and will not be run again.
           python3 -m unittest scripts/v2/test_facets.py scripts/v2/test_combined.py scripts/v2/test_audit_combined.py scripts/v2/test_run_delta.py scripts/v2/test_typesafe_client.py
@@ -123,8 +123,9 @@ jobs:
       #
       # `guards/reachable_test.py` is the one that matters over time. `scripts/v2/` exists because
       # "delete what nothing runs" was a habit, and a habit loses to a branch someone might come back
-      # to; this fails the build on a module under `pipeline/` that no stage reaches, and on one under
-      # `store/` that the writer the store stage runs does not reach.
+      # to; this fails the build on a module under `pipeline/` that no stage reaches, on one under
+      # `store/` that the writer the store stage runs does not reach, and on a script under `scripts/`
+      # that nothing that runs reaches and `guards/operator-tools.json` does not declare.
       - name: The pipeline
         run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/genres_moods_test.py pipeline/docfacts_test.py pipeline/compose_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py store/format_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/wikidata_facts_test.py lib/imdb_test.py lib/plot_test.py lib/enterprise_test.py lib/denembed_test.py guards/reachable_test.py den_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The
