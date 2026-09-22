@@ -111,6 +111,19 @@ class Passes(Staged):
         self.assertEqual({(r["mediaType"], r["tmdbId"], r["hasVector"]) for r in delta_pass["records"]},
                          {("movie", 1, False), ("movie", 7, False)})
 
+    def test_a_checkpointed_title_no_longer_asked_for_is_not_written(self):
+        """The checkpoint outlives the labels it was scraped for. A title the classify pass later dropped is
+        still in it, and written out it would claim a vector it no longer has."""
+        self.run_stage()
+        with open(os.path.join(self.out, "labels-t02.json"), "w", encoding="utf-8") as fh:
+            json.dump({"records": [{"mediaType": "movie", "tmdbId": 1}]}, fh)
+        self.run_stage()
+        self.assertEqual(sorted(self.read("facts-fields.json")), ["movie:1", "tv:1"], "the checkpoint keeps it")
+        corpus_pass = self.read(f"facts-{VERSION}.pre-merge.json")
+        self.assertEqual([(r["mediaType"], r["tmdbId"]) for r in corpus_pass["records"]], [("movie", 1)])
+        merged = self.read(f"facts-{VERSION}.json")
+        self.assertNotIn(("tv", 1, True), {(r["mediaType"], r["tmdbId"], r["hasVector"]) for r in merged["records"]})
+
     def test_the_passes_keep_separate_checkpoints(self):
         """Shared, the delta file would carry every corpus record, stamped vectorless."""
         self.run_stage()

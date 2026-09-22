@@ -262,6 +262,7 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE):
     fields_path = os.path.join(directory, "facts-fields.json")
     fields = checkpoint(fields_path)
     types = by_type(keys)
+    requested = [f"{kind}:{i}" for kind, ids in types.items() for i in ids]
     say(f"facts: {sum(len(ids) for ids in types.values())} titles, {len(wd.SPECS)} properties")
     if fields:
         say(f"resuming from {len(fields)} checkpointed titles")
@@ -274,12 +275,13 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE):
     genre_map = wd.genre_map(entities)
     say(f"genreMap: {len(genre_map)} genres map to TMDB ids")
 
+    # The checkpoint remembers every title this directory ever scraped; the pass writes the titles it was
+    # asked for. A title the labels no longer carry stays in the checkpoint, and writing it out anyway would
+    # stamp `hasVector` on a record whose vector is gone — three of them in the shipped facts.
     records = []
-    for key in sorted(fields):
-        parts = [part for part in key.split(":") if part]
-        if len(parts) != 2 or not _ID.fullmatch(parts[1]):
-            continue
-        records.append({**fields[key], "mediaType": parts[0], "tmdbId": int(parts[1]), "hasVector": has_vector})
+    for key in sorted(set(requested) & set(fields)):
+        media, tmdb_id = key.split(":")
+        records.append({**fields[key], "mediaType": media, "tmdbId": int(tmdb_id), "hasVector": has_vector})
     save(out, {"schema": 1, "datasetVersion": version, "genreMap": genre_map,
                "entities": {qid: entity_out(entry) for qid, entry in entities.items()}, "records": records})
     say(json.dumps({"facts": len(records), "entities": len(entities), "genreMap": len(genre_map),
