@@ -25,62 +25,23 @@ import Foundation
 struct TaxonomyBackfill {
     static func main() async {
         let argv = CommandLine.arguments
-        guard argv.count >= 2 else { usage(); exit(2) }
-        let args = Args(Array(argv.dropFirst(2)))
+        // Help is answered before argv is validated: a `--help` must not have to satisfy the required flags
+        // it is being asked to describe.
+        guard argv.count >= 2 else { Spec.printOverview(to: .standardError); exit(2) }
+        if Spec.isHelp(argv[1]) { Spec.printOverview(to: .standardOutput); exit(0) }
+        guard let command = Spec.command(named: argv[1]) else {
+            FileHandle.standardError.write(Data("unknown command '\(argv[1])'\n\n".utf8))
+            Spec.printOverview(to: .standardError); exit(2)
+        }
+        let rest = Array(argv.dropFirst(2))
+        if rest.contains(where: Spec.isHelp) { command.printHelp(to: .standardOutput); exit(0) }
         do {
-            switch argv[1] {
-            case "worklist": try await Commands.worklist(args)
-            case "enrich":   try await Commands.enrich(args)
-            case "enrich-ids": try await Commands.enrichIds(args)
-            case "escalation": try Commands.escalation(args)
-            case "assemble": try await Commands.assemble(args)
-            case "embed-corpus": try await Commands.embedCorpus(args)
-            case "dump-articles": try await Commands.dumpArticles(args)
-            case "doc-facts": try await Commands.docFacts(args)
-            case "facts": try await Commands.facts(args)
-            case "finalize": try Commands.finalize(args)
-            case "metadata": try await Commands.metadata(args)
-            case "score":    try Commands.score(args)
-            case "recluster": try Commands.recluster(args)
-            default: usage(); exit(2)
-            }
+            try await command.run(Args(rest, declaring: command.flags))
         } catch let error as ToolError {
             FileHandle.standardError.write(Data(Redact.secrets("error: \(error.message)\n").utf8)); exit(1)
         } catch {
             FileHandle.standardError.write(Data(Redact.secrets("error: \(error)\n").utf8)); exit(1)
         }
-    }
-
-    static func usage() {
-        FileHandle.standardError.write(Data("""
-        usage: taxonomy-backfill <command> [flags]
-          worklist --mode discover|export|delta --media movie|tv [--count N] [--vote-floor 50] [--file export.json] --out <path>
-                   delta:  --since YYYY-MM-DD [--known <labels-tNN.json>]   (DT-F daily freshness pass)
-          enrich   --worklist <path> [--vote-floor 50] [--limit 150] --out-dir <dir>
-          enrich-ids --ids <a,b,c> --media movie|tv --out-dir <dir>   (targeted re-enrich)
-          escalation --batch-id <n> --out-dir <dir>   (after pass 1: emit titles needing n=3)
-          assemble --batch-id <n> --out-dir <dir>
-          embed-corpus --labels <existing labels-t02.json> --out-dir <dir> [--enriched-dir <dir>]
-                       [--chunk 15] [--plot-cap 1500] [--limit N] [--pause-ms 0]
-                       (--chunk is bounded by den-embed's per-request token budget: 8192 / --plot-cap's
-                        token cost. Above it every request is a 413, which is not retried.
-                        --pause-ms idles between requests so a long run can share a busy machine;
-                        with --chunk 15 each 1000ms costs ~45min over a full corpus.)
-          doc-facts --labels <labels-t02.json> --out-dir <dir> [--batch 100]
-                    (scrape Wikidata P57 director + P136 genre for the shipped corpus into
-                     doc-facts.json — the two clauses of the embedding doc that still came from TMDB.
-                     Resumable: re-running skips ids already in the file.)
-          finalize --out-dir <dir>
-          metadata --out-dir <dir> [--skip-fetch] [--limit N]
-                   (the poster sidecar; its filename carries the datasetVersion, so run it after EVERY
-                    finalize that changed the corpus, before publishing.
-                    --limit N is a PROBE: it fetches N and reports, writing no sidecar and touching no
-                    manifest — a partial sidecar would re-sync every device onto a gutted one.)
-          score    --labels <labels.jsonl|labels-t02.json> --golden <golden.json> [--gate]
-          recluster --labels <labels-tNN.json> --vectors <vectors-eNN.bin> [--k 200] [--iterations 8]
-                    [--min-size 25] [--max-purity 0.35] [--min-cohesion 0.55] --out <report.json>  (DT-F weekly)
-
-        """.utf8))
     }
 }
 
@@ -2634,31 +2595,410 @@ enum Log {
     }
 }
 
+// MARK: - Flag declarations
+
+/// One command-line flag, declared once.
+///
+/// The declaration is the ONLY way a flag exists: `Args` refuses argv naming a flag no table declares, and
+/// traps when the CODE reads one. That second half is what keeps the tables from rotting — a flag added to a
+/// command body and not to its table fails the first time that path runs, so there is no separate "is the
+/// registry still current?" check to remember to write.
+struct Flag {
+    /// `.value` consumes the next argv token; `.bare` is present-or-absent.
+    enum Shape {
+        case value(placeholder: String)
+        case bare
+    }
+
+    let name: String
+    let shape: Shape
+    /// One line, shown by `--help`. This is the flag's documentation — there is nowhere else to put it.
+    let help: String
+    /// Refused before the command body runs, rather than wherever the body happens to read it.
+    let required: Bool
+
+    var takesValue: Bool {
+        if case .value = shape { return true }
+        return false
+    }
+
+    /// `--name <placeholder>` as `--help` prints it.
+    var spelling: String {
+        if case .value(let placeholder) = shape { return "\(name) \(placeholder)" }
+        return name
+    }
+
+    static func value(_ name: String, _ placeholder: String, _ help: String, required: Bool = false) -> Flag {
+        Flag(name: name, shape: .value(placeholder: placeholder), help: help, required: required)
+    }
+
+    static func bare(_ name: String, _ help: String) -> Flag {
+        Flag(name: name, shape: .bare, help: help, required: false)
+    }
+}
+
+/// A subcommand: its name, what it does, the flags it may be given, and what to run. Dispatch reads this
+/// table rather than a switch, so a command cannot exist in one and be missing from the other.
+struct Subcommand {
+    let name: String
+    let summary: String
+    let flags: [Flag]
+    let run: (Args) async throws -> Void
+}
+
+enum Spec {
+    /// Every subcommand, in pipeline order — which is also the order `--help` lists them in.
+    static let commands: [Subcommand] = [
+        Subcommand(
+            name: "worklist",
+            summary: "Build the universe of ids to classify → worklist-<media>.json.",
+            flags: [
+                .value("--out", "<path>", "where to write the worklist JSON", required: true),
+                .value("--mode", "<discover|export|delta>",
+                       "discover (default): TMDB /discover, vote_count.desc. export: parse TMDB's daily id "
+                       + "export. delta: the DT-F daily freshness pass over titles released since --since"),
+                .value("--media", "<movie|tv>", "movie (default) or tv — a worklist holds ONE media type"),
+                .value("--count", "<n>", "how many ids to collect in discover mode (default 500)"),
+                .value("--vote-floor", "<n>", "minimum TMDB vote count (default 50); re-checked at enrich"),
+                .value("--origins", "<cc,cc>",
+                       "discover: comma-separated origin countries, one fully-paged vote_count.gte slice each "
+                       + "— the foreign-depth expansion. Additive; --count is not applied"),
+                .value("--year-max", "<yyyy>",
+                       "discover past 10k results: newest release year to partition from (default 2026)"),
+                .value("--year-min", "<yyyy>", "discover past 10k results: oldest release year (default 1920)"),
+                .value("--since", "<yyyy-mm-dd>", "delta: only titles released on or after this date (required in delta)"),
+                .value("--known", "<labels-tNN.json>",
+                       "delta: already-published labels whose titles are skipped — a delta classifies what is NEW"),
+                .value("--file", "<export.json>", "export: the TMDB daily-export file to parse (required in export)"),
+            ],
+            run: { try await Commands.worklist($0) }),
+        Subcommand(
+            name: "enrich",
+            summary: "Next N un-enriched worklist ids → one TMDB call each → a scratch batch for Haiku.",
+            flags: [
+                .value("--worklist", "<path>", "the worklist JSON to draw ids from", required: true),
+                .value("--out-dir", "<dir>", "the run directory (enriched batches + the resumable checkpoint)",
+                       required: true),
+                .value("--vote-floor", "<n>", "minimum TMDB vote count (default 50); below it a title stays pending"),
+                .value("--limit", "<n>", "how many un-enriched ids to take this run (default 150)"),
+                .bare("--exclude-anime",
+                      "drop anime. Opt-IN: excluding it by default silently cost the corpus 1,498 titles"),
+            ],
+            run: { try await Commands.enrich($0) }),
+        Subcommand(
+            name: "enrich-ids",
+            summary: "Re-fetch an EXPLICIT set of already-vetted ids into one batch (targeted re-enrich).",
+            flags: [
+                .value("--out-dir", "<dir>", "the run directory the batch is written into", required: true),
+                .value("--batch-id", "<n>", "the batch number to write", required: true),
+                .value("--ids", "<path>", "a vote file whose tmdbIds are re-fetched", required: true),
+                .value("--media", "<movie|tv>", "movie (default) or tv — the batch holds one media type"),
+            ],
+            run: { try await Commands.enrichIds($0) }),
+        Subcommand(
+            name: "escalation",
+            summary: "After pass 1: emit the subset of a batch that needs a 2nd/3rd Haiku pass.",
+            flags: [
+                .value("--out-dir", "<dir>", "the run directory holding the batch and its vote passes", required: true),
+                .value("--batch-id", "<n>", "the batch to triage", required: true),
+            ],
+            run: { try Commands.escalation($0) }),
+        Subcommand(
+            name: "assemble",
+            summary: "One enriched batch + its vote passes → calibrated labels → embed → the index store.",
+            flags: [
+                .value("--out-dir", "<dir>", "the run directory (batch, votes, index store)", required: true),
+                .value("--batch-id", "<n>", "the batch to assemble", required: true),
+                .bare("--force", "re-process titles the classify checkpoint already holds (targeted re-pass)"),
+                .bare("--require-wiki-plot",
+                      "drop titles with no Wikipedia plot — their labels would derive from TMDB prose, which "
+                      + "TMDB's terms forbid shipping"),
+                .value("--plot-cap", "<chars>",
+                       "cap the plot clause of the embedding document (default 1500). Recorded in "
+                       + "index/composition.json; a later run must match it"),
+                .value("--embedder", "<den-embed|fnv>",
+                       "den-embed (default, bge-m3 int8[1024] via the service) or fnv, the offline fallback"),
+                .value("--sub-threshold", "<0..1>", "override the calibrated subgenre acceptance threshold"),
+                .value("--thematic-threshold", "<0..1>", "override the calibrated thematic acceptance threshold"),
+                .value("--mood-threshold", "<0..1>", "override the calibrated mood acceptance threshold"),
+                .value("--chunk", "<n>",
+                       "documents per den-embed request (default 8). bge-m3 attention is O(batch·seq²), so "
+                       + "big batches of long documents spike the service's RAM"),
+            ],
+            run: { try await Commands.assemble($0) }),
+        Subcommand(
+            name: "embed-corpus",
+            summary: "Embed ALREADY-DECIDED labels: compose the document, embed, append to the index store.",
+            flags: [
+                .value("--out-dir", "<dir>", "the run directory the index store is written into", required: true),
+                .value("--labels", "<labels-t02.json>", "the existing labels whose tags each document carries",
+                       required: true),
+                .value("--enriched-dir", "<dir>", "where the enriched batches (and their plots) live "
+                       + "(default: <out-dir>/enriched)"),
+                .value("--doc-facts", "<doc-facts.json>",
+                       "switch the document to the CC0 lean shape — no title, year or cast; director and genre "
+                       + "from Wikidata. Absent, the FULL shape is composed, which is a different vector space"),
+                .bare("--doc-drop-director",
+                      "drop the director clause from the lean document. Measured: it takes the same-director "
+                      + "gap from +0.035 to +0.104 while costing the same-actor gap only 0.071 → 0.056"),
+                .value("--chunk", "<n>",
+                       "documents per den-embed request (default 15). Bounded by den-embed's per-request token "
+                       + "budget: 8192 / --plot-cap's token cost. Above it every request is a 413, which is "
+                       + "not retried, so the run dies on its first flush having written nothing"),
+                .value("--plot-cap", "<chars>",
+                       "cap the plot clause (default 1500, matching assemble — both append to the SAME store "
+                       + "and must compose comparable documents). Recorded in index/composition.json"),
+                .value("--limit", "<n>", "stop after N newly-embedded titles; the run is resumable, so this "
+                       + "segments a long one"),
+                .value("--pause-ms", "<ms>",
+                       "idle between requests so a long run can share a busy machine. At --chunk 15 each "
+                       + "1000ms costs ~45min over a full corpus"),
+                .value("--dump-docs", "<path>",
+                       "write the composed documents and embed NOTHING, for embedding on another machine — "
+                       + "arm64 and x86_64 den-embed return different int8 vectors for identical input"),
+            ],
+            run: { try await Commands.embedCorpus($0) }),
+        Subcommand(
+            name: "dump-articles",
+            summary: "Write each grounded title's WHOLE Wikipedia article as prose, one JSON object per line.",
+            flags: [
+                .value("--out", "<path>", "the JSONL to append to; re-running resumes from it", required: true),
+                .value("--enriched-dir", "<dir>", "the enriched batches naming each title's article", required: true),
+                .value("--limit", "<n>", "stop after N articles (smoke tests)"),
+            ],
+            run: { try await Commands.dumpArticles($0) }),
+        Subcommand(
+            name: "doc-facts",
+            summary: "Scrape Wikidata P57 director + P136 genre for the shipped corpus into doc-facts.json.",
+            flags: [
+                .value("--out-dir", "<dir>", "doc-facts.json is written here", required: true),
+                .value("--labels", "<labels-t02.json>", "the corpus to scrape facts for", required: true),
+                .value("--batch", "<n>", "ids per SPARQL request (default 100). Resumable: a re-run skips "
+                       + "ids already in the file"),
+            ],
+            run: { try await Commands.docFacts($0) }),
+        Subcommand(
+            name: "facts",
+            summary: "The CC0 facts sidecar den-atlas /recommend ranks on. Needs no plot and no embedding.",
+            flags: [
+                .value("--out-dir", "<dir>", "facts-fields.json (the resumable checkpoint) is written here",
+                       required: true),
+                .value("--ids", "<movie:1,tv:2|path>",
+                       "the ids to scrape, inline or as a file of the same — the DELTA path. Without it, "
+                       + "--labels names the corpus"),
+                .value("--labels", "<labels-t02.json>", "the shipped labels, when --ids is not given"),
+                .value("--batch", "<n>", "ids per SPARQL request (default 100)"),
+                .bare("--has-vector",
+                      "mark each record as having a vector. FALSE for delta records: /recommend must never "
+                      + "let a vectorless record into an ANN path"),
+                .bare("--titles-only",
+                      "backfill just the titles hop over ids the checkpoint already holds — the resume "
+                      + "otherwise skips every finished id"),
+            ],
+            run: { try await Commands.facts($0) }),
+        Subcommand(
+            name: "finalize",
+            summary: "Index store → labels-<taxonomy>.json + vectors-<embed>.bin + dataset.meta.json + report.",
+            flags: [
+                .value("--out-dir", "<dir>", "the run directory holding the index store", required: true),
+                .value("--embedding-version", "<name>",
+                       "the artifact label (default bge-m3). Its implied dimension is checked against the "
+                       + "vectors, so a mislabelled blob is refused rather than shipped"),
+            ],
+            run: { try Commands.finalize($0) }),
+        Subcommand(
+            name: "metadata",
+            summary: "The poster sidecar. Its filename carries the datasetVersion — run it after EVERY finalize.",
+            flags: [
+                .value("--out-dir", "<dir>", "the run directory holding dataset.meta.json", required: true),
+                .bare("--skip-fetch", "patch the manifest from an existing sidecar, with no TMDB re-fetch"),
+                .value("--limit", "<n>",
+                       "a PROBE: fetch N and report, writing no sidecar and touching no manifest — a partial "
+                       + "sidecar would re-sync every device onto a gutted one"),
+            ],
+            run: { try await Commands.metadata($0) }),
+        Subcommand(
+            name: "score",
+            summary: "Labels vs the golden set: primary-genre accuracy, multi-label F1, per-family precision.",
+            flags: [
+                .value("--labels", "<labels.jsonl|labels-t02.json>", "the labels to score", required: true),
+                .value("--golden", "<golden.json>", "the golden set to score them against", required: true),
+                .value("--min-support", "<n>",
+                       "exclude labels with fewer than N golden examples from the GATE (default 10) — they are "
+                       + "still reported, but too few to pass or fail a run on"),
+                .bare("--gate", "exit non-zero if a family misses its precision target"),
+            ],
+            run: { try Commands.score($0) }),
+        Subcommand(
+            name: "recluster",
+            summary: "Cluster the shipped vectors and report groups the vocabulary does not explain (DT-F weekly).",
+            flags: [
+                .value("--labels", "<labels-tNN.json>", "the labels naming each vector", required: true),
+                .value("--vectors", "<vectors-eNN.bin>", "the shipped vector blob", required: true),
+                .value("--out", "<report.json>", "where to write the emergent-candidate report", required: true),
+                .value("--k", "<n>", "number of clusters (default 200)"),
+                .value("--iterations", "<n>", "k-means iterations (default 8)"),
+                .value("--min-size", "<n>", "ignore clusters smaller than this (default 25)"),
+                .value("--max-purity", "<0..1>",
+                       "report only clusters whose most common existing label is below this share (default "
+                       + "0.35) — a pure cluster is just an existing label rediscovering itself"),
+                .value("--min-cohesion", "<0..1>", "report only clusters at least this tight (default 0.55)"),
+            ],
+            run: { try Commands.recluster($0) }),
+    ]
+
+    static func command(named name: String) -> Subcommand? { commands.first { $0.name == name } }
+
+    static func isHelp(_ token: String) -> Bool { token == "--help" || token == "-h" }
+
+    /// The subcommand list — what a bare or unknown invocation gets.
+    static func printOverview(to handle: FileHandle) {
+        var text = "usage: taxonomy-backfill <command> [flags]\n\n"
+        let width = commands.map(\.name.count).max() ?? 0
+        for command in commands {
+            text += "  " + command.name.padding(toLength: width, withPad: " ", startingAt: 0)
+                + "  " + Text.wrapped(command.summary, indent: width + 4) + "\n"
+        }
+        text += "\nrun `taxonomy-backfill <command> --help` for a command's flags.\n"
+        handle.write(Data(text.utf8))
+    }
+}
+
+extension Subcommand {
+    /// This command's declared flags with their help — the only description of them that exists.
+    func printHelp(to handle: FileHandle) {
+        var text = "usage: taxonomy-backfill \(name) [flags]\n\n  "
+            + Text.wrapped(summary, indent: 2) + "\n\n"
+        let width = flags.map(\.spelling.count).max() ?? 0
+        for flag in flags {
+            let body = (flag.required ? "(required) " : "") + flag.help
+            text += "  " + flag.spelling.padding(toLength: width, withPad: " ", startingAt: 0)
+                + "  " + Text.wrapped(body, indent: width + 4) + "\n"
+        }
+        handle.write(Data(text.utf8))
+    }
+}
+
+enum Text {
+    /// Wrap to a terminal-ish width, indenting every line after the first so it lines up under the first.
+    static func wrapped(_ text: String, indent: Int, width: Int = 108) -> String {
+        var lines: [String] = []
+        var line = ""
+        for word in text.split(separator: " ") {
+            if line.isEmpty { line = String(word) }
+            else if line.count + 1 + word.count <= width - indent { line += " " + word }
+            else { lines.append(line); line = String(word) }
+        }
+        if !line.isEmpty { lines.append(line) }
+        return lines.joined(separator: "\n" + String(repeating: " ", count: indent))
+    }
+}
+
 // MARK: - Args
 
 struct Args {
+    private let declared: [String: Flag]
     private var map: [String: String] = [:]
-    private var flags: Set<String> = []
-    init(_ argv: [String]) {
+    private var present: Set<String> = []
+
+    /// Parse `argv` against one subcommand's declarations, refusing everything they do not describe.
+    ///
+    /// Each refusal closes a way the previous reader lost an argument in silence:
+    ///
+    /// - An unrecognised flag was kept and never read. A misspelled `--doc-drop-director` on `embed-corpus`
+    ///   left `dropDirector` false, exited 0, and composed a DIFFERENT embedding document — which on a fresh
+    ///   out-dir `recordComposition` then wrote into index/composition.json as that store's recorded truth,
+    ///   matching every later run against it. The documents embed, the vectors rank, the neighbours look
+    ///   plausible: nothing downstream can tell.
+    /// - A value flag followed by another flag became a BARE one, so its default silently stood:
+    ///   `--plot-cap --chunk 7` capped the plot at 1500 and gave the 7 to `--chunk`.
+    /// - A missing required flag only surfaced wherever the body happened to read it, which for an
+    ///   expensive command is after it has already done work.
+    init(_ argv: [String], declaring declarations: [Flag]) throws {
+        declared = Dictionary(uniqueKeysWithValues: declarations.map { ($0.name, $0) })
         var index = 0
         while index < argv.count {
-            let key = argv[index]
-            guard key.hasPrefix("--") else { index += 1; continue }
-            if index + 1 < argv.count, !argv[index + 1].hasPrefix("--") {
-                map[key] = argv[index + 1]; index += 2
-            } else { flags.insert(key); index += 1 }
+            let token = argv[index]
+            guard token.hasPrefix("--") else {
+                throw ToolError(message: "unexpected argument '\(token)' — every input to this command is a "
+                    + "--flag, so a bare word is either a stray value or a flag missing its dashes")
+            }
+            guard let flag = declared[token] else {
+                throw ToolError(message: "unknown flag \(token) — it would have been accepted and never "
+                    + "read.\(Self.suggestion(for: token, among: declarations))")
+            }
+            present.insert(token)
+            guard flag.takesValue else { index += 1; continue }
+            guard index + 1 < argv.count, !argv[index + 1].hasPrefix("--") else {
+                let followed = index + 1 < argv.count ? "'\(argv[index + 1])'" : "nothing"
+                throw ToolError(message: "\(flag.spelling) takes a value and was followed by \(followed) "
+                    + "— without one the flag would silently fall back to its default")
+            }
+            map[token] = argv[index + 1]
+            index += 2
+        }
+        if let missing = declarations.first(where: { $0.required && !present.contains($0.name) }) {
+            throw ToolError(message: "missing required \(missing.spelling) — \(missing.help)")
         }
     }
-    subscript(_ key: String) -> String? { map[key] }
-    func has(_ key: String) -> Bool { flags.contains(key) || map[key] != nil }
-    func int(_ key: String) -> Int? { map[key].flatMap { Int($0) } }
-    func double(_ key: String) -> Double? { map[key].flatMap { Double($0) } }
+
+    /// The declaration for `key`, or a trap.
+    ///
+    /// Reading an undeclared flag is a programming error, not operator input: `--help` does not list it and
+    /// argv carrying it was refused, so answering nil would reinstate exactly the silence this type removes.
+    private func declaration(_ key: String) -> Flag {
+        guard let flag = declared[key] else {
+            preconditionFailure("\(key) is not declared on this command — add it to the command's flags in Spec")
+        }
+        return flag
+    }
+
+    subscript(_ key: String) -> String? {
+        precondition(declaration(key).takesValue, "\(key) is declared bare — read it with has()")
+        return map[key]
+    }
+    func has(_ key: String) -> Bool { _ = declaration(key); return present.contains(key) }
+    func int(_ key: String) -> Int? { self[key].flatMap { Int($0) } }
+    func double(_ key: String) -> Double? { self[key].flatMap { Double($0) } }
     func require(_ key: String) throws -> String {
-        guard let value = map[key] else { throw ToolError(message: "missing \(key)") }
+        guard let value = self[key] else { throw ToolError(message: "missing \(key)") }
         return value
     }
     func requireInt(_ key: String) throws -> Int {
         guard let value = int(key) else { throw ToolError(message: "missing/invalid \(key)") }
         return value
+    }
+
+    /// " Did you mean --x?" for the nearest declared flag, or "" when none is close.
+    ///
+    /// A near miss is the whole point of refusing: it turns a typo that changed the output into a one-line
+    /// fix. The budget keeps it honest — suggesting `--k` for `--gate` would help nobody.
+    private static func suggestion(for token: String, among declarations: [Flag]) -> String {
+        let budget = max(2, token.count / 3)
+        let nearest = declarations
+            .map { ($0.name, editDistance($0.name, token)) }
+            .filter { $0.1 <= budget }
+            .min { $0.1 != $1.1 ? $0.1 < $1.1 : $0.0 < $1.0 }
+        guard let nearest else { return "" }
+        return " Did you mean \(nearest.0)?"
+    }
+
+    /// Levenshtein distance, one row at a time.
+    private static func editDistance(_ a: String, _ b: String) -> Int {
+        let a = Array(a), b = Array(b)
+        guard !a.isEmpty else { return b.count }
+        guard !b.isEmpty else { return a.count }
+        var previous = Array(0...b.count)
+        var current = previous
+        for i in 1...a.count {
+            current[0] = i
+            for j in 1...b.count {
+                current[j] = a[i - 1] == b[j - 1]
+                    ? previous[j - 1]
+                    : 1 + min(previous[j - 1], previous[j], current[j - 1])
+            }
+            swap(&previous, &current)
+        }
+        return previous[b.count]
     }
 }
