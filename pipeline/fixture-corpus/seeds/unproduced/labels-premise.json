@@ -1,0 +1,12 @@
+{
+  "count": 2,
+  "taxonomyVersion": "t02",
+  "records": [
+    {"animated": false, "mediaType": "movie", "tmdbId": 900001, "primaryGenre": "Mystery", "source": "llm",
+     "subgenres": [{"confidence": 0.82, "label": "Supernatural Mystery"}],
+     "moods": [{"confidence": 0.74, "label": "Brooding"}]},
+    {"animated": false, "mediaType": "tv", "tmdbId": 900006, "primaryGenre": "Drama", "source": "llm",
+     "subgenres": [{"confidence": 0.61, "label": "Family Saga"}],
+     "moods": [{"confidence": 0.58, "label": "Melancholic"}]}
+  ]
+}
