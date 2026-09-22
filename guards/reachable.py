@@ -14,7 +14,10 @@ packages are entered differently, so they name their roots differently:
 
   pipeline/  the modules in `STAGES`, passed in. A stage that leaves the list stops being a root, and
              everything only it reached surfaces here on the next run: the removal and the cleanup are
-             one commit rather than two years apart.
+             one commit rather than two years apart. The passes moved in from `scripts/` are entered
+             the way scripts are — executed by the path a stage's `PRODUCER` spells, imported by a
+             script still outside, run by hand — so `reached_from` widens the closure by those, and
+             still not by prose.
   store/     whatever `scripts/v2/build_store.py` imports, read off that file by `roots()`. Nothing
              imports `store/` from inside the repo's own import graph — the store stage runs the writer
              in a subprocess — so a hand-kept root list here would be a second copy of the writer's
@@ -126,6 +129,38 @@ def reached(package_dir, roots):
 def unreachable(package_dir, roots):
     """The modules nothing reaches — each one a file to delete."""
     return sorted(set(modules(package_dir)) - reached(package_dir, roots))
+
+
+def reached_from(repo, package_dir, base, entries=()):
+    """The package's reach from the modules `base`, widened by what enters it from outside the import graph.
+
+    A script moved into a package (oxyc/den-dataset#73) is entered the ways a script is: a stage executes
+    it by the path its `PRODUCER` spells, a refusal tells the operator to run it, a file outside the package
+    imports it. So on top of the import closure of `base`, a module is reached when a reached module names
+    it in code (see `references`), and when one of `entries` — repo-relative files that run, outside the
+    package — imports or names it. Iterated, because a module reached by name reaches what it imports.
+    """
+    by_path = {os.path.relpath(os.path.join(package_dir, m + ".py"), repo): m for m in modules(package_dir)}
+    found = set(base)
+    for entry in entries:
+        path = os.path.join(repo, entry)
+        if _is_python(path):
+            found |= set(roots(package_dir, path))
+        found |= {by_path[p] for p in references(path, by_path)}
+    while True:
+        closure = reached(package_dir, found)
+        named = {by_path[p] for m in closure
+                 for p in references(os.path.join(package_dir, m + ".py"), by_path)}
+        if named <= closure:
+            return closure
+        found |= named
+
+
+def _is_python(path):
+    if path.endswith(".py"):
+        return True
+    with open(path, encoding="utf-8") as fh:
+        return fh.readline().startswith("#!/usr/bin/env python")
 
 
 def orphan_tests(package_dir):
