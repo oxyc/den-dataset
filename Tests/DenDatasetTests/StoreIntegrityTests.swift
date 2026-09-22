@@ -319,7 +319,7 @@ final class RedactTests: XCTestCase {
 /// A fix that shipped with no test at all — verified: reverting it left the whole suite green.
 ///
 /// The `/discover` half of this class moved out with the worklist: the guard that an error body must not
-/// decode as an empty page is now `lib/tmdb.py`'s, and `pipeline/worklist_test.py` holds it.
+/// decode as an empty page is now `lib/tmdb.py`'s, and `lib/tmdb_test.py` holds it.
 final class SilentEmptyDecodeTests: XCTestCase {
 
     /// Redact has two passes: the query-parameter regex, and a verbatim sweep for known secret VALUES.

@@ -19,8 +19,10 @@ public struct DatasetMeta: Codable {
     public let vectorsBytes: Int
     public let builtAt: String
     public let lastModifiedHttp: String
-    // Metadata sidecar (optional; set by the `metadata` command AFTER finalize). Absent ⇒ no sidecar → the
-    // server serves labels+vectors only and the app hydrates poster cards via TMDB as before (no regression).
+    // The retired poster sidecar. Nothing sets these any more, and they stay declared anyway: an OWNED key
+    // the new manifest leaves nil is dropped by `ManifestMerge`, while an unowned one is carried forward —
+    // so un-declaring them would let a rewrite inherit a previous run's `metadataFile` and vouch for its
+    // sha, which both consumers hard-verify.
     public let metadataFile: String?
     public let metadataSha256: String?
     public let metadataBytes: Int?
@@ -70,18 +72,6 @@ public struct DatasetMeta: Codable {
         self.metadataBytes = metadataBytes
         self.embedderRuntime = embedderRuntime; self.embedderMaxTokens = embedderMaxTokens
         self.embeddingSpace = embeddingSpace
-    }
-
-    /// A copy naming a metadata sidecar. `metadata` patches an existing manifest rather than rebuilding it.
-    public func namingSidecar(file: String, sha256: String, bytes: Int) -> DatasetMeta {
-        DatasetMeta(datasetVersion: datasetVersion, taxonomyVersion: taxonomyVersion,
-                    embeddingModel: embeddingModel, dims: dims, count: count, quantization: quantization,
-                    labelsFile: labelsFile, vectorsFile: vectorsFile, labelsGzFile: labelsGzFile,
-                    labelsSha256: labelsSha256, labelsBytes: labelsBytes, vectorsSha256: vectorsSha256,
-                    vectorsBytes: vectorsBytes, builtAt: builtAt, lastModifiedHttp: lastModifiedHttp,
-                    metadataFile: file, metadataSha256: sha256, metadataBytes: bytes,
-                    embedderRuntime: embedderRuntime, embedderMaxTokens: embedderMaxTokens,
-                    embeddingSpace: embeddingSpace)
     }
 
     /// The keys this struct is authoritative for — including when it omits one. Everything else in the file

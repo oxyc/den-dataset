@@ -57,30 +57,21 @@ final class ManifestTests: XCTestCase {
         XCTAssertNil(result["embeddingSpace"], "an embedding space must never be inherited")
     }
 
-    /// `namingSidecar` is a hand-written 20-argument copy, and it is the ONE place the CodingKeys
-    /// compile-time guarantee does not reach: a future field with a defaulted init parameter compiles and
-    /// is silently dropped here — the facets/premise loss class through a new door.
-    ///
-    /// So this compares the whole encoded manifest rather than spot-checking a few fields. Verified by
-    /// mutation: the five-field version passed while `namingSidecar` zeroed labelsSha256, labelsBytes,
-    /// vectorsSha256 and vectorsBytes.
-    func testNamingASidecarChangesTheSidecarFieldsAndNothingElse() throws {
-        let before = meta(embedderRuntime: "den-embed/3.0.0")
-        let after = before.namingSidecar(file: "metadata-v1.json", sha256: "cc", bytes: 9)
-
-        XCTAssertEqual(after.metadataFile, "metadata-v1.json")
-        XCTAssertEqual(after.metadataSha256, "cc")
-        XCTAssertEqual(after.metadataBytes, 9)
-
-        func fieldsOtherThanTheSidecar(_ m: DatasetMeta) throws -> [String: String] {
-            let encoded = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(m))
-            let dict = try XCTUnwrap(encoded as? [String: Any])
-            return dict
-                .filter { !["metadataFile", "metadataSha256", "metadataBytes"].contains($0.key) }
-                .mapValues { "\($0)" }
-        }
-        XCTAssertEqual(try fieldsOtherThanTheSidecar(after), try fieldsOtherThanTheSidecar(before),
-                       "namingSidecar altered or dropped a field it does not own")
+    /// The poster sidecar is retired and nothing sets its keys, which is exactly when they must stay OWNED:
+    /// an owned key the new manifest omits is dropped, an unowned one is inherited. Un-declaring them would
+    /// let a rewrite carry a previous run's `metadataFile` forward and vouch for its sha — which both
+    /// consumers hard-verify against a file the release no longer carries.
+    func testTheRetiredSidecarKeysAreStillOwnedSoARewriteDropsThem() throws {
+        XCTAssertTrue(DatasetMeta.ownedKeys.isSuperset(of: ["metadataFile", "metadataSha256", "metadataBytes"]))
+        let existing = try JSONSerialization.data(withJSONObject: [
+            "metadataFile": "metadata-OLD.json", "metadataSha256": "old", "metadataBytes": 1,
+        ])
+        let merged = try ManifestMerge.merge(new: try JSONEncoder().encode(meta()), existing: existing,
+                                             owned: DatasetMeta.ownedKeys)
+        let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
+        XCTAssertNil(result["metadataFile"])
+        XCTAssertNil(result["metadataSha256"])
+        XCTAssertNil(result["metadataBytes"])
     }
 }
 
@@ -167,11 +158,6 @@ extension ClassifyCheckpointTests {
         XCTAssertEqual(keys, ["done", "totals"])
     }
 }
-
-// The sidecar's row order left with `metadata`, which is `pipeline/metadata.py` now;
-// `pipeline/metadata_test.py` holds the total-order rule. `DatasetMeta`'s three `metadata*` keys stay
-// here: the struct has to go on OWNING them, including by leaving them nil, or `ManifestMerge` inherits
-// the previous run's sidecar and swears to its sha — which both consumers hard-verify.
 
 /// Whether a run may append to an existing store. Disabling this decision wholesale used to leave the
 /// entire suite green, because it lived inline in the CLI target the tests cannot import.

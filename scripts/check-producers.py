@@ -72,9 +72,9 @@ REGISTRY = pipeline.producers()
 # ADDING A PUBLISHED ARTIFACT MEANS DECLARING IT. For anything the pipeline handles that is an entry in
 # `pipeline/artifacts.py` carrying a `manifest_key`; the one below is the remainder — an artifact of a
 # step not ported yet (oxyc/den-dataset#27), which is why it is still spelled out. It moves into the
-# catalogue with the stage that builds it, and this dict shrinks to the merge. `metadataFile` already
-# has: the poster sidecar is `pipeline/metadata.py`'s, so it is read off the stage order like everything
-# else and the hand-written entry is gone.
+# catalogue with the stage that builds it, and this dict shrinks to the merge. `metadataFile` has no entry
+# at all: the poster sidecar is retired, nothing builds it, and `prune-manifest.py` strips the key from a
+# manifest that still carries one before this check sees it.
 PRODUCERS = {
     "facetsFile": ("scripts/build-facets-bin.py", "scripts/build-facets-bin.py", True),
     **{a.manifest_key: REGISTRY[a.name] for a in DECLARED.values() if a.manifest_key},

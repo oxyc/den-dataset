@@ -84,8 +84,9 @@ final class ArgsTests: XCTestCase {
     func testABareInvocationListsTheSubcommands() throws {
         let result = run([])
         XCTAssertNotEqual(result.status, 0, "naming no command is a usage error")
-        // Every command that survives: the vote-pass generation went with the Jev pass, and the four
-        // deterministic ones are Python stages now. Naming all five rather than a sample, so a command
+        // Every command that survives: the vote-pass generation went with the Jev pass, the three
+        // deterministic ones are Python stages now, and `metadata` went with the poster sidecar. Naming all
+        // five rather than a sample, so a command
         // that disappears from the overview fails here rather than in an operator's terminal.
         for command in ["enrich", "embed-corpus", "facts", "finalize", "recluster"] {
             XCTAssert(result.stderr.contains(command), "\(command) is missing from the overview")

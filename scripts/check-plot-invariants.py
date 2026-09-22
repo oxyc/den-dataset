@@ -362,8 +362,8 @@ def main():
         with open(args.stamp_meta, encoding="utf-8") as fh:
             meta = json.load(fh)
         # Unowned keys, stamped here and carried forward by `ManifestMerge` — the same reason
-        # `manifest-counts.py` stamps `maxBatchId` rather than adding it to `DatasetMeta`, whose
-        # `namingSidecar` would drop a new field on the next `metadata` run.
+        # `manifest-counts.py` stamps `maxBatchId` rather than adding it to `DatasetMeta`: a key the struct
+        # owns is dropped by every `finalize` rewrite that does not compute it.
         meta["sharedPlotArticleTitles"] = shared_titles
         meta["sharedPlotArticles"] = len(groups)
         # What the collision census is a 35% proxy for. Stamped from the first publish that records it, so

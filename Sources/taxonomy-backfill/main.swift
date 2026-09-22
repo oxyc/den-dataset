@@ -7,12 +7,9 @@ import Foundation
 // produces the labels and facets the corpus join reads, so this tool gathers the inputs that pass needs and
 // turns already-decided labels into the shipped artifacts.
 //
-//   worklist      — build the universe (TMDB /discover sorted vote_count.desc for the pilot; daily-export
-//                   parse for the full run) → out/worklist-<media>.json
 //   enrich        — next N un-enriched ids → ONE TMDB call each (append_to_response=keywords), drop below the
 //                   vote floor / anime / fetch failures (logged) → out/enriched/batch-<id>.json (+ checkpoint).
 //                   The enriched batch is SCRATCH (holds raw TMDB text) and is never shipped.
-//   dump-articles — each grounded title's whole Wikipedia article as prose → the classify pass's input.
 //   embed-corpus  — compose(facts + already-decided tags + plot) → den-embed → append to the index store.
 //   finalize      — index store → labels-<taxonomy>.json + vectors-<embed>.bin + report.json +
 //                   dataset.meta.json (DERIVED only). Folds in the former import-dataset.mjs job.
