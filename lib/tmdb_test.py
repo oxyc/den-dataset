@@ -143,13 +143,15 @@ class Record(unittest.TestCase):
         with self.assertRaises(ValueError):
             tmdb_api.title_record(dict(SHAWSHANK, overview=["a"]), 278, "movie")
 
-    def test_the_facts_it_does_carry(self):
+    def test_the_facts_it_does_carry_and_nothing_else(self):
+        """Each field is here for a reader: the admission tier, the export row's count, the `animated` flag
+        `./den genres-moods` takes from genre 16. The title, year, genre names, keywords, director and cast
+        were written for readers that are gone, and nothing named by a person crosses at all."""
         record = tmdb_api.title_record(SHAWSHANK, 278, "movie")
-        self.assertEqual((record["title"], record["year"], record["director"]),
-                         ("The Shawshank Redemption", 1994, "Frank Darabont"))
-        self.assertEqual(record["topCast"], ["Tim Robbins", "Morgan Freeman", "Bob Gunton", "William Sadler"],
-                         "billing order, four names, an unordered name last")
-        self.assertEqual((record["genreIDs"], record["keywords"]), ([18, 80], ["prison"]))
+        self.assertEqual(record, {"tmdbId": 278, "mediaType": "movie", "genreIDs": [18, 80],
+                                  "originCountry": ["US"], "originalLanguage": "en", "voteCount": 29000})
+        for text in ("Shawshank", "Darabont", "Robbins", "prison", "Drama", "1994"):
+            self.assertNotIn(text, json.dumps(record))
 
     def test_tmdb_creators_never_cross(self):
         """`createdBy` is composed into the embedding document; it comes from Wikidata (P170) alone."""
@@ -160,12 +162,6 @@ class Record(unittest.TestCase):
             record = tmdb_api.title_record(body, body["id"], media)
             self.assertNotIn("createdBy", record)
             self.assertNotIn("David Simon", json.dumps(record))
-
-    def test_a_present_empty_value_does_not_fall_through(self):
-        """Swift's `??`: an empty release date is no year, not a reason to read the air date."""
-        body = {"id": 1, "title": "", "name": "N", "release_date": "", "first_air_date": "2001-01-01"}
-        record = tmdb_api.title_record(body, 1, "movie")
-        self.assertEqual((record["title"], record["year"]), ("", None))
 
     def test_production_countries_answer_only_when_origin_country_is_absent(self):
         body = {"id": 1, "title": "F", "production_countries": [{"iso_3166_1": "FR"}]}

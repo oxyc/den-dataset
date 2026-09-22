@@ -18,13 +18,14 @@ not votes, falls back to the detail call's. A title TMDB's count leaves short co
 IMDb id, one Wikidata SPARQL per media for all of them together. IMDb's counts are read, compared and
 forgotten; none is written into a batch, a log line or the report.
 
-**TMDB's prose never enters the record.** `lib/tmdb.title_record` keeps only the overview's LENGTH, and a
+**TMDB's prose never enters the record.** `lib/tmdb.title_record` keeps none of the overview, and a
 title with no Wikipedia plot is written `hasWikiPlot: false` with an empty `overview` — nothing downstream
 may ground it on anything else.
 
-**The batch file is read by `articles`, `embed`, `scripts/backfill-plot-provenance.py` and the census**,
-and it is written in the Swift encoder's exact layout (`swift_json`), so a batch this writes and one the
-Swift pass wrote diff as data rather than as formatting.
+**The batch file is read by `articles`, `embed`, `genres-moods`, `scripts/backfill-plot-provenance.py` and
+the census**, and it is written in the Swift encoder's exact layout (`swift_json`), so a batch this writes
+and one the Swift pass wrote diff as data rather than as formatting. Its TMDB fields are the few those
+readers need — see `lib/tmdb.title_record`.
 """
 import argparse
 import concurrent.futures
@@ -497,11 +498,11 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
 
     A worklist may hold BOTH media. The Swift command refused one that did, citing vote files that carried
     no media type and readers that keyed a row by a bare id — `loadVotePasses`, the escalation and
-    `assemble`. Those readers are deleted, and every set, map and query here is keyed by the pair. Not
-    every reader of a batch is: `scripts/check-votes.py` matches vote records by bare id and refuses a
-    mixed batch for that reason, but it checks the retired vote-pass output and nothing runs it. The
-    stages that read a batch — `articles`, `embed-corpus`, the corpus, the census — and the provenance
-    backfill key by `mediaType:tmdbId`.
+    `assemble`. Those readers are deleted, and every set, map and query here is keyed by the pair. So is
+    every reader of a batch today — the `articles`, `embed` and `genres-moods` stages, `run_combined.py`'s
+    evidence fallback, the census (`scripts/check-plot-invariants.py`), the provenance backfill and
+    `scripts/v2/premise_mine_candidates.py` all key by `mediaType:tmdbId` — and a mixed batch is safe only
+    while that holds: a reader keyed by a bare id would read series 95 as movie 95.
     """
     if limit < 1:
         raise StageError(f"enrich: --limit {limit} takes nothing, and would report the worklist as drained")

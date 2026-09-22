@@ -203,6 +203,21 @@ class Batch(unittest.TestCase):
         self.assertEqual([name for name in rows["movie:2"] if "overview" in name.lower()], ["overview"],
                          "not even the TMDB overview's LENGTH is carried any more")
 
+    def test_a_batch_row_carries_only_the_tmdb_fields_a_reader_needs(self):
+        """oxyc/den-dataset#53. `genreIDs` stays for `./den genres-moods`' `animated` flag; the title, year,
+        genre names, keywords, director and cast were written for readers that are gone."""
+        self.mapping[("movie", 1)] = {"article": "One"}
+        self.plots[("One", "en")] = found("W" * 200)
+        body = detail(1, release_date="1994-09-23", genres=[{"id": 16, "name": "Animation"}],
+                      keywords={"keywords": [{"id": 378, "name": "prison"}]},
+                      credits={"cast": [{"name": "Tim Robbins", "order": 0}],
+                               "crew": [{"name": "Frank Darabont", "job": "Director"}]})
+        self.run_batch({"/movie/1": body}, [("movie", 1)])
+        row = self.rows()["movie:1"]
+        self.assertEqual({"title", "year", "genres", "keywords", "keywordIDs", "director", "topCast"} & set(row),
+                         set())
+        self.assertEqual(row["genreIDs"], [16])
+
     def test_creators_are_wikidatas_or_none_never_tmdbs(self):
         """`createdBy` is composed into the embedding document. With no Wikidata P170 it is EMPTY — TMDB's
         `created_by` (or a crew "Creator" credit) is not a fallback."""

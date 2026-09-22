@@ -15,7 +15,6 @@ Two rules are load-bearing and neither is obvious from the endpoint:
 """
 import json
 import os
-import re
 
 from . import cache as caching
 from . import http
@@ -80,13 +79,10 @@ def is_title_record(body, expecting_appended):
 
 
 #: Detail, keywords and credits in ONE call. The value is part of the detail record's cache key, so it is
-#: spelled the way the Swift enrichment spelled it: ~60k records are on disk under exactly this.
+#: spelled the way the Swift enrichment spelled it: ~60k records are on disk under exactly this. The record
+#: no longer carries a keyword or a credit (see `title_record`), but asking for less would miss every one
+#: of those bodies and fetch the corpus again.
 APPEND = "keywords,credits"
-
-#: How many billed names the enriched record keeps.
-TOP_CAST = 4
-
-_YEAR = re.compile(r"[+-]?[0-9]+")
 
 
 def _field(body, name, kind):
@@ -102,11 +98,6 @@ def _field(body, name, kind):
     if not isinstance(value, kind) or (kind is int and isinstance(value, bool)):
         raise ValueError(f"TMDB `{name}` is {type(value).__name__}, not {kind.__name__}")
     return value
-
-
-def _first(*values):
-    """The first value that is not None — Swift's `a ?? b`."""
-    return next((value for value in values if value is not None), None)
 
 
 def _named(items, name, also=()):
@@ -129,44 +120,31 @@ def title_record(body, tmdb_id, media):
     a title whose overview ran under 20 characters. That check is gone (oxyc/den-dataset#53) — `overview`
     downstream holds a Wikipedia plot or nothing, so the length said nothing about what a title would be
     grounded on, and over the whole repass it refused 3 titles out of 59,209 — so nothing crosses now.
+
+    ONLY WHAT A READER NEEDS crosses (oxyc/den-dataset#53). `originCountry` picks the admission tier
+    (`pipeline/floors.py`) and `voteCount` is the gate's count for an export row; `genreIDs` is where
+    `./den genres-moods` takes a new title's `animated` flag from (genre 16). `originalLanguage` is still
+    written. `title`, `year`, `genres`, `keywords`, `keywordIDs`, `director` and `topCast` were written for
+    readers that are gone: the Swift batch decoder that required `title`, the classify dump that now names
+    a title by Wikidata's label and year (`pipeline/articles.targets`), and the premise ruler's candidate
+    miner (`scripts/v2/premise_mine_candidates.py`), which reads `keywordIDs` off the `out-t02` batches
+    already on disk and is not run on new ones.
     """
     if not isinstance(body, dict):
         raise ValueError("TMDB detail body is not an object")
-    # `??`, not `or`, throughout: a PRESENT empty value is the answer and does not fall through to the next
-    # field — an empty `release_date` is no year, not a reason to read `first_air_date`.
-    date = _first(_field(body, "release_date", str), _field(body, "first_air_date", str))
-    year = int(date[:4]) if date is not None and _YEAR.fullmatch(date[:4]) else None
-    block = _field(body, "keywords", dict) or {}
-    keywords = _named(_first(_field(block, "keywords", list), _field(block, "results", list), []), "name",
-                      (("id", int),))
     countries = _field(body, "origin_country", list)
     if countries is None:
         produced = _named(_field(body, "production_countries", list) or [], "iso_3166_1")
         countries = [country["iso_3166_1"] for country in produced]
-    credits = _field(body, "credits", dict) or {}
-    crew = _named(_field(credits, "crew", list) or [], "name")
-    cast = _named(_field(credits, "cast", list) or [], "name")
     genres = _named(_field(body, "genres", list) or [], "name", (("id", int),))
-    director = next((person["name"] for person in crew if person.get("job") == "Director"), None)
-    # No `createdBy` here. TMDB's `created_by` names were the fallback when Wikidata had no P170, and the
-    # enriched record's `createdBy` is composed into the embedding document — so TMDB text reached the
-    # shipped vectors. The enrichment fills `createdBy` from Wikidata alone.
-    # Billing order; a name with no `order` goes last, and ties keep TMDB's own order.
-    billed = sorted(cast, key=lambda person: person["order"] if isinstance(person.get("order"), int)
-                    else float("inf"))
     # `overview` is read and DISCARDED: reading it still type-checks the field, so a body whose overview is
     # not a string is refused here rather than decoded into half a record.
     _field(body, "overview", str)
     return {
         "tmdbId": tmdb_id, "mediaType": media,
-        "title": _first(_field(body, "title", str), _field(body, "name", str), ""),
-        "year": year,
-        "genreIDs": [genre["id"] for genre in genres], "genres": [genre["name"] for genre in genres],
-        "keywordIDs": [keyword["id"] for keyword in keywords],
-        "keywords": [keyword["name"] for keyword in keywords],
+        "genreIDs": [genre["id"] for genre in genres],
         "originCountry": countries, "originalLanguage": _field(body, "original_language", str),
         "voteCount": _field(body, "vote_count", int) or 0,
-        "director": director, "topCast": [person["name"] for person in billed[:TOP_CAST]],
     }
 
 
