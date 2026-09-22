@@ -41,6 +41,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.append(os.path.join(HERE, "v2"))
 sys.path.insert(0, REPO)
+import consolidate_corpus  # noqa: E402
 from article_sections import parse_sections  # noqa: E402
 from combined_questions import TAXONOMY, taxonomy  # noqa: E402
 from pipeline import artifacts  # noqa: E402
@@ -102,29 +103,30 @@ def read_curated(path):
     return head, head.pop("titles")
 
 
-def read_classify(paths):
-    """`key` → what `prepare` needs from its classify row, refusing a key answered twice."""
-    info, seen = {}, {}
-    for path in paths:
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                if not line.strip():
-                    continue
-                row = json.loads(line)
-                key = key_of(row)
-                if key in seen:
-                    raise StageError(f"{key} is answered in both {seen[key]} and {path}")
-                seen[key] = path
-                keep = []
-                for s in row.get("sections") or []:
-                    p = (s.get("role") or {}).get("probabilities") or {}
-                    story = p.get("story-premise", 0) + p.get("theme-subject", 0)
-                    if s["id"] == "s000" or story >= PREMISE_P:
-                        keep.append((s["id"], s["textSha256"]))
-                validity = (((row.get("answers") or {}).get("validity")) or {}).get("choice")
-                info[key] = {"keep": keep, "validity": validity, "year": row.get("year"),
-                             "title": row.get("title")}
-    return info
+def read_classify(paths, withdrawn=None):
+    """`key` → what `prepare` needs from its classify row.
+
+    The row that answers for a title is the corpus join's: across shards the latest run wins by key, and a
+    title withdrawn before that run started has none (`consolidate_corpus.latest`). Reading the shards
+    any other way would label a re-grounded title from the article its old run read. `withdrawn` is the
+    out-dir's tombstone file, when there is one.
+    """
+    def trim(row):
+        keep = []
+        for s in row.get("sections") or []:
+            p = (s.get("role") or {}).get("probabilities") or {}
+            story = p.get("story-premise", 0) + p.get("theme-subject", 0)
+            if s["id"] == "s000" or story >= PREMISE_P:
+                keep.append((s["id"], s["textSha256"]))
+        validity = (((row.get("answers") or {}).get("validity")) or {}).get("choice")
+        return {"keep": keep, "validity": validity, "year": row.get("year"), "title": row.get("title")}
+
+    try:
+        withdrawals = consolidate_corpus.read_withdrawals(withdrawn) if withdrawn else None
+        rows, _, _ = consolidate_corpus.latest(paths, "classify", withdrawals, keep=trim)
+    except SystemExit as refused:
+        raise StageError(str(refused)) from None
+    return rows
 
 
 def read_animated(enriched_dir):
@@ -198,7 +200,7 @@ def prepare(out_dir="out", work=None, mode="missing", keys_file=None, since=None
             raise StageError(f"--since wants YYYY-MM-DD, got {since!r}") from None
     vocab = vocabulary()
     ctx = Context(out_dir=out_dir, dataset_version="")
-    classify = read_classify(ctx.require_all(artifacts.COMBINED))
+    classify = read_classify(ctx.require_all(artifacts.COMBINED), ctx.require(artifacts.WITHDRAWN))
     _, titles = read_curated(curated)
     keys = None
     if mode == "keys":

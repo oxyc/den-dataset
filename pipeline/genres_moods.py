@@ -50,7 +50,7 @@ SPENDS = True
 #: false: it derives from the answers already on disk and asks nothing.
 FREE_WITHOUT_SPEND = True
 
-INPUTS = (artifacts.ARTICLES, artifacts.ENRICHED, artifacts.COMBINED)
+INPUTS = (artifacts.ARTICLES, artifacts.ENRICHED, artifacts.COMBINED, artifacts.WITHDRAWN)
 OUTPUTS = (artifacts.GENRES_MOODS_ANSWERS, artifacts.GENRES_MOODS_ANSWERS_MANIFEST, artifacts.GENRES_MOODS)
 
 CURATED = gm.CURATED
@@ -210,7 +210,7 @@ def selection(ctx, records):
     hashes it, so it must not move when the curated file does or a shard fills up.
     """
     _, titles = gm.read_curated(CURATED)
-    classify = gm.read_classify(ctx.require_all(artifacts.COMBINED))
+    classify = gm.read_classify(ctx.require_all(artifacts.COMBINED), ctx.require(artifacts.WITHDRAWN))
     by_key = {rc.article_key(r): r for r in records}
     states, unaskable = {}, {}
     for key, info in classify.items():
@@ -315,7 +315,7 @@ def derive(ctx):
     # and an out-dir without them is not one this stage can speak for. Parsing them is what waits on an
     # answer: the shards are 680 MB, and with nothing derived nothing would be asked of them.
     shards = ctx.require_all(artifacts.COMBINED)
-    classify = gm.read_classify(shards) if answers else {}
+    classify = gm.read_classify(shards, ctx.require(artifacts.WITHDRAWN)) if answers else {}
     animated = gm.read_animated(ctx.path(artifacts.ENRICHED)) if answers else {}
 
     counts = {"kept": 0, "derived": 0, "filled": 0, "not about the requested work": 0,
