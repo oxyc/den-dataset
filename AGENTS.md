@@ -15,9 +15,9 @@ prose somewhere that can go stale without anything failing.
 
 ## The part that is still being rebuilt
 
-`pipeline/` holds **six** stages today — the worklist, the classify pass, the embed pass, the corpus join,
-the store build and the publish. Only the enrichment drain still runs from `docs/OPERATE.md` under
-`scripts/`.
+`pipeline/` holds **seven** stages today — the worklist, the classify pass, the embed pass, the facts
+merge, the corpus join, the store build and the publish. Only the enrichment drain still runs from
+`docs/OPERATE.md` under `scripts/`.
 That is the migration in oxyc/den-dataset#27, not a second generation: stages join `STAGES` one at a
 time, and the old tree is deleted in the commit that makes the new one authoritative.
 

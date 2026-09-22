@@ -18,10 +18,11 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 
 #: The pipeline, in the order it runs. The worklist comes first because it is the universe everything after
 #: it is drawn from; classification next, because it reads the articles and nothing else here does;
-#: embedding before the corpus join, because its stores are what `finalize` turns into the vectors the
-#: store is built from; the corpus is joined before the store for the same reason; and publishing is last
-#: because it uploads what the store wrote. That ordering is the whole reason a stage can stop naming a
-#: producer for an artifact another stage makes.
+#: embedding before the facts merge, because its stores are what `finalize` turns into `labels-t02.json`
+#: and the corpus facts pass scrapes the ids in that file; the merge before the corpus join and the store,
+#: because both of them read the merged facts; and publishing is last because it uploads what the store
+#: wrote. That ordering is the whole reason a stage can stop naming a producer for an artifact another
+#: stage makes.
 #:
 #: `den run` STOPS BEFORE PUBLISHING unless asked with --publish: every other stage writes into the
 #: out-dir and can be run again, while publish replaces the moving `data-latest` release. The order below
@@ -30,7 +31,11 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: One short of the whole pipeline: `fetch` — the enrichment drain that turns the worklist into the
 #: enriched batches — still lives under `scripts/` and runs from `docs/OPERATE.md`. It lands in the gap
 #: between the worklist and the classify pass (oxyc/den-dataset#27).
-STAGES = ("worklist", "classify", "embed", "corpus", "store", "publish")
+#:
+#: `facts` sits after `embed` because the corpus pass scrapes the ids in `labels-t02.json`, which
+#: `finalize` writes from the embed stores — and before `corpus` and `store`, which both read the file
+#: it merges.
+STAGES = ("worklist", "classify", "embed", "facts", "corpus", "store", "publish")
 
 
 def stage(name):

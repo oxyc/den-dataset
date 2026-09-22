@@ -247,6 +247,20 @@ python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels ou
 # 6. Finalize — index store -> labels-t02.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
 $BIN finalize --out-dir out
 
+# 6a. The FACTS the store ranks on — the two scrape passes merged. The scrape runs TWICE and cannot run
+#     once: the corpus pass covers the ids in labels-t02.json and is stamped --has-vector, the delta pass
+#     covers ids given outright and is not, and /recommend must never let a vectorless record into an ANN
+#     path. Both passes and the merge all write facts-<ver>.json, so move the corpus pass aside first —
+#     without that the delta pass overwrites it and the merged file is short by every delta title, which
+#     is how a rebuild once dropped 137 of them and nothing but /recommend noticed.
+$BIN facts --out-dir out --labels out/labels-t02.json --has-vector
+mv out/facts-<ver>.json out/facts-<ver>.pre-merge.json
+$BIN facts --out-dir out --ids <the delta ids>     # writes out/facts-unversioned.json
+./den stage facts --out-dir out --dataset-version <ver>
+#     The stage runs scripts/merge-facts.py with those two files and --version, built from
+#     `pipeline/facts.py`'s declaration rather than retyped; `pipeline/facts_test.py` holds the two to the
+#     same bytes. A missing pass is a refusal naming what writes it, not a smaller merge.
+
 # 7. Metadata sidecar — poster/title/year per shipped id, so a neighbour renders without a TMDB detail call.
 #    Its filename carries the datasetVersion, which step 6 just changed, so this belongs after EVERY finalize
 #    that adds titles. Skipping it leaves the manifest naming the previous version's sidecar: it still hashes
