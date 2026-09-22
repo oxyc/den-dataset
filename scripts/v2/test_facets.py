@@ -10,8 +10,8 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import facet_questions  # noqa: E402
 import run_facets        # noqa: E402
+from pipeline import facet_questions  # noqa: E402
 
 
 class FacetPromptTests(unittest.TestCase):

@@ -40,8 +40,8 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from facet_questions import PROMPT, questions as facet_questions  # noqa: E402
-from lib.typesafe_client import MODEL, TypeSafe, TypeSafeError    # noqa: E402
+from lib.typesafe_client import MODEL, TypeSafe, TypeSafeError             # noqa: E402
+from pipeline.facet_questions import PROMPT, questions as facet_questions  # noqa: E402
 
 VALIDITY = {
     "validity": {

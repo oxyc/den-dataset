@@ -8,7 +8,7 @@ import json
 import os
 import re
 
-from facet_questions import questions as facet_questions
+from pipeline.facet_questions import questions as facet_questions
 from run_facets import VALIDITY
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
