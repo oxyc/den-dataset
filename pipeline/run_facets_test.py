@@ -2,21 +2,17 @@
 """Offline contract tests for the Jev facet prompt and append-only runner."""
 import json
 import os
-import sys
 import tempfile
 import unittest
 from unittest import mock
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-
-import run_facets        # noqa: E402
-from pipeline import facet_questions  # noqa: E402
+from . import facet_questions, run_facets
+from .contract import REPO
 
 
 class FacetPromptTests(unittest.TestCase):
     def test_v2_load_bearing_rules_reach_the_api_questions(self):
-        path = os.path.join(os.path.dirname(os.path.dirname(HERE)), "data", "prompts", "facets-v2.md")
+        path = os.path.join(REPO, "data", "prompts", "facets-v2.md")
         questions = facet_questions.questions(path)
         self.assertEqual(
             list(questions),

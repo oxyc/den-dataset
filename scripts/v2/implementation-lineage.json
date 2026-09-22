@@ -38,7 +38,7 @@
         "sha256": "6d6d0d469f3e25cff64d53ccc107f17adfcbc14f262703951b17e020c679453e",
         "commit": "a42042a",
         "supersededBy": "the commits that moved the pass out of scripts/ (oxyc/den-dataset#73)",
-        "why": "#73 moved the prompts to data/prompts/, so PROMPT names facets-v2.md there; the prompt's bytes are unchanged and its digest is the promptSha256 every manifest records. The facet parser moved to pipeline/, so it is imported as `pipeline.facet_questions`. Only where files are found changed — nothing that builds a question did, so the questions still hash to globalQuestionsSha256 8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964 and the label mapping to 06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577, which the pass's own tests pin (SHIPPED_GLOBAL_QUESTIONS_SHA, SHIPPED_LABEL_MAPPING_SHA)."
+        "why": "#73 moved the prompts to data/prompts/, so PROMPT names facets-v2.md there; the prompt's bytes are unchanged and its digest is the promptSha256 every manifest records. The facet parser and the v1 runner that holds the `validity` question moved to pipeline/, so they are imported as `pipeline.facet_questions` and `pipeline.run_facets`. Only where files are found changed — nothing that builds a question did, so the questions still hash to globalQuestionsSha256 8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964 and the label mapping to 06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577, which the pass's own tests pin (SHIPPED_GLOBAL_QUESTIONS_SHA, SHIPPED_LABEL_MAPPING_SHA)."
       }
     ],
     "typesafe_client.py": [

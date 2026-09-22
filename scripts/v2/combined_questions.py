@@ -9,7 +9,7 @@ import os
 import re
 
 from pipeline.facet_questions import questions as facet_questions
-from run_facets import VALIDITY
+from pipeline.run_facets import VALIDITY
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 #: The genres & moods vocabulary, as data: JSON under `data/` with the other committed inputs

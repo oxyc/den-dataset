@@ -2,7 +2,7 @@
 """Classify every grounded title's facets with a System One model, one call per title.
 
   ./den stage articles --out-dir out-repass
-  scripts/v2/run_facets.py --articles out-repass/articles.jsonl --out out-repass/facets.jsonl [--limit N]
+  pipeline/run_facets.py --articles out-repass/articles.jsonl --out out-repass/facets.jsonl [--limit N]
 
 ## Why this exists at all, and why it is not `llm_phase.py`
 
@@ -38,8 +38,9 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+if not __package__:
+    # Run as a file: the repo, not pipeline/, is the import root.
+    sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from lib.typesafe_client import MODEL, TypeSafe, TypeSafeError             # noqa: E402
 from pipeline.facet_questions import PROMPT, questions as facet_questions  # noqa: E402
 
