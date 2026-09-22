@@ -33,6 +33,9 @@ PATH = "/sparql"
 ID_PROPERTY = {"movie": "P4947", "tv": "P4983"}
 
 DIRECTOR, GENRE = "P57", "P136"
+#: What a title IS — `film`, `anime television series`. Asked beside P136 by `kind_query`, never by the
+#: doc-facts query, whose text is a cache key.
+INSTANCE_OF = "P31"
 
 #: A label the SERVICE could not resolve comes back as the bare Q-id.
 QID = re.compile(r"^Q\d+$")
@@ -401,6 +404,52 @@ def imdb_ids(ids, media, cache=None):
                            headers={"Content-Type": "application/sparql-query",
                                     "Accept": "application/sparql-results+json"})
     parsed = parse_imdb(payload)
+    if key is not None:
+        cache.write(key, payload)
+    return parsed
+
+
+def kind_query(ids, media):
+    """The SPARQL that names what one batch of TMDB ids ARE: the labels of their P136 genres and their P31
+    types, in one result.
+
+    A UNION rather than two OPTIONALs, and one request rather than two. Both properties are multi-valued,
+    so OPTIONALs return their cross product — the reason `doc_facts` asks one property per request — but a
+    UNION is a disjunction: each value is its own row, and the two sets simply concatenate.
+
+    LABELS, not Q-ids. Wikidata spreads anime across dozens of items (`anime film`, `anime television
+    series`, `fantasy anime and manga`, and a new one whenever an editor needs it), so a caller holding a
+    pinned list of Q-ids silently stops matching the ones minted after it was written.
+    """
+    values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
+    return (f"SELECT ?tmdb ?vLabel WHERE {{\n"
+            f"  VALUES ?tmdb {{ {values} }}\n"
+            f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"  {{ ?film wdt:{GENRE} ?v . }} UNION {{ ?film wdt:{INSTANCE_OF} ?v . }}\n"
+            f'  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul". }}\n'
+            f"}}\n"
+            f"ORDER BY ?tmdb ?vLabel")
+
+
+def kinds(ids, media, cache=None):
+    """`tmdbId -> [label]` — what one batch of titles are, by genre and by type, from disk where the same
+    batch was asked before. An id Wikidata states neither for is absent."""
+    if not ids:
+        return {}
+    query = kind_query(ids, media)
+    key = None
+    if cache is not None:
+        key = cache.key("sparql-kind", {"q": query})
+        hit = cache.read(key)
+        if hit is not None:
+            try:
+                return parse_labelled(hit)
+            except WikidataError:
+                pass
+    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
+                           headers={"Content-Type": "application/sparql-query",
+                                    "Accept": "application/sparql-results+json"})
+    parsed = parse_labelled(payload)
     if key is not None:
         cache.write(key, payload)
     return parsed

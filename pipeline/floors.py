@@ -39,7 +39,9 @@ per-title detail call alive.
 stated it when the universe was built, and it is the number that query selected on, so the gate does not
 ask TMDB for it again per title (oxyc/den-dataset#53). An export row carries none, because the daily dump
 states popularity; those fall back to the detail call while it is still made. A title nothing states a
-TMDB count for is judged on IMDb's count alone rather than as a title with zero votes.
+TMDB count for is judged on IMDb's count alone — the half of the union that exists for the titles TMDB
+undercounts — and a worklist row that stated no count is written without one rather than with a zero,
+which would be below every floor and refuse a title the detail call admits.
 
 2,000 is also the whole corpus's ±10% median at 50 (1,992), the figure the decision was made on. Rounded
 DOWN for the worldwide tier, since the union only ever adds: a floor a little low admits a few more titles

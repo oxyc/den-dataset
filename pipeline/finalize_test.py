@@ -17,7 +17,7 @@ import unittest
 
 import pipeline
 
-from . import artifacts, finalize
+from . import artifacts, enrich, finalize
 from .contract import Context, StageError, bind
 
 #: The Swift run's clock, so the manifest golden is comparable byte for byte.
@@ -230,6 +230,12 @@ class Report(Staged):
                 found = self.counters()
                 self.assertEqual((found["anime"], found["report"]["skippedBelowVoteFloor"],
                                   found["report"]["fetchFailures"]), (0, 0, 0))
+
+    def test_it_reports_exactly_the_counters_the_enrichment_tallies(self):
+        """A counter no rule can move any more still has a number in every checkpoint written before that
+        rule went, so reporting it reads as a rule that is still running. `noOverview` was the TMDB stub
+        check's, and went with it."""
+        self.assertEqual(sorted(finalize.ENRICH_TOTALS), sorted(enrich.TOTALS))
 
     def test_the_movie_pilots_bare_ids_are_still_a_checkpoint(self):
         lay_down(self.out)

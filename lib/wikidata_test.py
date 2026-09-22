@@ -303,6 +303,48 @@ class ImdbIds(unittest.TestCase):
         sent.assert_not_called()
 
 
+class Kinds(unittest.TestCase):
+    """What a title IS — its P136 genres and its P31 types — which is what the anime exclusion reads."""
+
+    def test_both_properties_ride_one_request_as_a_union(self):
+        """Two multi-valued OPTIONALs return their cross product, which is why `doc_facts` sends one
+        request per property. A UNION is a disjunction: each value is a row and the sets concatenate."""
+        query = wikidata.kind_query([12, 11, 11], "movie")
+        self.assertIn('VALUES ?tmdb { "11" "12" }', query, "sorted and unique, so one set is one key")
+        self.assertIn("{ ?film wdt:P136 ?v . } UNION { ?film wdt:P31 ?v . }", query)
+        self.assertNotIn("OPTIONAL", query)
+        self.assertIn("wdt:P4983 ?tmdb", wikidata.kind_query([1], "tv"))
+
+    def test_it_asks_for_labels_and_the_service_covers_en_and_mul(self):
+        """Wikidata mints a new `<genre> anime and manga` item whenever an editor needs one, so a caller
+        matching pinned Q-ids silently stops seeing the ones made after it was written."""
+        self.assertIn("?vLabel", wikidata.kind_query([1], "movie"))
+        self.assertIn('wikibase:language "en,mul"', wikidata.kind_query([1], "movie"))
+
+    def test_every_label_a_title_carries_accumulates_and_a_bare_qid_is_dropped(self):
+        payload = bindings((1, "anime television series"), (1, "Q123"), (1, "adventure anime and manga"),
+                           (2, "film"))
+        self.assertEqual(wikidata.parse_labelled(payload),
+                         {1: ["anime television series", "adventure anime and manga"], 2: ["film"]})
+
+    def test_a_body_that_is_not_a_result_is_refused_and_not_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = caching.ResponseCache("wiki", directory, 3600)
+            with mock.patch.object(wikidata.http, "request", return_value=b"<html>busy</html>"):
+                with self.assertRaises(wikidata.WikidataError):
+                    wikidata.kinds([1], "movie", cache)
+            self.assertIsNone(cache.read(cache.key("sparql-kind", {"q": wikidata.kind_query([1], "movie")})))
+            with mock.patch.object(wikidata.http, "request", return_value=bindings((1, "anime film"))) as sent:
+                self.assertEqual(wikidata.kinds([1], "movie", cache), {1: ["anime film"]})
+                self.assertEqual(wikidata.kinds([1], "movie", cache), {1: ["anime film"]})
+            self.assertEqual(sent.call_count, 1, "a real answer is served from disk the second time")
+
+    def test_no_ids_asks_nothing(self):
+        with mock.patch.object(wikidata.http, "request") as sent:
+            self.assertEqual(wikidata.kinds([], "movie"), {})
+        sent.assert_not_called()
+
+
 class Languages(unittest.TestCase):
     """What a title is IN — P364 — which orders the other-language plot fallback."""
 

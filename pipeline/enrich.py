@@ -56,11 +56,14 @@ WIKI_PLOT_FLOOR = 120
 #: of its own that clears `WIKI_PLOT_FLOOR` on any Wikipedia (see `reground`).
 OWN_ARTICLE_SUFFICIENT = 1000
 
-#: An overview shorter than this is a stub too thin to classify. Judged on the LENGTH only.
-STUB = 20
-
-#: TMDB keyword 210024 is "anime"; Japanese-language Animation (genre 16) is the catch-all.
-ANIME_KEYWORD, ANIMATION = 210024, 16
+#: Wikidata says anime in the LABEL of a P136 genre or a P31 type: `anime film`, `anime television series`,
+#: `<genre> anime and manga`, `anime/manga style`. The vocabulary is open — an editor mints a new
+#: `<genre> anime and manga` whenever one is needed — so the rule is the word, not a pinned list of Q-ids.
+ANIME = "anime"
+#: The one label carrying the word that says the opposite: western animation drawn in the style, which is
+#: not what someone excluding anime means. `lib/wikidata_facts.genre_map` sets `live-action/animated` aside
+#: from its animation rule for the same reason.
+NOT_ANIME = "anime-influenced animation"
 
 #: In-flight TMDB detail calls, and titles grounding at once — the second gentle on the public API.
 TMDB_WORKERS, WIKI_WORKERS = 8, 4
@@ -156,12 +159,22 @@ def read_checkpoint(path):
                          f"restore it, or delete it to intentionally start fresh")
 
 
-TOTALS = ("anime", "belowFloor", "failures", "noOverview")
+#: `noOverview` is gone with the stub check that counted it — see `run`. A checkpoint that carries one is
+#: read without it; the counter counted a rule that no longer exists.
+TOTALS = ("anime", "belowFloor", "failures")
 
 
-def is_anime(record):
-    return ANIME_KEYWORD in record["keywordIDs"] or (
-        ANIMATION in record["genreIDs"] and record["originalLanguage"] == "ja")
+def is_anime(labels):
+    """Whether Wikidata's P136 genres and P31 types say this title is anime.
+
+    Read off TMDB's keyword 210024 and its Japanese-language Animation catch-all before. Measured against
+    that rule over the 47,548 corpus titles with a facts row: 1,129 agree, 99 are TMDB's alone and 16
+    Wikidata's. Almost every one of the 99 is anime TMDB tags but Wikidata's P136 does not (`Devilman
+    Crybaby`), and the 16 are anime co-productions whose `original_language` is not `ja` — `Ulysses 31`
+    (French-Japanese), `Dogtanian` (Spanish-Japanese), `Ox Tales` (Dutch-Japanese). The flag is opt-IN and
+    `fetch` never passes it, so nothing shipped turns on the 115 either way.
+    """
+    return any(ANIME in label.lower() and label.lower() != NOT_ANIME for label in labels)
 
 
 def is_transient(error):
@@ -401,8 +414,10 @@ def tmdb_votes(label, record, worklist_votes):
     the query selected on. Only an `export` row has none — the daily dump states popularity — and those
     fall back to the detail call's count while that call is still made (oxyc/den-dataset#53).
 
-    None is not zero. A title nothing states a TMDB count for is judged on IMDb's count alone; read as
-    zero it would be below every floor, which is a refusal rather than an absence.
+    None where nothing states one, and the caller compares nothing rather than a number: a title neither
+    names a count for is judged on IMDb's count alone, which is the half of the union that exists for the
+    titles TMDB undercounts. The worklist is where the distinction is load-bearing — a row written with a
+    zero would refuse a title the detail call admits (`pipeline/worklist.entry`).
     """
     if label in worklist_votes:
         return worklist_votes[label]
@@ -508,6 +523,19 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise Aborted(f"Wikidata IMDb-id lookup failed for batch {batch_id} after retries ({error}); nothing "
                       f"written — re-run to retry this batch") from error
+    # What each admitted title IS, for the anime rule — and ONLY when a run asked to exclude anime, since
+    # the flag is opt-in and this is a whole extra query per media otherwise.
+    kinds = {}
+    if exclude_anime:
+        admitted_records = [r for r in records if key(r["mediaType"], r["tmdbId"]) in admitted]
+        try:
+            for media in sorted({record["mediaType"] for record in admitted_records}):
+                ids = [r["tmdbId"] for r in admitted_records if r["mediaType"] == media]
+                for tmdb_id, labels in wikidata.kinds(ids, media, cache).items():
+                    kinds[key(media, tmdb_id)] = labels
+        except (http.HTTPError, wikidata.WikidataError) as error:
+            raise Aborted(f"Wikidata genre/type lookup failed for batch {batch_id} after retries ({error}); "
+                          f"nothing written — re-run to retry this batch") from error
     for found in records:
         label = key(found["mediaType"], found["tmdbId"])
         if label not in admitted:
@@ -516,13 +544,16 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
             # widened the window to months. The cache makes the re-judging nearly free.
             counts["belowFloor"] += 1
             below.add(label)
-        elif exclude_anime and is_anime(found):
+        elif exclude_anime and is_anime(kinds.get(label, ())):
             # Opt-IN: excluding anime by default silently cost the corpus 1,498 titles, the entire
             # Ghibli catalogue among them.
             counts["anime"] += 1
-        elif found["overviewChars"] < STUB:
-            counts["noOverview"] += 1
         else:
+            # No stub check here any more. It dropped a title whose TMDB overview was under 20 characters,
+            # judged on a length `lib/tmdb.title_record` carried across the boundary for that one reader.
+            # `overview` holds a Wikipedia plot or nothing, so the length said nothing about what this
+            # title would be grounded on, and every admitted title is grounded on Wikipedia or written
+            # plotless regardless: over the whole repass it refused 3 titles out of 59,209.
             titles.append(found)
 
     # ONE mapping query per media type, keyed by both — see `lib/wikidata.mapping` — and one language query
@@ -587,7 +618,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     # Which source SERVED each plot, not which was asked: a bearer can be throttled or expire mid-run, and the
     # two record different things (the Enterprise path names no revision and cannot see a redirect).
     report = {"batchId": batch_id, "count": len(survivors), "belowFloor": counts["belowFloor"],
-              "anime": counts["anime"], "noOverview": counts["noOverview"], "failures": counts["failures"],
+              "anime": counts["anime"], "failures": counts["failures"],
               "deferred": len(deferred), "remaining": sum(key(*e) not in processed for e in worklist),
               "wikiPlot": with_plot, "tagsOnly": len(survivors) - with_plot, "batch": path,
               "plotsFromEnterprise": from_enterprise, "plotsFromActionApi": with_plot - from_enterprise,
