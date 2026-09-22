@@ -21,7 +21,6 @@ and the publish. Every step `docs/OPERATE.md` walks through is one of them. What
 outside are the side passes nothing here runs but two stages read —
 the second classify pass and the premise tags under `scripts/v2/` — and each still answers for itself in
 `pipeline/artifacts.py` until it lands.
->>>>>>> origin/main
 That is the migration in oxyc/den-dataset#27, not a second generation: stages join `STAGES` one at a
 time, and the old tree is deleted in the commit that makes the new one authoritative.
 
@@ -44,3 +43,28 @@ Tests sit beside the code: `pipeline/store.py` and `pipeline/store_test.py`, no 
 Soft ceiling of ~400 lines per file. `scripts/v2/build_store.py` was 1,468 and is the reason the number
 is written down; it is now the command line and the publication policy, over a `store/` package with one
 module per section group in `wire/store-v1.md`. Nothing there is over 260 lines.
+
+## Enriching genres & moods by hand
+
+An optional pass in which labelling agents write genres & moods into `data/genres-moods-curated.json`,
+overriding the automated labeller there (oxyc/den-dataset#56). Nothing in this repo pays for it; the
+agents do the labelling. Use the model the user names; Sonnet is the recommended one.
+
+1. `./den genres-moods prepare --out-dir <out-dir>`. It picks titles with no genres & moods (`--missing`,
+   the default; or `--keys FILE`, or `--since YYYY-MM-DD`), writes batches of 25 into
+   `<out-dir>/genres-moods-enrich/`, and prints the batch count and the instruction for one batch.
+2. Give each batch to one agent, with that instruction and its NNN filled in. The instruction points the
+   agent at the kit's `SPEC.md` and its `validate.py`.
+   - Claude Code: one subagent per batch on the model the user named (`opus`, `sonnet` or `haiku`), several
+     in parallel.
+   - Codex: work through the batches one at a time with the same instruction.
+   - Allow web search only if the user says so, and then give the agents the web version of the
+     instruction, which also asks for each batch's `.sources.json`.
+3. Give a batch to a new agent if its validator does not print `ok`.
+4. `./den genres-moods merge --model <model> [--web] --work <out-dir>/genres-moods-enrich`. It refuses if a
+   batch is missing or invalid, or if the result scores below the floors in `data/eval/quality-floors.json`.
+   On a pass it records new floors.
+5. Read the summary it prints: titles added and changed, how many titles each label gained or lost, and ten
+   before/after examples. If it looks right, commit `data/genres-moods-curated.json` and
+   `data/eval/quality-floors.json` together. For a deliberate drop, rerun step 4 with `--accept-drop`, then
+   run `scripts/eval-taxonomy.py data/genres-moods-curated.json --record` and commit both files.
