@@ -6,7 +6,8 @@
 
 The drain (`pipeline/fetch.py`) runs this until nothing remains; the daily delta runs it once per media
 and reports what is left. Per id: one TMDB detail+keywords+credits call; per media in the batch: one
-Wikidata SPARQL mapping the survivors to their articles; per title: a live Wikipedia plot, which becomes
+Wikidata SPARQL mapping the survivors to their articles, one for their languages and one for whether the
+works they are based on are films or series; per title: a live Wikipedia plot, which becomes
 the record's `overview`. Every one of those goes through `lib/`, so the responses already on disk under
 `.cache/` answer a re-run.
 
@@ -217,6 +218,28 @@ def grounded(record, found, article, role):
                 plotArticleRedirected=None if resolved is None else resolved != article)
 
 
+def source_work(facts):
+    """`(article, refused)`: the P144 work the fallback may read, and whether one was refused.
+
+    A novel, a play or a manga tells the story an adaptation tells. A FILM or a SERIES does not stand in
+    for another production: it is the original a remake re-shoots (`BÚÉK` and `Stranger in My Pocket` on
+    *Perfect Strangers (2016)*, `La oficina` on *The Office*) or the parent a spin-off leaves (`Zen – Grogu
+    and Dust Bunnies` on *The Mandalorian*), and its plot, cast and tone describe that one. Of the 543
+    titles that stay on their source work after the own-articles-first rule, this refuses 35: 28 that Jev
+    judged `other-screen-work` (every one of those), 4 `multi-work-overview`, 2 `correct-screen-work` and
+    1 `source-work`.
+
+    Where the mapping's pick is a screen work and the title names another P144 work that is not, that one
+    is read instead. A pick `sources` knows nothing about is read as before: its type is unknown, not bad.
+    """
+    article = facts.get("sourceArticle")
+    works = facts.get("sourceWorks") or {}
+    if not article or not works.get(article):
+        return article, False
+    others = sorted(name for name, screen in works.items() if not screen)
+    return (others[0], False) if others else (None, True)
+
+
 def reground(record, facts, cache, token):
     """`(verdict, record, detail)` for one title: `grounded`, `noPlot`, `missed` — a definitive fetch failure,
     kept as a plotless record — or `deferred`, which is not written and not checkpointed. `detail` is the
@@ -238,8 +261,13 @@ def reground(record, facts, cache, token):
     Shippūden` → `Naruto (TV series)`), and 7 of 99 such texts were judged the requested title. It is
     treated as no article on that wiki. Only a redirect the fetch SAW can be refused — the Enterprise path
     names no page, so its answer is taken as it comes.
+
+    A source work that is itself a film or a series is not read at all (`source_work`). A title left with
+    no plot by that refusal is `sourceIsScreenWork`, whatever its own articles held: no heading rule or
+    threshold changes it, only an own plot being written.
     """
     facts = facts or {}
+    source, refused = source_work(facts)
     # Runtime and creators ride the same hop, so they fold in for EVERY title, plot or not. `createdBy` is
     # Wikidata's P170 or nothing: it is composed into the embedding document, and a TMDB fallback here put
     # TMDB's names into the shipped vectors of 3,353 titles. `overview` starts EMPTY — it holds a Wikipedia
@@ -302,8 +330,8 @@ def reground(record, facts, cache, token):
                 article = by_language.get(language)
                 if article and consider(article, language, "own-other-language"):
                     break
-        if facts.get("sourceArticle") and (best is None or len(best[0]["text"]) < WIKI_PLOT_FLOOR):
-            consider(facts["sourceArticle"], "en", "source-work")
+        if source and (best is None or len(best[0]["text"]) < WIKI_PLOT_FLOOR):
+            consider(source, "en", "source-work")
     except http.HTTPError as error:
         if is_transient(error):
             return "deferred", None, error
@@ -316,8 +344,9 @@ def reground(record, facts, cache, token):
         # between those and "no article": every sitelink stale. Each wants a different re-run — a heading
         # rule, a threshold, a fresh Wikidata mapping — and a retry fixes none of them, so a missing page is
         # never `fetchFailed`.
-        return "noPlot", dict(record, noPlotReason="belowFloor" if saw_section else "noSection" if saw_article
-                              else "noArticle"), None
+        reason = ("sourceIsScreenWork" if refused else "belowFloor" if saw_section else "noSection" if saw_article
+                  else "noArticle")
+        return "noPlot", dict(record, noPlotReason=reason), None
     found, article, role = best
     return "grounded", grounded(record, found, article, role), found.get("source")
 
@@ -558,14 +587,19 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
 
     # ONE mapping query per media type, keyed by both — see `lib/wikidata.mapping` — and one language query
     # beside it. P364 is its own request rather than another OPTIONAL on the mapping, whose text is the
-    # cache key for ~770 bodies already on disk.
+    # cache key for ~770 bodies already on disk. So is the source-work query, asked only about the titles
+    # the mapping names a source work for.
     facts = {}
     try:
         for media in sorted({record["mediaType"] for record in titles}):
             ids = [record["tmdbId"] for record in titles if record["mediaType"] == media]
             spoken = wikidata.languages(ids, media, cache)
-            for tmdb_id, found in wikidata.mapping(ids, media, plot.HEADINGS_BY_LANGUAGE, cache).items():
-                facts[key(media, tmdb_id)] = dict(found, languages=spoken.get(tmdb_id, []))
+            mapped = wikidata.mapping(ids, media, plot.HEADINGS_BY_LANGUAGE, cache)
+            works = wikidata.sources(sorted(i for i, found in mapped.items() if found.get("sourceArticle")),
+                                     media, cache)
+            for tmdb_id, found in mapped.items():
+                facts[key(media, tmdb_id)] = dict(found, languages=spoken.get(tmdb_id, []),
+                                                  sourceWorks=works.get(tmdb_id, {}))
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise Aborted(f"Wikidata mapping failed for batch {batch_id} after retries ({error}); nothing "
                       f"written — re-run to retry this batch") from error

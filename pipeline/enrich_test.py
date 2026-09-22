@@ -113,13 +113,15 @@ class Batch(unittest.TestCase):
         # genres and P31 types, which is what the opt-in anime exclusion reads.
         self.languages, self.language_calls = {}, []
         self.kinds, self.kind_calls = {}, []
+        # Per (media, tmdbId): the English article of each P144 work, and whether it is a film or a series.
+        self.sources, self.source_calls = {}, []
         # IMDb: the id Wikidata names per (media, tmdbId), the dump's counts per id, and what loading the
         # dump does — a `Ratings`, or an exception to raise.
         self.imdb_ids, self.imdb_votes, self.imdb_id_calls = {}, {}, []
         self.dump = None
         for target, stub in ((enrich.wikidata, "mapping"), (enrich.plot, "plot"), (enrich.wikidata, "imdb_ids"),
                              (enrich.wikidata, "languages"), (enrich.wikidata, "kinds"),
-                             (enrich.imdb, "ratings")):
+                             (enrich.wikidata, "sources"), (enrich.imdb, "ratings")):
             patch = mock.patch.object(target, stub, getattr(self, stub + "_stub"))
             patch.start()
             self.addCleanup(patch.stop)
@@ -145,6 +147,10 @@ class Batch(unittest.TestCase):
     def kinds_stub(self, ids, media, cache=None):
         self.kind_calls.append((media, sorted(ids)))
         return {i: self.kinds[(media, i)] for i in ids if (media, i) in self.kinds}
+
+    def sources_stub(self, ids, media, cache=None):
+        self.source_calls.append((media, sorted(ids)))
+        return {i: self.sources[(media, i)] for i in ids if (media, i) in self.sources}
 
     def plot_stub(self, article, language="en", cache=None, token=None):
         self.plot_calls.append((article, language))
@@ -267,6 +273,60 @@ class Batch(unittest.TestCase):
         self.assertEqual(self.plot_calls, [("Own", "en")])
         self.assertEqual(self.rows()["movie:1"]["plotArticleRole"], "own")
         self.assertIs(self.rows()["movie:1"]["plotArticleRedirected"], False)
+
+    def test_a_source_work_that_is_a_film_or_a_series_is_never_read(self):
+        """`La oficina` is based on The Office: its plot, cast and tone are another production's. Nothing of
+        its own clears the floor, so it is plotless and says why — and the article is not even fetched."""
+        self.mapping.update({("tv", 1): {"article": "La oficina", "sourceArticle": "The Office"},
+                             ("tv", 2): {"sourceArticle": "The Office"}})
+        self.sources.update({("tv", 1): {"The Office": True}, ("tv", 2): {"The Office": True}})
+        self.plots[("La oficina", "en")] = found("o" * 80, resolved="La oficina")
+        self.plots[("The Office", "en")] = found("t" * 3000, resolved="The Office")
+        self.run_batch({"/tv/1": detail(1), "/tv/2": detail(2)}, [("tv", 1), ("tv", 2)])
+        rows = self.rows()
+        self.assertEqual([(rows[k]["hasWikiPlot"], rows[k]["noPlotReason"], rows[k]["overview"])
+                          for k in ("tv:1", "tv:2")], [(False, "sourceIsScreenWork", "")] * 2,
+                         "below the floor on its own page or with none at all, the reason is the refusal")
+        self.assertEqual(self.plot_calls, [("La oficina", "en")], "only its own page is fetched — no source, and no empty name in its place")
+
+    def test_a_novel_is_still_read_and_is_preferred_over_a_screen_work_the_title_also_names(self):
+        """P144 may name both the book and an earlier film of it. The book tells the story; the film is
+        another production of it."""
+        self.mapping.update({("movie", 1): {"sourceArticle": "The Wizard of Oz (1939 film)"},
+                             ("movie", 2): {"sourceArticle": "Novel"}})
+        self.sources.update({("movie", 1): {"The Wizard of Oz (1939 film)": True, "The Wonderful Wizard of Oz": False},
+                             ("movie", 2): {"Novel": False}})
+        self.plots[("The Wonderful Wizard of Oz", "en")] = found("w" * 900)
+        self.plots[("Novel", "en")] = found("n" * 900)
+        self.run_batch({"/movie/1": detail(1), "/movie/2": detail(2)}, [("movie", 1), ("movie", 2)])
+        rows = self.rows()
+        self.assertEqual([(rows[k]["plotArticleRole"], rows[k]["plotArticle"]) for k in ("movie:1", "movie:2")],
+                         [("source-work", "The Wonderful Wizard of Oz"), ("source-work", "Novel")])
+        self.assertNotIn(("The Wizard of Oz (1939 film)", "en"), self.plot_calls)
+
+    def test_a_source_work_the_lookup_says_nothing_about_is_read_as_before(self):
+        """Unknown is not a screen work: a pick Wikidata's answer does not name is read."""
+        self.mapping[("movie", 1)] = {"sourceArticle": "Book"}
+        self.sources[("movie", 1)] = {"Something Else": True}
+        self.plots[("Book", "en")] = found("b" * 900)
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
+        self.assertEqual(self.rows()["movie:1"]["plotArticle"], "Book")
+
+    def test_the_source_lookup_is_one_query_per_media_for_the_titles_with_a_source_work(self):
+        self.mapping.update({("movie", 1): {"sourceArticle": "A"}, ("movie", 2): {"article": "B"},
+                             ("movie", 3): {"sourceArticle": "C"}, ("tv", 4): {"sourceArticle": "D"}})
+        self.run_batch({"/movie/1": detail(1), "/movie/2": detail(2), "/movie/3": detail(3), "/tv/4": detail(4)},
+                       [("movie", 1), ("movie", 2), ("movie", 3), ("tv", 4)])
+        self.assertEqual(self.source_calls, [("movie", [1, 3]), ("tv", [4])])
+
+    def test_a_failed_source_lookup_aborts_the_batch_and_writes_nothing(self):
+        """Swallowed, every remake in the batch would be grounded on its original again."""
+        self.mapping[("movie", 1)] = {"sourceArticle": "Original"}
+        with mock.patch.object(enrich.wikidata, "sources", side_effect=http.HTTPError(0, "x")):
+            with self.assertRaises(enrich.Aborted):
+                self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
+        self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
+        self.assertFalse(os.path.exists(os.path.join(self.out, "enriched")))
 
     def test_a_source_work_that_is_the_only_candidate_is_still_a_source_work(self):
         """Reading the role off the position would call it `own`: it sits first when there is no English

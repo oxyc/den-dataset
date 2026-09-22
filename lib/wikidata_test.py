@@ -389,6 +389,62 @@ class Languages(unittest.TestCase):
         sent.assert_not_called()
 
 
+class Sources(unittest.TestCase):
+    """Whether each P144 work a title is based on is a film or a series — what the source-work fallback
+    refuses to read."""
+
+    def test_the_query_matches_the_media_and_walks_the_screen_classes_up_from_the_work(self):
+        film, series = wikidata.source_query([12, 11, 11], "movie"), wikidata.source_query([1], "tv")
+        self.assertIn('VALUES ?tmdb { "11" "12" }', film, "sorted and unique, so one set is one key")
+        self.assertIn("wdt:P4947 ?tmdb", film)
+        self.assertIn("wdt:P4983 ?tmdb", series)
+        self.assertIn("?film wdt:P144 ?basedOn", film)
+        self.assertIn("schema:isPartOf <https://en.wikipedia.org/>", film,
+                      "the English article, which is the name the mapping carries")
+        self.assertIn("?basedOn wdt:P31/wdt:P279* ?class", film)
+        for qid in ("Q11424", "Q15416", "Q526877"):   # film, television program, web series
+            self.assertIn(f"wd:{qid}", film)
+
+    def test_it_is_not_asked_on_the_mapping_query(self):
+        """The mapping's text is its cache key; a line added to it re-asks WDQS for every body on disk."""
+        self.assertNotIn("P279", wikidata.mapping_query([1], "movie", LANGUAGES))
+
+    def test_each_article_says_whether_it_is_a_screen_work(self):
+        """An article two works share is a screen work when either is."""
+        url = "https://en.wikipedia.org/wiki/"
+        payload = rows(
+            {"tmdb": cell("1"), "sourceArticle": cell(url + "The_Office_(British_TV_series)"), "screen": cell("true")},
+            {"tmdb": cell("2"), "sourceArticle": cell(url + "The_Wonderful_Wizard_of_Oz"), "screen": cell("false")},
+            {"tmdb": cell("2"), "sourceArticle": cell(url + "The_Wizard_of_Oz_(1939_film)"), "screen": cell("true")},
+            {"tmdb": cell("3"), "sourceArticle": cell(url + "Shared"), "screen": cell("true")},
+            {"tmdb": cell("3"), "sourceArticle": cell(url + "Shared"), "screen": cell("false")})
+        self.assertEqual(wikidata.parse_sources(payload), {
+            1: {"The Office (British TV series)": True},
+            2: {"The Wonderful Wizard of Oz": False, "The Wizard of Oz (1939 film)": True},
+            3: {"Shared": True}})
+
+    def test_a_body_that_is_not_a_result_is_refused_and_not_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = caching.ResponseCache("wiki", directory, 3600)
+            with mock.patch.object(wikidata.http, "request", return_value=b"<html>busy</html>"):
+                with self.assertRaises(wikidata.WikidataError):
+                    wikidata.sources([1], "movie", cache)
+            self.assertIsNone(cache.read(cache.key("sparql-source", {"q": wikidata.source_query([1], "movie")})))
+            answer = rows({"tmdb": cell("1"), "sourceArticle": cell("https://en.wikipedia.org/wiki/F"),
+                           "screen": cell("false")})
+            with mock.patch.object(wikidata.http, "request", return_value=answer) as sent:
+                self.assertEqual(wikidata.sources([1], "movie", cache), {1: {"F": False}})
+                self.assertEqual(wikidata.sources([1], "movie", cache), {1: {"F": False}})
+            self.assertEqual(sent.call_count, 1, "a real answer is served from disk the second time")
+            self.assertEqual(cache.read(cache.key("sparql-source", {"q": wikidata.source_query([1], "movie")})),
+                             answer, "under its own namespace")
+
+    def test_no_ids_asks_nothing(self):
+        with mock.patch.object(wikidata.http, "request") as sent:
+            self.assertEqual(wikidata.sources([], "movie"), {})
+        sent.assert_not_called()
+
+
 class Targets(unittest.TestCase):
     """What names a title to the classify pass — Wikidata's label and year, in place of TMDB's."""
 
