@@ -172,7 +172,7 @@ class Declaration(Staged):
     def test_it_declares_a_worklist_per_media(self):
         """`enrich` refuses a list that mixes them — a film and a series can share a tmdbId — so one
         combined output would be an artifact nothing downstream can read."""
-        self.assertEqual([bind(e).name for e in worklist.OUTPUTS], ["worklist_movie", "worklist_tv"])
+        self.assertEqual([bind(e).name for e in worklist.OUTPUTS], ["universe_movie", "universe_tv"])
         self.assertEqual(sorted(worklist.MEDIA), ["movie", "tv"])
 
 
@@ -196,7 +196,7 @@ class CommandLine(Staged):
             self.assertEqual(command[command.index("--file") + 1], os.path.join(self.out, filename))
             self.assertEqual(command[command.index("--media") + 1], media)
             self.assertEqual(command[command.index("--out") + 1],
-                             os.path.join(self.out, f"worklist-{media}.json"))
+                             os.path.join(self.out, f"universe-{media}.json"))
             # The dump carries no vote counts — the floor is enrich's question there, not this one's.
             self.assertNotIn("--vote-floor", command)
             self.assertNotIn("--since", command)
@@ -259,7 +259,7 @@ class Run(Staged):
     def test_it_builds_one_worklist_per_media_from_that_medias_dump(self):
         made = worklist.run(context(self.out, mode="export"))
         for media, expected in (("movie", [11, 12]), ("tv", [1399])):
-            path = os.path.join(self.out, f"worklist-{media}.json")
+            path = os.path.join(self.out, f"universe-{media}.json")
             self.assertIn(path, made)
             with open(path, encoding="utf-8") as fh:
                 entries = json.load(fh)
@@ -288,7 +288,19 @@ class Run(Staged):
         rows."""
         os.environ["DEN_STUB_EMPTY"] = "1"
         made = worklist.run(context(self.out, mode="delta", since="2026-09-07"))
-        self.assertIn("worklist-movie.json", made)
+        self.assertIn("universe-movie.json", made)
+
+    def test_this_stage_does_not_write_the_shipped_catalogues_filename(self):
+        """`scripts/build-worklist.py` owns `worklist-<media>.json` — the ids Den already ships, ordered by
+        popularity. This command enumerates all of TMDB: 1,246,659 movie ids against a corpus of 47,618.
+
+        They used to share a filename, so whichever ran last decided which universe the next enrich billed
+        for, and nothing downstream could tell them apart. Pinned as a rule rather than left to whoever
+        edits the artifact next.
+        """
+        for artifact in worklist.OUTPUTS:
+            self.assertNotIn("worklist", artifact.filename, "the shipped catalogue's name")
+            self.assertIn("universe", artifact.filename)
 
     def test_a_dump_the_parse_could_not_finish_is_refused(self):
         """The failure the exit code cannot show: `Worklist.parse` drops every line it cannot decode, so a
@@ -303,7 +315,7 @@ class Run(Staged):
 
 class Topology(unittest.TestCase):
     def test_the_worklists_are_owned_by_the_stage_that_writes_them(self):
-        for name in ("worklist_movie", "worklist_tv"):
+        for name in ("universe_movie", "universe_tv"):
             self.assertEqual(getattr(artifacts, name.upper()).producer, "")
             self.assertEqual(pipeline.producers()[name], (worklist.PRODUCER, worklist.HOW, False))
 

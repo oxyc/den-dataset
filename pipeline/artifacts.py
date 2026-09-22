@@ -53,15 +53,21 @@ EXPORT_TV = Artifact(
 #: The universe, one file per media — what `enrich` drains. Split by media because `enrich` refuses a
 #: worklist that mixes them: a film and a series can share a tmdbId, so one mixed list would classify the
 #: pair once and apply the answer to both. The split is the reader's rule, not a naming convention.
-WORKLIST_MOVIE = Artifact(
-    name="worklist_movie",
-    filename="worklist-movie.json",
+#:
+#: Named UNIVERSE, not worklist, because two different tools wrote `worklist-<media>.json` and they do not
+#: build the same list. `scripts/build-worklist.py` enumerates the ids Den already SHIPS, ordered by
+#: popularity, so a re-embed covers the current catalogue; this command enumerates everything TMDB has —
+#: 1,246,659 movie ids against a corpus of 47,618. Sharing a filename meant whichever ran last decided
+#: which universe the next enrich billed for, and nothing downstream could tell them apart.
+UNIVERSE_MOVIE = Artifact(
+    name="universe_movie",
+    filename="universe-movie.json",
     dedicated=False,
 )
 
-WORKLIST_TV = Artifact(
-    name="worklist_tv",
-    filename="worklist-tv.json",
+UNIVERSE_TV = Artifact(
+    name="universe_tv",
+    filename="universe-tv.json",
     dedicated=False,
 )
 
@@ -250,7 +256,7 @@ RELEASE = Artifact(
     remote=True,
 )
 
-CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, WORKLIST_MOVIE, WORKLIST_TV, ARTICLES, COMBINED,
+CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
              COMBINED_MANIFEST, DELTA, ENRICHED, DOC_FACTS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
              EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, FACTS, VECTORS, VECTOR_LABELS,
              PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)

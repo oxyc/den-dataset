@@ -28,10 +28,10 @@ checked one line finer — the ids written against the dump's own line count —
 half-written parses to half a catalogue, and half a catalogue looks like a catalogue.
 
 **A delta writes the same two filenames as a full run**, which is why `scripts/delta-run.sh` keeps its
-worklists in `$OUT_DIR/delta/`. Point the two outputs there with `--set` rather than moving the whole
-out-dir, so the labels a delta must skip are still found beside everything else: `enrich` drains
-`out/worklist-<media>.json`, and forty delta rows written over a 47k-title worklist do not corrupt anything
-— they end the full run, quietly, as a batch that reports nothing remaining.
+lists in `$OUT_DIR/delta/`. Point the two outputs there with `--set` rather than moving the whole out-dir,
+so the labels a delta must skip are still found beside everything else: `enrich` drains whichever list it
+is handed, and forty delta rows written over a 47k-title one do not corrupt anything — they end the full
+run, quietly, as a batch that reports nothing remaining.
 """
 import json
 import os
@@ -68,8 +68,8 @@ VOTE_FLOOR = 50
 #: media -> (its slice of the daily dump, the worklist built from it). `enrich` takes one media at a time
 #: and refuses a mixed list, so the command runs once per entry here.
 MEDIA = {
-    "movie": (artifacts.EXPORT_MOVIE, artifacts.WORKLIST_MOVIE),
-    "tv": (artifacts.EXPORT_TV, artifacts.WORKLIST_TV),
+    "movie": (artifacts.EXPORT_MOVIE, artifacts.UNIVERSE_MOVIE),
+    "tv": (artifacts.EXPORT_TV, artifacts.UNIVERSE_TV),
 }
 
 #: Both dumps are `--file` to the command — one per invocation — and `labels-t02.json` is `--known` here,
@@ -81,7 +81,7 @@ INPUTS = (
     artifacts.VECTOR_LABELS.called("known"),
 )
 
-OUTPUTS = (artifacts.WORKLIST_MOVIE, artifacts.WORKLIST_TV)
+OUTPUTS = (artifacts.UNIVERSE_MOVIE, artifacts.UNIVERSE_TV)
 
 #: The declaration, by artifact name, so `argv` spells no flag of its own — a declaration that has drifted
 #: from the command dies at its parser rather than composing a different universe.
