@@ -257,10 +257,16 @@ python3 scripts/v2/build_store.py \
 #     (oxyc/den#118). Both metadata-<ver>.json and out/enriched are still BUILT and read by other things;
 #     they are simply no longer inputs to the store, which now reads no TMDB artifact at all.
 
-# 8. Publish — the moving `data-latest` GitHub release den-atlas fetches. Run it FROM THE REPO ROOT: the
-#    ownership guard resolves producer paths and `git ls-files` against the working directory. It uploads
-#    the store and the manifest, and prunes every retired blob's keys out of that manifest first.
-scripts/publish-dataset.sh out
+# 8. Publish — the moving `data-latest` GitHub release den-atlas fetches. It uploads the store and the
+#    manifest, and prunes every retired blob's keys out of that manifest first.
+./den stage publish --out-dir out --dataset-version <ver>
+#     The stage runs `scripts/publish-dataset.sh out`, which is still the rule and still runnable by
+#     hand — but BY HAND it must be run FROM THE REPO ROOT, because the ownership guard resolves producer
+#     paths and `git ls-files` against the working directory. The stage runs it there whatever directory
+#     you typed it in. `pipeline/publish_test.py` holds the two invocations to the same argv, cwd and
+#     environment, and `scripts/publish-dataset.test.sh` runs its whole case list through both.
+#     Every override is an environment variable and reaches the guards either way (DEN_STORE_REBUILD,
+#     DEN_ALLOW_SHARED_PLOTS, DEN_ALLOW_DROPPING_BLOBS).
 ```
 
 `$BIN` is `.build/release/taxonomy-backfill` (`swift build -c release`).

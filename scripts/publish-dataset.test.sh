@@ -9,7 +9,14 @@
 # `gh` is stubbed on PATH: it serves a fixture published manifest, records every upload, and answers the
 # post-upload asset listing from what it recorded. Nothing here touches the network or a real release.
 #
-# Run: scripts/publish-dataset.test.sh
+# EVERY CASE RUNS THROUGH `run_publish`, so the same cases can be run a second time through
+# `den stage publish` (oxyc/den-dataset#27) with `DEN_PUBLISH_VIA=stage`. That second run is what the
+# publish stage's faithfulness rests on: the stage wraps a script whose output is a release, so there are
+# no bytes to diff the way the corpus and store stages are diffed, and the only way to show a guard still
+# refuses through the wrapper is to run the refusals through it. A wrapper that swallowed an exit code
+# would satisfy every argv comparison and fail here.
+#
+# Run: scripts/publish-dataset.test.sh  ·  DEN_PUBLISH_VIA=stage scripts/publish-dataset.test.sh
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -129,13 +136,24 @@ PY
 # The manifest as it is "already published", so the drop/shrink guards have a baseline.
 publish_baseline() { cp "$DIR/dataset.meta.json" "$PUBLISHED_META"; }
 
+# The publisher, invoked the way this run is testing it. Both forms take the publish dir as their only
+# argument and leave the same two logs behind, so a case reads identically either way.
+#
+# `--dataset-version` is required by `den` because the other stages resolve versioned filenames with it.
+# This stage resolves none: the store it uploads is named by the manifest, not by the declaration, which
+# is why a placeholder is correct here rather than sloppy.
 run_publish() {
-  PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" > "$WORK/out.log" 2> "$WORK/err.log"
+  if [ "${DEN_PUBLISH_VIA:-script}" = "stage" ]; then
+    PATH="$BIN:$PATH" python3 "$HERE/../den" stage publish --out-dir "$DIR" \
+      --dataset-version unused > "$WORK/out.log" 2> "$WORK/err.log"
+  else
+    PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" > "$WORK/out.log" 2> "$WORK/err.log"
+  fi
 }
 
 # --- the happy path, so a refusal below means something ------------------------------------------
 
-echo "publish-dataset.sh:"
+echo "publish-dataset.sh (via ${DEN_PUBLISH_VIA:-script}):"
 setup
 write_meta
 publish_baseline
@@ -363,8 +381,7 @@ meta["storeSha256"] = hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest()
 meta["storeBytes"] = os.path.getsize(sys.argv[2])
 json.dump(meta, open(sys.argv[1], "w"))
 PY
-if DEN_ALLOW_DROPPING_BLOBS=1 PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" \
-     > "$WORK/out.log" 2> "$WORK/err.log"; then
+if DEN_ALLOW_DROPPING_BLOBS=1 run_publish; then
   bad "the override let a version publish a second, different store"
 else
   ok "the override does not excuse an identity collision"
@@ -389,8 +406,7 @@ meta["storeSha256"] = hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest()
 meta["storeBytes"] = os.path.getsize(sys.argv[2])
 json.dump(meta, open(sys.argv[1], "w"))
 PY
-if DEN_STORE_REBUILD="the label sections gained the premise pass" PATH="$BIN:$PATH" \
-     bash "$PUBLISH" "$DIR" > "$WORK/out.log" 2> "$WORK/err.log"; then
+if DEN_STORE_REBUILD="the label sections gained the premise pass" run_publish; then
   grep -q "store rebuilt within datasetVersion" "$WORK/out.log" \
     && ok "a stated rebuild is allowed and announced" \
     || bad "it published but said nothing: $(tail -3 "$WORK/out.log")"
@@ -415,8 +431,7 @@ publish_baseline
 # above now refuses to publish under the old one. That is the honest shape of a deliberate shrink: a new
 # generation that happens to hold fewer records, not a version quietly meaning two files.
 write_meta bbbbbbbbbbbb 50
-if DEN_ALLOW_DROPPING_BLOBS=1 PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" \
-     > "$WORK/out.log" 2> "$WORK/err.log"; then
+if DEN_ALLOW_DROPPING_BLOBS=1 run_publish; then
   ok "DEN_ALLOW_DROPPING_BLOBS=1 lets a deliberate shrink through"
 else
   bad "the override did not work: $(tail -3 "$WORK/err.log")"
@@ -488,7 +503,7 @@ teardown
 # manifest meant a typo published ./data instead and reported success.
 
 setup
-if PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" > "$WORK/out.log" 2> "$WORK/err.log"; then
+if run_publish; then
   bad "an out-dir with no manifest published something"
 else
   grep -q "no dataset.meta.json" "$WORK/err.log" \

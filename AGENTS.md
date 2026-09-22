@@ -10,15 +10,15 @@ prose somewhere that can go stale without anything failing.
 | What builds an artifact? | The stage that declares it in `OUTPUTS`. For one nothing here builds yet, `pipeline/artifacts.py`. Or the producer column of `./den stages`. |
 | What does a store section mean? | den-spec `wire/store-v1.md`, then the `store/` module named for its heading. |
 | What order are the store's sections written in? | `store/build.py`, and `PROVENANCE` declares the same order. |
-| Why was a publish refused? | `scripts/publish-dataset.sh` and the checks it runs under `scripts/`. |
-| How do I run it? | `./den run --dataset-version <ver> --out-dir out` |
+| Why was a publish refused? | `scripts/publish-dataset.sh` and the checks it runs under `scripts/`. `pipeline/publish.py` runs it and adds no guard of its own. |
+| How do I run it? | `./den run --dataset-version <ver> --out-dir out` — which ENDS IN A PUBLISH. `./den stage <name>` runs one step. |
 
 ## The part that is still being rebuilt
 
-`pipeline/` holds **two** stages today — the corpus join and the store build — and everything else still
-runs from `docs/OPERATE.md` under `scripts/` and `scripts/v2/`. That is the migration in
-oxyc/den-dataset#27, not a second generation: stages join `STAGES` one at a time, and the old tree is
-deleted in the commit that makes the new one authoritative.
+`pipeline/` holds **three** stages today — the corpus join, the store build and the publish — and
+everything else still runs from `docs/OPERATE.md` under `scripts/` and `scripts/v2/`. That is the
+migration in oxyc/den-dataset#27, not a second generation: stages join `STAGES` one at a time, and the
+old tree is deleted in the commit that makes the new one authoritative.
 
 Three rules keep it from becoming `scripts/v3/`, and all three are enforced rather than written down:
 

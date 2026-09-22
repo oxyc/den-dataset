@@ -17,7 +17,7 @@ wrong:
 That is what "derivable" buys. A registry nothing executes is a copy waiting to rot; a registry derived
 from the declaration a stage runs on cannot say something the run does not.
 
-Two shapes here exist because the corpus stage needed them and the store stage did not:
+Three shapes here exist because a stage needed them, in the order the stages landed:
 
   * a **shard set** (`Artifact.shards`) — one flag the reader takes many times. `--combined` names three
     files, and the eleven titles that went missing for a day went missing because a producer read one
@@ -26,6 +26,11 @@ Two shapes here exist because the corpus stage needed them and the store stage d
     else. `labels-t02.json` is `--vector-labels` to the store writer and `--labels` to the corpus join.
     The file keeps one name, which is what `--set` and the registry key on; the word on the command line
     belongs to whoever is reading.
+  * a **remote artifact** (`Artifact.remote`) — something a stage produces that is not in the out-dir.
+    The publish stage's output is the moving `data-latest` release, and `OUTPUTS` still has to name it:
+    it is what the stage makes, and the registry's answer to "what publishes the dataset" is read off
+    that. Giving it a filename would put a path in the out-dir that nothing ever writes, so asking for
+    one is refused the way asking a shard set for one path is.
 """
 import dataclasses
 import glob as globbing
@@ -58,7 +63,8 @@ class Artifact:
     #: What the whole pipeline calls this file: the key `--set` takes, and the key the producer registry
     #: is built on. A reader that spells it differently on its own command line says so with `called`.
     name: str
-    #: The name it is written under, with `{version}` for the dataset version. For a shard set, a glob.
+    #: The name it is written under, with `{version}` for the dataset version. For a shard set, a glob;
+    #: for a remote artifact, the name the thing carries where it lives — the release tag.
     filename: str
     #: Repo-relative path of the committed file whose rule builds it — for an artifact no stage produces.
     producer: str = ""
@@ -72,6 +78,9 @@ class Artifact:
     #: True for a SET of files carried by one repeated flag — the pass shards. `filename` is then a glob
     #: and `Context.paths` resolves the whole set, so no stage can hand over one shard of three.
     shards: bool = False
+    #: True for an artifact that does not live in the out-dir — the published release. It has no path,
+    #: so `Context.path` refuses one rather than inventing a plausible place it is not.
+    remote: bool = False
 
     def flag(self):
         """The command-line flag that names it."""
@@ -133,6 +142,9 @@ class Context:
     def path(self, artifact):
         if artifact.shards:
             raise StageError(f"{artifact.name} is a set of shards, not a file — ask for paths()")
+        if artifact.remote:
+            raise StageError(f"{artifact.name} is published as {artifact.filename}, not written to "
+                             f"{self.out_dir} — it has no path here")
         override = self.overrides.get(artifact.name)
         if isinstance(override, (list, tuple)):
             raise StageError(f"{artifact.name} was pointed at {len(override)} paths and names one file")
@@ -205,7 +217,10 @@ def validate(module, name):
     The list in `pipeline/__init__.py` is what a reader is promised describes the pipeline. A name in it
     pointing at a module with no contract makes the list a lie in the one direction nothing else checks.
     """
-    for attribute in ("NAME", "PRODUCER", "HOW", "INPUTS", "OUTPUTS", "run"):
+    # PUBLISHES is declared rather than defaulted: `den run` skips a publishing stage unless asked, and a
+    # stage that forgot to say so would be swept back into every exploratory run — uploading to a moving
+    # public release because nobody wrote `False`. Making it required means the omission is a refusal.
+    for attribute in ("NAME", "PRODUCER", "HOW", "INPUTS", "OUTPUTS", "PUBLISHES", "run"):
         if not hasattr(module, attribute):
             raise StageError(f"stage {name}: {module.__name__} declares no {attribute}")
     if module.NAME != name:
@@ -216,6 +231,8 @@ def validate(module, name):
                 raise StageError(f"stage {name}: {field} holds {entry!r}, which is not an Artifact")
     if not module.OUTPUTS:
         raise StageError(f"stage {name}: declares no OUTPUTS, so nothing downstream can name what it made")
+    if not isinstance(module.PUBLISHES, bool):
+        raise StageError(f"stage {name}: PUBLISHES is {module.PUBLISHES!r}, which is not True or False")
     if not callable(module.run):
         raise StageError(f"stage {name}: run is not callable")
     return module
