@@ -66,7 +66,7 @@ What the runner guarantees, and why each matters when every call is paid:
 
 - **A pinned model.** A mutable `*-latest` alias is refused unless explicitly allowed: an alias cannot
   prove two calls months apart used the same weights.
-- **A manifest per shard** hashing the questions, prompt (`prompts/facets-v2.md`), vocabulary, inputs and
+- **A manifest per shard** hashing the questions, prompt (`data/prompts/facets-v2.md`), vocabulary, inputs and
   the runner's own source files. Resume refuses a changed manifest, so two configurations never share a
   file. Moving or editing one of those source files therefore needs an entry in
   `scripts/v2/implementation-lineage.json` saying why no answer moved.

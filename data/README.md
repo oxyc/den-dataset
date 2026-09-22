@@ -12,6 +12,8 @@ are Wikidata. Licences per file are in [`LICENSES.md`](../LICENSES.md).
 |---|---|---|
 | `genres-moods-vocabulary.json` | the genres & moods label names, per family | ours; hashed into every classify shard's manifest as `taxonomySha256` |
 | `genres-moods-definitions.json` | what each of those labels means — what a labeller is asked | — |
+| `prompts/facets-v2.md` | the plot-facet axes the classify pass asks, parsed into its questions | ours; hashed into every classify shard's manifest as `promptSha256` |
+| `prompts/facets-v1.md` | the nine-axis v1 facet prompt its census was run under | — |
 | `genres-moods-curated.json` | genres & moods for 47,539 titles, with each title's source | not rebuildable ([#56](https://github.com/oxyc/den-dataset/issues/56)); extended by `./den genres-moods` (`AGENTS.md`) |
 | `genres-moods-rule.json` | the per-label thresholds the `genres_moods` stage derives with, fitted on golden half A | ~$0.31 of Jev plus the fitting |
 | `premise-tags-v1.json` | 37,533 titles × 8–12 structural premise tags, the first generation | a full LLM pass |

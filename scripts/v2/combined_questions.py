@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 #: `taxonomySha256` and `taxonomyVersion` keep their names — shipped manifests and the store carry them,
 #: and a recorded key that is renamed is a key its readers no longer find.
 TAXONOMY = os.path.join(ROOT, "data", "genres-moods-vocabulary.json")
-PROMPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "facets-v2.md")
+PROMPT = os.path.join(ROOT, "data", "prompts", "facets-v2.md")
 PINNED_MODEL = "jev-1.13.0"
 
 #: The label families, in the order the file writes them. `version` is read beside them.

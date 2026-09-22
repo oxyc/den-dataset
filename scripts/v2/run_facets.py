@@ -144,7 +144,7 @@ def argument_parser():
     ap.add_argument("--articles", required=True, help="JSONL from `./den stage articles`")
     ap.add_argument("--out", required=True, help="JSONL, appended to; re-running resumes from it")
     ap.add_argument("--prompt", default=PROMPT,
-                    help="versioned facet prompt (default: prompts/facets-v1.md)")
+                    help="versioned facet prompt (default: data/prompts/facets-v1.md)")
     ap.add_argument("--limit", type=int, help="stop after N titles (smoke tests)")
     ap.add_argument("--max-chars", type=int, default=0,
                     help="truncate the article state (0 = whole article, the default and the intent)")

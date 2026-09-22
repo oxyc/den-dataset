@@ -16,7 +16,7 @@ import run_facets        # noqa: E402
 
 class FacetPromptTests(unittest.TestCase):
     def test_v2_load_bearing_rules_reach_the_api_questions(self):
-        path = os.path.join(HERE, "prompts", "facets-v2.md")
+        path = os.path.join(os.path.dirname(os.path.dirname(HERE)), "data", "prompts", "facets-v2.md")
         questions = facet_questions.questions(path)
         self.assertEqual(
             list(questions),
