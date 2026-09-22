@@ -37,9 +37,21 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 14392,
+      "alias": "The Blood Brothers",
+      "why": "The Blood Brothers is the 1973 Chang Cheh film The Warlords remakes; no language's label for The Warlords carries it, and the claimant is Squitieri's unrelated I guappi"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 16871,
       "alias": "Spell",
       "why": "Spell is a separate 2020 film; Drag Me to Hell never carried it"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 16919,
+      "alias": "We Are X",
+      "why": "We Are X is the 2016 X Japan documentary; Global Metal (2008) never carried it"
     },
     {
       "mediaType": "movie",
@@ -49,9 +61,27 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 37775,
+      "alias": "White Sister",
+      "why": "White Sister is the English title of Lattuada's Bianco, rosso e... (1972); this is Verdone's 1981 film"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 46998,
+      "alias": "The Heroes of Evil",
+      "why": "The Heroes of Evil is the 2015 Spanish film Los heroes del mal; this is the 2009 Greek film"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 52316,
       "alias": "Once Upon a Time in China V",
       "why": "names the NEXT film in the series, not this one"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 56785,
+      "alias": "Welcome to Earth",
+      "why": "the title translates as Welcome to Switzerland; Welcome to Earth is the Disney+ series"
     },
     {
       "mediaType": "movie",
@@ -61,15 +91,51 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 61462,
+      "alias": "Manhunt in the City",
+      "why": "Manhunt in the City is L'uomo della strada fa giustizia (1975); La mala ordina was released as Manhunt / The Italian Connection"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 65057,
+      "alias": "Family Tree",
+      "why": "Family Tree is the HBO series; The Descendants was not released under it"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 70841,
+      "alias": "Doraemon: Nobita's Space Heroes",
+      "why": "Nobita's Space Heroes is the 2015 Doraemon film; this is Nobita's Dinosaur 2006"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 138697,
       "alias": "Don Juan",
       "why": "Don Jon was retitled from Don Jon's Addiction; Don Juan is a different work"
     },
     {
       "mediaType": "movie",
+      "tmdbId": 205865,
+      "alias": "Doll",
+      "why": "Papusza is the poet's name (Romani for doll); every language's label keeps Papusza, so Doll is a gloss of the name, not a release title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 209266,
+      "alias": "Morocco",
+      "why": "the country the story is set in, not a title of the film"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 226857,
       "alias": "Xxx",
       "why": "xXx is the Vin Diesel film; unrelated"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 247182,
+      "alias": "Thirty Nine",
+      "why": "no language's label for Monzón's El Niño comes near it (de El Niño – Jagd vor Gibraltar, pl 9 mil); Thirty-Nine is the 2022 Korean series"
     },
     {
       "mediaType": "movie",
@@ -91,6 +157,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 352199,
+      "alias": "Anna",
+      "why": "the lead character's name (Valeria Golino's Anna), not a release title"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 399566,
       "alias": "King Kong vs. Godzilla",
       "why": "King Kong vs. Godzilla is the 1962 Toho film, not the 2021 one"
@@ -109,9 +181,51 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 421928,
+      "alias": "Key of Life",
+      "why": "Key of Life is the 2012 Japanese film Luck-Key remakes; not a title of the remake"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 431017,
+      "alias": "Dark Glasses",
+      "why": "Dark Glasses is Argento's 2022 Occhiali neri; this film is Let the Sunshine In in English"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 485811,
       "alias": "Army of the Dead",
       "why": "Army of the Dead is the 2021 Snyder film"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 486072,
+      "alias": "Leonardo",
+      "why": "the character's name and a 2021 series; the film is Leo Da Vinci: Mission Mona Lisa"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 499255,
+      "alias": "GLASS",
+      "why": "a misspelling of Grass, the film's English title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 504253,
+      "alias": "Let Me Eat Your Pancreas",
+      "why": "the English title of the 2017 live-action film; this anime was released as I Want to Eat Your Pancreas"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 645861,
+      "alias": "Till Death",
+      "why": "Till Death is the 2021 Megan Fox film; unrelated to South of Heaven"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 754800,
+      "alias": "The Way Things Go",
+      "why": "Was wir wollten was released in English as What We Wanted; The Way Things Go is a different work"
     },
     {
       "mediaType": "movie",
@@ -120,10 +234,40 @@
       "why": "Evolution is a separate film; unrelated to this one"
     },
     {
+      "mediaType": "movie",
+      "tmdbId": 913868,
+      "alias": "Diana",
+      "why": "the documentary's subject, not a title it was released under"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 2303,
+      "alias": "Hawaii Five-0",
+      "why": "the zero spelling is the 2010 reboot's title; this is the 1968 series"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 4241,
+      "alias": "You Again",
+      "why": "You Again is a 2010 film; unrelated to 8 Simple Rules"
+    },
+    {
       "mediaType": "tv",
       "tmdbId": 5341,
       "alias": "The Three Musketeers",
       "why": "the source it adapts, not a title it was released under"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 13579,
+      "alias": "Deep Blue",
+      "why": "Deep Blue (2003) is the separate feature film cut from the series' footage"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 32798,
+      "alias": "Hawaii Five-O",
+      "why": "the letter-O spelling is the 1968 original's title; this is the 2010 reboot"
     },
     {
       "mediaType": "tv",
@@ -145,9 +289,45 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 65417,
+      "alias": "PJs",
+      "why": "a nickname for PJ Masks; The PJs is a different series"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 67384,
+      "alias": "Trial",
+      "why": "a generic word; Goliath never aired under it"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 100088,
+      "alias": "LoU",
+      "why": "a fan abbreviation, not a title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 103506,
+      "alias": "The Florida Project",
+      "why": "The Florida Project is the 2017 Sean Baker film; unrelated"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 231503,
       "alias": "Crazy Heart",
       "why": "Crazy Heart is the 2009 Bridges film"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 250505,
+      "alias": "The Seven Dials Mystery",
+      "why": "the Christie novel it adapts and the 1981 TV film; not this series' title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 278877,
+      "alias": "ACAB – All Cops Are Bastards",
+      "why": "the 2012 Sollima film the series follows on from; not the series' title"
     }
   ],
   "keep": [
@@ -216,6 +396,18 @@
       "tmdbId": 454,
       "alias": "Romeo and Juliet",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1090,
+      "alias": "13th Floor",
+      "why": "numeral spelling of its own title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1090,
+      "alias": "The 13th Floor",
+      "why": "numeral spelling of its own title"
     },
     {
       "mediaType": "movie",
@@ -306,6 +498,18 @@
       "tmdbId": 3216,
       "alias": "Dracula vs. Frankenstein",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 3984,
+      "alias": "Shelter",
+      "why": "English translation of Riparo"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 4270,
+      "alias": "The Manhunt",
+      "why": "unsure: only Wikidata's en altLabel supports it as an English title of La Garce; kept because a wrong keep only adds a result"
     },
     {
       "mediaType": "movie",
@@ -537,6 +741,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 11421,
+      "alias": "CRAZY",
+      "why": "its own title without the dots"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 11543,
       "alias": "Strike",
       "why": "a Wikidata rdfs:label for this item in some language"
@@ -585,6 +795,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 12170,
+      "alias": "School's Out",
+      "why": "the release title in Germany (School's Out – Schule war gestern) and Spain, per Wikidata's de and es labels"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 12230,
       "alias": "101 Dalmatians",
       "why": "TMDB records it as an alternative title"
@@ -624,6 +840,12 @@
       "tmdbId": 13892,
       "alias": "Crime 101",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 14405,
+      "alias": "South of the Border",
+      "why": "unsure: only Wikidata's en altLabel supports it and no other language carries it; kept because a wrong keep only adds a result, and Stone's documentary still owns the exact name"
     },
     {
       "mediaType": "movie",
@@ -699,6 +921,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 18466,
+      "alias": "What If...?",
+      "why": "unsure: only Wikidata's en altLabel supports it as an English title for this split-timeline comedy; kept because a wrong keep only adds a result"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 18575,
       "alias": "Dogs",
       "why": "TMDB records it as an alternative title"
@@ -729,6 +957,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 20220,
+      "alias": "Sheherazade",
+      "why": "the de Broca film's English release title"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 20321,
       "alias": "Close Your Eyes",
       "why": "TMDB records it as an alternative title"
@@ -750,6 +984,12 @@
       "tmdbId": 20435,
       "alias": "Detonator",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 20502,
+      "alias": "The Life",
+      "why": "unsure: only Wikidata's en altLabel supports it as an English title of Yo puta; kept because a wrong keep only adds a result"
     },
     {
       "mediaType": "movie",
@@ -819,6 +1059,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 22121,
+      "alias": "Black Bullet",
+      "why": "an alternate English title of Truck Turner; Wikidata holds it as an en altLabel and nothing contradicts it, while the claimant is an unrelated Japanese anime series"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 23520,
       "alias": "Nine Lives",
       "why": "TMDB records it as an alternative title"
@@ -870,6 +1116,12 @@
       "tmdbId": 26127,
       "alias": "Army of One",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 26278,
+      "alias": "Quatermass II",
+      "why": "Roman-numeral styling of its own title, used on releases"
     },
     {
       "mediaType": "movie",
@@ -957,6 +1209,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 27812,
+      "alias": "Hide & Seek",
+      "why": "the English title (Kakurenbo: Hide and Seek)"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 27812,
+      "alias": "Hide and Seek",
+      "why": "the English title (Kakurenbo: Hide and Seek)"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 27905,
       "alias": "Screamers",
       "why": "TMDB records it as an alternative title"
@@ -981,9 +1245,21 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 28162,
+      "alias": "Stairway to Heaven",
+      "why": "the US release title"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 28264,
       "alias": "Slasher",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 28339,
+      "alias": "Tower of Terror",
+      "why": "an alternate release title of Wynorski's Hard to Die"
     },
     {
       "mediaType": "movie",
@@ -1005,6 +1281,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 29161,
+      "alias": "Creepers",
+      "why": "the cut US release title of Argento's Phenomena"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 29566,
       "alias": "The Runaways",
       "why": "TMDB records it as an alternative title"
@@ -1014,6 +1296,12 @@
       "tmdbId": 29702,
       "alias": "Unsane",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 29828,
+      "alias": "Eddie",
+      "why": "English form of the Polish title Edi"
     },
     {
       "mediaType": "movie",
@@ -1056,6 +1344,12 @@
       "tmdbId": 30784,
       "alias": "The Concrete Jungle",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 30973,
+      "alias": "The Life of Jesus",
+      "why": "released under that name in several markets: Wikidata labels it Das Leben Jesu (de), La Vida de Jesús (es), A Vida de Jesus (pt), Życie Jezusa (pl), Жизнь Иисуса (ru)"
     },
     {
       "mediaType": "movie",
@@ -1119,6 +1413,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 32941,
+      "alias": "Heat Wave",
+      "why": "the US release title"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 33408,
       "alias": "The Girl Next Door",
       "why": "reviewed: a real alternate or translated title"
@@ -1143,6 +1443,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 34494,
+      "alias": "Sorry if I Call You Love",
+      "why": "English translation of the title; the Spanish remake shares it"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 34796,
+      "alias": "Our daily bread",
+      "why": "Murnau's working title for City Girl"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 34812,
       "alias": "Invasion",
       "why": "a Wikidata rdfs:label for this item in some language"
@@ -1152,6 +1464,12 @@
       "tmdbId": 35053,
       "alias": "Fear",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 35894,
+      "alias": "The King",
+      "why": "English translation of El Rey"
     },
     {
       "mediaType": "movie",
@@ -1176,6 +1494,12 @@
       "tmdbId": 36727,
       "alias": "Dream House",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 36959,
+      "alias": "The Crossing",
+      "why": "the English title of Andreaskorset; its Spanish title is El cruce"
     },
     {
       "mediaType": "movie",
@@ -1218,6 +1542,12 @@
       "tmdbId": 38362,
       "alias": "The Con Man",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 38783,
+      "alias": "Tales of Terror",
+      "why": "unsure: only Wikidata's en altLabel supports it as an alternate title of Trilogy of Terror; kept because a wrong keep only adds a result"
     },
     {
       "mediaType": "movie",
@@ -1305,6 +1635,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 41434,
+      "alias": "Shoot",
+      "why": "a release title of Fruit Chan's Don't Look Up: Wikidata's fr label is Shoot"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 41889,
       "alias": "The Devil's Advocate",
       "why": "TMDB records it as an alternative title"
@@ -1326,6 +1662,12 @@
       "tmdbId": 42741,
       "alias": "A Cop",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 42741,
+      "alias": "Dirty Money",
+      "why": "the English release title of Melville's Un flic"
     },
     {
       "mediaType": "movie",
@@ -1413,6 +1755,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 46821,
+      "alias": "The Blood",
+      "why": "English translation of O Sangue (released as Blood)"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 46959,
       "alias": "Game Over",
       "why": "a Wikidata rdfs:label for this item in some language"
@@ -1437,6 +1785,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 47355,
+      "alias": "Just Married",
+      "why": "English translation of Oggi sposi"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 47759,
       "alias": "The Monkey King",
       "why": "TMDB records it as an alternative title"
@@ -1452,6 +1806,18 @@
       "tmdbId": 48139,
       "alias": "South",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 48161,
+      "alias": "Hold Up",
+      "why": "a release title of Nokas: Wikidata's fr label is Hold-up"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 48161,
+      "alias": "Hold-Up",
+      "why": "a release title of Nokas: Wikidata's fr label is Hold-up"
     },
     {
       "mediaType": "movie",
@@ -1473,6 +1839,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 48748,
+      "alias": "Clown",
+      "why": "the English translation of Klovn, the film's own title"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 49299,
       "alias": "Snake Eyes",
       "why": "TMDB records it as an alternative title"
@@ -1482,6 +1854,12 @@
       "tmdbId": 49397,
       "alias": "As man to man",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 50090,
+      "alias": "Blood Brothers",
+      "why": "the English translation of 의형제 (sworn brothers); Secret Reunion carries Sworn Brothers too"
     },
     {
       "mediaType": "movie",
@@ -1533,6 +1911,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 52111,
+      "alias": "The Town",
+      "why": "English translation of Kasaba (released as The Small Town)"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 53256,
       "alias": "3",
       "why": "TMDB records it as an alternative title"
@@ -1551,6 +1935,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 54898,
+      "alias": "Summer",
+      "why": "the US release title of Le Rayon vert"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 55587,
       "alias": "Chained",
       "why": "TMDB records it as an alternative title"
@@ -1560,6 +1950,12 @@
       "tmdbId": 55836,
       "alias": "A Gentle Creature",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 56177,
+      "alias": "Revenge",
+      "why": "an English release title of Wertmüller's Blood Feud; Wikidata holds it as an en altLabel"
     },
     {
       "mediaType": "movie",
@@ -1629,6 +2025,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 59762,
+      "alias": "Bugs",
+      "why": "a release title of Silent Night, Deadly Night 4: Wikidata's de labels include Bugs"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 59843,
       "alias": "Shanghai Express",
       "why": "TMDB records it as an alternative title"
@@ -1689,6 +2091,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 62947,
+      "alias": "The Witch",
+      "why": "the English release title of La strega in amore"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 63025,
       "alias": "Schizoid",
       "why": "TMDB records it as an alternative title"
@@ -1728,6 +2136,12 @@
       "tmdbId": 65513,
       "alias": "The Returned",
       "why": "the English title the series aired under"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 65671,
+      "alias": "Shoot",
+      "why": "English translation of Dispara"
     },
     {
       "mediaType": "movie",
@@ -1797,6 +2211,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 74132,
+      "alias": "Before the Storm",
+      "why": "unsure: only Wikidata's en altLabel supports it as an English title of Vent mauvais; kept because a wrong keep only adds a result"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 74812,
       "alias": "Thieves",
       "why": "a Wikidata rdfs:label for this item in some language"
@@ -1815,15 +2235,39 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 77338,
+      "alias": "Untouchable",
+      "why": "the UK release title of Intouchables"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 77345,
+      "alias": "Truth or Dare",
+      "why": "English translation of Sanning eller konsekvens"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 77351,
       "alias": "The Reunion",
       "why": "a Wikidata rdfs:label for this item in some language"
     },
     {
       "mediaType": "movie",
+      "tmdbId": 77399,
+      "alias": "Bloodsuckers",
+      "why": "the US release title"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 78507,
       "alias": "The Spy",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 78852,
+      "alias": "1984",
+      "why": "its own title in numerals"
     },
     {
       "mediaType": "movie",
@@ -1842,6 +2286,12 @@
       "tmdbId": 81481,
       "alias": "Crucible",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 81871,
+      "alias": "The Dolls",
+      "why": "English translation of Le bambole, its English release title"
     },
     {
       "mediaType": "movie",
@@ -1875,6 +2325,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 85398,
+      "alias": "1001 Nights",
+      "why": "the numeral spelling of its own English title, A Thousand and One Nights"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 86331,
       "alias": "Desire",
       "why": "TMDB records it as an alternative title"
@@ -1884,6 +2340,12 @@
       "tmdbId": 86431,
       "alias": "Sinbad",
       "why": "a Wikidata rdfs:label for this item in some language"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 87246,
+      "alias": "Exorcism",
+      "why": "its Russian release title Изгнание дьявола translates as Exorcism; the claimant is the unrelated 2024 The Exorcism, so this is a translated title, not another work's"
     },
     {
       "mediaType": "movie",
@@ -1911,6 +2373,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 92251,
+      "alias": "The Women",
+      "why": "English translation of Les Femmes"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 92257,
       "alias": "Christine",
       "why": "TMDB records it as an alternative title"
@@ -1923,9 +2391,27 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 96454,
+      "alias": "The Visitor",
+      "why": "the English translation of La visita"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 96546,
+      "alias": "La Paura",
+      "why": "the Italian release title of Rossellini's Angst (Fear)"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 98566,
       "alias": "TMNT",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 99642,
+      "alias": "A New Life",
+      "why": "the English title of Grandrieux's La vie nouvelle"
     },
     {
       "mediaType": "movie",
@@ -1950,6 +2436,12 @@
       "tmdbId": 106679,
       "alias": "The Confessional",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 107121,
+      "alias": "Bizarre",
+      "why": "the US release title of Secrets of Sex"
     },
     {
       "mediaType": "movie",
@@ -1986,6 +2478,18 @@
       "tmdbId": 114136,
       "alias": "20,000 Leagues Under the Sea",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 115665,
+      "alias": "Ecstasy",
+      "why": "English translation of Extasis"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 117923,
+      "alias": "Sofia",
+      "why": "Assassin's Bullet was shot and announced as Sofia; Wikidata holds it as an en altLabel"
     },
     {
       "mediaType": "movie",
@@ -2043,6 +2547,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 131176,
+      "alias": "The Sin",
+      "why": "an English release title of Lattuada's Bianco, rosso e... (also White Sister)"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 133063,
       "alias": "Haunted Castle",
       "why": "TMDB records it as an alternative title"
@@ -2079,6 +2589,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 148243,
+      "alias": "Bluebeard",
+      "why": "the English title of Painlevé and Bertrand-Boutée's 1936 puppet film La Barbe bleue, whose en label is Blue Beard"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 148980,
       "alias": "Battlestar Galactica",
       "why": "a Wikidata rdfs:label for this item in some language"
@@ -2103,6 +2619,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 157827,
+      "alias": "Back Home",
+      "why": "the French release title of Louder Than Bombs"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 159211,
+      "alias": "Fairytale",
+      "why": "the Italian original title"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 161056,
       "alias": "8 Ball Bunny",
       "why": "reviewed: a real alternate or translated title"
@@ -2118,6 +2646,12 @@
       "tmdbId": 165739,
       "alias": "The List",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 167087,
+      "alias": "Asphalt",
+      "why": "English translation of Asfalto"
     },
     {
       "mediaType": "movie",
@@ -2163,9 +2697,33 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 176762,
+      "alias": "Dracula's Daughter",
+      "why": "the English translation of La Fille de Dracula; its en label is the near-identical Daughter of Dracula"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 184992,
+      "alias": "I Travel Alone",
+      "why": "the international English title of Viaggio sola"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 186629,
       "alias": "The Prophet",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 186988,
+      "alias": "Honey",
+      "why": "the English title of Golino's Miele"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 188476,
+      "alias": "Poil de carotte",
+      "why": "the French original title"
     },
     {
       "mediaType": "movie",
@@ -2223,9 +2781,33 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 210648,
+      "alias": "Death Ship",
+      "why": "English title of Das Totenschiff (The Death Ship)"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 210913,
+      "alias": "Station",
+      "why": "Blood Glacier was also released as The Station"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 210913,
+      "alias": "The Station",
+      "why": "Blood Glacier was also released as The Station"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 212716,
       "alias": "What If",
       "why": "a Wikidata rdfs:label for this item in some language"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 219318,
+      "alias": "The Volcano",
+      "why": "the English title of Eyjafjallajokull"
     },
     {
       "mediaType": "movie",
@@ -2250,6 +2832,12 @@
       "tmdbId": 228165,
       "alias": "SpongeBob SquarePants 3D",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 228176,
+      "alias": "Pilgrim",
+      "why": "English translation of El Peregrino"
     },
     {
       "mediaType": "movie",
@@ -2280,6 +2868,12 @@
       "tmdbId": 244063,
       "alias": "Boys",
       "why": "a Wikidata rdfs:label for this item in some language"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 247319,
+      "alias": "Lovers",
+      "why": "unsure: only Wikidata's en altLabel supports it as an English title of Une autre vie; kept because a wrong keep only adds a result"
     },
     {
       "mediaType": "movie",
@@ -2316,6 +2910,12 @@
       "tmdbId": 257093,
       "alias": "Haunted",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 257816,
+      "alias": "Playing the Field",
+      "why": "the English release title of L'arbitro"
     },
     {
       "mediaType": "movie",
@@ -2361,6 +2961,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 277154,
+      "alias": "Admiral",
+      "why": "the English release title of Michiel de Ruyter"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 277934,
+      "alias": "Only You",
+      "why": "English translation of Sadece Sen"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 284052,
       "alias": "Dr Strange",
       "why": "the abbreviation viewers type, unpunctuated"
@@ -2385,6 +2997,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 287637,
+      "alias": "White Lies",
+      "why": "unsure: only Wikidata's en altLabel supports it, plausibly Tigers' earlier title; kept because a wrong keep only adds a result"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 290098,
       "alias": "Mademoiselle",
       "why": "TMDB records it as an alternative title"
@@ -2403,9 +3021,27 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 299824,
+      "alias": "Ghouls",
+      "why": "Mojin: The Lost Legend's earlier English title was The Ghouls"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 299824,
+      "alias": "The Ghouls",
+      "why": "Mojin: The Lost Legend's earlier English title was The Ghouls"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 300467,
       "alias": "Monster Hunter",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 300666,
+      "alias": "Strings",
+      "why": "Bravetown's earlier title; its Russian release title Нити means Strings"
     },
     {
       "mediaType": "movie",
@@ -2451,9 +3087,21 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 315588,
+      "alias": "Dreamgirls",
+      "why": "the English rendering of Traumfrauen; Wikidata carries Dreamgirls as its es label as well as an en altLabel"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 318781,
       "alias": "The Colony",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 319341,
+      "alias": "Mamma o papà?",
+      "why": "the Italian title of Papa ou maman, which the 2017 Italian remake took over"
     },
     {
       "mediaType": "movie",
@@ -2505,6 +3153,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 343173,
+      "alias": "Generation Z",
+      "why": "a release title of The Rezort: Wikidata's es label is Generación Z"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 345888,
       "alias": "Guest",
       "why": "TMDB records it as an alternative title"
@@ -2514,6 +3168,12 @@
       "tmdbId": 345888,
       "alias": "The Guest",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 346034,
+      "alias": "3 Idiots",
+      "why": "English translation of the remake's own title; the Hindi original still owns the exact match"
     },
     {
       "mediaType": "movie",
@@ -2538,6 +3198,12 @@
       "tmdbId": 354861,
       "alias": "Who's Your Daddy?",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 359025,
+      "alias": "Hunted",
+      "why": "a release title of Camino: its German title is Gejagt (Hunted)"
     },
     {
       "mediaType": "movie",
@@ -2631,6 +3297,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 402919,
+      "alias": "The Promise",
+      "why": "English translation of the German title Das Versprechen"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 408539,
       "alias": "Heaven",
       "why": "reviewed: a real alternate or translated title"
@@ -2655,6 +3327,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 413846,
+      "alias": "Clash",
+      "why": "unsure: only Wikidata's en altLabel supports it, plausibly 1992's working title; kept because a wrong keep only adds a result"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 414597,
       "alias": "Primal",
       "why": "TMDB records it as an alternative title"
@@ -2667,6 +3345,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 419504,
+      "alias": "Messy Christmas",
+      "why": "the international English title; Wikidata carries Messy Christmas as its es label as well as an en altLabel"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 420950,
+      "alias": "Alone",
+      "why": "English translation of Seuls, its English release title"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 421467,
       "alias": "Godzilla 1985",
       "why": "TMDB records it as an alternative title"
@@ -2676,6 +3366,12 @@
       "tmdbId": 422619,
       "alias": "Duplicate",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 423360,
+      "alias": "Hammer",
+      "why": "English translation of Molot"
     },
     {
       "mediaType": "movie",
@@ -2697,6 +3393,24 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 430988,
+      "alias": "Vamps",
+      "why": "a release title of Вурдалаки: Wikidata's fr label is Vamps"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 431244,
+      "alias": "The Tourist",
+      "why": "unsure: only Wikidata's en altLabel supports it, plausibly Lost in Florence's earlier title; kept because a wrong keep only adds a result"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 431244,
+      "alias": "Tourist",
+      "why": "unsure: only Wikidata's en altLabel supports it, plausibly Lost in Florence's earlier title; kept because a wrong keep only adds a result"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 431580,
       "alias": "Everest",
       "why": "TMDB records it as an alternative title"
@@ -2715,6 +3429,24 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 444193,
+      "alias": "Storyteller",
+      "why": "The Evil Within was titled The Storyteller before release"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 444193,
+      "alias": "The Storyteller",
+      "why": "The Evil Within was titled The Storyteller before release"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 449459,
+      "alias": "Keepers",
+      "why": "the UK original title; retitled The Vanishing in the US"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 451499,
       "alias": "School of Life",
       "why": "TMDB records it as an alternative title"
@@ -2727,9 +3459,21 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 453274,
+      "alias": "The Intrusion",
+      "why": "an English rendering of L'intrusa, released in English as The Intruder"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 454699,
       "alias": "Happy Family",
       "why": "a Wikidata rdfs:label for this item in some language"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 466980,
+      "alias": "The Guardian",
+      "why": "the English translation of 大护法 (Dahufa, great guardian)"
     },
     {
       "mediaType": "movie",
@@ -2793,6 +3537,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 502897,
+      "alias": "Summer",
+      "why": "the English release title of Leto"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 507250,
+      "alias": "Borderland",
+      "why": "unsure: only Wikidata's en altLabel supports it, plausibly Dead Shot's working title; kept because a wrong keep only adds a result"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 509467,
       "alias": "The Body",
       "why": "reviewed: a real alternate or translated title"
@@ -2802,6 +3558,12 @@
       "tmdbId": 517302,
       "alias": "Birds of a Feather",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 518496,
+      "alias": "Wild",
+      "why": "released in the US as Sauvage/Wild"
     },
     {
       "mediaType": "movie",
@@ -2889,6 +3651,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 567566,
+      "alias": "The Rifleman",
+      "why": "a release title of Blizzard of Souls: Wikidata's it label is The Rifleman and its ja label ザ・ライフルマン"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 571785,
       "alias": "The Night of the Hunter",
       "why": "TMDB records it as an alternative title"
@@ -2907,9 +3675,27 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 582895,
+      "alias": "Lullaby",
+      "why": "Chanson douce translates as Lullaby, the title Slimani's novel carries in the UK; the film's en label is Perfect Nanny"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 582907,
+      "alias": "Sun",
+      "why": "English translation of Sole"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 586351,
       "alias": "The Wolves",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 595924,
+      "alias": "Freedom",
+      "why": "English translation of Serra's Liberte"
     },
     {
       "mediaType": "movie",
@@ -2937,6 +3723,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 647581,
+      "alias": "Swing",
+      "why": "Heart of Champions' original title"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 652483,
       "alias": "Fala Sério Mãe",
       "why": "a Wikidata rdfs:label for this item in some language"
@@ -2946,6 +3738,12 @@
       "tmdbId": 656156,
       "alias": "Guardian",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 668435,
+      "alias": "Slap",
+      "why": "English translation of Thappad"
     },
     {
       "mediaType": "movie",
@@ -3051,6 +3849,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 844530,
+      "alias": "The Conviction",
+      "why": "English translation of De Veroordeling"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 874355,
       "alias": "The Cow",
       "why": "TMDB records it as an alternative title"
@@ -3072,6 +3876,12 @@
       "tmdbId": 884452,
       "alias": "The Ambush",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 910365,
+      "alias": "The Conference",
+      "why": "the English release title of Die Wannseekonferenz"
     },
     {
       "mediaType": "movie",
@@ -3129,6 +3939,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 986056,
+      "alias": "*The New Avengers",
+      "why": "Marvel retitled Thunderbolts* to this after release"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 986056,
+      "alias": "The New Avengers",
+      "why": "Marvel retitled Thunderbolts* to *The New Avengers after release"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 994138,
       "alias": "Dark Woods",
       "why": "reviewed: a real alternate or translated title"
@@ -3159,6 +3981,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 1084571,
+      "alias": "Happiness",
+      "why": "English translation of Felicita"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 1128547,
       "alias": "The Tourist",
       "why": "reviewed: a real alternate or translated title"
@@ -3183,6 +4011,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 1215185,
+      "alias": "The Infiltrator",
+      "why": "the English translation of La infiltrada (it: L'infiltrata); its international title is Undercover"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 1242434,
       "alias": "High and Low",
       "why": "a Wikidata rdfs:label for this item in some language"
@@ -3201,9 +4035,27 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 1290417,
+      "alias": "Shiver",
+      "why": "Thrash's title before Netflix renamed it"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 1307118,
       "alias": "Soulmate",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1310830,
+      "alias": "Outside",
+      "why": "English translation of Fuori"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1361292,
+      "alias": "The Offer",
+      "why": "unsure: only Wikidata's en altLabel supports it, plausibly a working title for this 2024 film; kept because a wrong keep only adds a result"
     },
     {
       "mediaType": "movie",
@@ -3219,6 +4071,12 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 111,
+      "alias": "7 lives",
+      "why": "English translation of 7 vidas"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 137,
       "alias": "WITCH",
       "why": "reviewed: a real alternate or translated title"
@@ -3231,6 +4089,12 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 367,
+      "alias": "Klown",
+      "why": "the series' English title"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 918,
       "alias": "MASH",
       "why": "TMDB records it as an alternative title"
@@ -3240,6 +4104,12 @@
       "tmdbId": 1568,
       "alias": "Till Death",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 1891,
+      "alias": "Roma",
+      "why": "the Italian title of Rome"
     },
     {
       "mediaType": "tv",
@@ -3258,6 +4128,18 @@
       "tmdbId": 4562,
       "alias": "7 Days",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 8962,
+      "alias": "Marco",
+      "why": "the English title (Marco: 3000 Leagues in Search of Mother)"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 10620,
+      "alias": "Maya the Bee",
+      "why": "the English title of the 1975 anime"
     },
     {
       "mediaType": "tv",
@@ -3291,15 +4173,57 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 31572,
+      "alias": "Lupin III part I",
+      "why": "the English name of the first Lupin III series"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 31572,
+      "alias": "Lupin III: Part One",
+      "why": "the English name of the first Lupin III series"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 31585,
       "alias": "Copper",
       "why": "TMDB records it as an alternative title"
     },
     {
       "mediaType": "tv",
+      "tmdbId": 31586,
+      "alias": "Queen of the South",
+      "why": "English translation of La Reina del Sur; the USA Network adaptation still owns the exact match"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 31586,
+      "alias": "The Queen of the South",
+      "why": "English translation of La Reina del Sur; the USA Network adaptation still owns the exact match"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 32368,
+      "alias": "The Crime",
+      "why": "the literal English translation of Forbrydelsen"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 32702,
+      "alias": "The Open Heart",
+      "why": "English translation of A Corazon Abierto"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 34304,
       "alias": "The Island",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 42444,
+      "alias": "Knights of the Zodiac",
+      "why": "the English title of Saint Seiya"
     },
     {
       "mediaType": "tv",
@@ -3327,15 +4251,33 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 56425,
+      "alias": "Grappler Baki",
+      "why": "the English title of the 2001 anime"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 60621,
       "alias": "The Prince",
       "why": "reviewed: a real alternate or translated title"
     },
     {
       "mediaType": "tv",
+      "tmdbId": 62602,
+      "alias": "Blue Spring Ride",
+      "why": "the English title of Ao Haru Ride"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 62933,
       "alias": "I Remember You",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 62984,
+      "alias": "The Mysteries of Laura",
+      "why": "English translation of the Spanish original; the NBC remake still owns the exact match"
     },
     {
       "mediaType": "tv",
@@ -3351,9 +4293,27 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 65763,
+      "alias": "Bugs!",
+      "why": "the show's first-season title, Bugs! A Looney Tunes Prod., which the record carries too"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 67046,
       "alias": "Retribution",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 67394,
+      "alias": "Midnight Sun",
+      "why": "the English title of Jour polaire"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 68343,
+      "alias": "Angel",
+      "why": "the heroine's name in the European dubs and the head of their titles (de Angel das Blumenmädchen, es Angel, la niña de las flores, pt Angel, a Menina das Flores); kept, though it is close to a character name"
     },
     {
       "mediaType": "tv",
@@ -3375,6 +4335,18 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 72013,
+      "alias": "Just One Look",
+      "why": "English title of Juste un regard (the Coben novel's title)"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 72690,
+      "alias": "Rescue Me",
+      "why": "the English translation of 구해줘 (Save Me)"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 75789,
       "alias": "Gone",
       "why": "reviewed: a real alternate or translated title"
@@ -3384,6 +4356,12 @@
       "tmdbId": 76303,
       "alias": "The Plague",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 76829,
+      "alias": "D'Artagnan and The Three Musketeers",
+      "why": "the English title of the 1979 Soviet series"
     },
     {
       "mediaType": "tv",
@@ -3402,6 +4380,12 @@
       "tmdbId": 78293,
       "alias": "El Manantial",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 80377,
+      "alias": "The Hypochondriac",
+      "why": "English translation of La hipocondriaca"
     },
     {
       "mediaType": "tv",
@@ -3429,9 +4413,27 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 93905,
+      "alias": "The Island",
+      "why": "unsure: only Wikidata's en altLabel supports it and it may just describe the setting; kept because a wrong keep only adds a result, and Sløborn is too obscure to outrank the films that own the name"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 94940,
+      "alias": "No Second Chance",
+      "why": "the English title of the 2019 Korean drama"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 95881,
       "alias": "Rings",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 99047,
+      "alias": "The Moment",
+      "why": "unsure: only Wikidata's en altLabel supports it as an English title of Record of Youth; kept because a wrong keep only adds a result"
     },
     {
       "mediaType": "tv",
@@ -3478,6 +4480,12 @@
     {
       "mediaType": "tv",
       "tmdbId": 110562,
+      "alias": "The Traitors",
+      "why": "unsure: the Arabic release is Al Kha'en (The Traitor), which the record also carries; the plural is only Wikidata's en altLabel. Kept because a wrong keep only adds a result"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 110562,
       "alias": "The Unfaithful",
       "why": "reviewed: a real alternate or translated title"
     },
@@ -3513,6 +4521,12 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 156902,
+      "alias": "Jigsaw",
+      "why": "Kaleidoscope's working title when Netflix announced it; Wikidata carries Jigsaw as its es label too"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 158596,
       "alias": "Fatal Beauty",
       "why": "reviewed: a real alternate or translated title"
@@ -3522,6 +4536,12 @@
       "tmdbId": 194567,
       "alias": "Extinction",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 204370,
+      "alias": "The Path",
+      "why": "an English title of Travessia; its French title is Le Chemin de la vérité"
     },
     {
       "mediaType": "tv",
@@ -3567,9 +4587,33 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 223365,
+      "alias": "Rebirth",
+      "why": "English translation of Renascer"
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 231503,
       "alias": "Wild",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 248937,
+      "alias": "The Choice",
+      "why": "unsure: only Wikidata's en altLabel supports it, plausibly Hostage's working title; kept because a wrong keep only adds a result"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 254071,
+      "alias": "Haven",
+      "why": "Steal's working title; Wikidata carries Haven as its sv label as well as an en altLabel"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 257048,
+      "alias": "She's The One",
+      "why": "Globo's international English title"
     },
     {
       "mediaType": "tv",
