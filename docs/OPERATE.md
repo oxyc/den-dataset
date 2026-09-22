@@ -169,6 +169,13 @@ python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popu
 scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. Then: scripts/enrich-run.sh tv 150
 #    (Observed on the popular tier: ~96% wikiPlot hit; the misses are recent/obscure titles with no enwiki article.)
 
+# 3a. Classify — the Jev pass that produced the shipped labels and facets: one typed request per title over
+#     the dumped article, into the `combined-v1-r2*.jsonl` shards the corpus join reads. It is the only step
+#     here that costs money ($20.47 for 47,529 titles), so run it with --plan first; it resumes, so a repeat
+#     buys only what is missing. The questions, the planner and the audit are in `scripts/v2/FACETS-V2.md`.
+taxonomy-backfill dump-articles --enriched-dir out/enriched --out out/articles.jsonl
+./den stage classify --out-dir out --dataset-version <ver> --plan     # then again without --plan
+
 # 4. [Agent] Haiku vote passes over each scratch batch -> out/votes/batch-<id>-pass<N>.json
 #    (Opus orchestrates the subagents; see `tickets/DT-classification-prompt.md` in the **den app** repo. Escalate the hard cases with
 #    `$BIN escalation --batch-id <id> --out-dir out` before pass 2/3.)

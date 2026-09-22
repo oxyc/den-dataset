@@ -49,6 +49,8 @@ HOW = "taxonomy-backfill embed-corpus"
 #: Writes into the out-dir and nowhere else. Expensive to repeat — a full corpus is ~12 hours —
 #: but repeatable, and resumable, which is a different thing from irreversible.
 PUBLISHES = False
+#: den-embed is self-hosted, so a re-embed costs hours and no money.
+SPENDS = False
 COMMAND = "embed-corpus"
 
 #: Where `swift build -c release` leaves the binary, repo-relative.

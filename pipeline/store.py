@@ -28,6 +28,7 @@ PRODUCER = "scripts/v2/build_store.py"
 HOW = "scripts/v2/build_store.py --stamp-meta"
 #: Writes into the out-dir and nowhere else, so a repeat run costs only time.
 PUBLISHES = False
+SPENDS = False
 
 #: In the writer's own argument order, which `store_test.py` holds against `build_store.INPUT_ARGS`.
 INPUTS = (

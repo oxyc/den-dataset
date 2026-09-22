@@ -32,15 +32,16 @@ class Listing(unittest.TestCase):
     def test_stages_answers_what_runs_in_what_order_and_what_it_touches(self):
         result = den("stages")
         self.assertEqual(result.returncode, 0, result.stderr)
-        # The order, and that it is the real one: the vectors are embedded before the corpus is joined,
-        # the corpus before the store is built from it, and the publish that uploads the store is last.
-        for position, name in enumerate(("embed", "corpus", "store", "publish"), start=1):
+        # The order, and that it is the real one: the articles are classified before the vectors are
+        # embedded, the vectors before the corpus is joined, the corpus before the store is built from it,
+        # and the publish that uploads the store is last.
+        named = ("classify", "embed", "corpus", "store", "publish")
+        for position, name in enumerate(named, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
-        order = [result.stdout.index(f"{n}. {s}")
-                 for n, s in enumerate(("embed", "corpus", "store", "publish"), start=1)]
+        order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(named, start=1)]
         self.assertEqual(order, sorted(order), "den stages printed them out of order")
         for line in ("premise_labels", "scripts/v2/build_store.py", "scripts/v2/consolidate_corpus.py",
-                     "scripts/publish-dataset.sh"):
+                     "scripts/v2/run_combined.py", "scripts/publish-dataset.sh"):
             self.assertIn(line, result.stdout)
         # The optional input is marked as such: "the writer needs this" and "the writer can do without
         # it" are different answers to the same question. So is a flag that takes a set of shards.
@@ -50,9 +51,9 @@ class Listing(unittest.TestCase):
 
 class Dispatch(unittest.TestCase):
     def test_a_stage_that_is_not_in_the_order_is_refused_with_the_order(self):
-        result = den("stage", "classify", "--dataset-version", "test")
+        result = den("stage", "worklist", "--dataset-version", "test")
         self.assertEqual(result.returncode, 1)
-        self.assertIn("no stage named 'classify'", result.stderr)
+        self.assertIn("no stage named 'worklist'", result.stderr)
         self.assertIn("store", result.stderr)
 
     def test_a_missing_input_is_refused_with_the_command_that_builds_it(self):
@@ -97,6 +98,28 @@ class Dispatch(unittest.TestCase):
             self.assertIsInstance(module.PUBLISHES, bool, f"{module.NAME} does not declare PUBLISHES")
         self.assertTrue(pipeline.stage("publish").PUBLISHES)
         self.assertFalse(pipeline.stage("store").PUBLISHES)
+
+    def test_a_stage_must_say_whether_it_spends(self):
+        """The same reason as PUBLISHES, for the other effect that leaves the out-dir. A stage that buys
+        from a paid provider and forgot to say so would be bought by every exploratory `den run`."""
+        import pipeline
+        for module in pipeline.stages():
+            self.assertIsInstance(module.SPENDS, bool, f"{module.NAME} does not declare SPENDS")
+        self.assertTrue(pipeline.stage("classify").SPENDS)
+        self.assertFalse(pipeline.stage("store").SPENDS)
+
+    def test_den_run_leaves_out_the_stage_that_buys(self):
+        """`den run` over an out-dir holding nothing must not reach the paid pass at all.
+
+        The refusal it would otherwise raise is about a missing input, which is the RIGHT answer for the
+        wrong reason: fill that input in and the same command starts buying. So the check is that the
+        stage is not attempted — the run reaches a later stage's complaint, never classify's.
+        """
+        with tempfile.TemporaryDirectory() as out:
+            gated = den("run", "--dataset-version", "test", "--out-dir", out)
+            self.assertNotIn("==> classify", gated.stderr)
+            asked = den("run", "--dataset-version", "test", "--out-dir", out, "--spend")
+            self.assertIn("==> classify", asked.stderr)
 
     def test_set_wants_a_pair(self):
         result = den("stage", "store", "--dataset-version", "test", "--set", "corpus")

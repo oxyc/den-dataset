@@ -13,6 +13,7 @@ Options (both run forms):
     --expect N                     the title count the corpus join is held to
     --pause-ms N                   milliseconds the embed pass idles between requests
     --limit N                      stop the embed pass after N new titles
+    --plan                         the classify pass validates and reports, and buys nothing
     --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
                                    NAME to name every shard of a set
 
@@ -66,7 +67,8 @@ def context(args):
             overrides[name] = path
     return pipeline.Context(out_dir=args.out_dir, dataset_version=args.dataset_version,
                             overrides=overrides, stamp_meta=args.stamp_meta or "",
-                            expect=args.expect, pause_ms=args.pause_ms, limit=args.limit)
+                            expect=args.expect, pause_ms=args.pause_ms, limit=args.limit,
+                            plan=args.plan)
 
 
 def execute(module, ctx):
@@ -89,12 +91,16 @@ def main(argv=None):
         sub.add_argument("--pause-ms", type=int, default=0,
                          help="milliseconds the embed pass idles between requests")
         sub.add_argument("--limit", type=int, help="stop the embed pass after N new titles")
+        sub.add_argument("--plan", action="store_true",
+                         help="the classify pass validates and reports its call plan, and buys nothing")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
         return sub
 
-    with_options(commands.add_parser("run", help="run every stage, in order")).add_argument(
-        "--publish", action="store_true",
-        help="also run the publishing stage, which CLOBBERS the moving data-latest release")
+    run = with_options(commands.add_parser("run", help="run every stage, in order"))
+    run.add_argument("--publish", action="store_true",
+                     help="also run the publishing stage, which CLOBBERS the moving data-latest release")
+    run.add_argument("--spend", action="store_true",
+                     help="also run the stages that BUY from a paid provider (the classify pass is ~$20)")
     with_options(commands.add_parser("stage", help="run one stage")).add_argument("name")
 
     args = parser.parse_args(argv)
@@ -105,11 +111,22 @@ def main(argv=None):
         if args.command == "stage":
             chosen = [pipeline.stage(args.name)]
         else:
-            # `run` stops before the stages that publish unless asked. Every other stage writes into the
-            # out-dir and can be run again; publishing uploads to a moving public release, so a run that
-            # was meant to rebuild a store would replace the one people are serving. Naming the flag also
-            # makes the daily job say out loud that it publishes, rather than inheriting it from the order.
-            chosen = [m for m in pipeline.stages() if args.publish or not m.PUBLISHES]
+            # `run` stops before the stages whose effect reaches outside the out-dir, unless asked for that
+            # effect by name. Everything else writes into the out-dir and can be run again, so a wrong
+            # `den run` costs time.
+            #
+            # Two gates rather than one, because they are different consequences and an operator wants one
+            # without the other: a re-label buys rows again without touching what is served, and a publish
+            # replaces the served dataset without buying anything. Naming each also makes the unattended
+            # job say out loud what it does, rather than inheriting it from the stage order.
+            #
+            # SPENDS is not covered by the resume. The pass classifies only what is missing, so a repeat
+            # costs nothing it already has — but an article dump rebuilt with more titles makes the
+            # difference missing, and buys it. `--plan` cannot warn about that either: it estimates the
+            # whole input without consulting what is done, so it reads ~$20 whether the run would buy
+            # everything or nothing.
+            chosen = [m for m in pipeline.stages()
+                      if (args.publish or not m.PUBLISHES) and (args.spend or not m.SPENDS)]
         for module in chosen:
             execute(module, ctx)
     except pipeline.StageError as refusal:

@@ -86,12 +86,17 @@ jobs:
       # live den-embed, and it is byte comparison against the real service. What runs here is the argument
       # list, the pinned composition and what the stage does with the result.
       #
+      # The classify stage's cannot be byte comparison at all: a provider answers the rows and each one
+      # carries a fresh run id, so what runs here is the pass's own configuration hash — a manifest built
+      # from the documented command's arguments, which a run the stage launches must accept unchanged —
+      # plus the `--plan` dry run, which IS deterministic and is compared byte for byte.
+      #
       # `guards/reachable_test.py` is the one that matters over time. `scripts/v2/` exists because
       # "delete what nothing runs" was a habit, and a habit loses to a branch someone might come back
       # to; this fails the build on a module under `pipeline/` that no stage reaches, and on one under
       # `store/` that the writer the store stage runs does not reach.
       - name: The pipeline
-        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/embed_test.py pipeline/publish_test.py store/build_test.py guards/reachable_test.py den_test.py
+        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/classify_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/embed_test.py pipeline/publish_test.py store/build_test.py guards/reachable_test.py den_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The
       # guards above are the pieces; this is whether the script wires them up — that it refuses a wrong
       # hash, a missing blob, a dropped key, a shrunk count and a blob from a dead generation, and that
