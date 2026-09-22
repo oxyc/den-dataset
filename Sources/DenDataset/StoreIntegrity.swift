@@ -87,46 +87,4 @@ public enum StoreIntegrity {
         if dropping > maxDrop { return .refuse(dropping: dropping, divergesAtLine: aligned + 1) }
         return .truncate(keeping: aligned)
     }
-
-    /// The first index at which two already-parsed stores disagree about which title they describe, or
-    /// nil when they agree throughout. Used by `finalize` as the last gate before shipping.
-    public static func firstMisalignment(records: [IndexRecord], rows: [VectorRow]) -> Int? {
-        (0..<min(records.count, rows.count)).first { records[$0].tmdbId != rows[$0].tmdbId }
-    }
-}
-
-/// Writing `dataset.meta.json` without discarding the keys the `DatasetMeta` struct does not model.
-///
-/// The manifest is a closed `Codable` struct, so decode-then-re-encode drops every key it does not
-/// declare — and the shipped manifest carries twelve such keys (the premise index's six, the facet blob's
-/// three, the metadata sidecar's three), written by a tool that is no longer in this repo. Running
-/// `metadata`, or re-running `finalize`, silently erased them: `publish-dataset.sh` still uploaded the
-/// blobs because they match its glob, and its pre-flight only checks that the files the manifest *names*
-/// exist — so a manifest naming none of them passed, and den-atlas lost premise search and facets with no
-/// error on either side.
-public enum ManifestMerge {
-    /// Merge freshly-encoded manifest JSON over whatever is already on disk. A key the struct OWNS always
-    /// wins — including by being absent, which is how it says "there is no sidecar". A key the struct does
-    /// not own is carried through untouched.
-    ///
-    /// `owned` has to be passed in, because "absent from the new JSON" cannot distinguish the two cases on
-    /// its own: `JSONEncoder` omits nil Optionals, so a `metadataFile` the struct deliberately left nil
-    /// looked exactly like one of the unmodelled keys and inherited the PREVIOUS run's value. That is worse
-    /// than the loss this function was written to stop — the manifest then names a sidecar built for an
-    /// older datasetVersion and swears to its old sha256. Both consumers hard-verify that sha
-    /// (den/deploy/atlas-dataset-sync.sh, and the app's index store), so the refresh does not degrade, it
-    /// stops: den-atlas keeps serving the old dataset and the 4-hourly timer fails silently forever.
-    ///
-    /// Merging the rest rather than enumerating the twelve keys that go missing, because enumerating them
-    /// fixes today's loss and leaves the next key someone adds to repeat it.
-    public static func merge(new: Data, existing: Data?, owned: Set<String>) throws -> Data {
-        guard var merged = try JSONSerialization.jsonObject(with: new) as? [String: Any] else { return new }
-        if let existing,
-           let old = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] {
-            for (key, value) in old where merged[key] == nil && !owned.contains(key) {
-                merged[key] = value
-            }
-        }
-        return try JSONSerialization.data(withJSONObject: merged, options: [.prettyPrinted, .sortedKeys])
-    }
 }

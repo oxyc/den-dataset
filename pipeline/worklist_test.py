@@ -246,7 +246,7 @@ class Delta(Staged):
         os.remove(os.path.join(self.out, "labels-t02.json"))
         with self.assertRaises(StageError) as refused:
             worklist.universe(context(self.out, mode="delta", since="2026-09-07"), "movie", FakeTMDB({}))
-        self.assertIn("taxonomy-backfill finalize", str(refused.exception))
+        self.assertIn("./den stage finalize", str(refused.exception))
 
     def test_a_labels_file_that_names_no_records_is_refused_rather_than_read_as_nothing_published(self):
         """A wrong `--set vector_labels=…` is a file with no `records` in it. Read as an empty set it skips
@@ -259,6 +259,7 @@ class Delta(Staged):
             worklist.universe(context(self.out, mode="delta", since="2026-09-07"), "movie", client)
         self.assertIn("labels-t02.json", str(refused.exception))
         self.assertIn("no records", str(refused.exception))
+        self.assertIn("./den stage finalize", str(refused.exception))
         self.assertEqual(client.asked, [])
 
     def test_a_delta_that_found_nothing_is_not_a_failure(self):

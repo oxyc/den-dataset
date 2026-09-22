@@ -1,9 +1,8 @@
 import XCTest
 @testable import DenDataset
 
-/// The two failures these cover both shipped a corpus that looked perfectly healthy: right vector count,
-/// right dimensions, clean hashes, and every title holding someone else's vector — or a manifest that
-/// silently stopped naming two thirds of the files it had just published.
+/// The failure these cover shipped a corpus that looked perfectly healthy: right vector count, right
+/// dimensions, clean hashes, and every title holding someone else's vector.
 final class StoreIntegrityTests: XCTestCase {
 
     private func labelLine(_ id: Int) -> String {
@@ -59,123 +58,6 @@ final class StoreIntegrityTests: XCTestCase {
 
     func testEmptyStoresAreVacuouslyAligned() {
         XCTAssertEqual(StoreIntegrity.alignedPrefix(labels: [], vectors: []), 0)
-    }
-
-    // MARK: - firstMisalignment (finalize's last gate)
-
-    func testFirstMisalignmentIsNilWhenEveryLinePairsUp() {
-        let records = [1, 2, 3].map {
-            IndexRecord(tmdbId: $0, mediaType: "movie", primaryGenre: "Drama",
-                        subgenres: [], moods: [], source: .llm)
-        }
-        let rows = [1, 2, 3].map { VectorRow(tmdbId: $0, v: [0]) }
-        XCTAssertNil(StoreIntegrity.firstMisalignment(records: records, rows: rows))
-    }
-
-    func testFirstMisalignmentFindsTheShift() {
-        let records = [1, 2, 3].map {
-            IndexRecord(tmdbId: $0, mediaType: "movie", primaryGenre: "Drama",
-                        subgenres: [], moods: [], source: .llm)
-        }
-        let rows = [1, 99, 3].map { VectorRow(tmdbId: $0, v: [0]) }
-        XCTAssertEqual(StoreIntegrity.firstMisalignment(records: records, rows: rows), 1)
-    }
-
-    // MARK: - ManifestMerge
-
-    /// The twelve keys the shipped manifest actually carries, and which a `finalize` or `metadata` re-run
-    /// used to delete — taking premise search and facets down with them, silently, on both sides.
-    /// The real thing, not a hand-copy. A 20-key literal here would drift from the struct silently, and
-    /// these tests would then pass against an `owned` set the production write never uses.
-    private let owned = DatasetMeta.ownedKeys
-
-    private static let unmodelledKeys = [
-        "premiseEmbeddingModel", "premiseDims", "premiseCount",
-        "premiseLabelsFile", "premiseLabelsSha256", "premiseLabelsBytes",
-        "premiseVectorsFile", "premiseVectorsSha256", "premiseVectorsBytes",
-        "facetsFile", "facetsSha256", "facetsBytes",
-    ]
-
-    func testKeysTheStructDoesNotModelSurviveARewrite() throws {
-        var old: [String: Any] = ["datasetVersion": "old", "count": 1]
-        for (i, key) in Self.unmodelledKeys.enumerated() { old[key] = "value-\(i)" }
-        let existing = try JSONSerialization.data(withJSONObject: old)
-        let fresh = try JSONSerialization.data(withJSONObject: ["datasetVersion": "new", "count": 2])
-
-        let merged = try ManifestMerge.merge(new: fresh, existing: existing, owned: owned)
-        let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
-
-        for (i, key) in Self.unmodelledKeys.enumerated() {
-            XCTAssertEqual(result[key] as? String, "value-\(i)", "\(key) was dropped")
-        }
-    }
-
-    func testTheStructWinsOnKeysItOwns() throws {
-        let existing = try JSONSerialization.data(withJSONObject: ["count": 1, "facetsFile": "facets.bin"])
-        let fresh = try JSONSerialization.data(withJSONObject: ["count": 2])
-
-        let merged = try ManifestMerge.merge(new: fresh, existing: existing, owned: owned)
-        let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
-
-        XCTAssertEqual(result["count"] as? Int, 2, "a stale value must not survive the merge")
-        XCTAssertEqual(result["facetsFile"] as? String, "facets.bin")
-    }
-
-    /// The half of the merge that matters as much as preserving: a key the struct OWNS but leaves out is
-    /// saying "there is no sidecar", and that has to win too.
-    ///
-    /// `JSONEncoder` omits nil Optionals, so an omitted `metadataFile` was indistinguishable from an
-    /// unmodelled key and inherited the previous run's value — a manifest naming a sidecar built for an
-    /// older datasetVersion and swearing to its old sha256. Both consumers hard-verify that sha, so the
-    /// refresh does not degrade, it STOPS: den-atlas keeps serving the old dataset and the 4-hourly timer
-    /// fails silently forever. Worse than the loss the merge was written to prevent.
-    func testAnOwnedKeyTheStructOmittedIsNotInherited() throws {
-        let existing = try JSONSerialization.data(withJSONObject: [
-            "count": 1,
-            "metadataFile": "metadata-OLDVERSION.json",
-            "metadataSha256": "STALE-SHA",
-            "embedderRuntime": "den-embed/2.9.0",
-            "facetsFile": "facets.bin",              // NOT owned — must survive
-        ])
-        let fresh = try JSONSerialization.data(withJSONObject: ["count": 2])
-
-        let merged = try ManifestMerge.merge(new: fresh, existing: existing, owned: owned)
-        let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
-
-        XCTAssertNil(result["metadataFile"], "a sidecar the struct no longer names must not come back")
-        XCTAssertNil(result["metadataSha256"])
-        XCTAssertNil(result["embedderRuntime"], "an embedder identity must never be inherited")
-        XCTAssertEqual(result["facetsFile"] as? String, "facets.bin", "unmodelled keys still survive")
-        XCTAssertEqual(result["count"] as? Int, 2)
-    }
-
-    func testAFirstEverWriteHasNothingToPreserve() throws {
-        let fresh = try JSONSerialization.data(withJSONObject: ["count": 2])
-        let merged = try ManifestMerge.merge(new: fresh, existing: nil, owned: owned)
-        let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
-        XCTAssertEqual(result.keys.sorted(), ["count"])
-    }
-
-    func testAnUnreadableExistingManifestDoesNotBlockTheWrite() throws {
-        let fresh = try JSONSerialization.data(withJSONObject: ["count": 2])
-        let merged = try ManifestMerge.merge(new: fresh, existing: Data("{corrupt".utf8), owned: owned)
-        let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
-        XCTAssertEqual(result["count"] as? Int, 2)
-    }
-
-    /// Preserved values keep their JSON TYPE. `premiseDims` and the `*Bytes` keys are numbers, and
-    /// stringifying them would let a manifest through that den-atlas cannot decode.
-    func testPreservedValuesKeepTheirType() throws {
-        let existing = try JSONSerialization.data(
-            withJSONObject: ["premiseDims": 1024, "premiseCount": 37533, "facetsBytes": 900_123])
-        let fresh = try JSONSerialization.data(withJSONObject: ["count": 2])
-
-        let merged = try ManifestMerge.merge(new: fresh, existing: existing, owned: owned)
-        let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: merged) as? [String: Any])
-
-        XCTAssertEqual(result["premiseDims"] as? Int, 1024)
-        XCTAssertEqual(result["premiseCount"] as? Int, 37533)
-        XCTAssertEqual(result["facetsBytes"] as? Int, 900_123)
     }
 }
 

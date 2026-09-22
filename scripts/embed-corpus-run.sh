@@ -184,7 +184,10 @@ for attempt in $(seq 1 200); do
   if [ "$written" -eq 0 ]; then
     echo "=== all titles embedded → finalizing ==="
     stop_embed
-    "$BIN" finalize --out-dir "$OUT_DIR" || { echo "finalize failed — nothing published"; exit 1; }
+    # `--dataset-version` is required by `den` and unused by finalize: none of its filenames carries one,
+    # and the version it stamps is derived from what it writes.
+    ./den stage finalize --out-dir "$OUT_DIR" --dataset-version unused \
+      || { echo "finalize failed — nothing published"; exit 1; }
     exit 0
   fi
 done

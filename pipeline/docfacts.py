@@ -29,7 +29,7 @@ import os
 import sys
 
 from . import artifacts
-from .contract import StageError, bind
+from .contract import StageError, bind, how_to_build
 from lib import cache as caching
 from lib import http, wikidata
 
@@ -83,7 +83,7 @@ def outstanding(labels_path, have):
     records = labels.get("records")
     if not records:
         raise StageError(f"docfacts: {labels_path} names no records, so there is no corpus to scrape "
-                         f"facts for. Build it with: taxonomy-backfill finalize")
+                         f"facts for. Build it with: {how_to_build(artifacts.VECTOR_LABELS)}")
     todo = {}
     for record in records:
         media, tmdb_id = record["mediaType"], record["tmdbId"]

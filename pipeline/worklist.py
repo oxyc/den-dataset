@@ -35,7 +35,7 @@ import os
 import sys
 
 from . import artifacts, floors as floor_rules
-from .contract import StageError, bind
+from .contract import StageError, bind, how_to_build
 from lib import cache as caching
 from lib import tmdb as tmdb_api
 
@@ -142,7 +142,7 @@ def known_ids(path, media):
     if not records:
         raise StageError(f"worklist: {path} names no records, so there is nothing to tell a delta what is "
                          f"already published. Point vector_labels at the published labels; build them "
-                         f"with: taxonomy-backfill finalize")
+                         f"with: {how_to_build(artifacts.VECTOR_LABELS)}")
     return {record["tmdbId"] for record in records if record.get("mediaType") == media}
 
 

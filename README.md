@@ -141,12 +141,13 @@ the other 421 would be dropped by the ToS rule regardless.
   it reads and writes; `./den stages` prints it.
 - `lib/` — what a stage needs from outside the machine: HTTP with retry, the response cache, and the
   upstream clients (TMDB, Wikidata, Wikipedia — the whole article in `wikipedia.py`, the plot in `plot.py`).
-- `Sources/DenDataset/` — the library the remaining Swift phases still need: the `t02` `Taxonomy`, the
-  `HashingEmbedder` + `Quantizer`, and the format + producer model types.
+- `Sources/DenDataset/` — the library the remaining Swift phases still need: the `HashingEmbedder` +
+  `Quantizer` and the format + producer model types. `Taxonomy.swift` is referenced by no Swift code any
+  more and is still load-bearing: `scripts/v2/combined_questions.py` parses it as the classify pass's
+  vocabulary and hashes it into that pass's manifest.
 - `Sources/taxonomy-backfill/` — the CLI that drives the phases not ported yet (`embed-corpus`, `facts`,
-  `finalize`, `recluster`).
-- `Tests/DenDatasetTests/` — golden (embedder/quantizer determinism), conformance (artifact format), and a
-  fixture-based end-to-end smoke test (no TMDB, no network).
+  `recluster`).
+- `Tests/DenDatasetTests/` — golden (embedder/quantizer determinism) and conformance (artifact format).
 
 ## Build / test
 
@@ -164,7 +165,7 @@ swift test
 ./den stage classify  --out-dir <dir> --dataset-version <ver> [--plan]
 ./den stage docfacts  --out-dir <dir> --dataset-version <ver>
 taxonomy-backfill embed-corpus  --out-dir <dir> --labels labels-t02.json [--doc-facts …]
-taxonomy-backfill finalize      --out-dir <dir>
+./den stage finalize  --out-dir <dir> --dataset-version <ver>
 ```
 
 Or `./den run`, which is the whole order — see `./den stages`.
@@ -190,11 +191,10 @@ out-dir; `publish-dataset.sh` prunes their keys out of the manifest.
 - `labels-<tax>.json` — the derived labels (no raw TMDB text; asserted). Also what the publish-time quality
   gate scores against the golden set — it reads this file by name, not from the manifest.
 - `vectors-bge-m3.bin` — a `DENVEC02` blob: magic, little-endian `[u32 count][u32 dim]`, a `u64` key per row
-  (`(media << 32) | tmdbId`, media 0 = movie), then `count × dim` int8 rows (dim 1024 for the bge-m3 build;
-  `--embedding-version` overrides the label for an FNV run). The keys are the format's point: row order used
-  to live only in `labels-<tax>.json`'s record order, so a regenerated labels file moved every vector onto
-  the wrong title with nothing able to see it. Layout and rationale: `Sources/DenDataset/VectorBlob.swift`
-  and `scripts/v2/vector_blob.py`. An older blob is converted, never re-embedded, by
+  (`(media << 32) | tmdbId`, media 0 = movie), then `count × dim` int8 rows (dim 1024, and anything else
+  is refused). The keys are the format's point: row order used to live only in `labels-<tax>.json`'s record
+  order, so a regenerated labels file moved every vector onto the wrong title with nothing able to see it.
+  Layout and rationale: `scripts/v2/vector_blob.py`. An older blob is converted, never re-embedded, by
   `scripts/v2/migrate_vector_blob.py` — den-embed's output differs by build host, so re-running it changes
   the values and not just the layout.
 - `dataset.meta.json` — the manifest the server reads (dataset version, hashes, byte counts, timestamps).
@@ -382,8 +382,9 @@ deriving from, so it is dropped entirely. This is **95.4% of everything the pipe
 deliberate policy, not attrition.
 
 Two consequences that are easy to trip over:
-- `finalize`'s ship guard is literally `s.contains("overview")`. A future field carrying prose under another
-  name (`summary`, `synopsis`) sails straight into the shipped artifact. Widen the guard if you add one.
+- `finalize`'s ship guard matches key NAMES, at every depth, against a fixed list of prose fields
+  (`SHIP_GUARD` in `pipeline/finalize.py`). A future field carrying prose under a name not on that list
+  sails straight into the shipped artifact. Widen the list if you add one.
 - 19,255 enriched rows carry TMDB prose in `overview`. Any pass that feeds `overview` to an LLM **must** gate
   on `hasWikiPlot`, or it sends TMDB Content to an AI application — barred by TMDb §1.C.
 

@@ -115,7 +115,7 @@ Next, by hand — the classify stage BUYS, so it is not run unattended. In \`./d
   3. Scrape the document's director and genre, embed, and finalize:
        ./den stage docfacts --out-dir $OUT_DIR --dataset-version <ver>
        ./den stage embed --out-dir $OUT_DIR --dataset-version <ver>
-       $BIN finalize --out-dir $OUT_DIR
+       ./den stage finalize --out-dir $OUT_DIR --dataset-version <ver>
   4. Merge the facts (its two scrape passes are docs/OPERATE.md step 6a), join the corpus, build the
      store, publish:
        ./den stage facts --out-dir $OUT_DIR --dataset-version <ver>
@@ -123,6 +123,6 @@ Next, by hand — the classify stage BUYS, so it is not run unattended. In \`./d
        ./den stage store --out-dir $OUT_DIR --dataset-version <ver> --stamp-meta $OUT_DIR/dataset.meta.json
        ./den stage publish --out-dir $OUT_DIR --dataset-version <ver>
 
-(\`docfacts\` and \`embed-corpus\` read the shipped labels blob, so a new id is only scraped and embedded
+(\`docfacts\` and \`embed\` read the shipped labels blob, so a new id is only scraped and embedded
 once the classify pass's rows have reached it — see docs/OPERATE.md for the order.)
 EOF

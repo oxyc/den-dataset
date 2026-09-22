@@ -1,40 +1,9 @@
 import XCTest
 @testable import DenDataset
 
-/// The artifact FORMAT is the only coupling to the app, so lock it: the labels JSON encodes with sorted keys
-/// and round-trips, and the vectors blob is `DENVEC02`, a little-endian count and dim, a u64 key per row,
-/// then the int8 rows. (The smoke test additionally reads the REAL binary the tool wrote — this asserts the
-/// contract shape.)
+/// The vectors blob is `DENVEC02`, a little-endian count and dim, a u64 key per row, then the int8 rows. The
+/// labels artifact's bytes are `pipeline/finalize.py`'s now, and `pipeline/finalize_test.py` holds them.
 final class ConformanceTests: XCTestCase {
-    func testLabelsArtifactEncodesSortedAndRoundTrips() throws {
-        let records = [
-            IndexRecord(tmdbId: 603, mediaType: "movie", primaryGenre: "Science Fiction",
-                        subgenres: [LabelConfidence(label: "Sci-Fi Action", confidence: 0.9)],
-                        moods: [LabelConfidence(label: "Mind-bending", confidence: 0.8)],
-                        source: .llm, animated: false),
-            IndexRecord(tmdbId: 155, mediaType: "movie", primaryGenre: "Action",
-                        subgenres: [LabelConfidence(label: "Crime Thriller", confidence: 0.85)],
-                        moods: [LabelConfidence(label: "Dark & Gritty", confidence: 0.7)],
-                        source: .llm, animated: false),
-        ]
-        let artifact = LabelsArtifact(taxonomyVersion: "t01", records: records)
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let blob = try encoder.encode(artifact)
-
-        // Sorted keys → deterministic byte output (top-level keys appear in alphabetical order).
-        let json = String(data: blob, encoding: .utf8)!
-        let countIdx = json.range(of: "\"count\"")!.lowerBound
-        let recordsIdx = json.range(of: "\"records\"")!.lowerBound
-        let taxIdx = json.range(of: "\"taxonomyVersion\"")!.lowerBound
-        XCTAssert(countIdx < recordsIdx && recordsIdx < taxIdx, "sortedKeys orders count < records < taxonomyVersion")
-
-        let decoded = try JSONDecoder().decode(LabelsArtifact.self, from: blob)
-        XCTAssertEqual(decoded, artifact)
-        XCTAssertEqual(decoded.count, 2)
-    }
-
     func testVectorBlobLayoutIsMagicCountDimKeysRows() throws {
         // The REAL writer, not a copy of it. This file used to hold its own transcription of the tool's
         // `vectorsBlob`, and asserted the format against that — so it went on passing after the writer

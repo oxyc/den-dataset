@@ -1,4 +1,3 @@
-import CryptoKit
 import DenDataset
 import Foundation
 
@@ -8,8 +7,8 @@ import Foundation
 // turns already-decided labels into the shipped artifacts.
 //
 //   embed-corpus  — compose(facts + already-decided tags + plot) → den-embed → append to the index store.
-//   finalize      — index store → labels-<taxonomy>.json + vectors-<embed>.bin + report.json +
-//                   dataset.meta.json (DERIVED only). Folds in the former import-dataset.mjs job.
+//
+// The index store becomes the shipped artifacts in `pipeline/finalize.py`.
 //
 // The enrichment that feeds them is `pipeline/enrich.py`. No LLM key — this tool does not classify.
 
@@ -729,168 +728,6 @@ enum Commands {
         if vectors.count != n { try rewrite(vectors, vectorsPath) }
     }
 
-    /// Expected vector dimension for a known embedding label, or nil (skip the check) for an unrecognized one.
-    static func expectedDims(forEmbeddingVersion version: String) -> Int? {
-        if version.hasPrefix("bge-m3") { return 1024 }
-        if version == "e02" || version.hasPrefix("fnv") { return 384 }
-        return nil
-    }
-
-    // finalize — the index store → the shipped artifacts. DERIVED labels + quantized vectors ONLY; asserts no
-    // raw TMDB text leaked in. Recomputes the run report (coverage + primary-genre dist + confidence buckets)
-    // and folds in the former import-dataset.mjs step: dataset.meta.json (the manifest the Rust server reads)
-    // + a gzipped copy of the labels blob.
-    static func finalize(_ args: Args) throws {
-        // FP-2: the shipped embedding is now bge-m3 (den-embed) → vectors-bge-m3.bin, with `dims` taken from
-        // the ACTUAL vector length (1024). The earlier lexical builds shipped e02 (FNV, 384-dim); the app
-        // re-syncs because FP-1 keys the on-device index on embeddingModel + dims. `--embedding-version`
-        // overrides the label (e.g. an offline FNV run), but the default is the bge-m3 artifact name.
-        let embeddingVersion = args["--embedding-version"] ?? "bge-m3"
-
-        let outDir = try args.require("--out-dir")
-        let allRecords: [IndexRecord] = try FileIO.readLines(Layout.labelsStore(outDir)).map { try JSON.decode($0) }
-        let allRows: [VectorRow] = try FileIO.readLines(Layout.vectorsStore(outDir)).map { try JSON.decode($0) }
-        guard allRecords.count == allRows.count else {
-            throw ToolError(message: "store misaligned: \(allRecords.count) labels vs \(allRows.count) vectors")
-        }
-        // ...and that line i of each names the same title. The two stores are positionally zipped from here
-        // on — nothing downstream carries the vector's own id — so equal counts with a shifted body ships a
-        // corpus where every title holds someone else's vector, and looks perfectly healthy doing it.
-        if let bad = StoreIntegrity.firstMisalignment(records: allRecords, rows: allRows) {
-            throw ToolError(message: "store misaligned at line \(bad + 1): labels say tmdbId "
-                + "\(allRecords[bad].tmdbId), vectors say \(allRows[bad].tmdbId) — refusing to ship. "
-                + "Re-run embed-corpus, which reconciles the stores before appending.")
-        }
-        // De-dup by (mediaType, tmdbId) keeping the LAST occurrence — a re-embed appends superseding
-        // records, and finalize keeps the newest while preserving aligned vectors.
-        var lastIndex: [String: Int] = [:]
-        for (i, r) in allRecords.enumerated() { lastIndex["\(r.mediaType):\(r.tmdbId)"] = i }
-        let keep = Set(lastIndex.values)
-        let records = allRecords.enumerated().filter { keep.contains($0.offset) }.map(\.element)
-        let rows = allRows.enumerated().filter { keep.contains($0.offset) }.map(\.element)
-        let vectors: [[Int8]] = rows.map { $0.v.map { Int8(clamping: $0) } }
-
-        // Guard the mixed-embedder / mislabel footgun: every vector must share ONE length, and it must match the
-        // dimension the --embedding-version label implies (bge-m3 = 1024, fnv/e02 = 384). A store assembled with
-        // two embedders, or a blob labelled bge-m3 but holding 384-dim FNV content, would otherwise ship a
-        // corrupt/lying artifact, which a reader's length check can only reject wholesale, never explain.
-        let dimsSeen = Set(vectors.map(\.count))
-        guard dimsSeen.count == 1, let dim = dimsSeen.first, dim > 0 else {
-            throw ToolError(message: "vectors have non-uniform length \(dimsSeen.sorted()) — a mixed-embedder "
-                + "store; refusing to ship. Re-assemble the batches with a single embedder.")
-        }
-        if let expected = expectedDims(forEmbeddingVersion: embeddingVersion), expected != dim {
-            throw ToolError(message: "embedding-version '\(embeddingVersion)' implies dim \(expected) but the "
-                + "vectors are \(dim)-dim — mislabelled artifact; refusing to ship.")
-        }
-
-        // Written by whichever command embedded the store. Absent for a corpus built before it was recorded,
-        // or by the offline FNV embedder — both legitimate, so this is carried through, not required.
-        var embedder: DenEmbedClient.Identity? = nil
-        if FileManager.default.fileExists(atPath: Layout.embedderIdentity(outDir)) {
-            // Loudly, not `try?`: a malformed identity file silently turned the cross-check below into a
-            // no-op AND dropped the identity from the manifest, with nothing said either way.
-            do { embedder = try JSON.read(Layout.embedderIdentity(outDir)) } catch {
-                throw ToolError(message: "\(Layout.embedderIdentity(outDir)) is unreadable (\(error)) — it "
-                    + "records what embedded this store, so shipping without it would misdescribe the corpus")
-            }
-        }
-        if let embedder, embedder.dims > 0, embedder.dims != dim {
-            throw ToolError(message: "the store was embedded by \(embedder.label) but its vectors are "
-                + "\(dim)-dim — refusing to ship a manifest that would misdescribe them.")
-        }
-
-        // Written by whichever embed path verified the known-answer canary — `embed-corpus` here, or
-        // `scripts/v2/embed_docs.py` on the box by way of `import_box_vectors.py --embed-space`. Absent
-        // for a store built before the canary existed, which is carried as an absent manifest key rather
-        // than a guess: naming a space this run did not verify is the failure the canary exists to stop.
-        var embeddingSpace: String? = nil
-        if FileManager.default.fileExists(atPath: Layout.embeddingSpace(outDir)) {
-            // Loudly, like the identity above: a malformed file would otherwise drop the space from the
-            // manifest and say nothing, which looks exactly like a store that never had one.
-            do {
-                let stamp: EmbedSpaceCanary.Stamp = try JSON.read(Layout.embeddingSpace(outDir))
-                embeddingSpace = stamp.spaceId
-            } catch {
-                throw ToolError(message: "\(Layout.embeddingSpace(outDir)) is unreadable (\(error)) — it "
-                    + "records the embedding space this store's vectors are in, so shipping without it "
-                    + "would publish a corpus that cannot say which space it belongs to")
-            }
-        }
-
-        let taxonomyVersion = Taxonomy.current.version
-        let labels = LabelsArtifact(taxonomyVersion: taxonomyVersion, records: records)
-        let labelsBlob = try JSON.encodeSorted(labels)
-        let prose = ShipGuard.prohibited(in: labelsBlob)
-        guard prose.isEmpty else {
-            throw ToolError(message: "REFUSING to ship: the labels artifact carries prose field(s) "
-                + "\(prose.joined(separator: ", ")). A published artifact holds labels, ids and numbers — "
-                + "TMDB's terms bar shipping their text, and a CC0 plot belongs in the corpus and the "
-                + "embedding, not in an artifact served to devices.")
-        }
-        let labelsPath = Layout.labelsArtifact(outDir, taxonomyVersion)
-        let vectorsPath = Layout.vectorsArtifact(outDir, embeddingVersion)
-        // Each row named by its title, from the record it was zipped with. The blob used to be the matrix
-        // alone, leaving the labels artifact as the only record of which row was whose — so the artifact
-        // had to keep being built after it stopped being published, purely as an order oracle, and a
-        // regenerated labels file with a different record order would have moved every vector onto the
-        // wrong title with nothing able to notice.
-        let vectorsData = try VectorBlob.encode(
-            keys: records.map { VectorBlob.key(mediaType: $0.mediaType, tmdbId: $0.tmdbId) },
-            vectors: vectors)
-        try FileIO.write(labelsBlob, to: labelsPath)
-        try FileIO.write(vectorsData, to: vectorsPath)
-
-        // Fold in import-dataset.mjs: the manifest + gzipped labels the Rust server serves.
-        let dims = dim   // validated above: uniform + consistent with the embedding-version label
-        let labelsSha = sha256Hex(labelsBlob)
-        let vectorsSha = sha256Hex(vectorsData)
-        let datasetVersion = String(sha256Hex(Data("\(labelsSha):\(vectorsSha)".utf8)).prefix(12))
-        let now = Date()
-        let labelsGzPath = try Shell.gzip(labelsPath)   // labels-<tax>.json.gz beside the labels blob
-        let meta = DatasetMeta(
-            datasetVersion: datasetVersion,
-            taxonomyVersion: taxonomyVersion,
-            embeddingModel: embeddingVersion,
-            dims: dims,
-            count: records.count,
-            quantization: "int8-symmetric-x127",
-            labelsFile: (labelsPath as NSString).lastPathComponent,
-            vectorsFile: (vectorsPath as NSString).lastPathComponent,
-            labelsGzFile: (labelsGzPath as NSString).lastPathComponent,
-            labelsSha256: labelsSha,
-            labelsBytes: labelsBlob.count,
-            vectorsSha256: vectorsSha,
-            vectorsBytes: vectorsData.count,
-            builtAt: DateFmt.iso8601(now),
-            lastModifiedHttp: DateFmt.rfc1123(now),
-            embedderRuntime: embedder?.runtime,
-            embedderMaxTokens: embedder?.maxTokens,
-            embeddingSpace: embeddingSpace)
-        try JSON.writeMeta(meta, to: Layout.datasetMeta(outDir))
-
-        var report = RunReport()
-        report.processed = records.count
-        for record in records {
-            report.byPrimaryGenre[record.primaryGenre, default: 0] += 1
-            for item in record.subgenres + record.moods {
-                report.confidenceHistogram[confidenceBucket(item.confidence), default: 0] += 1
-            }
-        }
-        if let enrichCk: EnrichCheckpoint = try? JSON.read(Layout.enrichCheckpoint(outDir)) {
-            report.skippedBelowVoteFloor = enrichCk.totals.belowFloor
-            report.fetchFailures = enrichCk.totals.failures
-        }
-        let extra = ReportExtras(
-            anime: (try? JSON.read(Layout.enrichCheckpoint(outDir)) as EnrichCheckpoint)?.totals.anime ?? 0,
-            noPrimary: (try? JSON.read(Layout.classifyCheckpoint(outDir)) as ClassifyCheckpoint)?.totals.noPrimary ?? 0,
-            report: report)
-        try JSON.writePretty(extra, to: Layout.report(outDir))
-
-        print("finalize: \(records.count) titles · labels=\(labelsPath) vectors=\(vectorsPath) meta=\(Layout.datasetMeta(outDir)) dataset=\(datasetVersion)")
-        print("primary-genre dist: \(report.byPrimaryGenre.sorted { $0.value > $1.value }.map { "\($0.key):\($0.value)" }.joined(separator: " "))")
-    }
-
     // MARK: - recluster (DT-F weekly)
 
     /// Cluster the shipped vectors and report groups the existing vocabulary does NOT explain — candidate
@@ -1031,51 +868,6 @@ enum Commands {
 
 }
 
-func confidenceBucket(_ confidence: Double) -> String {
-    let low = (confidence * 10).rounded(.down) / 10
-    return String(format: "%.1f-%.1f", low, low + 0.1)
-}
-
-// MARK: - Hashing / gzip / dates (import-dataset.mjs fold-in)
-
-func sha256Hex(_ data: Data) -> String {
-    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-}
-
-/// The manifest the Rust server reads (former import-dataset.mjs output). Field names are the JSON keys.
-
-enum DateFmt {
-    static func iso8601(_ date: Date) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f.string(from: date)
-    }
-    static func rfc1123(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "GMT")
-        f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
-        return f.string(from: date)
-    }
-}
-
-enum Shell {
-    /// gzip a file to `<path>.gz` (keeps the original), returning the .gz path. Shelling to /usr/bin/gzip is
-    /// the simplest way to a real gzip container from Foundation (Compression's zlib codec isn't gzip-framed).
-    @discardableResult
-    static func gzip(_ path: String) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/gzip")
-        process.arguments = ["-kf", path]
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw ToolError(message: "gzip failed (\(process.terminationStatus)) for \(path)")
-        }
-        return path + ".gz"
-    }
-}
-
 // MARK: - DTOs
 
 /// The enriched record `pipeline/enrich.py` writes, as the embed pass reads it back.
@@ -1181,67 +973,16 @@ struct EnrichedDTO: Codable {
     }
 }
 
-/// The checkpoint `pipeline/enrich.py` writes, read here only for the run report's totals.
-struct EnrichCheckpoint: Codable {
-    // Keyed "movie:12345" / "tv:12345": TMDB movie and TV id namespaces OVERLAP (both start low), so a bare
-    // Set<Int> shared across a movie run then a tv run would skip every TV title whose id matches a processed
-    // movie id (e.g. tv 550 skipped because movie 550 was done). Media-qualify the key.
-    var processed: Set<String> = []
-    var nextBatch: Int = 1
-    var totals = Totals()
-
-    // Tolerant decode: a legacy checkpoint stored `processed` as bare [Int] (the movie-only pilot) — migrate
-    // those to movie-qualified keys so a resume across this change doesn't reset progress. Malformed/truncated
-    // JSON still throws here (the container decode fails), which the caller surfaces loudly.
-    init(from decoder: any Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        if let keyed = try? c.decode(Set<String>.self, forKey: .processed) {
-            processed = keyed
-        } else {
-            processed = Set((try c.decode(Set<Int>.self, forKey: .processed)).map { "movie:\($0)" })
-        }
-        nextBatch = try c.decodeIfPresent(Int.self, forKey: .nextBatch) ?? 1
-        totals = try c.decodeIfPresent(Totals.self, forKey: .totals) ?? Totals()
-    }
-    enum CodingKeys: String, CodingKey { case processed, nextBatch, totals }
-
-    struct Totals: Codable {
-        var belowFloor = 0, anime = 0, failures = 0, noOverview = 0
-        init() {}
-        // Tolerant decode: a checkpoint written before a field existed must still load (Swift's synthesized
-        // Decodable requires every key, so a new field would otherwise reset the whole checkpoint → silent
-        // re-enrich from scratch). decodeIfPresent + default keeps old checkpoints valid across field adds.
-        init(from decoder: any Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            belowFloor = try c.decodeIfPresent(Int.self, forKey: .belowFloor) ?? 0
-            anime = try c.decodeIfPresent(Int.self, forKey: .anime) ?? 0
-            failures = try c.decodeIfPresent(Int.self, forKey: .failures) ?? 0
-            noOverview = try c.decodeIfPresent(Int.self, forKey: .noOverview) ?? 0
-        }
-    }
-}
-
-struct ReportExtras: Codable {
-    let anime: Int
-    let noPrimary: Int
-    let report: RunReport
-}
-
 // MARK: - Paths
 
 enum Layout {
-    static func enrichCheckpoint(_ dir: String) -> String { join(dir, "enrich-checkpoint.json") }
-    static func classifyCheckpoint(_ dir: String) -> String { join(dir, "classify-checkpoint.json") }
     static func enrichedDir(_ dir: String) -> String { join(dir, "enriched") }
     static func embedderIdentity(_ dir: String) -> String { join(dir, "index/embedder.json") }
     static func embeddingSpace(_ dir: String) -> String { join(dir, "index/embedding-space.json") }
     static func compositionIdentity(_ dir: String) -> String { join(dir, "index/composition.json") }
     static func labelsStore(_ dir: String) -> String { join(dir, "index/labels.jsonl") }
     static func vectorsStore(_ dir: String) -> String { join(dir, "index/vectors.jsonl") }
-    static func labelsArtifact(_ dir: String, _ v: String) -> String { join(dir, "labels-\(v).json") }
-    static func vectorsArtifact(_ dir: String, _ v: String) -> String { join(dir, "vectors-\(v).bin") }
     static func datasetMeta(_ dir: String) -> String { join(dir, "dataset.meta.json") }
-    static func report(_ dir: String) -> String { join(dir, "report.json") }
     static func join(_ dir: String, _ rel: String) -> String { (dir as NSString).appendingPathComponent(rel) }
 }
 
@@ -1273,15 +1014,6 @@ enum JSON {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try FileIO.write(try encoder.encode(value), to: path)
     }
-    /// Write `dataset.meta.json` through `ManifestMerge`, so keys `DatasetMeta` does not model survive
-    /// while every key it DOES model — including ones it deliberately omits — comes from this write.
-    static func writeMeta(_ value: DatasetMeta, to path: String) throws {
-        let existing = try? Data(contentsOf: URL(fileURLWithPath: path))
-        let merged = try ManifestMerge.merge(new: try encodeSorted(value), existing: existing,
-                                             owned: DatasetMeta.ownedKeys)
-        try FileIO.write(merged, to: path)
-    }
-
     static func encodeSorted<T: Encodable>(_ value: T) throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(value)
@@ -1435,16 +1167,6 @@ enum Spec {
                       + "otherwise skips every finished id"),
             ],
             run: { try await Commands.facts($0) }),
-        Subcommand(
-            name: "finalize",
-            summary: "Index store → labels-<taxonomy>.json + vectors-<embed>.bin + dataset.meta.json + report.",
-            flags: [
-                .value("--out-dir", "<dir>", "the run directory holding the index store", required: true),
-                .value("--embedding-version", "<name>",
-                       "the artifact label (default bge-m3). Its implied dimension is checked against the "
-                       + "vectors, so a mislabelled blob is refused rather than shipped"),
-            ],
-            run: { try Commands.finalize($0) }),
         Subcommand(
             name: "recluster",
             summary: "Cluster the shipped vectors and report groups the vocabulary does not explain (DT-F weekly).",

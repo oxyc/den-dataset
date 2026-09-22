@@ -84,11 +84,11 @@ final class ArgsTests: XCTestCase {
     func testABareInvocationListsTheSubcommands() throws {
         let result = run([])
         XCTAssertNotEqual(result.status, 0, "naming no command is a usage error")
-        // Every command that survives: the vote-pass generation went with the Jev pass, the three
-        // deterministic ones and `enrich` are Python now, and `metadata` went with the poster sidecar. Naming
-        // all four rather than a sample, so a command
-        // that disappears from the overview fails here rather than in an operator's terminal.
-        for command in ["embed-corpus", "facts", "finalize", "recluster"] {
+        // Every command that survives: the vote-pass generation went with the Jev pass, the deterministic
+        // ones — `finalize` among them — and `enrich` are Python now, and `metadata` went with the poster
+        // sidecar. Naming all of them rather than a sample, so a command that disappears from the overview
+        // fails here rather than in an operator's terminal.
+        for command in ["embed-corpus", "facts", "recluster"] {
             XCTAssert(result.stderr.contains(command), "\(command) is missing from the overview")
         }
     }
@@ -108,19 +108,17 @@ final class ArgsTests: XCTestCase {
         let stderr: String
     }
 
-    /// Run the tool and capture both streams. Unlike `SmokeTests.run`, a non-zero exit is the expected
-    /// outcome of most of these, so the status is returned rather than failed on.
+    /// Run the tool and capture both streams. A non-zero exit is the expected outcome of most of these, so
+    /// the status is returned rather than failed on.
     private func run(_ arguments: [String]) -> Result {
         let process = Process()
-        // The same binary SmokeTests drives, located once: a second copy of "where the products directory
-        // is" is a thing to keep in step for no benefit.
-        process.executableURL = SmokeTests.binaryURL
+        process.executableURL = Self.binaryURL
         process.arguments = arguments
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
         do { try process.run() } catch {
-            XCTFail("could not run \(SmokeTests.binaryURL.path): \(error)")
+            XCTFail("could not run \(Self.binaryURL.path): \(error)")
             return Result(status: -1, stdout: "", stderr: "")
         }
         // Drained before waiting: a full pipe buffer would block the child forever.
@@ -131,4 +129,13 @@ final class ArgsTests: XCTestCase {
                       stdout: String(data: outData, encoding: .utf8) ?? "",
                       stderr: String(data: errData, encoding: .utf8) ?? "")
     }
+
+    /// The `taxonomy-backfill` executable sits in the same products directory as the xctest bundle.
+    static let binaryURL: URL = {
+        for bundle in Bundle.allBundles where bundle.bundlePath.hasSuffix(".xctest") {
+            return bundle.bundleURL.deletingLastPathComponent().appendingPathComponent("taxonomy-backfill")
+        }
+        // Linux / plain builds: the test runner sits beside the executable.
+        return Bundle.main.bundleURL.appendingPathComponent("taxonomy-backfill")
+    }()
 }

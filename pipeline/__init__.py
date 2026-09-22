@@ -21,21 +21,22 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: reads the plots and the evidence out of; the article dump after it, because it is what the classify
 #: pass reads; classification then, because nothing else here reads the articles; the doc facts before the
 #: embed pass, because they are two clauses of the document it composes and a run without them builds a
-#: different vector space; embedding before the facts merge, because its stores are what `finalize` turns
-#: into `labels-t02.json` and the corpus facts pass scrapes the ids in that file; the merge before the
-#: corpus join and the store, because both of them read the merged facts; and publishing is last because
-#: it uploads what the store wrote. That ordering is the whole reason a stage can stop naming a producer
-#: for an artifact another stage makes.
+#: different vector space; finalize straight after the embedding, because it turns the embed stores into
+#: `labels-t02.json`, the vector blob and the manifest; the facts after that, because the corpus facts pass
+#: scrapes the ids in that labels file; the facts before the corpus join and the store, because both of
+#: them read the merged facts; and publishing is last because it uploads what the store wrote. That
+#: ordering is the whole reason a stage can stop naming a producer for an artifact another stage makes.
 #:
 #: `den run` STOPS BEFORE PUBLISHING unless asked with --publish: every other stage writes into the
 #: out-dir and can be run again, while publish replaces the moving `data-latest` release. The order below
 #: is what the pipeline IS; what one command chooses to run is a separate question (see `PUBLISHES`).
 #:
-#: `facts` sits after `embed` because the corpus pass scrapes the ids in `labels-t02.json`, which
-#: `finalize` writes from the embed stores — and before `corpus` and `store`, which both read the file
-#: it merges.
-STAGES = ("worklist", "fetch", "articles", "classify", "docfacts", "embed", "facts", "corpus", "store",
-          "publish")
+#: `embed` READS `labels-t02.json` for each title's tags and `finalize` rewrites it from the stores `embed`
+#: appended to, so the file an embed composes from is the previous finalize's. That is the loop a re-embed
+#: has always been — the labels are decided by the classify pass, not by the vectors — and it is why the
+#: labels artifact has one owner and two readers ahead of it.
+STAGES = ("worklist", "fetch", "articles", "classify", "docfacts", "embed", "finalize", "facts", "corpus",
+          "store", "publish")
 
 
 def stage(name):

@@ -167,13 +167,14 @@ class Refusal(Staged):
     def test_a_missing_labels_file_is_refused_with_what_builds_it(self):
         with self.assertRaises(StageError) as refused:
             docfacts.run(self.context())
-        self.assertIn("taxonomy-backfill finalize", str(refused.exception))
+        self.assertIn("./den stage finalize", str(refused.exception))
 
     def test_a_labels_file_with_no_records_is_refused(self):
         self.labels([])
         with self.assertRaises(StageError) as refused:
             docfacts.run(self.context())
         self.assertIn("no records", str(refused.exception))
+        self.assertIn("./den stage finalize", str(refused.exception))
 
 
 class Topology(unittest.TestCase):

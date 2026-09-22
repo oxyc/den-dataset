@@ -185,17 +185,6 @@ public struct LabelsArtifact: Codable, Sendable, Equatable {
     }
 }
 
-/// Run report (coverage, primary-genre distribution, confidence histogram, cost). Emitted beside the index.
-public struct RunReport: Codable, Sendable, Equatable {
-    public var processed: Int = 0
-    public var skippedBelowVoteFloor: Int = 0
-    public var fetchFailures: Int = 0
-    public var byPrimaryGenre: [String: Int] = [:]
-    public var confidenceHistogram: [String: Int] = [:]   // bucket "0.5-0.6" → count
-    public var llmCalls: Int = 0
-    public init() {}
-}
-
 /// Resumable checkpoint — the set of already-processed ids so a re-run skips them (24h-run safety).
 public struct Checkpoint: Codable, Sendable, Equatable {
     public var processed: Set<Int>

@@ -248,7 +248,10 @@ python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels ou
 #     finalize (step 6) then stamps it into dataset.meta.json as `embeddingSpace`.
 
 # 6. Finalize — index store -> labels-t02.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
-$BIN finalize --out-dir out
+#    Refuses a torn store, vectors of two lengths or of any length but 1024, and an identity record that
+#    disagrees with the vectors or will not parse. `datasetVersion` is derived from the two artifacts'
+#    hashes, so this is where the version the later stages take is decided.
+./den stage finalize --out-dir out --dataset-version <ver>
 
 # 6a. The FACTS the store ranks on — the two scrape passes merged. The scrape runs TWICE and cannot run
 #     once: the corpus pass covers the ids in labels-t02.json and is stamped --has-vector, the delta pass
@@ -311,8 +314,6 @@ python3 scripts/v2/build_store.py \
 ```
 
 `$BIN` is `.build/release/taxonomy-backfill` (`swift build -c release`).
-
-`finalize --embedding-version <v>` overrides the artifact label. The default path is the bge-m3 build above.
 
 ## Recovering a store's composition
 

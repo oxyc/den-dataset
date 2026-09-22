@@ -138,8 +138,8 @@ ENTITIES = Artifact(
     filename="corpus-{version}-entities.json.gz",
 )
 
-#: The embed pass's two append-only stores, written line by line and resumed from. `finalize` turns them
-#: into `labels-t02.json` and `vectors-bge-m3.bin`; until then they are the corpus's vectors. Paired by
+#: The embed pass's two append-only stores, written line by line and resumed from. The finalize stage turns
+#: them into `labels-t02.json` and `vectors-bge-m3.bin`; until then they are the corpus's vectors. Paired by
 #: position, which is why a kill between the two lines is repaired before anything appends to them.
 EMBED_LABELS = Artifact(
     name="embed_labels",
@@ -164,18 +164,22 @@ COMPOSITION = Artifact(
 
 #: Which den-embed built the store. `finalize` only ever checked that the vectors share one LENGTH, which
 #: every bge-m3 generation does, so a run resumed after an upgrade produced a corpus half-embedded by each.
+#: Optional to finalize: a store from before it was recorded is legitimate, and is carried as an absent key.
 EMBEDDER = Artifact(
     name="embedder",
     filename="index/embedder.json",
     dedicated=False,
+    required=False,
 )
 
 #: The known-answer canary's verdict for the service that embedded these rows — the space's published name,
-#: which `finalize` stamps into `dataset.meta.json`.
+#: which `finalize` stamps into `dataset.meta.json`. Optional there for the same reason as the embedder: a
+#: store built before the canary existed names no space, and guessing one is what the canary is against.
 EMBEDDING_SPACE = Artifact(
     name="embedding_space",
     filename="index/embedding-space.json",
     dedicated=False,
+    required=False,
 )
 
 #: The corpus pass's scrape: the titles that have a vector, written with `--has-vector`. It lands under
@@ -214,9 +218,6 @@ FACTS = Artifact(
 VECTORS = Artifact(
     name="vectors",
     filename="vectors-bge-m3.bin",
-    producer=BACKFILL,
-    how="taxonomy-backfill finalize",
-    dedicated=False,
     manifest_key="vectorsFile",
 )
 
@@ -225,9 +226,6 @@ VECTORS = Artifact(
 VECTOR_LABELS = Artifact(
     name="vector_labels",
     filename="labels-t02.json",
-    producer=BACKFILL,
-    how="taxonomy-backfill finalize",
-    dedicated=False,
     manifest_key="labelsFile",
 )
 
@@ -257,18 +255,12 @@ STORE = Artifact(
 )
 
 #: The manifest that describes the store, and the release's commit point — it is uploaded last, so what
-#: `data-latest` carries is whatever it names. `finalize` writes it and the publisher rewrites it in place
-#: (the prune, the record counts, `storeRebuild`, the shared-article census), which is why it is an input
-#: here and not an output: the stage that CREATES it is not ported, and a refusal for a missing one has to
-#: send an operator to finalize rather than back to the publisher. `dedicated` is false for the same
-#: reason `facts` is — one binary writes four things, so a staleness warning on it would fire for reasons
-#: that have nothing to do with the manifest.
+#: `data-latest` carries is whatever it names. The finalize stage creates it; the store writer and the
+#: publisher rewrite it in place (the stamp, the prune, the record counts, `storeRebuild`, the
+#: shared-article census), which is why every writer merges over it rather than replacing it.
 MANIFEST = Artifact(
     name="manifest",
     filename="dataset.meta.json",
-    producer=BACKFILL,
-    how="taxonomy-backfill finalize",
-    dedicated=False,
 )
 
 #: What a publish makes: the moving `data-latest` GitHub release den-atlas fetches. The only artifact here
