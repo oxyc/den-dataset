@@ -80,7 +80,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import consolidate_corpus as cc  # noqa: E402  — the corpus join's supersede rule and tombstones
-from combined_questions import taxonomy_questions  # noqa: E402
+from pipeline.combined_questions import taxonomy_questions  # noqa: E402
 
 THRESHOLD, CAP = 0.8, 3
 JULY, SEPTEMBER, SWAP = "july-relabel", "september-subagents", "classify-swap"

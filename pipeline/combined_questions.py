@@ -8,10 +8,10 @@ import json
 import os
 import re
 
-from pipeline.facet_questions import questions as facet_questions
-from pipeline.run_facets import VALIDITY
+from .facet_questions import questions as facet_questions
+from .run_facets import VALIDITY
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: The genres & moods vocabulary, as data: JSON under `data/` with the other committed inputs
 #: (oxyc/den-dataset#27). The constant, the `--taxonomy` flag and the manifest keys `taxonomy`,
 #: `taxonomySha256` and `taxonomyVersion` keep their names — shipped manifests and the store carry them,

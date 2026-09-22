@@ -32,6 +32,7 @@ import unittest
 import pipeline
 
 from . import artifacts, classify, corpus, embed, fetch
+from . import combined_questions as questions
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,7 +49,6 @@ def load(name, path):
 
 
 script = load("run_combined", os.path.join(V2, "run_combined.py"))
-questions = load("combined_questions", os.path.join(V2, "combined_questions.py"))
 fixture = load("test_combined", os.path.join(V2, "test_combined.py"))
 
 VERSION = "testver"

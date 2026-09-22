@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from combined_questions import global_questions
+from pipeline.combined_questions import global_questions
 from run_combined import (acquire_output_lock, argument_parser, article_key, attach_enriched_evidence,
                           load_articles, paid_run, release_output_lock)
 

@@ -9,10 +9,9 @@ from unittest import mock
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import combined_questions
 import run_combined
 import resume_combined_excluding
-from pipeline import article_sections
+from pipeline import article_sections, combined_questions
 
 
 def answer_for(question):

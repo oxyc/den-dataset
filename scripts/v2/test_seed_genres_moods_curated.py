@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import seed_genres_moods_curated as seed  # noqa: E402
-from combined_questions import taxonomy_questions  # noqa: E402
+from pipeline.combined_questions import taxonomy_questions  # noqa: E402
 
 _, MAPPING, _ = taxonomy_questions()
 SUB = sorted(q for q, m in MAPPING.items() if m["family"] == "subgenres")

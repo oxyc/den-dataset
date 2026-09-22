@@ -20,13 +20,13 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-import combined_questions
-from combined_questions import (PINNED_MODEL, PROMPT, ROOT, TAXONOMY, global_questions, section_question)
 from lib import typesafe_client
 from lib.typesafe_client import TypeSafe, TypeSafeError
-from pipeline import article_sections
+from pipeline import article_sections, combined_questions
 from pipeline.article_sections import (encoded_chars, is_oversized, parse_sections, public_section,
                                        section_groups, select_global_sections, sha256_text, state_for)
+from pipeline.combined_questions import (PINNED_MODEL, PROMPT, ROOT, TAXONOMY, global_questions,
+                                         section_question)
 
 SCHEMA_VERSION = "combined-jev-v1"
 #: Bumped when the shape of the recorded configuration changes rather than when the questions do. `-v2`
@@ -41,11 +41,11 @@ DEFAULT_MAX_STATE_CHARS = 110_000
 #: `implementationSha256`, and `audit_combined.validate_implementation` hashes again. Keyed by FILE NAME,
 #: which is what every shipped manifest records, so a file that moves keeps its key. The paths are each
 #: module's own rather than one shared directory: the four do not live together (oxyc/den-dataset#73).
-IMPLEMENTATION = {name: os.path.abspath(module.__file__) for name, module in (
-    ("run_combined.py", sys.modules[__name__]),
-    ("article_sections.py", article_sections),
-    ("combined_questions.py", combined_questions),
-    ("typesafe_client.py", typesafe_client),
+IMPLEMENTATION = {name: os.path.abspath(path) for name, path in (
+    ("run_combined.py", __file__),
+    ("article_sections.py", article_sections.__file__),
+    ("combined_questions.py", combined_questions.__file__),
+    ("typesafe_client.py", typesafe_client.__file__),
 )}
 
 
