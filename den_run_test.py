@@ -71,7 +71,9 @@ from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
 from pipeline import artifacts  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 
-sys.path.insert(0, os.path.join(HERE, "scripts", "v2"))
+V2 = os.path.join(HERE, "scripts", "v2")
+sys.path.insert(0, V2)
+import audit_combined  # noqa: E402
 import vector_blob  # noqa: E402
 
 FIXTURE = os.path.join(HERE, "pipeline", "fixture-corpus")
@@ -93,6 +95,24 @@ UNPRODUCED = {
 GIVEN_VERSION = "fixture"
 DIMS = 1024
 BELOW_FLOOR = "movie:900004"
+
+
+#: The sidecars of the two seeded Jev shards, which the corpus stage audits before it joins.
+SEEDED_MANIFESTS = ("combined-v1-r2.jsonl.manifest.json", "delta-v2.jsonl.manifest.json")
+
+
+def stamp_implementation(path):
+    """Record, in a seeded shard's manifest, this tree's digests of the files the pass hashes.
+
+    The seed stands in for a shard bought on the pass as this tree holds it, which is what these digests
+    say. They are written at copy time rather than committed: committed, every edit to the pass would fail
+    this test with the audit's advice — record a lineage entry — which is meant for shards someone paid for.
+    """
+    manifest = read_json(path)
+    manifest["config"]["implementationSha256"] = {name: sha256(os.path.join(V2, name))
+                                                  for name in audit_combined.IMPLEMENTATION}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=2)
 
 
 def load_den():
@@ -368,6 +388,8 @@ class DenRun(unittest.TestCase):
         for kind in ("unproduced", "cycle", "unbought"):
             for name in os.listdir(os.path.join(SEEDS, kind)):
                 shutil.copy(os.path.join(SEEDS, kind, name), cls.out)
+        for name in SEEDED_MANIFESTS:
+            stamp_implementation(os.path.join(cls.out, name))
         spec = read_json(os.path.join(cls.out, "vectors-premise.json"))
         os.unlink(os.path.join(cls.out, "vectors-premise.json"))
         vector_blob.write(os.path.join(cls.out, artifacts.PREMISE_VECTORS.filename), spec["keys"],
@@ -608,6 +630,17 @@ class UnproducedSeeds(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(os.path.join(SEEDS, "unproduced"))),
                          sorted(f for files in UNPRODUCED.values() for f in files),
                          "a file in seeds/unproduced/ that UNPRODUCED does not name")
+
+
+class SeededManifests(unittest.TestCase):
+    def test_a_seed_manifest_as_committed_is_refused_by_the_audit(self):
+        """The seeds record no implementation digests of their own, and the audit refuses a manifest that
+        records none — so the run's audit passes only on what `stamp_implementation` wrote."""
+        for name in SEEDED_MANIFESTS:
+            path = next(os.path.join(SEEDS, kind, name) for kind in ("unbought", "unproduced")
+                        if os.path.isfile(os.path.join(SEEDS, kind, name)))
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "records no implementation"):
+                audit_combined.validate_implementation(name, read_json(path)["config"])
 
 
 class TheLabelsLoop(unittest.TestCase):

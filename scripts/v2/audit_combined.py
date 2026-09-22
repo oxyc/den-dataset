@@ -26,6 +26,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 #: superseded it and why its rows still mean the same thing. See `validate_implementation`.
 LINEAGE = os.path.join(HERE, "implementation-lineage.json")
 
+#: The pass's own source files, which `run_combined.manifest_config` hashes into every shard's manifest
+#: under `implementationSha256`. A manifest must record every one of them: see `validate_implementation`.
+IMPLEMENTATION = ("run_combined.py", "article_sections.py", "combined_questions.py", "typesafe_client.py")
+
 #: Where the pass keeps each committed input today, for a manifest that names it somewhere else. See
 #: `manifest_file`.
 CURRENT_FILE = {"prompt": PROMPT, "taxonomy": TAXONOMY}
@@ -239,11 +243,23 @@ def validate_implementation(where, config, lineage=None):
     manifest is the provenance of a run that was paid for once and will not be repeated, and rewriting it
     to keep a checker quiet destroys the only record of what produced those rows.
 
+    A manifest that records no digest for one of `IMPLEMENTATION`, or none at all, is refused too: nothing
+    to compare is not a match, and it says nothing about which version of the pass produced the rows.
+
     Returns the allowances it granted, so a caller can say out loud which ones it is running on.
     """
     lineage = load_lineage() if lineage is None else lineage
+    recorded = config.get("implementationSha256")
+    if not isinstance(recorded, dict):
+        fail(where, "the manifest records no implementationSha256, so nothing says which version of the pass "
+                    "produced the shard's rows")
+    missing = [name for name in IMPLEMENTATION if name not in recorded]
+    if missing:
+        fail(where, f"the manifest records no implementation hash for {', '.join(missing)}, so nothing says "
+                    f"which version of {'that file' if len(missing) == 1 else 'those files'} produced the "
+                    f"shard's rows")
     allowed = []
-    for name, expected in config.get("implementationSha256", {}).items():
+    for name, expected in recorded.items():
         path = os.path.join(HERE, name)
         if sha256_file(path) == expected:
             continue
