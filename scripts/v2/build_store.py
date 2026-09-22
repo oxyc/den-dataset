@@ -73,7 +73,10 @@ from store.inputs import (INPUT_ARGS, build_inputs, input_digest,  # noqa: E402
 #:   ours       — this pipeline's own bookkeeping: offsets, indices, counts, controlled vocabularies
 #:   identifier — an id rather than content: the TMDB key, the IMDb id, a TMDB person id
 #:   tmdb       — TMDB CONTENT, which is what #118 is removing
-SOURCES = {"wikidata", "wikipedia", "llm", "ours", "identifier", "tmdb"}
+#:   imdb       — IMDb's dataset CONTENT: vote counts, ratings. The enrichment admits titles on the counts
+#:                (`pipeline/floors.py`), and IMDb's licence is non-transferable, so they may never ship.
+#:                Not the `imdb` SECTION, which is the id — an `identifier`.
+SOURCES = {"wikidata", "wikipedia", "llm", "ours", "identifier", "tmdb", "imdb"}
 
 #: Every section, and its source. Asserted at assembly as `set(PROVENANCE) == set(sec.order)`, which
 #: fails in BOTH directions: a new section with no entry here is fatal, and so is an entry for a section
@@ -146,7 +149,7 @@ PROVENANCE = {
 
 #: The sources that are a vendor's CONTENT. `identifier` is deliberately not one: an id is a join key,
 #: which is the one thing both catalogue licences leave us.
-VENDOR_SOURCES = {"tmdb"}
+VENDOR_SOURCES = {"tmdb", "imdb"}
 
 #: The vendor-sourced sections the store may still carry. `card_title` and `card_year` have moved to
 #: Wikidata and `votes` is gone, so this is EMPTY: the store carries identifiers and free facts, nothing

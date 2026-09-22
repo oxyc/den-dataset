@@ -105,10 +105,25 @@ class Batch(unittest.TestCase):
         self.out = self.directory.name
         self.cache = caching.ResponseCache("wiki", os.path.join(self.out, "cache"), 3600)
         self.mapping, self.plots, self.plot_calls, self.mapping_calls = {}, {}, [], []
-        for target, stub in ((enrich.wikidata, "mapping"), (enrich.plot, "plot")):
+        # IMDb: the id Wikidata names per (media, tmdbId), the dump's counts per id, and what loading the
+        # dump does — a `Ratings`, or an exception to raise.
+        self.imdb_ids, self.imdb_votes, self.imdb_id_calls = {}, {}, []
+        self.dump = None
+        for target, stub in ((enrich.wikidata, "mapping"), (enrich.plot, "plot"), (enrich.wikidata, "imdb_ids"),
+                             (enrich.imdb, "ratings")):
             patch = mock.patch.object(target, stub, getattr(self, stub + "_stub"))
             patch.start()
             self.addCleanup(patch.stop)
+
+    def imdb_ids_stub(self, ids, media, cache=None):
+        self.imdb_id_calls.append((media, sorted(ids)))
+        return {i: self.imdb_ids[(media, i)] for i in ids if (media, i) in self.imdb_ids}
+
+    def ratings_stub(self, minimum=0, env=None, request=None):
+        if isinstance(self.dump, Exception):
+            raise self.dump
+        return self.dump or enrich.imdb.Ratings(
+            {tt: n for tt, n in self.imdb_votes.items() if n >= minimum}, "unchanged")
 
     def mapping_stub(self, ids, media, languages, cache=None):
         self.mapping_calls.append((media, sorted(ids)))
@@ -348,6 +363,118 @@ class Batch(unittest.TestCase):
                 self.run_batch({"/movie/1": detail(1)}, [("movie", 1)], token="bearer")
         self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
 
+    # -- admission: TMDB's count OR IMDb's ------------------------------------------------------------
+
+    def admission(self, *titles):
+        """One batch of `(tmdbId, TMDB votes, origin, IMDb id or None, IMDb votes)` movies. Returns the
+        report and the keys the batch wrote."""
+        bodies = {}
+        for tmdb_id, votes, origin, imdb_id, imdb_votes in titles:
+            bodies[f"/movie/{tmdb_id}"] = detail(tmdb_id, votes=votes, origin_country=origin)
+            if imdb_id:
+                self.imdb_ids[("movie", tmdb_id)] = imdb_id
+                self.imdb_votes[imdb_id] = imdb_votes
+        report = self.run_batch(bodies, [("movie", t[0]) for t in titles])
+        return report, set(self.rows()) if os.path.exists(enrich.batch_path(self.out, 1)) else set()
+
+    def test_a_title_only_imdb_admits_is_admitted(self):
+        """`Elkürtük`: 44 TMDB votes, 40,939 on IMDb. TMDB's floor alone never let it in."""
+        report, written = self.admission((1, 44, ["TR"], "tt1", 40939))
+        self.assertEqual(written, {"movie:1"})
+        self.assertEqual((report["admittedByImdb"], report["admittedByTmdb"], report["belowFloor"]), (1, 0, 0))
+        self.assertEqual(self.checkpoint()["processed"], ["movie:1"])
+
+    def test_a_title_only_tmdb_admits_is_admitted(self):
+        """`El Señor de los Cielos`: IMDb undercounts it. The union keeps everything TMDB's floor admits."""
+        report, written = self.admission((1, 3650, ["US"], "tt1", 1648), (2, 60, ["US"], None, 0))
+        self.assertEqual(written, {"movie:1", "movie:2"})
+        self.assertEqual((report["admittedByTmdb"], report["admittedByImdb"], report["admittedByBoth"]), (2, 0, 0))
+
+    def test_a_title_both_admit_is_counted_as_both(self):
+        report, _written = self.admission((1, 500, ["US"], "tt1", 5000))
+        self.assertEqual((report["admittedByBoth"], report["admittedByTmdb"], report["admittedByImdb"]), (1, 0, 0))
+
+    def test_a_title_neither_admits_is_refused_and_stays_pending(self):
+        """Below every floor is a verdict about today, so it is not checkpointed — as before the union."""
+        report, written = self.admission((1, 49, ["US"], "tt1", 1999))
+        self.assertEqual(written, set())
+        self.assertEqual((report["belowFloor"], report["count"], report["remaining"]), (1, 0, 1))
+        self.assertEqual(self.checkpoint()["processed"], [])
+
+    def test_each_tier_has_its_own_floors(self):
+        """A regional origin clears at 15 TMDB or 500 IMDb; any other origin needs 50 or 2,000."""
+        report, written = self.admission(
+            (1, 20, ["FR"], None, 0),          # regional, TMDB 20 ≥ 15
+            (2, 20, ["US"], None, 0),          # worldwide, TMDB 20 < 50, no IMDb id
+            (3, 5, ["BR"], "tt3", 600),        # regional, IMDb 600 ≥ 500
+            (4, 5, ["US"], "tt4", 600),        # worldwide, IMDb 600 < 2,000
+            (5, 5, ["US"], "tt5", 2500))       # worldwide, IMDb 2,500 ≥ 2,000
+        self.assertEqual(written, {"movie:1", "movie:3", "movie:5"})
+        self.assertEqual(report["belowFloor"], 2)
+
+    def test_the_floors_a_run_names_are_the_ones_it_judges_by(self):
+        bodies = {"/movie/1": detail(1, votes=30, origin_country=["US"])}
+        self.imdb_ids[("movie", 1)] = "tt1"
+        self.imdb_votes["tt1"] = 900
+        report = self.run_batch(bodies, [("movie", 1)], floors=enrich.floor_rules.given(imdb=800))
+        self.assertEqual(report["admittedByImdb"], 1)
+
+    def test_a_title_with_no_imdb_id_is_judged_on_tmdb_alone_and_counted(self):
+        report, written = self.admission((1, 30, ["US"], None, 0), (2, 80, ["US"], None, 0))
+        self.assertEqual(written, {"movie:2"})
+        self.assertEqual(report["shortOfImdbId"], 1, "only a title TMDB left short needed the id")
+
+    def test_the_gate_is_decided_before_the_expensive_work(self):
+        """A refused title is never mapped to its articles and no plot is fetched for it: extra candidates
+        cost an id lookup, not a plot fetch and a classification."""
+        self.mapping[("movie", 1)] = {"article": "Kept"}
+        self.mapping[("movie", 2)] = {"article": "Refused"}
+        self.plots[("Kept", "en")] = found("k" * 300)
+        self.admission((1, 44, ["TR"], "tt1", 40939), (2, 10, ["US"], "tt2", 10))
+        self.assertEqual(self.mapping_calls, [("movie", [1])])
+        self.assertEqual(self.plot_calls, [("Kept", "en")])
+        self.assertEqual(self.imdb_id_calls, [("movie", [1, 2])], "one lookup for the batch, per media")
+
+    def test_a_dump_that_cannot_be_had_admits_on_tmdb_alone_and_says_so(self):
+        """Not a refusal: the union's TMDB half is the floor the pipeline ran on before, so nothing it admits
+        is lost, and a title only IMDb admits is below-floor — never checkpointed — until a dump arrives."""
+        self.dump = enrich.imdb.Unavailable("HTTP 503 for https://datasets.imdbws.com/title.ratings.tsv.gz")
+        with mock.patch("sys.stderr") as stderr:
+            report, written = self.admission((1, 500, ["US"], "tt1", 5000), (2, 44, ["TR"], "tt2", 40939))
+        self.assertEqual(written, {"movie:1"})
+        self.assertEqual((report["admittedByTmdb"], report["admittedByBoth"], report["belowFloor"]), (1, 0, 1))
+        self.assertTrue(report["imdbGate"].startswith("off: "), report["imdbGate"])
+        self.assertIn("HTTP 503", report["imdbGate"])
+        self.assertEqual(self.imdb_id_calls, [], "no id is worth looking up with nothing to judge it by")
+        self.assertIn("IMDb half", "".join(str(c) for c in stderr.write.call_args_list))
+        with open(os.path.join(self.out, "enrich-log.txt")) as fh:
+            self.assertIn("imdb-gate off: HTTP 503", fh.read())
+        self.assertEqual(self.checkpoint()["processed"], ["movie:1"], "the IMDb-only title stays pending")
+
+    def test_the_report_names_the_dumps_freshness(self):
+        report, _written = self.admission((1, 500, ["US"], None, 0))
+        self.assertEqual(report["imdbGate"], "unchanged")
+
+    def test_a_failed_imdb_id_lookup_aborts_the_batch_and_writes_nothing(self):
+        with mock.patch.object(enrich.wikidata, "imdb_ids", side_effect=http.HTTPError(0, "x")):
+            with self.assertRaises(enrich.Aborted):
+                self.run_batch({"/movie/1": detail(1, votes=10)}, [("movie", 1)])
+        self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
+        self.assertFalse(os.path.exists(os.path.join(self.out, "enriched")))
+
+    def test_no_imdb_count_is_written_anywhere(self):
+        """IMDb's licence is non-transferable: its counts decide admission and go nowhere. Not the batch,
+        which the corpus and the store are built from; not the log or the report either."""
+        report, _written = self.admission((1, 44, ["TR"], "tt1", 987654), (2, 500, ["US"], "tt2", 876543))
+        with open(enrich.batch_path(self.out, 1), encoding="utf-8") as fh:
+            batch = fh.read()
+        with open(os.path.join(self.out, "enrich-log.txt"), "a+", encoding="utf-8") as fh:
+            fh.seek(0)
+            logged = fh.read()
+        for text in (batch, logged, json.dumps(report)):
+            self.assertNotIn("987654", text)
+            self.assertNotIn("876543", text)
+
     # -- the checkpoint -------------------------------------------------------------------------------
 
     def test_transient_and_below_floor_ids_stay_pending_and_the_rest_are_checkpointed(self):
@@ -584,6 +711,14 @@ class CommandLine(unittest.TestCase):
             for flag in flags:
                 args += [flag] if flag == "--exclude-anime" else [flag, "1"]
             enrich.parser().parse_args(args)  # an unknown flag exits here
+
+    def test_the_floors_on_the_command_line_are_the_ones_the_batch_runs_at(self):
+        with mock.patch.object(enrich, "run", return_value={"remaining": 0}) as ran, mock.patch("sys.stdout"):
+            enrich.main(["--worklist", "w", "--out-dir", "o", "--vote-floor", "40", "--regional-vote-floor", "10",
+                         "--imdb-floor", "1500", "--regional-imdb-floor", "300"])
+            self.assertEqual(ran.call_args.args[2], enrich.floor_rules.Floors(40, 10, 1500, 300))
+            enrich.main(["--worklist", "w", "--out-dir", "o"])
+            self.assertEqual(ran.call_args.args[2], enrich.floor_rules.DEFAULT)
 
     def test_an_unknown_flag_is_refused(self):
         with self.assertRaises(SystemExit), mock.patch("sys.stderr"):

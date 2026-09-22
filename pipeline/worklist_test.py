@@ -24,7 +24,7 @@ import unittest
 
 import pipeline
 
-from . import artifacts, worklist
+from . import artifacts, floors, worklist
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -98,12 +98,16 @@ class Declaration(unittest.TestCase):
         self.assertEqual([bind(e).name for e in worklist.OUTPUTS], ["universe_movie", "universe_tv"])
         self.assertEqual(sorted(worklist.MEDIA), ["movie", "tv"])
 
-    def test_the_vote_floor_it_pins_is_the_one_the_daily_pass_uses(self):
-        """Pinned rather than inherited: the universe this stage builds should not move because a default
-        somewhere else moved."""
-        self.assertEqual(worklist.VOTE_FLOOR, 50)
+    def test_discovery_enumerates_at_the_lowest_floor_any_tier_admits_at(self):
+        """At 50, discovery never listed a title the regional tier's 15 would admit, nor one IMDb admits
+        that TMDB undercounts — the port from Swift lost the 15 exactly that way. The number is pinned as
+        well as derived: a floors change that moves what discovery pays for should be a visible edit."""
+        self.assertEqual(worklist.VOTE_FLOOR, 15)
+        self.assertEqual(worklist.VOTE_FLOOR, min(floors.DEFAULT.tmdb, floors.DEFAULT.regional_tmdb))
+
+    def test_the_daily_pass_admits_at_the_worldwide_floor(self):
         with open(os.path.join(REPO, "scripts", "delta-run.sh"), encoding="utf-8") as fh:
-            self.assertIn("VOTE_FLOOR:-50", fh.read())
+            self.assertIn(f"VOTE_FLOOR:-{floors.DEFAULT.tmdb}", fh.read())
 
     def test_it_does_not_write_the_shipped_catalogues_filename(self):
         """`scripts/build-worklist.py` owns `worklist-<media>.json` — the ids Den already ships, ordered by

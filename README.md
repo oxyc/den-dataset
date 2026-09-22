@@ -123,9 +123,12 @@ have a plot and still did not ship — 519 of them because of the media-id colli
 
 **The universe these are drawn from.** TMDB's daily exports list 1,216,343 movie ids and 225,504 TV
 series ids. The enrichment worklist is not that universe: it is the ids Den already ships, ordered by
-TMDB popularity, and bounded by a vote floor (default 50) — a title with almost no votes has no plot
-worth classifying and would be re-billed daily until it earned some. So the numbers above are "of what
-we chose to enrich", not "of everything TMDB knows about".
+TMDB popularity, and bounded by vote floors — a title with almost no votes has no plot worth
+classifying and would be re-billed daily until it earned some. A title is admitted when its TMDB count
+OR its IMDb count clears its tier's floor: 50 TMDB or 2,000 IMDb votes worldwide, 15 or 500 for European,
+South American and Australian/New Zealand origins (`pipeline/floors.py` has the measurement behind each).
+IMDb's counts decide admission only and are never stored. So the numbers above are "of what we chose to
+enrich", not "of everything TMDB knows about".
 
 **Known gap:** 940 TV series share a TMDB id with a shipped movie (Buffy/Armageddon, Doctor Who, Star
 Trek), and all 940 are missing because the classify checkpoint keyed on a bare id. The keying is fixed;

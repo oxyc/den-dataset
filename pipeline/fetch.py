@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 
-from . import artifacts, enrich
+from . import artifacts, enrich, floors as floor_rules
 from .contract import REPO, StageError, bind
 from lib import enterprise, tmdb as tmdb_api
 
@@ -147,8 +147,9 @@ def announce_prose_source(media, served):
 def batch(ctx, media):
     """One batch of `media`'s worklist, under freshly asked credentials. Returns its report."""
     key, token = credentials()
-    return enrich.run(ctx.require(bind(UNIVERSES[media]).artifact), ctx.out_dir,
-                      vote_floor=enrich.VOTE_FLOOR if ctx.vote_floor is None else ctx.vote_floor,
+    floors = floor_rules.given(ctx.vote_floor, ctx.regional_vote_floor, ctx.imdb_floor,
+                               ctx.regional_imdb_floor)
+    return enrich.run(ctx.require(bind(UNIVERSES[media]).artifact), ctx.out_dir, floors=floors,
                       limit=BATCH, client=tmdb_api.TMDB(key), token=token)
 
 
@@ -204,7 +205,8 @@ def drain(ctx, media):
                         f"fetch: every title in this {media} batch is below the vote floor, so the worklist "
                         f"cannot drain at it — below-floor ids are not checkpointed, because a vote count "
                         f"only climbs. Re-run with --vote-floor 0 to include the low-vote tail, or filter "
-                        f"the worklist. This is not an upstream failure.")
+                        f"the worklist. This is not an upstream failure. (The IMDb half of the gate: "
+                        f"{report.get('imdbGate')}.)")
             stalls += 1
             if stalls >= STALLS:
                 below, deferred = report.get("belowFloor", 0), report.get("deferred", 0)

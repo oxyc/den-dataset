@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """ONE enrichment batch: the next N un-enriched worklist ids, grounded on Wikipedia, written as a batch.
 
-    python3 -m pipeline.enrich --worklist W --out-dir D [--vote-floor 50] [--limit 150] [--exclude-anime]
+    python3 -m pipeline.enrich --worklist W --out-dir D [--vote-floor 50] [--regional-vote-floor 15]
+                               [--imdb-floor 2000] [--regional-imdb-floor 500] [--limit 150] [--exclude-anime]
 
 The drain (`pipeline/fetch.py`) runs this until nothing remains; the daily delta runs it once per media
 and reports what is left. Per id: one TMDB detail+keywords+credits call; per media in the batch: one
 Wikidata SPARQL mapping the survivors to their articles; per title: a live Wikipedia plot, which becomes
 the record's `overview`. Every one of those goes through `lib/`, so the responses already on disk under
 `.cache/` answer a re-run.
+
+**Admission is decided before any of the expensive work**, on TMDB's vote count OR IMDb's — see
+`pipeline/floors.py` for the floors and why there are four. A title TMDB's count leaves short costs one
+more thing: its IMDb id, one Wikidata SPARQL per media for all of them together. IMDb's counts are read,
+compared and forgotten; none is written into a batch, a log line or the report.
 
 **TMDB's prose never enters the record.** `lib/tmdb.title_record` keeps only the overview's LENGTH, and a
 title with no Wikipedia plot is written `hasWikiPlot: false` with an empty `overview` — nothing downstream
@@ -26,13 +32,15 @@ import sys
 import threading
 
 from lib import cache as caching
-from lib import enterprise, http, plot, tmdb as tmdb_api, wikidata, wikipedia
+from lib import enterprise, http, imdb, plot, tmdb as tmdb_api, wikidata, wikipedia
 
+from . import floors as floor_rules
 from .contract import StageError
 
-#: The default floor, below which a title stays pending. See `run` for why it is never checkpointed.
-VOTE_FLOOR = 50
 LIMIT = 150
+
+#: Which count admitted a title, for the report.
+TMDB, IMDB, BOTH = "tmdb", "imdb", "both"
 
 #: Minimum plot length to ground on, in characters. Was 200, justified as "a one-line logline adds little
 #: over the TMDB overview it would replace" — but that comparison is gone: `overview` holds a Wikipedia plot
@@ -340,7 +348,51 @@ def read_worklist(path):
         raise StageError(f"enrich: {path} is not a worklist of {{tmdbId, mediaType}} rows ({error})")
 
 
-def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anime=False, client=None,
+def imdb_counts(floors):
+    """`(ratings, note)` — IMDb's counts for this batch, or `None` and why not.
+
+    A dump that cannot be had turns the IMDb half of the gate OFF for the batch; it does not refuse it. The
+    union's TMDB half is exactly the floor this pipeline ran on before IMDb was asked, so nothing it admits
+    is lost, and a title only IMDb would have admitted is judged below the floor — which is never
+    checkpointed, so the next batch with a dump judges it again. Refusing instead would stop the daily pass
+    on a third party's outage for titles that are merely deferred. Off is never SILENT: the note goes into
+    the report, the log and stderr.
+    """
+    try:
+        ratings = imdb.ratings(floors.lowest_imdb)
+    except imdb.Unavailable as error:
+        return None, f"off: {error}"
+    return ratings, ratings.note
+
+
+def admit(records, floors, ratings, cache):
+    """`(admitted, unidentified)`: key → which count admitted it (`TMDB`, `IMDB` or `BOTH`), and how many of
+    the titles TMDB left short have no IMDb id and were therefore judged on TMDB's count alone.
+
+    A key absent from `admitted` is below every floor its tiers set. With `ratings` None the IMDb half is
+    off and this is TMDB's floor alone. Raises what the IMDb-id lookup raises — the caller aborts on it, as
+    it does on the mapping, which asks the same service.
+    """
+    admitted, unidentified = {}, 0
+    ids = {}
+    if ratings is not None:
+        for media in sorted({record["mediaType"] for record in records}):
+            found = wikidata.imdb_ids([r["tmdbId"] for r in records if r["mediaType"] == media], media, cache)
+            ids.update({key(media, tmdb_id): imdb_id for tmdb_id, imdb_id in found.items()})
+    for record in records:
+        label = key(record["mediaType"], record["tmdbId"])
+        tmdb_floor, imdb_floor = floors.of(record)
+        by_tmdb = record["voteCount"] >= tmdb_floor
+        imdb_id = ids.get(label)
+        by_imdb = imdb_id is not None and ratings.get(imdb_id) >= imdb_floor
+        if by_tmdb or by_imdb:
+            admitted[label] = BOTH if by_tmdb and by_imdb else TMDB if by_tmdb else IMDB
+        if not by_tmdb and ratings is not None and imdb_id is None:
+            unidentified += 1
+    return admitted, unidentified
+
+
+def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude_anime=False, client=None,
         cache=None, token=None):
     """One batch. Returns the report the drain reads by key.
 
@@ -383,7 +435,7 @@ def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anim
     client = client or tmdb_api.TMDB()
     cache = wikipedia.cache_for() if cache is None else cache
     counts = dict.fromkeys(TOTALS, 0)
-    titles, deferred, below = [], set(), set()
+    records, titles, deferred, below = [], [], set(), set()
     with concurrent.futures.ThreadPoolExecutor(max_workers=TMDB_WORKERS) as pool:
         verdicts = pool.map(lambda entry: fetch_title(client, *entry), pending)
         for (media, tmdb_id), (verdict, found) in zip(pending, verdicts):
@@ -395,20 +447,35 @@ def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anim
             elif verdict == "failure":
                 counts["failures"] += 1
                 log(out_dir, f"fetch-failure id={label} {found}")
-            elif found["voteCount"] < vote_floor:
-                # NOT checkpointed either. A vote count only climbs, so "below the floor" is a verdict about
-                # today; checkpointing it made the rejection permanent, and a 180-day cached detail record
-                # widened the window to months. The cache makes the re-judging nearly free.
-                counts["belowFloor"] += 1
-                below.add(label)
-            elif exclude_anime and is_anime(found):
-                # Opt-IN: excluding anime by default silently cost the corpus 1,498 titles, the entire
-                # Ghibli catalogue among them.
-                counts["anime"] += 1
-            elif found["overviewChars"] < STUB:
-                counts["noOverview"] += 1
             else:
-                titles.append(found)
+                records.append(found)
+
+    ratings, gate = imdb_counts(floors) if records else (None, None)
+    if records and ratings is None:
+        log(out_dir, f"imdb-gate {gate} — batch {batch_id} admits on TMDB's count alone")
+        print(f"  warning: the IMDb half of the admission gate is {gate}. This batch admits on TMDB's count "
+              f"alone; a title only IMDb would admit stays pending for the next batch.", file=sys.stderr)
+    try:
+        admitted, unidentified = admit(records, floors, ratings, cache)
+    except (http.HTTPError, wikidata.WikidataError) as error:
+        raise Aborted(f"Wikidata IMDb-id lookup failed for batch {batch_id} after retries ({error}); nothing "
+                      f"written — re-run to retry this batch") from error
+    for found in records:
+        label = key(found["mediaType"], found["tmdbId"])
+        if label not in admitted:
+            # NOT checkpointed either. A vote count only climbs, so "below the floor" is a verdict about
+            # today; checkpointing it made the rejection permanent, and a 180-day cached detail record
+            # widened the window to months. The cache makes the re-judging nearly free.
+            counts["belowFloor"] += 1
+            below.add(label)
+        elif exclude_anime and is_anime(found):
+            # Opt-IN: excluding anime by default silently cost the corpus 1,498 titles, the entire
+            # Ghibli catalogue among them.
+            counts["anime"] += 1
+        elif found["overviewChars"] < STUB:
+            counts["noOverview"] += 1
+        else:
+            titles.append(found)
 
     # ONE mapping query per media type, keyed by both — see `lib/wikidata.mapping`.
     facts = {}
@@ -473,7 +540,15 @@ def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anim
               "deferred": len(deferred), "remaining": sum(key(*e) not in processed for e in worklist),
               "wikiPlot": with_plot, "tagsOnly": len(survivors) - with_plot, "batch": path,
               "plotsFromEnterprise": from_enterprise, "plotsFromActionApi": with_plot - from_enterprise,
-              "enterpriseRequests": enterprise.gate.sent_this_run - requests_before}
+              "enterpriseRequests": enterprise.gate.sent_this_run - requests_before,
+              # Which count admitted each title that cleared the gate. Counts of titles, never a vote count:
+              # IMDb's numbers stay in this process. `imdbGate` says how fresh the dump was, or why the IMDb
+              # half was off; `shortOfImdbId` are titles TMDB left short that Wikidata names no IMDb id
+              # for, so TMDB's count alone decided them.
+              "admittedByTmdb": sum(v == TMDB for v in admitted.values()),
+              "admittedByImdb": sum(v == IMDB for v in admitted.values()),
+              "admittedByBoth": sum(v == BOTH for v in admitted.values()),
+              "shortOfImdbId": unidentified, "imdbGate": gate}
     if token and enterprise.gate.off:
         report["enterpriseOff"] = enterprise.gate.off
     return report
@@ -484,8 +559,15 @@ def parser():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--worklist", required=True, help="the worklist JSON to draw ids from")
     parser.add_argument("--out-dir", required=True, help="the enriched batches and the resumable checkpoint")
-    parser.add_argument("--vote-floor", type=int, default=VOTE_FLOOR,
-                        help="minimum TMDB vote count (default 50); below it a title stays pending")
+    parser.add_argument("--vote-floor", type=int,
+                        help=f"the worldwide tier's TMDB vote floor (default {floor_rules.DEFAULT.tmdb}); a "
+                             f"title below every floor it is judged by stays pending")
+    parser.add_argument("--regional-vote-floor", type=int,
+                        help=f"the regional tier's TMDB vote floor (default {floor_rules.DEFAULT.regional_tmdb})")
+    parser.add_argument("--imdb-floor", type=int,
+                        help=f"the worldwide tier's IMDb vote floor (default {floor_rules.DEFAULT.imdb})")
+    parser.add_argument("--regional-imdb-floor", type=int,
+                        help=f"the regional tier's IMDb vote floor (default {floor_rules.DEFAULT.regional_imdb})")
     parser.add_argument("--limit", type=int, default=LIMIT, help="un-enriched ids to take (default 150)")
     parser.add_argument("--exclude-anime", action="store_true",
                         help="drop anime. Opt-IN: excluding it by default silently cost the corpus 1,498 titles")
@@ -495,7 +577,9 @@ def parser():
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
-        report = run(args.worklist, args.out_dir, args.vote_floor, args.limit, args.exclude_anime,
+        floors = floor_rules.given(args.vote_floor, args.regional_vote_floor, args.imdb_floor,
+                                   args.regional_imdb_floor)
+        report = run(args.worklist, args.out_dir, floors, args.limit, args.exclude_anime,
                      token=os.environ.get("WIKIMEDIA_ENTERPRISE_TOKEN") or None)
     except (StageError, Aborted, tmdb_api.TMDBError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)

@@ -268,5 +268,40 @@ class Mapping(unittest.TestCase):
         self.assertEqual(sent.call_count, 1, "a real answer is served from disk the second time")
 
 
+class ImdbIds(unittest.TestCase):
+    """The admission gate's lookup: the IMDb id of each title TMDB's count leaves short."""
+
+    def test_the_query_matches_the_media_and_asks_for_p345_only(self):
+        query = wikidata.imdb_query([12, 11, 11], "tv")
+        self.assertIn('VALUES ?tmdb { "11" "12" }', query, "sorted and unique, so one set is one key")
+        self.assertIn("wdt:P4983 ?tmdb", query)
+        self.assertIn("wdt:P345 ?imdb", query)
+        self.assertNotIn("OPTIONAL", query, "a title with no IMDb id has no row, which is the answer")
+
+    def test_only_a_title_id_counts_and_the_first_in_order_wins(self):
+        payload = rows({"tmdb": cell("1"), "imdb": cell("nm0000001")}, {"tmdb": cell("1"), "imdb": cell("tt02")},
+                       {"tmdb": cell("1"), "imdb": cell("tt03")}, {"tmdb": cell("2"), "imdb": cell("co1")})
+        self.assertEqual(wikidata.parse_imdb(payload), {1: "tt02"})
+
+    def test_a_body_that_is_not_a_result_is_refused_and_not_kept(self):
+        """Read as no bindings, a WDQS maintenance page would judge the whole batch on TMDB alone."""
+        with tempfile.TemporaryDirectory() as directory:
+            cache = caching.ResponseCache("wiki", directory, 3600)
+            with mock.patch.object(wikidata.http, "request", return_value=b"<html>busy</html>"):
+                with self.assertRaises(wikidata.WikidataError):
+                    wikidata.imdb_ids([1], "movie", cache)
+            self.assertIsNone(cache.read(cache.key("sparql-imdb", {"q": wikidata.imdb_query([1], "movie")})))
+            answer = rows({"tmdb": cell("1"), "imdb": cell("tt01")})
+            with mock.patch.object(wikidata.http, "request", return_value=answer) as sent:
+                self.assertEqual(wikidata.imdb_ids([1], "movie", cache), {1: "tt01"})
+                self.assertEqual(wikidata.imdb_ids([1], "movie", cache), {1: "tt01"})
+            self.assertEqual(sent.call_count, 1, "a real answer is served from disk the second time")
+
+    def test_no_ids_asks_nothing(self):
+        with mock.patch.object(wikidata.http, "request") as sent:
+            self.assertEqual(wikidata.imdb_ids([], "movie"), {})
+        sent.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

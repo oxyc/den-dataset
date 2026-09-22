@@ -181,6 +181,23 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("NAME=PATH", result.stderr)
 
+    def test_every_admission_floor_reaches_the_run(self):
+        """A flag the parser accepts and `Context` never hears of is a floor an operator believes they set."""
+        import argparse
+        import importlib.machinery
+        loader = importlib.machinery.SourceFileLoader("den_entry", DEN)
+        module = importlib.util.module_from_spec(importlib.util.spec_from_loader("den_entry", loader))
+        loader.exec_module(module)
+        args = argparse.Namespace(set=[], out_dir="out", dataset_version="v", stamp_meta=None, mode=None,
+                                  since=None, expect=None, pause_ms=0, limit=None, media=None, vote_floor=40,
+                                  regional_vote_floor=10, imdb_floor=1500, regional_imdb_floor=300, plan=False)
+        ctx = module.context(args)
+        self.assertEqual((ctx.vote_floor, ctx.regional_vote_floor, ctx.imdb_floor, ctx.regional_imdb_floor),
+                         (40, 10, 1500, 300))
+        listed = den("stage", "fetch", "--help").stdout
+        for flag in ("--vote-floor", "--regional-vote-floor", "--imdb-floor", "--regional-imdb-floor"):
+            self.assertIn(flag, listed)
+
 
 class EndToEnd(fixture.StoreFixture, unittest.TestCase):
     def test_den_stage_store_builds_a_store(self):

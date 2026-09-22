@@ -345,6 +345,67 @@ def mapping(ids, media, languages, cache=None):
     return parsed
 
 
+def imdb_query(ids, media):
+    """The SPARQL that maps one batch of TMDB ids to their IMDb ids (P345), and nothing else.
+
+    Separate from the mapping query because it is asked BEFORE admission, of the titles TMDB's count left
+    below its floor: they need an IMDb id to be judged on IMDb's count, and none of the mapping's
+    sitelinks until they are admitted.
+    """
+    values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
+    return (f"SELECT ?tmdb ?imdb WHERE {{\n"
+            f"  VALUES ?tmdb {{ {values} }}\n"
+            f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"  ?film wdt:P345 ?imdb .\n"
+            f"}}\n"
+            f"ORDER BY ?tmdb ?imdb")
+
+
+def parse_imdb(payload):
+    """`tmdbId -> tt…` for one SPARQL body. RAISES on a body that is not a SPARQL result.
+
+    P345 is multi-valued and not checked against IMDb's id space, so only a `tt` id counts, and the first in
+    the query's order wins — the same one every run. An id with none is absent: the caller judges it on
+    TMDB's count alone.
+    """
+    try:
+        bindings = json.loads(payload.decode("utf-8"))["results"]["bindings"]
+        if not isinstance(bindings, list):
+            raise TypeError(bindings)
+    except (ValueError, KeyError, TypeError):
+        raise WikidataError(f"not a SPARQL result: {payload[:200]!r}") from None
+    out = {}
+    for binding in bindings:
+        raw, imdb = _cell(binding, "tmdb"), _cell(binding, "imdb")
+        if raw is None or not _INTEGER.fullmatch(raw) or not imdb or not imdb.startswith("tt"):
+            continue
+        out.setdefault(int(raw), imdb)
+    return out
+
+
+def imdb_ids(ids, media, cache=None):
+    """`tmdbId -> tt…` for one batch of one media type, from disk where the same batch was asked before."""
+    if not ids:
+        return {}
+    query = imdb_query(ids, media)
+    key = None
+    if cache is not None:
+        key = cache.key("sparql-imdb", {"q": query})
+        hit = cache.read(key)
+        if hit is not None:
+            try:
+                return parse_imdb(hit)
+            except WikidataError:
+                pass
+    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
+                           headers={"Content-Type": "application/sparql-query",
+                                    "Accept": "application/sparql-results+json"})
+    parsed = parse_imdb(payload)
+    if key is not None:
+        cache.write(key, payload)
+    return parsed
+
+
 def cache_for(env=None):
     """Wikidata shares the `wiki` namespace with Wikipedia — one cache to age out, one to clear."""
     return caching.wiki(env)
