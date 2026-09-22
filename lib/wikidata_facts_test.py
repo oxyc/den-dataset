@@ -90,6 +90,44 @@ class Parse(unittest.TestCase):
         with self.assertRaises(wd.WikidataError):
             wd.parse_facts(b"<html>maintenance</html>", SPEC["cast"])
 
+    def test_every_p179_target_is_kept_for_the_series_filter(self):
+        """WALL-E's: a critics' list and a series. Collapsed to the least, the list was all that survived."""
+        got = wd.parse_facts(body({"tmdb": "1", "v": "http://www.wikidata.org/entity/Q9000"},
+                                  {"tmdb": "1", "v": "http://www.wikidata.org/entity/Q26705935"}),
+                             SPEC["franchise"])
+        self.assertEqual(got, {1: ["Q26705935", "Q9000"]})
+
+
+class Series(unittest.TestCase):
+    LIST, SERIES, CATALOG = "Q26705935", "Q9000", "Q56070713"
+
+    def test_a_list_is_dropped_and_the_most_specific_series_leads_whatever_the_order(self):
+        """A studio canon is typed an animated film series and holds every film the studio made; the
+        story's own series is fewer members. Equal counts fall to the lower Q-id NUMBER, not string."""
+        members = {self.SERIES: 4, self.CATALOG: 67, "Q10": 4}
+        for seed in range(6):
+            targets = [self.LIST, self.CATALOG, self.SERIES, "Q10"]
+            random.Random(seed).shuffle(targets)
+            with self.subTest(targets=targets):
+                self.assertEqual(wd.franchises(targets, members), ["Q10", self.SERIES, self.CATALOG])
+        self.assertEqual(wd.franchises([self.LIST], members), [])
+
+    def test_the_query_walks_the_class_hierarchy_for_the_three_kinds(self):
+        query = wd.series_query([self.SERIES, self.LIST, self.SERIES])
+        self.assertIn(f"VALUES ?item {{ wd:{self.LIST} wd:{self.SERIES} }}", query)
+        self.assertIn("?item wdt:P31/wdt:P279* ?class", query)
+        self.assertIn("VALUES ?class { wd:Q24856 wd:Q5398426 wd:Q196600 }", query)
+
+    def test_an_answer_is_cached_per_batch(self):
+        asked = []
+        payload = body({"item": ENTITY + self.SERIES, "members": "4"})
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(wd, "_sparql", lambda query: asked.append(query) or payload):
+            cache = caching.ResponseCache("wiki", directory, 3600)
+            first = wd.series([self.SERIES, self.LIST], cache)
+            second = wd.series([self.LIST, self.SERIES], cache)
+        self.assertEqual((first, second, len(asked)), ({self.SERIES: 4}, {self.SERIES: 4}, 1))
+
 
 class Fetch(unittest.TestCase):
     def setUp(self):
