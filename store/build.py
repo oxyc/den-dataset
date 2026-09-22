@@ -17,7 +17,7 @@ import json
 import os
 import sys
 
-from . import cards, entities, facets, facts, format, identity, labels, makers, scores, vectors
+from . import aliases, cards, entities, facets, facts, format, identity, labels, makers, scores, vectors
 from .inputs import corpus_rows, labels_by_key, read_json
 
 
@@ -33,6 +33,12 @@ def run(args, inputs, prose_check, provenance_check):
     keys = identity.sorted_keys(rows)
     n = len(keys)
     print(f"  {n} titles", file=sys.stderr)
+
+    # Before anything reads `facts.titles`: a dropped alias must reach neither `alias_titles` nor the
+    # card's name fallback. See `store/aliases.py`.
+    alias_record = aliases.apply(rows.values())
+    print(f"  aliases: {alias_record['dropped']} dropped by data/alias-decisions.json, "
+          f"{alias_record['undecided']} naming another title with no decision", file=sys.stderr)
 
     entity_table = read_json(args.entities)
     genre_map, facts_records = facts.read_genre_map(read_json(args.facts), args.facts)
@@ -190,6 +196,10 @@ def run(args, inputs, prose_check, provenance_check):
         # given a `File`/`Sha256`/`Bytes` name or the prune's keep-list would drop it. Without this the
         # only record of a 42% `ending` drop is a build log nobody kept.
         meta["facetGates"] = gate_report
+        # Which alias decisions this store applied, and how many colliding aliases it ships undecided.
+        # `check-alias-collisions.py --gate` refuses the publish unless the hash is the committed file's
+        # and the count is zero. Same shape rule as the two above: no `File`/`Sha256`/`Bytes` name.
+        meta["aliasDecisions"] = alias_record
         with open(args.stamp_meta, "w") as fh:
             json.dump(meta, fh, indent=1)
             fh.write("\n")

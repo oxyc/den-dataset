@@ -1061,3 +1061,45 @@ class TheCardReadsBackFromTheCorpus(StoreFixture, unittest.TestCase):
         with tempfile.TemporaryDirectory() as out:
             store, _ = self.build(out, titles=self.TITLES + [nameless])
         self.assertEqual([store.text(i) for i in store.ints("card_title")], ["Alpha", "Beta", None])
+
+
+class TheAliasDecisionsAreApplied(StoreFixture, unittest.TestCase):
+    """`data/alias-decisions.json` takes effect in the store, and the store records how many colliding
+    aliases it ships undecided — the number `check-alias-collisions.py --gate` refuses a publish on.
+
+    Run against the committed file, whose `drop` list takes "Alien" off Taxi Driver (movie:103). Wikidata
+    still carries that altLabel, so a fresh scrape brings it back; the store is where every path ends.
+    """
+
+    DECISIONS = os.path.join(HERE, "..", "..", "data", "alias-decisions.json")
+
+    def titles(self):
+        def titled(key, names):
+            media, tmdb_id = key.split(":")
+            return {"key": key, "mediaType": media, "tmdbId": int(tmdb_id), "facts": {"titles": names},
+                    "labels": None, "premiseLabels": None}
+        return self.TITLES + [
+            titled("movie:103", {"en": "Taxi Driver", "aliases": ["Alien"]}),
+            titled("movie:348", {"en": "Alien"}),
+            # Another title's name, and the decisions file says nothing about it.
+            titled("movie:9", {"en": "Gamma", "aliases": ["Beta"]}),
+        ]
+
+    def test_a_dropped_alias_does_not_ship_and_an_undecided_one_is_counted(self):
+        with tempfile.TemporaryDirectory() as out:
+            meta = os.path.join(out, "dataset.meta.json")
+            with open(meta, "w") as fh:
+                json.dump({"datasetVersion": "test"}, fh)
+            store, _ = self.build(out, titles=self.titles(), stamp=meta)
+            with open(meta) as fh:
+                record = json.load(fh)["aliasDecisions"]
+
+        offsets, ids = store.ints("alias_titles_o"), store.ints("alias_titles_v")
+
+        def names(key):
+            row = store.keys().index(key)
+            return [store.text(i) for i in ids[offsets[row]:offsets[row + 1]]]
+
+        self.assertEqual(names("movie:103"), ["Taxi Driver"], "the dropped alias reached alias_titles")
+        self.assertEqual(names("movie:9"), ["Gamma", "Beta"], "an undecided alias still ships until decided")
+        self.assertEqual(record, {"sha256": sha256(self.DECISIONS), "dropped": 1, "undecided": 1})
