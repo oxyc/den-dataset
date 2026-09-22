@@ -32,13 +32,13 @@ class Listing(unittest.TestCase):
     def test_stages_answers_what_runs_in_what_order_and_what_it_touches(self):
         result = den("stages")
         self.assertEqual(result.returncode, 0, result.stderr)
-        # The order, and that it is the real one: the articles are classified before the vectors are
-        # embedded, the vectors before the corpus is joined, the corpus before the store is built from it,
-        # and the publish that uploads the store is last.
-        named = ("classify", "embed", "corpus", "store", "publish")
-        for position, name in enumerate(named, start=1):
+        # The order, and that it is the real one: the universe is built before anything is drawn from it,
+        # the articles are classified before the vectors are embedded, the vectors before the corpus is
+        # joined, the corpus before the store is built from it, and the publish that uploads it is last.
+        expected = ("worklist", "classify", "embed", "corpus", "store", "publish")
+        for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
-        order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(named, start=1)]
+        order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
         self.assertEqual(order, sorted(order), "den stages printed them out of order")
         for line in ("premise_labels", "scripts/v2/build_store.py", "scripts/v2/consolidate_corpus.py",
                      "scripts/v2/run_combined.py", "scripts/publish-dataset.sh"):

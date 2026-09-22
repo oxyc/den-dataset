@@ -10,6 +10,8 @@ Options (both run forms):
     --out-dir DIR                  where artifacts are read and written  (default: out)
     --dataset-version VER          the version the filenames carry       (required)
     --stamp-meta PATH              the manifest to declare the outputs in
+    --mode MODE                    which universe the worklist builds: export, discover or delta
+    --since YYYY-MM-DD             the window a delta worklist collects titles from
     --expect N                     the title count the corpus join is held to
     --pause-ms N                   milliseconds the embed pass idles between requests
     --limit N                      stop the embed pass after N new titles
@@ -67,6 +69,7 @@ def context(args):
             overrides[name] = path
     return pipeline.Context(out_dir=args.out_dir, dataset_version=args.dataset_version,
                             overrides=overrides, stamp_meta=args.stamp_meta or "",
+                            mode=args.mode or "", since=args.since or "",
                             expect=args.expect, pause_ms=args.pause_ms, limit=args.limit,
                             plan=args.plan)
 
@@ -87,6 +90,8 @@ def main(argv=None):
         sub.add_argument("--out-dir", default="out")
         sub.add_argument("--dataset-version", required=True)
         sub.add_argument("--stamp-meta")
+        sub.add_argument("--mode", help="which universe the worklist builds: export, discover or delta")
+        sub.add_argument("--since", help="the window a delta worklist collects titles from, YYYY-MM-DD")
         sub.add_argument("--expect", type=int, help="the title count the corpus join is held to")
         sub.add_argument("--pause-ms", type=int, default=0,
                          help="milliseconds the embed pass idles between requests")

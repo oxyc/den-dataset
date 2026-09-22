@@ -30,6 +30,41 @@ ARTICLES = Artifact(
     dedicated=False,
 )
 
+#: TMDB's daily ID export, one per media — the universe `worklist --mode export` parses. A public static
+#: file (no API key), and the only input to the full run's universe that comes from outside this repo.
+#: `scripts/build-worklist.py`'s `fetch_export` is what fetches it, under exactly these names, and leaves it
+#: GZIPPED; the Swift reader takes text, so the decompression it does not do is part of the `how`.
+EXPORT_MOVIE = Artifact(
+    name="export_movie",
+    filename="movie_ids.json",
+    producer="scripts/build-worklist.py",
+    how="python3 scripts/build-worklist.py, then gunzip out/movie_ids.json.gz",
+    dedicated=False,
+)
+
+EXPORT_TV = Artifact(
+    name="export_tv",
+    filename="tv_series_ids.json",
+    producer="scripts/build-worklist.py",
+    how="python3 scripts/build-worklist.py, then gunzip out/tv_series_ids.json.gz",
+    dedicated=False,
+)
+
+#: The universe, one file per media — what `enrich` drains. Split by media because `enrich` refuses a
+#: worklist that mixes them: a film and a series can share a tmdbId, so one mixed list would classify the
+#: pair once and apply the answer to both. The split is the reader's rule, not a naming convention.
+WORKLIST_MOVIE = Artifact(
+    name="worklist_movie",
+    filename="worklist-movie.json",
+    dedicated=False,
+)
+
+WORKLIST_TV = Artifact(
+    name="worklist_tv",
+    filename="worklist-tv.json",
+    dedicated=False,
+)
+
 #: The classify pass, in shards. Three of them today, named by the run that wrote them rather than by the
 #: dataset version — the pass owns that naming, and this is a glob so the set is whatever the pass left
 #: behind. Reading one shard of three is what took eleven titles out of a derived blob for a day; a stage
@@ -215,6 +250,7 @@ RELEASE = Artifact(
     remote=True,
 )
 
-CATALOGUE = (ARTICLES, COMBINED, COMBINED_MANIFEST, DELTA, ENRICHED, DOC_FACTS, EMBED_LABELS,
-             EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, FACTS, VECTORS,
-             VECTOR_LABELS, PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)
+CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, WORKLIST_MOVIE, WORKLIST_TV, ARTICLES, COMBINED,
+             COMBINED_MANIFEST, DELTA, ENRICHED, DOC_FACTS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
+             EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, FACTS, VECTORS, VECTOR_LABELS,
+             PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)

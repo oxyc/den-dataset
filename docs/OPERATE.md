@@ -161,6 +161,17 @@ cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterpr
 #    Wikipedia article first (and can watch the plot-hit rate fall off / pick a stopping point). Build it from
 #    the shipped labels (re-embeds exactly what we ship) and sort by TMDB daily-export popularity:
 python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popularity-sorted)
+#    THIS IS THE RE-EMBED'S UNIVERSE — the ids we already ship, reordered. It is not the same universe as
+#    `taxonomy-backfill worklist`, which is where new titles come from, and both write these two filenames:
+#      ./den stage worklist --mode export --out-dir out --dataset-version <ver>
+#        every id in TMDB's daily dump (put movie_ids.json / tv_series_ids.json in the out-dir first —
+#        `fetch_export` above leaves them gzipped, so gunzip them). The stage refuses a run that did not
+#        name a mode, and one whose dump lost lines to the parse.
+#      ./den stage worklist --mode delta --since YYYY-MM-DD --out-dir out --dataset-version <ver> \
+#          --set worklist_movie=out/delta/worklist-movie.json --set worklist_tv=out/delta/worklist-tv.json
+#        what `scripts/delta-run.sh` builds daily — new titles only, skipping out/labels-t02.json. The two
+#        --set flags are why it keeps its worklists in delta/: a delta written over the full worklist does
+#        not corrupt the enrich run, it ENDS it, as a batch that reports nothing remaining.
 
 # 3. Enrich — TMDB detail+keywords+credits, then ONE Wikidata SPARQL + live Wikipedia plot per surviving id.
 #    The Wikipedia plot REPLACES the TMDB overview where found (re-grounding); each batch prints wikiPlot vs
