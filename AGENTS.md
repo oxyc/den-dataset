@@ -51,6 +51,10 @@ An optional pass in which labelling agents write genres & moods into `data/genre
 overriding the automated labeller there (oxyc/den-dataset#56). Nothing in this repo pays for it; the
 agents do the labelling. Use the model the user names; Sonnet is the recommended one.
 
+The automated labeller is the `genres_moods` stage: it asks Jev about the titles this file has no genres
+& moods for and derives `genres-moods.json` from the answers. A title this pass writes here is never asked
+again, so enriching one by hand is what overrides it.
+
 1. `./den genres-moods prepare --out-dir <out-dir>`. It picks titles with no genres & moods (`--missing`,
    the default; or `--keys FILE`, or `--since YYYY-MM-DD`), writes batches of 25 into
    `<out-dir>/genres-moods-enrich/`, and prints the batch count and the instruction for one batch.

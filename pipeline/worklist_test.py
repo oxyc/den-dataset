@@ -294,7 +294,7 @@ class Delta(Staged):
         with open(os.path.join(REPO, "scripts", "delta-run.sh"), encoding="utf-8") as fh:
             script = fh.read()
         hand_off = script.split("Next, by hand")[1]
-        stages = list(dict.fromkeys(re.findall(r"\./den stage ([a-z]+)", hand_off)))
+        stages = list(dict.fromkeys(re.findall(r"\./den stage ([a-z_]+)", hand_off)))
         self.assertEqual(stages, list(pipeline.STAGES[pipeline.STAGES.index("articles"):]))
         self.assertNotIn("swift build", script)
         self.assertNotIn("taxonomy-backfill", script)

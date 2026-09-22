@@ -38,8 +38,8 @@ class Listing(unittest.TestCase):
         # that reads them, classified before the vectors are embedded, the vectors finalized into the
         # labels file the facts passes scrape the ids of, the merged facts before the corpus that joins
         # them, the corpus before the store built from it, and the publish that uploads the store is last.
-        expected = ("worklist", "fetch", "articles", "classify", "docfacts", "embed", "finalize", "facts",
-                    "corpus", "store", "publish")
+        expected = ("worklist", "fetch", "articles", "classify", "genres_moods", "docfacts", "embed",
+                    "finalize", "facts", "corpus", "store", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
@@ -180,6 +180,9 @@ class Dispatch(unittest.TestCase):
             self.assertIn("==> fetch: ", gated.stderr, "the drain did not finish, so classify is "
                                                        "unreached for a reason that is not the gate")
             self.assertNotIn("==> classify", gated.stderr)
+            # The genres & moods stage buys too, but only in one of its steps, so it still runs: what it
+            # does without `--spend` is derive from the answers already bought.
+            self.assertIn("==> genres_moods", gated.stderr)
 
             asked = den(*run, "--spend")
             self.assertIn("==> classify", asked.stderr)
@@ -199,7 +202,7 @@ class Dispatch(unittest.TestCase):
         args = argparse.Namespace(set=[], out_dir="out", dataset_version="v", stamp_meta=None, mode=None,
                                   since=None, expect=None, pause_ms=0, limit=None, media=None, vote_floor=40,
                                   regional_vote_floor=10, imdb_floor=1500, regional_imdb_floor=300, plan=False,
-                                  dump_docs=None)
+                                  spend=False, dump_docs=None)
         ctx = module.context(args)
         self.assertEqual((ctx.vote_floor, ctx.regional_vote_floor, ctx.imdb_floor, ctx.regional_imdb_floor),
                          (40, 10, 1500, 300))
