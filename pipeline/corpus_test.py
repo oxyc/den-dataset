@@ -44,6 +44,8 @@ def load(name, path):
     return module
 
 
+import audit_combined  # noqa: E402  — the bundle auditor the stage runs, for its recorded lineage
+
 script = load("consolidate_corpus", os.path.join(V2, "consolidate_corpus.py"))
 fixture = load("test_consolidate_corpus", os.path.join(V2, "test_consolidate_corpus.py"))
 
@@ -65,13 +67,31 @@ PASS_KEYS = ("movie:1", "movie:2", "tv:9")
 FACTS_KEYS = PASS_KEYS + ("movie:77",)
 
 
+#: The source files `run_combined.py` hashes into every shard it writes, and which the stage's audit reads
+#: back. Spelled here rather than imported so a fixture manifest is built the way the pass builds one.
+IMPLEMENTATION = ("run_combined.py", "article_sections.py", "combined_questions.py", "typesafe_client.py")
+
+
 def sha256(path):
     with open(path, "rb") as fh:
         return hashlib.sha256(fh.read()).hexdigest()
 
 
+def write_manifest(shard, implementation=None):
+    """The sidecar the pass writes beside a shard, under the name it derives from `--out`.
+
+    Only the provenance the stage's audit reads is filled in; the rest of a real manifest belongs to the
+    row-level readback, which is not a precondition of a join.
+    """
+    digests = {name: sha256(os.path.join(V2, name)) for name in IMPLEMENTATION}
+    digests.update(implementation or {})
+    with open(shard + ".manifest.json", "w", encoding="utf-8") as fh:
+        json.dump({"runId": "corpus-stage-test", "configSha256": "config-test",
+                   "config": {"implementationSha256": digests}}, fh)
+
+
 def write_inputs(out):
-    """Every declared input, under its declared filename."""
+    """Every declared input, under its declared filename — each pass shard with the sidecar it is audited by."""
     first, second = (os.path.join(out, n) for n in FIXTURE_FILES["combined"])
     fixture.write(first, [fixture.combined(1), fixture.combined(2)])
     fixture.write(second, [fixture.combined(9, media="tv")])
@@ -83,6 +103,8 @@ def write_inputs(out):
     fixture.write(os.path.join(out, FIXTURE_FILES["delta"][1]),
                   [{"mediaType": "tv", "tmdbId": 9,
                     "answers": {"critique__craft": {"p": 0.4}, "made_for_children": {"choice": "no"}}}])
+    for name in FIXTURE_FILES["combined"] + FIXTURE_FILES["delta"]:
+        write_manifest(os.path.join(out, name))
     fixture.facts_file(os.path.join(out, FIXTURE_FILES["facts"][0]), list(FACTS_KEYS),
                        entities={"Q42": {"en": "Ada Director"}})
     fixture.labels_file(os.path.join(out, FIXTURE_FILES["vector_labels"][0]), list(PASS_KEYS))
@@ -176,6 +198,76 @@ class CommandLine(unittest.TestCase):
             self.assertNotIn("--expect", corpus.argv(context(out)))
             command = corpus.argv(context(out, expect=4))
             self.assertEqual(command[command.index("--expect") + 1], "4")
+
+
+class BundleProvenance(unittest.TestCase):
+    """The bundle audit, which nothing ran until it was wired in here.
+
+    Three files in this repo call `audit_combined.py` the only thing between a corrupted bundle and a
+    published dataset, and it was reachable from no stage and no CI step. The join is where it belongs:
+    it is what turns the paid Jev shards into the corpus every later stage derives from.
+
+    The check is over the shards' sidecar manifests, not over their rows. What a manifest pins that
+    matters here is the pass's own source files — a bundle answered by a version of the pass nobody can
+    account for is the corrupted-bundle case, and it is not detectable by looking at the rows.
+    """
+
+    def test_the_audited_inputs_are_the_paid_passes(self):
+        """The other three inputs are derived locally and carry no manifest, so there is nothing to check
+        them against; claiming to audit them would be a check that always passes."""
+        self.assertEqual([a.name for a in corpus.AUDITED], ["combined", "delta"])
+
+    def test_a_clean_bundle_needs_no_allowance(self):
+        with tempfile.TemporaryDirectory() as out:
+            write_inputs(out)
+            self.assertEqual(corpus.audit_bundles(context(out)), [])
+
+    def test_a_shard_with_no_manifest_stops_the_join(self):
+        """The pass derives the sidecar's name from `--out`, so a shard under a name of its own is split
+        from the only record of what produced its rows."""
+        with tempfile.TemporaryDirectory() as out:
+            write_inputs(out)
+            os.remove(os.path.join(out, FIXTURE_FILES["combined"][0] + ".manifest.json"))
+            with self.assertRaises(StageError) as refused:
+                corpus.run(context(out, expect=4))
+            self.assertIn("has no manifest", str(refused.exception))
+
+    def test_an_unexplained_implementation_change_stops_the_join(self):
+        """The edit nobody wrote down. Hashing cannot tell an edit that changes what the rows mean from
+        one that does not, so an unrecorded difference is the end of the run."""
+        with tempfile.TemporaryDirectory() as out:
+            write_inputs(out)
+            write_manifest(os.path.join(out, FIXTURE_FILES["combined"][0]),
+                           implementation={"run_combined.py": "0" * 64})
+            with self.assertRaises(StageError) as refused:
+                corpus.run(context(out, expect=4))
+            self.assertIn("run_combined.py", str(refused.exception))
+            self.assertIn("implementation-lineage.json", str(refused.exception))
+
+    def test_a_recorded_implementation_change_is_allowed_and_named(self):
+        """The shipped case: `combined-v1-r2` was bought on the pass as #20 left it and `delta-v2` on the
+        client as it was before #63. Re-stamping those manifests would erase the provenance of a run that
+        was paid for once, so the exception is recorded instead — and the stage says which one it ran on.
+        """
+        recorded = audit_combined.load_lineage()["run_combined.py"][0]
+        with tempfile.TemporaryDirectory() as out:
+            write_inputs(out)
+            write_manifest(os.path.join(out, FIXTURE_FILES["combined"][0]),
+                           implementation={"run_combined.py": recorded["sha256"]})
+            granted = corpus.audit_bundles(context(out))
+            self.assertEqual([entry["shard"] for entry in granted], [FIXTURE_FILES["combined"][0]])
+            self.assertEqual(granted[0]["sha256"], recorded["sha256"])
+            self.assertTrue(granted[0]["why"])
+
+    def test_the_audit_runs_before_the_join_does(self):
+        """A refusal after the corpus is written is a corpus on disk that something downstream will read."""
+        with tempfile.TemporaryDirectory() as out:
+            write_inputs(out)
+            write_manifest(os.path.join(out, FIXTURE_FILES["delta"][0]),
+                           implementation={"typesafe_client.py": "0" * 64})
+            with self.assertRaises(StageError):
+                corpus.run(context(out, expect=4))
+            self.assertFalse(os.path.exists(os.path.join(out, f"corpus-{VERSION}.jsonl.gz")))
 
 
 class Topology(unittest.TestCase):

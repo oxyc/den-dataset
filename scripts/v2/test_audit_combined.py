@@ -137,5 +137,46 @@ class CombinedAuditTests(unittest.TestCase):
         self.assertEqual(summary["run"]["calls"], 2)
 
 
+class ImplementationLineageTests(unittest.TestCase):
+    """The recorded exceptions to the implementation-hash refusal.
+
+    The refusal is what stops a bundle produced by a version of the pass nobody can account for. It has
+    to have exceptions, because the pass is edited for reasons that cannot reach a row — but an exception
+    that is a bare digest is indistinguishable from one that hides a real change, so every entry has to
+    carry the commit that superseded it and a reason somebody wrote.
+    """
+
+    IMPLEMENTATION = ("run_combined.py", "article_sections.py", "combined_questions.py",
+                      "typesafe_client.py")
+
+    def test_the_working_trees_digests_need_no_exception(self):
+        current = {name: run_combined.sha256_file(os.path.join(audit_combined.HERE, name))
+                   for name in self.IMPLEMENTATION}
+        self.assertEqual(audit_combined.validate_implementation("here", {
+            "implementationSha256": current}), [])
+
+    def test_an_unrecorded_digest_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "implementation-lineage.json"):
+            audit_combined.validate_implementation("here", {
+                "implementationSha256": {"run_combined.py": "0" * 64}})
+
+    def test_every_recorded_entry_names_a_commit_and_a_reason(self):
+        for name, entries in audit_combined.load_lineage().items():
+            self.assertIn(name, self.IMPLEMENTATION, "a file the pass does not hash")
+            for entry in entries:
+                self.assertRegex(entry.get("sha256", ""), r"^[0-9a-f]{64}$")
+                self.assertTrue(entry.get("commit"), f"{name}: no commit")
+                self.assertTrue(entry.get("supersededBy"), f"{name}: no superseding commit")
+                self.assertGreater(len(entry.get("why", "")), 40, f"{name}: no reason worth reading")
+
+    def test_no_recorded_entry_names_the_file_as_it_stands(self):
+        """A stale entry. The digest in the tree needs no exception, and one recorded for it would go on
+        excusing that digest after the file moves on."""
+        for name, entries in audit_combined.load_lineage().items():
+            current = run_combined.sha256_file(os.path.join(audit_combined.HERE, name))
+            for entry in entries:
+                self.assertNotEqual(entry["sha256"], current, f"{name}: stale lineage entry")
+
+
 if __name__ == "__main__":
     unittest.main()

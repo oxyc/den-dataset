@@ -79,7 +79,8 @@ COMBINED = Artifact(
 #: Each shard's sidecar: the run id, and the hashes of the input, the questions, the prompt, the taxonomy,
 #: the model and the pass's own source files. `run_combined.py` derives its name from `--out` rather than
 #: taking a flag for it, and `audit_combined.py` — the only thing between a corrupted bundle and a
-#: published dataset — looks it up by that derived name. Declared so the stage checks it landed there.
+#: published dataset — looks it up by that derived name. Declared so the stage checks it landed there,
+#: and read back by the corpus stage before it joins: see `pipeline/corpus.py`'s `audit_bundles`.
 COMBINED_MANIFEST = Artifact(
     name="combined_manifest",
     filename="combined-v1-r2*.jsonl.manifest.json",

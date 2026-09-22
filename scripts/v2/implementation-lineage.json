@@ -1,0 +1,21 @@
+{
+  "note": "Superseded digests of the four source files run_combined.py hashes into every shard's manifest. A shard bought on an older version of the pass is still auditable ONLY if somebody wrote down why that version's rows mean the same thing; re-stamping the manifest instead would erase the provenance of a paid run to make a checker quiet. So the check stays strict and the exceptions are here, each naming the commit that superseded it and what that commit did. An unlisted digest is a refusal. Add an entry only after reading the diff: `git diff <commit>^ <commit> -- scripts/v2/<file>`.",
+  "superseded": {
+    "run_combined.py": [
+      {
+        "sha256": "90290c325d6f6739b8ec34d1b7476e4448e1a933875273a1b9a261c0d9d66aff",
+        "commit": "b9e02ad",
+        "supersededBy": "c03afa0c4e8dbad44b829101b6d52fdb4485c105",
+        "why": "#60 added the delta pass's `state_section_ids` branch to `classify`, a refusal for a state carrying no article section, and a `sectionDecisions` figure in the PLAN summary. The `state_section_ids=None` path the corpus pass runs is unchanged, and none of it reaches a row, so combined-v1-r2's rows are what this file would still produce. #50 also retitled one docstring line."
+      }
+    ],
+    "typesafe_client.py": [
+      {
+        "sha256": "8dbb112388aca23c1c7b7c87595d71b6975d81e52717dd061bc8a26ba894e546",
+        "commit": "b9e02ad",
+        "supersededBy": "7e7da380eeeef6bad0894615a435fb24d1ac9209",
+        "why": "#63 widened the retry to connection failures that arrive without an HTTP status and made the client obey a Retry-After. It touches when a request is repeated, not what is sent or how the answer is parsed, so a row bought through the old transport is the same row."
+      }
+    ]
+  }
+}
