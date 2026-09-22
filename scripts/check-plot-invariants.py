@@ -27,17 +27,18 @@ Scared` 1-5 are a single item; `Carlos` is in TMDB as a movie and a series), so 
 reach zero with them in it. The identity is `imdbId` (P345), which lives in the facts file, so the
 exemption needs `--facts`.
 
-The cause is the source-work fallback in the enrich pass — `reground` in `pipeline/enrich.py`, which ported
-the Swift `regroundOnWikipedia` that grounded the shipped generation. It tries the title's own article, then
-the Wikidata P144 source work, and keeps the LONGEST, stopping once one reaches `OWN_ARTICLE_SUFFICIENT`.
+The cause was the source-work fallback in the enrich pass as the Swift `regroundOnWikipedia` wrote it, which
+grounded the shipped generation: it tried the title's own article, then the Wikidata P144 source work, and
+kept the LONGEST, stopping once one reached `OWN_ARTICLE_SUFFICIENT`. When MANY adaptations map to one
+source, a 46,936-character novel beats every adaptation's own article, so all of them inherit it, and
+longest-wins guarantees it. `reground` in `pipeline/enrich.py` now reads the source work only for a title
+with no plot of its own on any Wikipedia, and refuses a sitelink that redirects into another page; the
+counts below are the shipped generation's until it is re-enriched.
 
-That is right when ONE adaptation maps to one source work — it is what stops Silo falling back to 189
-characters of its own article instead of the novel's 12,415. It fails when MANY adaptations map to the same
-source: a 46,936-character novel beats every adaptation's own article, so all of them inherit it, and
-longest-wins guarantees it. The consequence is measurable downstream — 63% of shared-article groups agree on
-`primaryGenre` against 12% for a size-matched random control, and all five novel-grounded Wuthering Heights
-titles are labelled `ending=happy` (the novel's) while `movie:3084`, the only one grounded on its own film
-article, is correctly `ending=tragic`.
+The consequence is measurable downstream — 63% of shared-article groups agree on `primaryGenre` against
+12% for a size-matched random control, and all five novel-grounded Wuthering Heights titles are labelled
+`ending=happy` (the novel's) while `movie:3084`, the only one grounded on its own film article, is correctly
+`ending=tragic`.
 
 ### The per-title check the census is a proxy for
 
@@ -377,10 +378,10 @@ def main():
         print("       A title grounded on another work's article is described by that work: its labels, "
               "its facets and its\n       premise all come from a story it does not tell (oxyc/den-dataset#16).",
               file=sys.stderr)
-        print("       The cause is the source-work fallback in `reground` (pipeline/enrich.py) — "
-              "longest-wins over\n       [own article, P144 source work], so one novel beats every "
-              "adaptation's own article and all of them\n       inherit it. The named clusters above say "
-              "which articles to look at.", file=sys.stderr)
+        print("       Look at `reground` (pipeline/enrich.py): the P144 source work is meant to ground only a "
+              "title with no plot\n       of its own on any Wikipedia, so one novel cannot out-read every "
+              "adaptation's own article. The named\n       clusters above say which articles to look at.",
+              file=sys.stderr)
         print("       Fix the grounding, or — if this increase is understood and deliberate — say why:",
               file=sys.stderr)
         print("         DEN_ALLOW_SHARED_PLOTS='why the count went up' scripts/publish-dataset.sh <dir>",
