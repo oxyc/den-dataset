@@ -575,6 +575,10 @@ public struct WikipediaSource: Sendable {
         /// target's revid. Storing the redirect's name beside the target's revid would make the bulk-revid
         /// refresh compare against a redirect page — which effectively never changes — and pin the stale
         /// plot forever, the exact failure the revision is recorded to prevent.
+        ///
+        /// nil on the Enterprise path for the same reason `revId` is: structured-contents returns sections
+        /// and no page title, so it cannot say where the text came from. Echoing the requested title back
+        /// would read as "no redirect happened" on the one path that cannot tell.
         public let resolvedArticle: String?
         /// Which headings the text came from, in the order they were taken.
         ///
@@ -671,7 +675,7 @@ public struct WikipediaSource: Sendable {
 
     public func plot(articleTitle: String) async throws -> PlotFetch? {
         if enterpriseToken != nil, let found = try? await enterpriseProse(articleTitle: articleTitle) {
-            return PlotFetch(text: found.text, revId: nil, resolvedArticle: articleTitle,
+            return PlotFetch(text: found.text, revId: nil, resolvedArticle: nil,
                              sections: found.sections)
         }
         return try await actionAPIPlot(articleTitle: articleTitle)

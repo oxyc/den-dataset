@@ -16,6 +16,53 @@ public struct WorklistEntry: Sendable, Equatable, Hashable {
     }
 }
 
+/// Which of the enrich pass's plot candidates won — the thing that says whether a title's plot text is about
+/// that title at all.
+///
+/// The candidates are not interchangeable. `own` is this title's own article; `ownOtherLanguage` is the same
+/// article on another Wikipedia, which is a different language but still this work; `sourceWork` is the
+/// Wikidata P144 work it was adapted from — a novel, memoir or manga that tells a related story about a
+/// DIFFERENT work. 1,975 of the 47,529 grounded titles are on a source work, and a Jev validity census scored
+/// 1% of those `correct-screen-work` against 98.7% for own-article groundings (oxyc/den-dataset#16).
+public enum PlotArticleRole: String, Codable, Sendable {
+    case own
+    case ownOtherLanguage = "own-other-language"
+    case sourceWork = "source-work"
+}
+
+/// How a grounded title got its plot text, recorded at the moment the enrich pass decides it.
+///
+/// The pass knows both facts and used to discard them, leaving every later census to re-derive them from the
+/// Wikidata cache. The collision census that stands in for them today sees only titles whose article grounds
+/// a SECOND title — 729 of the 2,075 mis-grounded, 35% — because a title grounded on a novel that happens to
+/// ground nothing else collides with nobody and is invisible by construction.
+public struct PlotProvenance: Sendable, Equatable, Codable {
+    public let role: PlotArticleRole
+    /// Whether the article fetched was not the one asked for. Wikidata's sitelink can point at a redirect
+    /// that lands in a different work's page — `Jarhead 2: Field of Fire` → `Jarhead (film)`,
+    /// `Beck – Den svaga länken` → `Beck (Swedish TV series)` — so the role reads `own` and the text is about
+    /// another film. 100 titles arrive this way, and no change to the source-work fall-through touches them.
+    ///
+    /// nil when the fetch named no page: the Enterprise structured-contents endpoint returns sections and no
+    /// title, so it cannot say. Unknown, never assumed false.
+    public let redirected: Bool?
+
+    /// `resolved` is the article the fetch actually read, nil when the source could not report one.
+    public init(role: PlotArticleRole, requested: String, resolved: String?) {
+        self.role = role
+        self.redirected = resolved.map { $0 != requested }
+    }
+
+    public init(role: PlotArticleRole, redirected: Bool?) {
+        self.role = role
+        self.redirected = redirected
+    }
+
+    /// True when the recorded decision says the text describes a different work. The one question every
+    /// consumer of this field asks, answered here so each one does not re-spell it.
+    public var groundedOnAnotherWork: Bool { role == .sourceWork || redirected == true }
+}
+
 /// The single-request enrichment (`append_to_response=keywords`) feeding the classifier. Held only in
 /// memory during the run; **not** part of the published index.
 public struct EnrichedTitle: Sendable, Equatable {
@@ -71,6 +118,13 @@ public struct EnrichedTitle: Sendable, Equatable {
     /// Which Wikipedia the plot came from — "en" unless the title had no English article. A non-English
     /// plot is a different claim about the title, and a reviewer needs to know which language to read.
     public let plotLanguage: String?
+    /// WHICH candidate won and whether a redirect moved it — the two facts that say whether `overview`
+    /// describes this title or another work.
+    ///
+    /// nil means the record was enriched before this was recorded, which is UNKNOWN and not `own`. Nothing
+    /// may infer the role from `plotArticle`: an adaptation's own article and the novel's are both just
+    /// names, and a redirect leaves no trace in the name at all.
+    public let plotProvenance: PlotProvenance?
     /// WHY there is no plot, when there is none: `noArticle`, `noSection`, `belowFloor`, `fetchFailed`.
     ///
     /// `hasWikiPlot: false` alone is what makes every improvement cost a full re-scrape. The four causes
@@ -86,7 +140,7 @@ public struct EnrichedTitle: Sendable, Equatable {
                 runtimeMinutes: Int? = nil, hasWikiPlot: Bool = false,
                 plotArticle: String? = nil, plotRevId: Int? = nil, overviewChars: Int = 0,
                 noPlotReason: String? = nil, plotSections: [String] = [],
-                plotLanguage: String? = nil) {
+                plotLanguage: String? = nil, plotProvenance: PlotProvenance? = nil) {
         self.tmdbId = tmdbId; self.mediaType = mediaType; self.title = title; self.year = year
         self.overview = overview; self.genreIDs = genreIDs; self.genreNames = genreNames
         self.keywords = keywords; self.originCountry = originCountry
@@ -99,18 +153,21 @@ public struct EnrichedTitle: Sendable, Equatable {
         self.noPlotReason = noPlotReason
         self.plotSections = plotSections
         self.plotLanguage = plotLanguage
+        self.plotProvenance = plotProvenance
     }
 
     /// Return a copy with the Wikipedia plot grounded in (`overview` ← plot, `hasWikiPlot` = true).
     public func groundedOnWikiPlot(_ plot: String, article: String? = nil, revId: Int? = nil,
-                                   sections: [String] = [], language: String? = nil) -> EnrichedTitle {
+                                   sections: [String] = [], language: String? = nil,
+                                   provenance: PlotProvenance? = nil) -> EnrichedTitle {
         EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: plot,
                       genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
                       originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: true,
                       plotArticle: article, plotRevId: revId, overviewChars: overviewChars,
-                      noPlotReason: nil, plotSections: sections, plotLanguage: language)
+                      noPlotReason: nil, plotSections: sections, plotLanguage: language,
+                      plotProvenance: provenance)
     }
 
     /// Return a copy recording WHY no plot was found, so a later pass can re-run only the subset a given
@@ -122,7 +179,8 @@ public struct EnrichedTitle: Sendable, Equatable {
                       director: director, topCast: topCast, createdBy: createdBy,
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: false,
                       plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
-                      noPlotReason: reason, plotSections: plotSections, plotLanguage: plotLanguage)
+                      noPlotReason: reason, plotSections: plotSections, plotLanguage: plotLanguage,
+                      plotProvenance: plotProvenance)
     }
 
     /// Fold in the facts that ride along on the Wikidata hop.
@@ -140,7 +198,7 @@ public struct EnrichedTitle: Sendable, Equatable {
                       runtimeMinutes: wikiRuntime ?? runtimeMinutes, hasWikiPlot: hasWikiPlot,
                       plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
                       noPlotReason: noPlotReason, plotSections: plotSections,
-                      plotLanguage: plotLanguage)
+                      plotLanguage: plotLanguage, plotProvenance: plotProvenance)
     }
 }
 

@@ -32,11 +32,25 @@ cpi = load()
 
 
 def enriched(rec, **over):
-    """One enriched row, grounded unless told otherwise."""
+    """One enriched row, grounded unless told otherwise.
+
+    No `plotArticleRole` by default — that is the shipped corpus, enriched before the enrich pass recorded
+    which candidate won. Cases that exercise the recorded decision pass it explicitly.
+    """
     out = {"tmdbId": rec, "mediaType": "movie", "title": f"T{rec}", "hasWikiPlot": True,
            "overview": "plot", "plotArticle": "Wuthering Heights", "plotLanguage": "en"}
     out.update(over)
     return out
+
+
+def owner(rec, **over):
+    """A row whose recorded provenance says it is grounded on its OWN article, unmoved."""
+    return enriched(rec, plotArticleRole="own", plotArticleRedirected=False, **over)
+
+
+def borrower(rec, **over):
+    """A row grounded on the Wikidata P144 source work — a novel, which is a different work."""
+    return enriched(rec, plotArticleRole="source-work", plotArticleRedirected=False, **over)
 
 
 class SharedPlotArticles(unittest.TestCase):
@@ -74,6 +88,131 @@ class SharedPlotArticles(unittest.TestCase):
         self.assertEqual(cpi.shared_plot_articles(grounded), {},
                          "no recorded article is unknown grounding, not shared grounding")
 
+    def test_one_wikidata_item_behind_several_tmdb_ids_is_not_sharing(self):
+        """`Don't Hug Me I'm Scared` 1-5 are ONE Wikidata item with five TMDB ids, and `Carlos` is in TMDB
+        as both a movie and a series. They are one work on its own page, so the invariant can never ratchet
+        to zero while they are counted."""
+        grounded = {"movie:1": enriched(1), "movie:2": enriched(2)}
+        self.assertEqual(cpi.shared_plot_articles(grounded, same_item={"movie:1": "tt2591814",
+                                                                      "movie:2": "tt2591814"}), {})
+
+    def test_two_items_on_one_article_are_still_sharing(self):
+        grounded = {"movie:1": enriched(1), "movie:2": enriched(2)}
+        self.assertEqual(
+            sorted(cpi.shared_plot_articles(grounded, same_item={"movie:1": "tt0000001",
+                                                                 "movie:2": "tt0000002"})),
+            [("en", "Wuthering Heights")])
+
+    def test_an_unknown_item_does_not_exempt_a_group(self):
+        """A title absent from the facts file has no known identity. Exempting on that would turn a missing
+        fact into a licence to share."""
+        grounded = {"movie:1": enriched(1), "movie:2": enriched(2)}
+        self.assertEqual(sorted(cpi.shared_plot_articles(grounded, same_item={"movie:1": "tt2591814"})),
+                         [("en", "Wuthering Heights")])
+
+
+class Borrowers(unittest.TestCase):
+    """Which SIDE of a shared article is at fault.
+
+    336 of the 1,066 are grounded on their own page, correctly, and are counted only because someone else
+    borrowed it. Ratcheting all 1,066 asks the 336 to fix something they did not do.
+    """
+
+    def test_a_recorded_owner_is_not_counted(self):
+        grounded = {"movie:1": owner(1), "movie:2": borrower(2)}
+        groups = cpi.shared_plot_articles(grounded)
+        _, out, _ = run_report(groups, grounded)
+        self.assertIn("another title : 1", out, "only the borrower is counted")
+
+    def test_provenance_that_was_never_recorded_counts(self):
+        """The shipped corpus has no provenance at all. A reader that cannot tell must say so and count the
+        title, not assume it owns the article — the standing 1,066 stays 1,066."""
+        grounded = {"movie:1": enriched(1), "movie:2": enriched(2)}
+        groups = cpi.shared_plot_articles(grounded)
+        _, out, _ = run_report(groups, grounded)
+        self.assertIn("another title : 2", out)
+        self.assertIn("no recorded provenance", out, "and it says why it could not tell")
+
+    def test_an_own_article_reached_through_a_redirect_is_a_borrower(self):
+        """`Jarhead 2: Field of Fire` resolves to `Jarhead (film)`. The winning candidate is the title's
+        own sitelink and the text is about another film, so no change to the source-work fall-through
+        reaches this class."""
+        grounded = {"movie:1": owner(1),
+                    "movie:2": enriched(2, plotArticleRole="own", plotArticleRedirected=True)}
+        groups = cpi.shared_plot_articles(grounded)
+        _, out, _ = run_report(groups, grounded)
+        self.assertIn("another title : 1", out)
+
+    def test_an_unknown_redirect_counts(self):
+        """The Enterprise endpoint names no page, so it cannot say whether a redirect moved the fetch.
+        Counting it as an owner would clear a title on a question nothing answered."""
+        grounded = {"movie:1": enriched(1, plotArticleRole="own", plotArticleRedirected=None),
+                    "movie:2": borrower(2)}
+        groups = cpi.shared_plot_articles(grounded)
+        _, out, _ = run_report(groups, grounded)
+        self.assertIn("another title : 2", out)
+
+
+class ProvenanceCensus(unittest.TestCase):
+    """The per-title check the collision census stands in for.
+
+    2,075 titles are grounded on something that is not about them; the collision census sees 729 of them,
+    because a title grounded on a novel that grounds no SECOND title collides with nobody.
+    """
+
+    def test_a_source_work_grounding_is_named_even_when_it_collides_with_nothing(self):
+        grounded = {"movie:1": borrower(1, plotArticle="Silo (novel)")}
+        census = cpi.plot_provenance(grounded)
+        self.assertEqual(census["misgrounded"], ["movie:1"])
+        self.assertEqual(census["unrecorded"], [])
+
+    def test_a_redirect_is_named(self):
+        grounded = {"movie:1": enriched(1, plotArticleRole="own", plotArticleRedirected=True)}
+        self.assertEqual(cpi.plot_provenance(grounded)["misgrounded"], ["movie:1"])
+
+    def test_an_own_grounding_is_clean(self):
+        self.assertEqual(cpi.plot_provenance({"movie:1": owner(1)})["misgrounded"], [])
+
+    def test_another_language_is_still_this_title(self):
+        grounded = {"movie:1": enriched(1, plotArticleRole="own-other-language",
+                                        plotArticleRedirected=False, plotLanguage="de")}
+        self.assertEqual(cpi.plot_provenance(grounded)["misgrounded"], [])
+
+    def test_a_record_with_no_recorded_role_is_unknown_not_clean(self):
+        """Absent must mean "enriched before this was recorded". Reading it as `own` would report the whole
+        shipped corpus as correctly grounded on the strength of a field nothing wrote."""
+        census = cpi.plot_provenance({"movie:1": enriched(1)})
+        self.assertEqual(census["misgrounded"], [])
+        self.assertEqual(census["unrecorded"], ["movie:1"])
+
+    def test_the_roles_are_counted(self):
+        grounded = {"movie:1": owner(1), "movie:2": borrower(2), "movie:3": enriched(3)}
+        census = cpi.plot_provenance(grounded)
+        self.assertEqual(census["roles"], {"own": 1, "source-work": 1})
+
+    def test_the_census_is_reported_and_stamped(self):
+        with tempfile.TemporaryDirectory() as dir:
+            e, labels = write_case(dir, {1: [borrower(1, plotArticle="Silo (novel)"), owner(2)]})
+            meta = os.path.join(dir, "dataset.meta.json")
+            with open(meta, "w", encoding="utf-8") as fh:
+                json.dump({}, fh)
+            code, out, _ = run(["--enriched-dir", e, "--labels", labels, "--stamp-meta", meta])
+            self.assertEqual(code, 0)
+            self.assertIn("grounded on another work", out)
+            self.assertIn("movie:1", out, "and it names the title, though nothing collides with it")
+            with open(meta, encoding="utf-8") as fh:
+                stamped = json.load(fh)
+            self.assertEqual(stamped["misgroundedTitles"], 1)
+            self.assertEqual(stamped["provenanceUnrecordedTitles"], 0)
+
+    def test_a_corpus_with_no_provenance_says_it_cannot_tell(self):
+        with tempfile.TemporaryDirectory() as dir:
+            e, labels = write_case(dir, {1: [enriched(1), enriched(2, plotArticle="Solaris")]})
+            code, out, _ = run(["--enriched-dir", e, "--labels", labels])
+            self.assertEqual(code, 0, "a corpus enriched before the field existed still publishes")
+            self.assertIn("no recorded provenance", out)
+            self.assertIn("2", out)
+
 
 def write_case(dir, rows_by_batch, labelled=None):
     """An enriched tree + a labels blob, and the argv that checks them."""
@@ -88,6 +227,14 @@ def write_case(dir, rows_by_batch, labelled=None):
     with open(labels, "w", encoding="utf-8") as fh:
         json.dump({"records": [{"tmdbId": k, "mediaType": "movie"} for k in keys]}, fh)
     return enriched_dir, labels
+
+
+def run_report(groups, grounded):
+    """`report_shared_articles` with its output captured, returning `(count, stdout, stderr)`."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        count = cpi.report_shared_articles(groups, grounded)
+    return count, out.getvalue(), err.getvalue()
 
 
 def run(argv):
@@ -227,6 +374,32 @@ class Scope(unittest.TestCase):
                                        {"tmdbId": 2, "mediaType": "movie"}]}, fh)
             _, out, _ = run(["--enriched-dir", e, "--labels", labels, "--facts", facts])
             self.assertIn("another title : 2", out, "movie:3 is out of scope, so it is not counted")
+
+    def test_facts_supplies_the_wikidata_identity_the_exemption_needs(self):
+        """`imdbId` is the item's identity and lives only in the facts file — the enriched row has no
+        Wikidata id at all, so without `--facts` the one-item groups cannot be told from real sharing."""
+        with tempfile.TemporaryDirectory() as dir:
+            e, labels = write_case(dir, {1: [enriched(1), enriched(2)]})
+            facts = os.path.join(dir, "facts.json")
+            with open(facts, "w", encoding="utf-8") as fh:
+                json.dump({"records": [{"tmdbId": 1, "mediaType": "movie", "imdbId": "tt2591814"},
+                                       {"tmdbId": 2, "mediaType": "movie", "imdbId": "tt2591814"}]}, fh)
+            _, without, _ = run(["--enriched-dir", e, "--labels", labels])
+            self.assertIn("another title : 2", without)
+            _, with_facts, _ = run(["--enriched-dir", e, "--labels", labels, "--facts", facts])
+            self.assertIn("another title : 0", with_facts, "one item behind two TMDB ids is one work")
+
+    def test_a_list_valued_imdb_id_is_read(self):
+        """`imdbId` ships as `one_or_many`: a scalar for nearly every title, a list where Wikidata carries
+        two. A reader that only handles the scalar silently stops exempting those."""
+        with tempfile.TemporaryDirectory() as dir:
+            e, labels = write_case(dir, {1: [enriched(1), enriched(2)]})
+            facts = os.path.join(dir, "facts.json")
+            with open(facts, "w", encoding="utf-8") as fh:
+                json.dump({"records": [{"tmdbId": 1, "mediaType": "movie", "imdbId": ["tt2591814"]},
+                                       {"tmdbId": 2, "mediaType": "movie", "imdbId": "tt2591814"}]}, fh)
+            _, out, _ = run(["--enriched-dir", e, "--labels", labels, "--facts", facts])
+            self.assertIn("another title : 0", out)
 
 
 if __name__ == "__main__":

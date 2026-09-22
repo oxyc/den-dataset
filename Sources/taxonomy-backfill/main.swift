@@ -479,22 +479,31 @@ enum Commands {
                         // cover unadapted material or diverge. Accepted for premise and thematic similarity,
                         // where the story engine is what matters; it would be wrong for anything claiming to
                         // describe this cut specifically.
-                        let candidates = [facts?.article, facts?.sourceArticle].compactMap { $0 }
+                        //
+                        // Each candidate carries its ROLE, so the winner still knows which of the two it
+                        // was. Reading it off the position afterwards would be wrong for the 4% of titles
+                        // with no English article, where the source work is the only candidate and sits at
+                        // index 0.
+                        var candidates: [(article: String, role: PlotArticleRole)] = []
+                        if let own = facts?.article { candidates.append((own, .own)) }
+                        if let source = facts?.sourceArticle { candidates.append((source, .sourceWork)) }
                         guard !candidates.isEmpty else { return .noPlot(title, .noArticle) }
                         do {
-                            var found: (article: String, plot: WikipediaSource.PlotFetch)?
+                            var found: (article: String, role: PlotArticleRole,
+                                        plot: WikipediaSource.PlotFetch)?
                             // Whether ANY candidate had a plot-ranked section at all, even a short one. That
                             // is the difference between "a heading rule would reach this" and "the floor
                             // rejected it", and without it both look the same afterwards.
                             var sawSection = false
                             for candidate in candidates {
-                                guard let plot = try await wiki.plot(articleTitle: candidate) else { continue }
+                                guard let plot = try await wiki.plot(articleTitle: candidate.article)
+                                else { continue }
                                 sawSection = true
                                 // Keep the LONGEST, rather than the first over the line. The own article is
                                 // tried first, so a thin one no longer blocks the source work: Silo's own
                                 // article gives 189 characters of premise and the novel gives 12,415.
                                 if plot.text.count > (found?.plot.text.count ?? 0) {
-                                    found = (candidate, plot)
+                                    found = (candidate.article, candidate.role, plot)
                                 }
                                 // …but stop once the title's own article is clearly enough, so a well
                                 // covered adaptation does not pay for a second fetch it cannot use.
@@ -519,7 +528,10 @@ enum Commands {
                                                                          language: lang) else { continue }
                                     sawSection = true
                                     if plot.text.count > (found?.plot.text.count ?? 0) {
-                                        found = (article, plot)
+                                        // Still this title's OWN article, just on another Wikipedia —
+                                        // `articlesByLang` is built from its sitelinks, never the source
+                                        // work's.
+                                        found = (article, .ownOtherLanguage, plot)
                                     }
                                     if plot.text.count >= ownArticleSufficient { break }
                                 }
@@ -532,12 +544,20 @@ enum Commands {
                             // The RESOLVED article, not the one asked for: a redirect returns the target's
                             // content and revid, so storing the redirect's name would make the refresh
                             // compare revisions of two different pages.
+                            //
+                            // …and WHICH candidate that was, plus whether a redirect moved it. Both are
+                            // known only here, and the article name alone recovers neither: a novel's page
+                            // and an adaptation's are both just names, and a redirect leaves no trace at
+                            // all. Discarded, every later census has to replay this decision out of the
+                            // Wikidata cache to ask "is this text about this title?".
                             return .grounded(title.groundedOnWikiPlot(
                                 hit.plot.text,
                                 article: hit.plot.resolvedArticle ?? hit.article,
                                 revId: hit.plot.revId,
                                 sections: hit.plot.sections,
-                                language: hit.plot.language))
+                                language: hit.plot.language,
+                                provenance: PlotProvenance(role: hit.role, requested: hit.article,
+                                                           resolved: hit.plot.resolvedArticle)))
                         } catch {
                             let key = MediaKey(title.mediaType, title.tmdbId)
                             if Transport.isRetryable(error) {
@@ -2330,6 +2350,14 @@ struct EnrichedDTO: Codable {
     let plotSections: [String]
     /// Which Wikipedia the plot came from; "en" unless the fallback found it elsewhere.
     let plotLanguage: String?
+    /// Which candidate the plot came from — `own`, `own-other-language` or `source-work` — and whether a
+    /// redirect moved the fetch off the article that was asked for. Together they answer "is this text
+    /// about this title?", which nothing downstream can re-derive from the article name.
+    ///
+    /// Both absent on every batch written before the enrich pass recorded them: that is UNKNOWN, and a
+    /// reader must report it as unknown rather than read it as `own`/false.
+    let plotArticleRole: String?
+    let plotArticleRedirected: Bool?
     /// The LENGTH of TMDB's overview, never its text — the stub check's only input. See `EnrichedTitle`.
     let overviewChars: Int
 
@@ -2343,6 +2371,8 @@ struct EnrichedDTO: Codable {
         hasWikiPlot = t.hasWikiPlot
         plotArticle = t.plotArticle; plotRevId = t.plotRevId; noPlotReason = t.noPlotReason
         plotSections = t.plotSections; plotLanguage = t.plotLanguage
+        plotArticleRole = t.plotProvenance?.role.rawValue
+        plotArticleRedirected = t.plotProvenance?.redirected
         overviewChars = t.overviewChars
     }
 
@@ -2374,6 +2404,11 @@ struct EnrichedDTO: Codable {
         noPlotReason = try c.decodeIfPresent(String.self, forKey: .noPlotReason)
         plotSections = try c.decodeIfPresent([String].self, forKey: .plotSections) ?? []
         plotLanguage = try c.decodeIfPresent(String.self, forKey: .plotLanguage)
+        // Absent on every batch enriched before the pass recorded which candidate won. Left nil, which
+        // every reader must treat as "cannot tell" — defaulting to `own` would report 47,529 titles as
+        // correctly grounded on the strength of a field that was never written.
+        plotArticleRole = try c.decodeIfPresent(String.self, forKey: .plotArticleRole)
+        plotArticleRedirected = try c.decodeIfPresent(Bool.self, forKey: .plotArticleRedirected)
         // Batches written before the overview was dropped at the client boundary still carry its text. Fall
         // back to its length so a re-read of those keeps the same stub verdict — the text itself is ignored.
         overviewChars = try c.decodeIfPresent(Int.self, forKey: .overviewChars)
@@ -2389,7 +2424,11 @@ struct EnrichedDTO: Codable {
                       runtimeMinutes: runtimeMinutes, hasWikiPlot: hasWikiPlot,
                       plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
                       noPlotReason: noPlotReason, plotSections: plotSections,
-                      plotLanguage: plotLanguage)
+                      plotLanguage: plotLanguage,
+                      // No role recorded is no provenance, not a default one — `PlotProvenance` has no
+                      // "unknown" case because the absence of the value IS the unknown.
+                      plotProvenance: plotArticleRole.flatMap(PlotArticleRole.init(rawValue:))
+                          .map { PlotProvenance(role: $0, redirected: plotArticleRedirected) })
     }
 }
 

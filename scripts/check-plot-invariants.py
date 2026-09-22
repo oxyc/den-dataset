@@ -16,6 +16,17 @@ titles (2.24% of the 47,529 grounded) are grounded on one of 465 articles that g
 Five of them carry the *Wuthering Heights novel*, whose 46,936 characters of `Feminist` / `Class and money` /
 `Morality` are literary criticism of an 1847 book rather than the plot of any adaptation.
 
+What is counted is the **borrowers**: 336 of those 1,066 are the article's own subject, grounded correctly,
+and are in the census only because someone else took their page. Ratcheting all 1,066 asks them to fix
+something they did not do. Both sides are printed; only the borrowing side is counted, and a title whose
+provenance is unrecorded counts, because this guard ratchets and must not clear a title it cannot tell
+about.
+
+**One Wikidata item behind several TMDB ids is exempt** — 31 titles are in that position (`Don't Hug Me I'm
+Scared` 1-5 are a single item; `Carlos` is in TMDB as a movie and a series), so the invariant could never
+reach zero with them in it. The identity is `imdbId` (P345), which lives in the facts file, so the
+exemption needs `--facts`.
+
 The cause is the source-work fallback in `taxonomy-backfill`. `regroundOnWikipedia` tries the title's own
 article, then the Wikidata P144 source work, and keeps the LONGEST:
 
@@ -31,6 +42,23 @@ longest-wins guarantees it. The consequence is measurable downstream — 63% of 
 `primaryGenre` against 12% for a size-matched random control, and all five novel-grounded Wuthering Heights
 titles are labelled `ending=happy` (the novel's) while `movie:3084`, the only one grounded on its own film
 article, is correctly `ending=tragic`.
+
+### The per-title check the census is a proxy for
+
+Provenance recovered for all 47,529 grounded titles says the collision census sees **35% of the defect**:
+2,075 titles are grounded on something that is not about them — 1,975 through the P144 source work and 100
+through a sitelink that redirected into another page — and only 729 of those collide with a second title.
+A title grounded on a novel that grounds nothing else is invisible to a collision census *by construction*:
+Silo is on the novel, alone, and reads as clean.
+
+So the enrich pass now RECORDS what it decided, in `plotArticleRole` (`own` / `own-other-language` /
+`source-work`) and `plotArticleRedirected`, and `plot_provenance` reads it back per title. No fetch, no LLM
+and no collision needed — the pass already knew both facts and used to throw them away.
+
+Absent means the row was enriched before the pass recorded this, which is UNKNOWN. It is reported as such
+and counted as neither clean nor mis-grounded; every row in the shipped generation is in that state, so
+this census reads 0 with 47,529 unknown until a re-enrich. Reading a missing role as `own` would report the
+whole corpus as correctly grounded on the strength of a field nothing wrote.
 
 ### Why the ARTICLE and not the text
 
@@ -75,6 +103,12 @@ records it as `maxBatchId`.
     scripts/check-plot-invariants.py ... --max-batch-id 177 --facts out-publish/facts-<ver>.json
     scripts/check-plot-invariants.py ... --shared-plot-baseline 1066 --stamp-meta out/dataset.meta.json
 
+`--facts` does two things at once, which is worth knowing before adding it to a publish. It SCOPES the
+census to the shipped keys — 8,949 of the 47,529 grounded titles never shipped — and it supplies the
+`imdbId` the one-item exemption needs. Measured on the current generation: 1,066 with neither, 1,043 with
+the exemption alone at full scope, 407 with both. The publish gate does not pass it today, so its baseline
+is the unscoped, unexempted count.
+
 Exit codes: 0 fine (or a standing violation, warned) · 1 `--fail` and a standing violation · 2 the
 shared-article count REGRESSED against `--shared-plot-baseline`.
 """
@@ -104,7 +138,74 @@ def batch_files(enriched_dir, max_batch_id=None):
     return [name for _, name in sorted(out)]
 
 
-def shared_plot_articles(grounded):
+ROLES = ("own", "own-other-language", "source-work")
+
+
+def plot_provenance(grounded):
+    """Per title, what the enrich pass recorded about WHICH article it took the plot from.
+
+    `plotArticleRole` says which candidate won — the title's own article, its article on another
+    Wikipedia, or the Wikidata P144 source work — and `plotArticleRedirected` says whether the fetch
+    landed somewhere other than the page it asked for. Together they answer "is this text about this
+    title?" directly, where the collision census can only answer "did two titles land on one page".
+
+    Returns `misgrounded` (the text describes a different work), `unrecorded` (the row predates the
+    field, so nothing is known) and a count per role.
+
+    ABSENT IS UNKNOWN, NOT CLEAN. Every row in the shipped generation lacks both fields, and reading a
+    missing role as `own` would report 47,529 titles as correctly grounded on the strength of a field
+    nothing ever wrote. They are listed separately and counted as neither.
+    """
+    misgrounded, unrecorded, roles = [], [], {}
+    for key, rec in sorted(grounded.items()):
+        role = rec.get("plotArticleRole")
+        if role not in ROLES:
+            unrecorded.append(key)
+            continue
+        roles[role] = roles.get(role, 0) + 1
+        # A P144 source work is a novel or manga — a different work telling a related story. A redirect
+        # moved the fetch off the page the sitelink named, which lands in a parent or sibling work
+        # (`Jarhead 2: Field of Fire` → `Jarhead (film)`) and is untouched by any change to the
+        # source-work fall-through.
+        if role == "source-work" or rec.get("plotArticleRedirected") is True:
+            misgrounded.append(key)
+    return {"misgrounded": misgrounded, "unrecorded": unrecorded, "roles": roles}
+
+
+def report_provenance(census, grounded, limit=10):
+    """Print the per-title census — the 2,075, not the 729 of them that happen to collide."""
+    denom = len(grounded) or 1
+    found = census["misgrounded"]
+    print(f"  grounded on another work's article (recorded at enrich) : {len(found)} "
+          f"({100 * len(found) / denom:.2f}% of {denom} grounded)")
+    if census["roles"]:
+        print("      by winning candidate: "
+              + ", ".join(f"{role} {census['roles'][role]}" for role in ROLES if role in census["roles"]))
+    for key in found[:limit]:
+        rec = grounded[key]
+        why = "redirected" if rec.get("plotArticleRedirected") is True else rec.get("plotArticleRole")
+        print(f"      {key:16s} {why:12s} {rec.get('plotArticle')!r}")
+    if len(found) > limit:
+        print(f"      … and {len(found) - limit} more")
+    if census["unrecorded"]:
+        print(f"  no recorded provenance : {len(census['unrecorded'])} — enriched before the pass recorded "
+              "which candidate\n      won, so whether their text is about them is UNKNOWN, not clean. "
+              "Re-enrich to learn it.")
+    return len(found)
+
+
+def owns_its_article(rec):
+    """Whether the RECORD says this title is grounded on its own page and the fetch did not move.
+
+    It clears a title only on positive evidence. A row with no recorded role, and one whose redirect the
+    fetch could not report (the Enterprise endpoint names no page), stay counted. This guard ratchets, so
+    the safe direction is to over-count: clearing a title on a question nothing answered would lower the
+    number the NEXT publish is measured against, and hide a real regression under it.
+    """
+    return rec.get("plotArticleRole") == "own" and rec.get("plotArticleRedirected") is False
+
+
+def shared_plot_articles(grounded, same_item=None):
     """`(language, article) -> [key, …]` for every article that grounds MORE THAN ONE title.
 
     Keyed on the language too: `Hamlet` on enwiki and `Hamlet` on dewiki are different articles, and
@@ -114,6 +215,13 @@ def shared_plot_articles(grounded):
     `plotLanguage` defaults to "en" rather than to None. The field was added after the first passes, so
     older enriched rows carry an English plot and no language — treating those as their own bucket would
     hide exactly the oldest, most-inherited groundings.
+
+    `same_item` maps key -> the title's Wikidata identity (its IMDb id, which is P345 and unique per item).
+    A group whose members are ALL one identity is one work behind several TMDB ids, not a borrowed
+    article: `Don't Hug Me I'm Scared` 1-5 are a single Wikidata item with five TMDB ids, and `Carlos` is
+    in TMDB as both a movie and a series. 31 titles are in that position, so the invariant cannot reach
+    zero while they count. A member with no known identity does NOT exempt a group — a missing fact is not
+    evidence of sameness.
     """
     groups = {}
     for key, rec in grounded.items():
@@ -121,17 +229,55 @@ def shared_plot_articles(grounded):
         if not article:
             continue
         groups.setdefault((rec.get("plotLanguage") or "en", article), []).append(key)
-    return {where: sorted(keys) for where, keys in groups.items() if len(keys) > 1}
+
+    def one_item(keys):
+        items = {(same_item or {}).get(key) for key in keys}
+        return len(items) == 1 and None not in items
+
+    return {where: sorted(keys) for where, keys in groups.items()
+            if len(keys) > 1 and not one_item(keys)}
+
+
+def wikidata_identity(facts_records):
+    """`key -> imdbId` from a facts record list. `imdbId` is P345, one per Wikidata item.
+
+    Ships as `one_or_many` (check-facts-schema.py): a bare string for nearly every title, a list where
+    Wikidata carries more than one. Both shapes read the same here.
+    """
+    out = {}
+    for rec in facts_records:
+        imdb = rec.get("imdbId")
+        if isinstance(imdb, list):
+            imdb = imdb[0] if len(imdb) == 1 else None
+        if imdb:
+            out[f"{rec['mediaType']}:{rec['tmdbId']}"] = imdb
+    return out
 
 
 def report_shared_articles(groups, grounded, limit=10):
-    """Print the census, worst first, naming both sides — a guard nobody can act on is a guard nobody reads."""
-    titles = sum(len(keys) for keys in groups.values())
+    """Print the census, worst first, naming both sides — a guard nobody can act on is a guard nobody reads.
+
+    COUNTS THE BORROWERS. Of the 1,066 titles in shared groups, 336 are grounded on their own page,
+    correctly, and appear only because someone else borrowed it — ratcheting all 1,066 asks them to fix
+    something they did not do. The number that moves when the grounding is fixed is the 730 who took
+    someone else's article, and `owns_its_article` is what tells the sides apart. Both sides are still
+    PRINTED: naming only the borrower would leave a reader unable to see what was borrowed from where.
+    """
+    members = sum(len(keys) for keys in groups.values())
+    owners = sum(1 for keys in groups.values() for key in keys if owns_its_article(grounded[key]))
+    unrecorded = sum(1 for keys in groups.values() for key in keys
+                     if grounded[key].get("plotArticleRole") not in ROLES)
+    titles = members - owners
     denom = len(grounded) or 1
     print(f"  grounded on an article that also grounds another title : {titles} "
           f"({100 * titles / denom:.2f}% of {denom} grounded)")
     if not groups:
         return titles
+    if owners:
+        print(f"      {owners} more are the article's own subject, grounded correctly, and not counted")
+    if unrecorded:
+        print(f"      {unrecorded} have no recorded provenance, so which side they are on is unknown — "
+              "counted")
     print(f"      across {len(groups)} shared articles; worst {min(limit, len(groups))}:")
     for where, keys in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:limit]:
         language, article = where
@@ -142,7 +288,8 @@ def report_shared_articles(groups, grounded, limit=10):
             # `overviewChars`: that field keeps the TMDB overview's length across the swap, so it answers a
             # different question and reads as a plot length that is wrong by an order of magnitude.
             chars = len(rec.get("overview") or "")
-            print(f"            {key:16s} {chars:7,d} ch  {rec.get('title') or ''!r}")
+            side = "owns it" if owns_its_article(rec) else ""
+            print(f"            {key:16s} {chars:7,d} ch  {rec.get('title') or ''!r} {side}".rstrip())
         if len(keys) > 6:
             print(f"            … and {len(keys) - 6} more")
     return titles
@@ -181,9 +328,14 @@ def main():
         labelled = {f"{r.get('mediaType', 'movie')}:{r['tmdbId']}" for r in json.load(fh)["records"]}
 
     scope = None
+    same_item = None
     if args.facts:
         with open(args.facts, encoding="utf-8") as fh:
-            scope = {f"{r['mediaType']}:{r['tmdbId']}" for r in json.load(fh)["records"]}
+            records = json.load(fh)["records"]
+        scope = {f"{r['mediaType']}:{r['tmdbId']}" for r in records}
+        # The enriched row carries no Wikidata id, so this file is the only place the one-item exemption
+        # can learn that several TMDB ids are one work.
+        same_item = wikidata_identity(records)
 
     def inscope(key):
         return scope is None or key in scope
@@ -200,8 +352,10 @@ def main():
         print(f"      {k}")
 
     in_scope = {k: r for k, r in grounded.items() if inscope(k)}
-    groups = shared_plot_articles(in_scope)
+    groups = shared_plot_articles(in_scope, same_item=same_item)
     shared_titles = report_shared_articles(groups, in_scope)
+    provenance = plot_provenance(in_scope)
+    misgrounded = report_provenance(provenance, in_scope)
 
     if args.stamp_meta:
         with open(args.stamp_meta, encoding="utf-8") as fh:
@@ -211,6 +365,10 @@ def main():
         # `namingSidecar` would drop a new field on the next `metadata` run.
         meta["sharedPlotArticleTitles"] = shared_titles
         meta["sharedPlotArticles"] = len(groups)
+        # What the collision census is a 35% proxy for. Stamped from the first publish that records it, so
+        # the generation that first carries provenance leaves the baseline a later ratchet can use.
+        meta["misgroundedTitles"] = misgrounded
+        meta["provenanceUnrecordedTitles"] = len(provenance["unrecorded"])
         with open(args.stamp_meta, "w", encoding="utf-8") as fh:
             json.dump(meta, fh, indent=1)
             fh.write("\n")
