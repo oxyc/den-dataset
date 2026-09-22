@@ -88,9 +88,13 @@ COMBINED_MANIFEST = Artifact(
 
 #: The second pass — the questions `combined-v1-r2` did not ask. It buys from a paid provider, and without
 #: `--spend` the script prints the estimate and stops, so the command a refusal quotes carries it.
+#:
+#: `v2`, not `v1`: every `delta-v1` row was answered from the title alone, because the pass patched out the
+#: function `classify()` builds its state from, so Jev never saw the article (fixed in #60). The glob names
+#: the generation that saw the article; a `v1` file left in an out-dir is read by nothing.
 DELTA = Artifact(
     name="delta",
-    filename="delta-v1*.jsonl",
+    filename="delta-v2*.jsonl",
     producer="scripts/v2/run_delta.py",
     how="scripts/v2/run_delta.py --spend",
     shards=True,

@@ -5,7 +5,8 @@
       --combined out-repass/combined-v1-r2.jsonl \
       --combined out-repass/combined-v1-r2-token-fallback.jsonl \
       --combined out-repass/combined-v1-r2-token-fallback-2.jsonl \
-      --delta out-repass/delta-v1.jsonl \
+      --delta out-repass/delta-v2.jsonl \
+      --delta out-repass/delta-v2-rest.jsonl \
       --facts out-repass/facts-5b1c3213b6a1.json \
       --labels out-repass/labels-t02.json \
       --premise-labels out-repass/labels-premise.json \
