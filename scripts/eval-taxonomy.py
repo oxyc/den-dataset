@@ -4,6 +4,7 @@
     scripts/eval-taxonomy.py out-repass/labels-t02.json            # report
     scripts/eval-taxonomy.py out-repass/labels-t02.json --gate     # …and exit 1 below the floors
     scripts/eval-taxonomy.py out-repass/labels-t02.json --record   # make these scores the floors
+    scripts/eval-taxonomy.py data/genres-moods-curated.json --gate # the committed genres & moods
 
 This is the ONLY check in the pipeline that measures label QUALITY rather than plumbing. Everything else
 asks whether the right number of records arrived in the right shape; this asks whether they are *correct*.
@@ -74,9 +75,13 @@ MIN_COVERAGE = 0.70
 
 
 def labels_by_key(path):
-    """`(mediaType, tmdbId)` → its record, from a labels artifact."""
+    """`(mediaType, tmdbId)` → its record, from a labels artifact or from `data/genres-moods-curated.json`,
+    whose `titles` are keyed `mediaType:tmdbId`."""
     with open(path, encoding="utf-8") as fh:
         blob = json.load(fh)
+    if isinstance(blob, dict) and isinstance(blob.get("titles"), dict):
+        return blob.get("taxonomyVersion"), {(k.split(":")[0], int(k.split(":")[1])): r
+                                             for k, r in blob["titles"].items()}
     rows = blob.get("records") if isinstance(blob, dict) else blob
     if not isinstance(rows, list):
         sys.exit(f"{path}: expected a records array")
