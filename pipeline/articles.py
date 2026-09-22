@@ -43,7 +43,7 @@ from . import artifacts
 # for the rule its refusal points at.
 from . import fetch as fetch_stage
 from .contract import StageError
-from lib import http, wikipedia
+from lib import http, wikidata, wikipedia
 
 NAME = "articles"
 
@@ -63,6 +63,14 @@ GATE = 4
 #: and 505 of them disagree about `hasWikiPlot`, which decides whether a title has an article to dump at
 #: all. Newest wins, which is what `finalize` and the embed pass already do.
 BATCH = re.compile(r"^batch-(\d+)\.json$")
+
+#: Ids per Wikidata target lookup, the batch size of the pipeline's other per-id queries. Membership is
+#: part of the cache key, so it is fixed here rather than taken from the command line.
+TARGET_BATCH = 100
+
+#: What a row's `title` and `year` came from. Rows written before it existed carry TMDB's, and nothing
+#: else in a row tells the two apart.
+TARGET_SOURCE = "wikidata"
 
 INPUTS = (artifacts.ENRICHED,)
 OUTPUTS = (artifacts.ARTICLES,)
@@ -138,10 +146,40 @@ def line(row):
     return json.dumps(row, ensure_ascii=False, separators=(",", ":")).replace("/", r"\/")
 
 
-def row(record, found):
+def targets(records, cache):
+    """`key -> {"title", "year"}` from Wikidata for every record about to be dumped.
+
+    `title` and `year` are the classify pass's requested target — what it judges "is this article about
+    this work?" against — and every row once carried TMDB's, which is how this file came to hold TMDB
+    Content. They come from Wikidata instead: the item's label, and its earliest publication or start year.
+
+    Asked before anything is written. A lookup that fails is a refusal, not a row with no target: the
+    classify pass would pay to judge an article against a blank name.
+    """
+    ids = {}
+    for record in records:
+        ids.setdefault(record["mediaType"], set()).add(record["tmdbId"])
+    out = {}
+    for media in sorted(ids):
+        ordered = sorted(ids[media])
+        for start in range(0, len(ordered), TARGET_BATCH):
+            try:
+                found = wikidata.targets(ordered[start:start + TARGET_BATCH], media, cache)
+            except (http.HTTPError, wikidata.WikidataError) as error:
+                raise StageError(f"articles: the Wikidata lookup that names each title failed ({error}). "
+                                 f"Nothing was written; re-run once Wikidata answers.") from None
+            out.update({f"{media}:{tmdb_id}": target for tmdb_id, target in found.items()})
+    return out
+
+
+def row(record, found, target):
     """One output line. The key order is the reader's: `scripts/v2/` joins this file by `mediaType` and
     `tmdbId`, and `extractorArticleRevId` is what says whether the article moved since the plot was
     taken.
+
+    `title` and `year` are Wikidata's (`target`), never the enriched record's, which are TMDB's. Both are
+    written even when unknown: `run_combined.py` fills an ABSENT `year` from the enriched batches — TMDB's
+    year again.
 
     A field the enrichment did not record is written as an explicit `null`, never left out — and for
     `extractorArticleRevId` that is a decision, not a serialiser default. `run_combined.py` and
@@ -154,8 +192,9 @@ def row(record, found):
     return {
         "mediaType": record["mediaType"],
         "tmdbId": record["tmdbId"],
-        "title": record.get("title"),
-        "year": record.get("year"),
+        "title": target.get("title"),
+        "year": target.get("year"),
+        "targetSource": TARGET_SOURCE,
         "article": record["plotArticle"],
         "language": record.get("plotLanguage") or "en",
         "resolvedArticle": found["resolvedArticle"],
@@ -223,6 +262,7 @@ def run(ctx, cache=None):
     print(f"  articles: {len(done)} already dumped, {len(todo)} to fetch", file=sys.stderr)
 
     cache = wikipedia.cache_for() if cache is None else cache
+    named = targets(todo, cache)
     written = missing = failed = 0
     last_error = None
     with open(out, "a", encoding="utf-8") as handle:
@@ -239,7 +279,7 @@ def run(ctx, cache=None):
                     if found is None:
                         missing += 1
                         continue
-                    handle.write(line(row(record, found)) + "\n")
+                    handle.write(line(row(record, found, named.get(key(record), {}))) + "\n")
                     written += 1
                 if written and written % 2000 < GATE:
                     print(f"  articles: dumped {written} (no article {missing}, unreachable {failed})…",
