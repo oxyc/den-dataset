@@ -13,6 +13,7 @@ Both cost real coverage and neither raised anything:
 The query TEXT is pinned because it is hashed into the cache key: reformatting it re-asks Wikidata for
 ~770 batches already on disk.
 """
+import hashlib
 import json
 import tempfile
 import unittest
@@ -175,6 +176,96 @@ class Facts(unittest.TestCase):
 
     def test_an_empty_batch_asks_nothing(self):
         self.assertEqual(wikidata.doc_facts([], "movie"), {})
+
+
+def rows(*bindings_):
+    return json.dumps({"results": {"bindings": list(bindings_)}}).encode()
+
+
+def cell(value):
+    return {"type": "literal", "value": value}
+
+
+#: sha256 of `mapping_query([603, 27205], "movie", <the twelve plot languages>)`. The generator that produces
+#: it was checked against the Swift pass's own cache: over out-repass's 199 enriched batches, the keys it
+#: derives name 180 SPARQL bodies already on disk — every batch whose survivors were the whole mapping set.
+#: One changed character in the text, a comment line included, moves every one of those keys.
+MAPPING_DIGEST = "92f9932aa1dc2704b20a4562a080b6b48db03c25a5ec937ef0b9b44f7cdc87c3"
+LANGUAGES = ("da", "de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "sv")
+
+
+class Mapping(unittest.TestCase):
+    def test_the_query_text_is_the_one_the_cache_is_keyed_on(self):
+        query = wikidata.mapping_query([27205, 603, 603], "movie", LANGUAGES)
+        self.assertEqual(hashlib.sha256(query.encode()).hexdigest(), MAPPING_DIGEST)
+        self.assertIn('VALUES ?tmdb { "603" "27205" }', query, "sorted and unique, as Swift sent them")
+        self.assertTrue(query.endswith("ORDER BY ?tmdb ?article"), "no trailing newline")
+
+    def test_a_series_is_mapped_on_the_series_property(self):
+        self.assertIn("?film wdt:P4983 ?tmdb .", wikidata.mapping_query([1], "tv", LANGUAGES))
+
+    def test_article_imdb_and_absence(self):
+        parsed = wikidata.parse_mapping(rows(
+            {"tmdb": cell("27205"), "article": cell("https://en.wikipedia.org/wiki/Inception"),
+             "imdb": cell("tt1375666")},
+            {"tmdb": cell("603"), "article": cell("https://en.wikipedia.org/wiki/The_Matrix")}))
+        self.assertEqual((parsed[27205]["article"], parsed[27205]["imdb"]), ("Inception", "tt1375666"))
+        self.assertEqual(parsed[603]["article"], "The Matrix")
+        self.assertIsNone(parsed[603]["imdb"])
+        self.assertNotIn(999, parsed)
+
+    def test_creators_accumulate_and_the_shortest_runtime_wins(self):
+        """A title binds once PER creator — first-wins would drop the second Duffer brother — and a series
+        with a 50- and a 70-minute cut answers "have I got time for this" with the 50."""
+        parsed = wikidata.parse_mapping(rows(
+            {"tmdb": cell("66732"), "runtime": cell("70"), "creatorLabel": cell("Ross Duffer")},
+            {"tmdb": cell("66732"), "runtime": cell("49.5"), "creatorLabel": cell("Matt Duffer")}))
+        self.assertEqual(parsed[66732]["creators"], ["Matt Duffer", "Ross Duffer"])
+        self.assertEqual(parsed[66732]["runtimeMinutes"], 50, "rounded half away from zero, as Swift did")
+
+    def test_other_language_articles_are_keyed_by_their_wiki(self):
+        parsed = wikidata.parse_mapping(rows(
+            {"tmdb": cell("1"), "anyArticle": cell("https://de.wikipedia.org/wiki/Schachnovelle_(2021)"),
+             "anySite": cell("https://de.wikipedia.org/")},
+            {"tmdb": cell("1"), "anyArticle": cell("https://en.wikipedia.org/wiki/Chess_Story"),
+             "anySite": cell("https://en.wikipedia.org/")}))
+        self.assertEqual(parsed[1]["articlesByLang"], {"de": "Schachnovelle (2021)"},
+                         "English is the own article, never a fallback")
+
+    def test_the_source_work_is_carried_apart_from_the_own_article(self):
+        parsed = wikidata.parse_mapping(rows(
+            {"tmdb": cell("125988"), "article": cell("https://en.wikipedia.org/wiki/Silo_(TV_series)"),
+             "sourceArticle": cell("https://en.wikipedia.org/wiki/Wool_(novel)")}))
+        self.assertEqual((parsed[125988]["article"], parsed[125988]["sourceArticle"]),
+                         ("Silo (TV series)", "Wool (novel)"))
+
+    def test_zero_bindings_is_an_answer_and_an_undecodable_body_is_not(self):
+        """The first is "these titles have no article" and is recorded; the second must retry the batch. A
+        WDQS maintenance page read as "no bindings" made a whole batch plotless and checkpointed."""
+        self.assertEqual(wikidata.parse_mapping(rows()), {})
+        for body in (b"<html>service unavailable</html>", b"", b'{"results":{}}'):
+            with self.assertRaises(wikidata.WikidataError):
+                wikidata.parse_mapping(body)
+
+    def test_an_article_name_is_percent_decoded_unless_the_escape_is_broken(self):
+        self.assertEqual(wikidata.article_title("https://en.wikipedia.org/wiki/Am%C3%A9lie"), "Amélie")
+        self.assertEqual(wikidata.article_title("https://en.wikipedia.org/wiki/100%_Wolf"), "100% Wolf",
+                         "a bare % leaves the whole name undecoded rather than half-decoded")
+        self.assertIsNone(wikidata.article_title("https://example.com/no-wiki-path"))
+
+    def test_a_body_that_does_not_parse_is_not_kept(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        cache = caching.ResponseCache("wiki", directory.name, 3600)
+        with mock.patch.object(wikidata.http, "request", return_value=b"<html>maintenance</html>"):
+            with self.assertRaises(wikidata.WikidataError):
+                wikidata.mapping([1], "movie", LANGUAGES, cache)
+        key = cache.key("sparql", {"q": wikidata.mapping_query([1], "movie", LANGUAGES)})
+        self.assertIsNone(cache.read(key))
+        with mock.patch.object(wikidata.http, "request", return_value=rows()) as sent:
+            wikidata.mapping([1], "movie", LANGUAGES, cache)
+            wikidata.mapping([1], "movie", LANGUAGES, cache)
+        self.assertEqual(sent.call_count, 1, "a real answer is served from disk the second time")
 
 
 if __name__ == "__main__":

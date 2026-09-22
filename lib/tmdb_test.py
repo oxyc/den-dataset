@@ -117,5 +117,63 @@ class Detail(unittest.TestCase):
         self.assertEqual(self.fetch_twice({"id": 11, "title": "Star Wars", "keywords": {}, "credits": {}}), 1)
 
 
+SHAWSHANK = {"id": 278, "title": "The Shawshank Redemption", "release_date": "1994-09-23",
+             "overview": "  A banker is sentenced to life in Shawshank.  ", "vote_count": 29000,
+             "original_language": "en", "origin_country": ["US"],
+             "genres": [{"id": 18, "name": "Drama"}, {"id": 80, "name": "Crime"}],
+             "keywords": {"keywords": [{"id": 378, "name": "prison"}]},
+             "credits": {"cast": [{"name": "Morgan Freeman", "order": 1}, {"name": "Tim Robbins", "order": 0},
+                                  {"name": "Uncredited"}, {"name": "Bob Gunton", "order": 2},
+                                  {"name": "William Sadler", "order": 3}, {"name": "Clancy Brown", "order": 4}],
+                         "crew": [{"name": "Roger Deakins", "job": "Director of Photography"},
+                                  {"name": "Frank Darabont", "job": "Director"}]}}
+
+
+class Record(unittest.TestCase):
+    def test_the_overview_never_crosses_only_its_length(self):
+        """TMDB's terms (§1.C) speak to their content in a machine-learning application; this record feeds a
+        classifier and an embedder. The stub check needs a length and nothing else."""
+        record = tmdb_api.title_record(SHAWSHANK, 278, "movie")
+        self.assertNotIn("overview", record)
+        self.assertNotIn("Shawshank.", json.dumps(record))
+        self.assertEqual(record["overviewChars"], 43, "trimmed, in code points")
+
+    def test_the_facts_it_does_carry(self):
+        record = tmdb_api.title_record(SHAWSHANK, 278, "movie")
+        self.assertEqual((record["title"], record["year"], record["director"]),
+                         ("The Shawshank Redemption", 1994, "Frank Darabont"))
+        self.assertEqual(record["topCast"], ["Tim Robbins", "Morgan Freeman", "Bob Gunton", "William Sadler"],
+                         "billing order, four names, an unordered name last")
+        self.assertEqual((record["genreIDs"], record["keywords"]), ([18, 80], ["prison"]))
+
+    def test_a_series_carries_its_creators_and_an_empty_list_is_an_answer(self):
+        series = {"id": 1438, "name": "The Wire", "first_air_date": "2002-06-02",
+                  "created_by": [{"name": "David Simon"}], "credits": {"crew": [{"name": "X", "job": "Creator"}]}}
+        self.assertEqual(tmdb_api.title_record(series, 1438, "tv")["createdBy"], ["David Simon"])
+        self.assertEqual(tmdb_api.title_record(dict(series, created_by=[]), 1438, "tv")["createdBy"], [],
+                         "a present, empty created_by does not fall through to the crew")
+        film = {"id": 1, "title": "F", "credits": {"crew": [{"name": "Y", "job": "Creator"}]}}
+        self.assertEqual(tmdb_api.title_record(film, 1, "movie")["createdBy"], ["Y"])
+
+    def test_a_present_empty_value_does_not_fall_through(self):
+        """Swift's `??`: an empty release date is no year, not a reason to read the air date."""
+        body = {"id": 1, "title": "", "name": "N", "release_date": "", "first_air_date": "2001-01-01"}
+        record = tmdb_api.title_record(body, 1, "movie")
+        self.assertEqual((record["title"], record["year"]), ("", None))
+
+    def test_production_countries_answer_only_when_origin_country_is_absent(self):
+        body = {"id": 1, "title": "F", "production_countries": [{"iso_3166_1": "FR"}]}
+        self.assertEqual(tmdb_api.title_record(body, 1, "movie")["originCountry"], ["FR"])
+        self.assertEqual(tmdb_api.title_record(dict(body, origin_country=[]), 1, "movie")["originCountry"], [])
+
+    def test_a_body_of_the_wrong_shape_is_refused_rather_than_half_read(self):
+        """A record whose `genres` is not a list of `{id, name}` did not decode, and was dropped as a dead id
+        rather than enriched with half its fields."""
+        for body in ([], {"id": 1, "genres": [{"name": "Drama"}]}, {"id": 1, "vote_count": "12"},
+                     {"id": 1, "vote_count": True}):
+            with self.assertRaises(ValueError):
+                tmdb_api.title_record(body, 1, "movie")
+
+
 if __name__ == "__main__":
     unittest.main()

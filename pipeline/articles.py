@@ -213,7 +213,7 @@ def run(ctx, cache=None):
             f"articles: {enriched} holds no title with a recorded Wikipedia article, so there is nothing "
             f"to dump and the classify pass would have nothing to read. Enrichment records `plotArticle` "
             # Read off the stage that owns the batches rather than spelled here. It was
-            # `scripts/enrich-run.sh` until the drain became a stage, and a copy of that string would have
+            # an enrich wrapper script until the drain became a stage, and a copy of that string would have
             # gone on sending an operator to a script the pipeline no longer runs.
             f"when it grounds a title — build the batches with: {fetch_stage.HOW}")
     # Applied after the refusal above, so `--limit 0` asks for nothing rather than reading as an empty

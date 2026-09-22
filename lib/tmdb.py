@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""TMDB's `/discover`, which the worklist enumerates a universe from — and the detail-record path the
-enrichment port will read titles through.
+"""TMDB's `/discover`, which the worklist enumerates a universe from — and the detail record the enrichment
+reads each title through (`title_record`), from the ~60k bodies the Swift enrichment already cached.
 
-Small on purpose. The app's client is a different thing with different needs. Today only `/discover` has a
-caller; `TMDB.get`'s detail cache and `is_title_record` exist for the `enrich` port, which lands next and
-needs exactly that, down to finding the detail records the Swift enrichment already cached.
+Small on purpose. The app's client is a different thing with different needs.
 
 Two rules are load-bearing and neither is obvious from the endpoint:
 
@@ -17,6 +15,7 @@ Two rules are load-bearing and neither is obvious from the endpoint:
 """
 import json
 import os
+import re
 
 from . import cache as caching
 from . import http
@@ -78,6 +77,104 @@ def is_title_record(body, expecting_appended):
     if expecting_appended and (body.get("keywords") is None or body.get("credits") is None):
         return False
     return True
+
+
+#: Detail, keywords and credits in ONE call. The value is part of the detail record's cache key, so it is
+#: spelled the way the Swift enrichment spelled it: ~60k records are on disk under exactly this.
+APPEND = "keywords,credits"
+
+#: How many billed names the enriched record keeps.
+TOP_CAST = 4
+
+_YEAR = re.compile(r"[+-]?[0-9]+")
+
+
+def _field(body, name, kind):
+    """`body[name]`, None when absent or null, and a refusal when it is there as the wrong type.
+
+    Strict because the Swift decoder was: a record whose `genres` is not a list of `{id, name}` failed to
+    decode and was dropped as a dead id, not enriched with half its fields. `bool` is not an `int` here,
+    though Python says it is.
+    """
+    value = body.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, kind) or (kind is int and isinstance(value, bool)):
+        raise ValueError(f"TMDB `{name}` is {type(value).__name__}, not {kind.__name__}")
+    return value
+
+
+def _first(*values):
+    """The first value that is not None — Swift's `a ?? b`."""
+    return next((value for value in values if value is not None), None)
+
+
+def _named(items, name, also=()):
+    """A list of objects each carrying a string `name` (and ints/strings named in `also`)."""
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get(name), str):
+            raise ValueError(f"TMDB list item without a string `{name}`: {item!r}"[:200])
+        for extra, kind in also:
+            if not isinstance(item.get(extra), kind) or isinstance(item.get(extra), bool):
+                raise ValueError(f"TMDB list item without `{extra}`: {item!r}"[:200])
+    return items
+
+
+def title_record(body, tmdb_id, media):
+    """The detail body as the enriched record's TMDB half. Raises ValueError on a body that is not one.
+
+    THE OVERVIEW STOPS HERE — its LENGTH crosses, its text does not. TMDB's terms (§1.C) speak directly to
+    using their content with a machine-learning application, and this record feeds a classifier and an
+    embedder. The pipeline only ever needed the overview to tell a stub too thin to classify from a real
+    title, which a character count answers. Dropping the text at the boundary makes that structural:
+    `overview` downstream holds a Wikipedia plot or nothing, so no later path can leak it by forgetting a
+    flag.
+    """
+    if not isinstance(body, dict):
+        raise ValueError("TMDB detail body is not an object")
+    # `??`, not `or`, throughout: a PRESENT empty value is the answer and does not fall through to the next
+    # field — an empty `release_date` is no year, not a reason to read `first_air_date`.
+    date = _first(_field(body, "release_date", str), _field(body, "first_air_date", str))
+    year = int(date[:4]) if date is not None and _YEAR.fullmatch(date[:4]) else None
+    block = _field(body, "keywords", dict) or {}
+    keywords = _named(_first(_field(block, "keywords", list), _field(block, "results", list), []), "name",
+                      (("id", int),))
+    countries = _field(body, "origin_country", list)
+    if countries is None:
+        produced = _named(_field(body, "production_countries", list) or [], "iso_3166_1")
+        countries = [country["iso_3166_1"] for country in produced]
+    credits = _field(body, "credits", dict) or {}
+    crew = _named(_field(credits, "crew", list) or [], "name")
+    cast = _named(_field(credits, "cast", list) or [], "name")
+    genres = _named(_field(body, "genres", list) or [], "name", (("id", int),))
+    director = next((person["name"] for person in crew if person.get("job") == "Director"), None)
+    # Showrunners. `created_by` is a top-level TV field, so a series carries its creators even though
+    # `director` is null for nearly all of them — which is what made same-creator series invisible. Films
+    # have no `created_by`; the crew "Creator" credit is the rare stand-in. An EMPTY `created_by` is an
+    # answer and is kept, not fallen through.
+    created = _field(body, "created_by", list)
+    creators = ([person["name"] for person in _named(created, "name")] if created is not None
+                else [person["name"] for person in crew if person.get("job") == "Creator"])
+    # Billing order; a name with no `order` goes last, and ties keep TMDB's own order.
+    billed = sorted(cast, key=lambda person: person["order"] if isinstance(person.get("order"), int)
+                    else float("inf"))
+    overview = _field(body, "overview", str) or ""
+    return {
+        "tmdbId": tmdb_id, "mediaType": media,
+        "title": _first(_field(body, "title", str), _field(body, "name", str), ""),
+        "year": year,
+        "genreIDs": [genre["id"] for genre in genres], "genres": [genre["name"] for genre in genres],
+        "keywordIDs": [keyword["id"] for keyword in keywords],
+        "keywords": [keyword["name"] for keyword in keywords],
+        "originCountry": countries, "originalLanguage": _field(body, "original_language", str),
+        "voteCount": _field(body, "vote_count", int) or 0,
+        "director": director, "topCast": [person["name"] for person in billed[:TOP_CAST]],
+        "createdBy": creators,
+        # CODE POINTS, where the Swift client counted grapheme clusters. The count's only use is the stub
+        # check below 20, every other length in this pipeline is `len()`, and the two differ only where an
+        # overview carries combining marks — see the port's replay for how often.
+        "overviewChars": len(overview.strip()),
+    }
 
 
 class TMDB:

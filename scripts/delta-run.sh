@@ -9,7 +9,7 @@
 #
 #   den stage worklist --mode delta
 #                           → new titles since the window, above the vote floor, minus what's published
-#   enrich                  → TMDB + Wikipedia plot for those ids only
+#   python3 -m pipeline.enrich → TMDB + Wikipedia plot for those ids only
 #   ---- THE PASS STOPS HERE ----
 #   articles → classify → docfacts → embed → finalize → facts → corpus → store → publish
 #
@@ -76,10 +76,12 @@ for media in movie tv; do
   [ "$count" -eq 0 ] && { echo "  $media: nothing new"; continue; }
   echo "  $media: $count candidate(s) → enrich"
   enterprise_login
-  # `enrich` reports the batch it wrote. Capturing it is the whole fix for `--batch-id 0`: the id comes from
-  # the enrich checkpoint's running counter, so it is only knowable at run time.
-  json=$("$BIN" enrich --worklist "$worklist" --limit "$LIMIT" \
-                       --vote-floor "$VOTE_FLOOR" --out-dir "$OUT_DIR" | tail -1)
+  # ONE batch, not the fetch stage's drain: a delta states its limit and reports what is left over, and a
+  # below-floor leftover — which the drain would stop on — is normal here. `enrich` reports the batch it
+  # wrote. Capturing it is the whole fix for `--batch-id 0`: the id comes from the enrich checkpoint's
+  # running counter, so it is only knowable at run time.
+  json=$(python3 -m pipeline.enrich --worklist "$worklist" --limit "$LIMIT" \
+                                    --vote-floor "$VOTE_FLOOR" --out-dir "$OUT_DIR" | tail -1)
   echo "  $json"
   batch=$(printf '%s' "$json" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("batchId",""))')
   n=$(printf '%s' "$json" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("count",0))')

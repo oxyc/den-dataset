@@ -152,7 +152,7 @@ ssh root@pve 'incus exec den -- podman run --rm --network den docker.io/curlimag
 #    Health is a CONSTANT — it answers ok while the model is missing and every /embed 500s, so probe
 #    /embed/batch with a real string rather than trusting /health.
 
-# 1. Secrets — copy the template and fill it (gitignored via *.env). The run wrapper sources this.
+# 1. Secrets — copy the template and fill it (gitignored via *.env). The fetch stage sources this.
 cd ~/Projects/Personal/den-dataset
 swift build -c release && BIN=.build/release/taxonomy-backfill
 cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterprise username/password (optional)
@@ -174,16 +174,20 @@ python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popu
 #        corrupt the enrich run, it ENDS it, as a batch that reports nothing remaining.
 
 # 3. Enrich — TMDB detail+keywords+credits, then ONE Wikidata SPARQL + live Wikipedia plot per surviving id.
-#    The Wikipedia plot REPLACES the TMDB overview where found (re-grounding); each batch prints wikiPlot vs
-#    tagsOnly. The wrapper logs into Enterprise (if creds present) for a fresh 24h token, then runs ONE batch.
-#    Resumable via the enrich checkpoint — loop until "remaining":0.
+#    The Wikipedia plot is the record's `overview`; TMDB's overview never enters it (only its length). Each
+#    batch prints wikiPlot vs tagsOnly. Per batch the stage reads den.env if TMDB_API_KEY is not already
+#    set, and mints a fresh 24h Enterprise bearer if none is held (scripts/lib/den-env.sh). Resumable via
+#    the enrich checkpoint.
 #    `./den stage fetch --out-dir out --dataset-version <ver>` runs the whole drain — both worklists, batch
-#    after batch, until nothing remains — which is what `scripts/enrich-all.sh` did per media. The loop is
-#    the stage's now, with the same three stopping rules: an aborted batch is retried, a batch that exits
-#    clean having moved `remaining` not at all is a stall, and a batch where every title fell below the vote
-#    floor says so instead of blaming the upstream. `--media movie|tv` does one; `--vote-floor 0` re-includes
-#    the low-vote tail. One batch by hand is still scripts/enrich-run.sh:
-scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. Then: scripts/enrich-run.sh tv 150
+#    after batch, until nothing remains, with three stopping rules: an aborted batch is retried, a batch
+#    that finishes having moved `remaining` not at all is a stall, and a batch where every title fell below
+#    the vote floor says so instead of blaming the upstream. `--media movie|tv` does one; `--vote-floor 0`
+#    re-includes the low-vote tail. To drain the RE-EMBED universe above rather than the stage's own, point
+#    it there:
+./den stage fetch --out-dir out --dataset-version <ver> \
+    --set universe_movie=out/worklist-movie.json --set universe_tv=out/worklist-tv.json
+#    One batch by hand (credentials already in the environment):
+python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --limit 150
 #    (Observed on the popular tier: ~96% wikiPlot hit; the misses are recent/obscure titles with no enwiki article.)
 
 # 3a. Classify — the Jev pass that produced the shipped labels and facets: one typed request per title over
@@ -355,10 +359,12 @@ Re-embed the changed ids through the **same** `den-embed` service the full run u
 ## Optional: Wikimedia Enterprise plots
 
 Put `WIKIMEDIA_ENTERPRISE_USERNAME` / `WIKIMEDIA_ENTERPRISE_PASSWORD` (a free Enterprise account works) in
-`den.env`. `scripts/enrich-run.sh` exchanges them at `https://auth.enterprise.wikimedia.com/v1/login` for a
-24h bearer token (`access_token`) and exports it as `WIKIMEDIA_ENTERPRISE_TOKEN`, which `WikipediaSource` uses
-to hit the structured-contents endpoint for the pre-sectioned plot (higher rate limit, cleaner prose — the
-plot text is the section's `has_parts` paragraphs, joined). Any miss falls back to the public action API.
+`den.env`. The fetch stage (`enterprise_login` in `scripts/lib/den-env.sh`) exchanges them at
+`https://auth.enterprise.wikimedia.com/v1/login` for a 24h bearer token (`access_token`), which `lib/plot.py`
+uses to hit the structured-contents endpoint for the pre-sectioned plot (higher rate limit — the plot text is
+the section's `has_parts` paragraphs, joined). Any miss falls back to the public action API. That path is
+never cached, and it names no page, so a plot read through it records no revision id and no resolved article
+and cannot see a redirect (`plotArticleRedirected` is absent, i.e. unknown).
 Leave the two fields blank to use the public `action=parse` API only (same plot coverage, slower). Fetch is
 per-article/on-demand — **never** a Wikimedia dump (those are stale + hundreds of GB); the working set is a
 few hundred MB total.

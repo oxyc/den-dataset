@@ -94,8 +94,7 @@ class Declaration(unittest.TestCase):
         self.assertEqual(bound.artifact, artifacts.VECTOR_LABELS)
 
     def test_it_declares_a_worklist_per_media(self):
-        """`enrich` refuses a list that mixes them — a film and a series can share a tmdbId — so one
-        combined output would be an artifact nothing downstream can read."""
+        """One file per media is what the fetch stage declares and drains, one universe at a time."""
         self.assertEqual([bind(e).name for e in worklist.OUTPUTS], ["universe_movie", "universe_tv"])
         self.assertEqual(sorted(worklist.MEDIA), ["movie", "tv"])
 
