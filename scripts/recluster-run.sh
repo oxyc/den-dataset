@@ -59,8 +59,9 @@ echo "== tightest candidates =="
 import json, sys
 rows = json.load(open(sys.argv[1]))
 for r in rows[:10]:
+    # A cluster none of whose members carries a subgenre has no dominant label, and the report omits the key.
     print(f"  size={r['size']:4d}  cohesion={r['cohesion']:.2f}  purity={r['purity']:.2f}  "
-          f"nearest existing label: {r['dominantLabel']!r}")
+          f"nearest existing label: {r.get('dominantLabel')!r}")
     print(f"      {', '.join(r['examples'][:6])}")
 print(f"\n{len(rows)} candidate(s) → {sys.argv[1]}")
 PY

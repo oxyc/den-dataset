@@ -148,6 +148,21 @@ class Interpreter(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("candidate(s)", done.stdout)
 
+    def test_the_runner_summarises_a_candidate_with_no_dominant_label(self):
+        """No member carries a subgenre, so the report has no `dominantLabel` for it — which the summary
+        used to index, dying after the report was written."""
+        with tempfile.TemporaryDirectory() as out:
+            labels, _ = fixture(out)
+            with open(labels, encoding="utf-8") as fh:
+                doc = json.load(fh)
+            for record in doc["records"]:
+                record["subgenres"] = []
+            with open(labels, "w", encoding="utf-8") as fh:
+                json.dump(doc, fh)
+            done = self.run_runner(out, dict(os.environ, PYTHON=sys.executable, K="6", MIN_SIZE="3"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("nearest existing label: None", done.stdout)
+
 
 class Arithmetic(unittest.TestCase):
     def test_the_exact_dot_is_left_to_right(self):
