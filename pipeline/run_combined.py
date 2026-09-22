@@ -315,7 +315,7 @@ def load_or_create_manifest(path, config):
                 "  The rows already in the output were bought under the manifest's configuration and "
                 "stay valid; re-stamping the manifest onto this one would erase what produced them. "
                 "Finish the remaining titles in a separately manifested shard beside this one and check "
-                "the set with scripts/v2/audit_combined_bundle.py.")
+                "the set with pipeline/audit_combined_bundle.py.")
             raise SystemExit("\n".join(lines))
         return manifest
     manifest = {

@@ -83,7 +83,7 @@ They were quarantined with `resume_combined_excluding.py` and rerun under a lowe
 questions and code. Completeness is therefore a property of the bundle:
 
 ```sh
-python3 scripts/v2/audit_combined_bundle.py \
+python3 pipeline/audit_combined_bundle.py \
   --articles out-repass/articles.jsonl \
   --enriched-dir out-repass/enriched \
   --out out-repass/combined-v1-r2.jsonl \
