@@ -281,8 +281,8 @@ python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
 # 1,066 titles in the shipped generation are grounded on a Wikipedia article that also grounds another title
 # — five of them on the Wuthering Heights NOVEL, whose literary criticism is not the plot of any adaptation.
 # They get that article's labels, facets and premise, so they are described by a story they do not tell. The
-# cause is the source-work fallback in `regroundOnWikipedia` keeping the longest of [own article, P144 source
-# work]: one novel outweighs every adaptation's own article, so all of them inherit it. `check-plot-
+# cause is the source-work fallback in `reground` (pipeline/enrich.py) keeping the longest of [own article,
+# P144 source work]: one novel outweighs every adaptation's own article, so all of them inherit it. `check-plot-
 # invariants.py` documents the mechanism and what it deliberately does not check.
 #
 # WARNS on the standing count and REFUSES an increase, which is the record-count guard's shape rather than

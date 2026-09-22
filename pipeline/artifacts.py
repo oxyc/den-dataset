@@ -47,9 +47,9 @@ EXPORT_TV = Artifact(
     dedicated=False,
 )
 
-#: The universe, one file per media — what `enrich` drains. Split by media because `enrich` refuses a
-#: worklist that mixes them: a film and a series can share a tmdbId, so one mixed list would classify the
-#: pair once and apply the answer to both. The split is the reader's rule, not a naming convention.
+#: The universe, one file per media — what `enrich` drains, one media at a time, so a run can name one
+#: (`--media`). `enrich` itself takes a worklist of both: a film and a series can share a tmdbId, and every
+#: set, map and query in `pipeline/enrich.py` is keyed by `mediaType:tmdbId` for that reason.
 #:
 #: Named UNIVERSE, not worklist, because two different tools wrote `worklist-<media>.json` and they do not
 #: build the same list. `scripts/build-worklist.py` enumerates the ids Den already SHIPS, ordered by

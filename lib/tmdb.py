@@ -170,9 +170,11 @@ def title_record(body, tmdb_id, media):
         "voteCount": _field(body, "vote_count", int) or 0,
         "director": director, "topCast": [person["name"] for person in billed[:TOP_CAST]],
         "createdBy": creators,
-        # CODE POINTS, where the Swift client counted grapheme clusters. The count's only use is the stub
-        # check below 20, every other length in this pipeline is `len()`, and the two differ only where an
-        # overview carries combining marks — see the port's replay for how often.
+        # CODE POINTS, where the Swift pass counted grapheme clusters (`String.count`) — here and for every
+        # other length it judged, the plot floor and the 1,000-character sufficiency included. The Python
+        # enrichment measures all of them with `len()`. They differ only where text carries combining marks
+        # or joined emoji: over all 47,529 grounded plots, 19 differ and none crosses 120 or 1,000. This
+        # count's only reader is the stub check below 20.
         "overviewChars": len(overview.strip()),
     }
 
