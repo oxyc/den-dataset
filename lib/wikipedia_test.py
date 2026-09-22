@@ -10,8 +10,12 @@ needs anchors or directionality, so Face/Off's plot section arrives as `<span di
 The Rifleman's Overview as two `<span class="anchor">` elements followed by the word. Comparing the raw
 string dropped those articles with no error anywhere.
 """
+import json
+import tempfile
 import unittest
+from unittest import mock
 
+from . import cache as caching
 from . import wikipedia
 
 
@@ -147,6 +151,35 @@ class CacheableBody(unittest.TestCase):
         self.assertFalse(wikipedia.is_parse_result({"error": {"code": "missingtitle"}}))
         self.assertFalse(wikipedia.is_parse_result({"parse": {}, "error": {}}))
         self.assertFalse(wikipedia.is_parse_result([]))
+
+
+class Fetch(unittest.TestCase):
+    """`fetch_parse` against a real cache directory, with the request stubbed — the rule above, used."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.cache = caching.ResponseCache("wiki", self.directory.name, 3600)
+        self.requests = 0
+        patch = mock.patch.object(wikipedia.http, "request", self.answer)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def answer(self, host, path, params=None, **kwargs):
+        self.requests += 1
+        return json.dumps(self.body).encode()
+
+    def test_an_error_envelope_is_fetched_again_rather_than_served_from_disk(self):
+        self.body = {"error": {"code": "missingtitle"}}
+        wikipedia.fetch_parse("Nothing", "en", self.cache)
+        wikipedia.fetch_parse("Nothing", "en", self.cache)
+        self.assertEqual(self.requests, 2)
+
+    def test_a_parse_result_is_served_from_disk_the_second_time(self):
+        self.body = {"parse": {"title": "Alien (film)", "revid": 1, "wikitext": "Lead."}}
+        first = wikipedia.fetch_parse("Alien", "en", self.cache)
+        second = wikipedia.fetch_parse("Alien", "en", self.cache)
+        self.assertEqual((self.requests, second), (1, first))
 
 
 if __name__ == "__main__":

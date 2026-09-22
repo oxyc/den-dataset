@@ -9,8 +9,11 @@ Both are 200s. Neither raises anywhere without a check written for it:
     sits in the cache for its whole TTL as a title with no keywords, no director and no cast.
 """
 import json
+import tempfile
 import unittest
+from unittest import mock
 
+from . import cache as caching
 from . import tmdb as tmdb_api
 
 
@@ -36,12 +39,6 @@ class Query(unittest.TestCase):
         self.assertEqual(movie["primary_release_date.gte"], "2026-01-01")
         self.assertEqual(series["first_air_date.gte"], "2026-01-01")
         self.assertNotIn("first_air_date.gte", movie)
-
-    def test_origins_are_alternatives(self):
-        """Within one TMDB parameter a pipe is OR and a comma is AND; a comma here would ask for titles
-        originating in every named country at once, which is nothing."""
-        params = tmdb_api.discover_params("movie", origin_country=["FR", "IT"])
-        self.assertEqual(params["with_origin_country"], "FR|IT")
 
     def test_a_query_with_no_filters_carries_only_what_it_must(self):
         self.assertEqual(tmdb_api.discover_params("movie"),
@@ -95,6 +92,29 @@ class Body(unittest.TestCase):
 
     def test_a_series_carries_its_name_where_a_film_carries_its_title(self):
         self.assertTrue(tmdb_api.is_title_record({"id": 1399, "name": "Game of Thrones"}, False))
+
+
+class Detail(unittest.TestCase):
+    """`TMDB.get` on a detail path against a real cache directory — the rule above, used."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.client = tmdb_api.TMDB(key="test",
+                                    cache=caching.ResponseCache("tmdb", self.directory.name, 3600))
+
+    def fetch_twice(self, body):
+        fake = FakeHTTP(body)
+        with mock.patch.object(tmdb_api.http, "request", fake):
+            for _ in range(2):
+                self.client.get("/movie/11", {"append_to_response": "keywords,credits"})
+        return len(fake.requests)
+
+    def test_a_partial_record_is_asked_for_again_rather_than_served_for_the_ttl(self):
+        self.assertEqual(self.fetch_twice({"id": 11, "title": "Star Wars"}), 2)
+
+    def test_a_whole_record_is_served_from_disk_the_second_time(self):
+        self.assertEqual(self.fetch_twice({"id": 11, "title": "Star Wars", "keywords": {}, "credits": {}}), 1)
 
 
 if __name__ == "__main__":

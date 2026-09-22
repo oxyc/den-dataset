@@ -14,8 +14,11 @@ The query TEXT is pinned because it is hashed into the cache key: reformatting i
 ~770 batches already on disk.
 """
 import json
+import tempfile
 import unittest
+from unittest import mock
 
+from . import cache as caching
 from . import wikidata
 
 
@@ -37,10 +40,50 @@ class Query(unittest.TestCase):
     def test_the_ids_are_quoted_values_in_the_order_given(self):
         self.assertIn('VALUES ?tmdb { "11" "12" }', wikidata.query_text([11, 12], "movie", "P136"))
 
-    def test_the_text_is_stable_for_one_batch(self):
-        """It is hashed into the cache key, so two spellings of one question are two scrapes."""
+    def test_the_text_is_the_swift_passs_byte_for_byte(self):
+        """It is hashed into the cache key, so a second spelling of one question is a second scrape of
+        ~770 batches. This is `WikipediaSource.docFacts`'s multi-line literal as Swift renders it: two-space
+        indent, and NO trailing newline — the closing delimiter sits on its own line."""
         self.assertEqual(wikidata.query_text([11, 12], "movie", "P57"),
-                         wikidata.query_text([11, 12], "movie", "P57"))
+                         'SELECT ?tmdb ?vLabel WHERE {\n'
+                         '  VALUES ?tmdb { "11" "12" }\n'
+                         '  ?film wdt:P4947 ?tmdb .\n'
+                         '  ?film wdt:P57 ?v .\n'
+                         '  SERVICE wikibase:label { bd:serviceParam wikibase:language "en,mul". }\n'
+                         '}\n'
+                         'ORDER BY ?tmdb ?vLabel')
+
+
+class Fetch(unittest.TestCase):
+    """`fetch_property` against a real cache directory, with the request stubbed."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.cache = caching.ResponseCache("wiki", self.directory.name, 3600)
+        self.requests = 0
+        patch = mock.patch.object(wikidata.http, "request", self.answer)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def answer(self, host, path, params=None, **kwargs):
+        self.requests += 1
+        return self.payload
+
+    def test_a_body_that_does_not_parse_is_not_kept(self):
+        """A WDQS maintenance page arrives as a 200. Kept, it outlives the outage by the whole TTL, and
+        every batch it answers reads as a batch of films with no director and no genre."""
+        self.payload = b"<html>Service temporarily unavailable</html>"
+        with self.assertRaises(wikidata.WikidataError):
+            wikidata.fetch_property([11], "movie", wikidata.DIRECTOR, self.cache)
+        key = self.cache.key("sparql-docfacts", {"q": wikidata.query_text([11], "movie", wikidata.DIRECTOR)})
+        self.assertIsNone(self.cache.read(key))
+
+    def test_a_result_is_kept_under_the_query_text_and_served_from_disk(self):
+        self.payload = bindings((11, "Lucas"))
+        first = wikidata.fetch_property([11], "movie", wikidata.DIRECTOR, self.cache)
+        second = wikidata.fetch_property([11], "movie", wikidata.DIRECTOR, self.cache)
+        self.assertEqual((self.requests, first, second), (1, {11: ["Lucas"]}, {11: ["Lucas"]}))
 
 
 class Parse(unittest.TestCase):

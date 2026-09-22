@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""The two TMDB endpoints this pipeline reads: `/discover` and a title's detail record.
+"""TMDB's `/discover`, which the worklist enumerates a universe from — and the detail-record path the
+enrichment port will read titles through.
 
-Small on purpose. The app's client is a different thing with different needs; this one exists so the
-worklist can enumerate a universe, and nothing else belongs here until the enrichment moves across.
+Small on purpose. The app's client is a different thing with different needs. Today only `/discover` has a
+caller; `TMDB.get`'s detail cache and `is_title_record` exist for the `enrich` port, which lands next and
+needs exactly that, down to finding the detail records the Swift enrichment already cached.
 
 Two rules are load-bearing and neither is obvious from the endpoint:
 
@@ -22,8 +24,7 @@ from . import http
 HOST = "api.themoviedb.org"
 BASE = "/3"
 
-#: `/discover` pages 20 results each and serves at most 500 pages — the ceiling the year partition exists
-#: to page past.
+#: `/discover` pages 20 results each and serves at most 500 pages, so one query sees 10,000 titles at most.
 MAX_PAGES = 500
 
 
@@ -41,8 +42,8 @@ def api_key(env=None):
     return key
 
 
-def discover_params(media, vote_count_gte=None, release_date_gte=None, release_date_lte=None,
-                    origin_country=(), sort_by="popularity.desc", include_adult=False):
+def discover_params(media, vote_count_gte=None, release_date_gte=None, sort_by="popularity.desc",
+                    include_adult=False):
     """The `/discover/{movie,tv}` parameters, without `api_key` or `page`.
 
     The date field is named for the media: TMDB calls it `primary_release_date` for a film and
@@ -52,14 +53,9 @@ def discover_params(media, vote_count_gte=None, release_date_gte=None, release_d
     params = {"sort_by": sort_by, "include_adult": "true" if include_adult else "false"}
     if vote_count_gte is not None:
         params["vote_count.gte"] = str(vote_count_gte)
-    if origin_country:
-        # Within one TMDB parameter a pipe is OR and a comma is AND; origins are alternatives.
-        params["with_origin_country"] = "|".join(origin_country)
-    date_key = "first_air_date" if media == "tv" else "primary_release_date"
     if release_date_gte:
+        date_key = "first_air_date" if media == "tv" else "primary_release_date"
         params[f"{date_key}.gte"] = release_date_gte
-    if release_date_lte:
-        params[f"{date_key}.lte"] = release_date_lte
     return params
 
 
