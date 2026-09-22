@@ -190,7 +190,8 @@ def report_provenance(census, grounded, limit=10):
     if census["unrecorded"]:
         print(f"  no recorded provenance : {len(census['unrecorded'])} — enriched before the pass recorded "
               "which candidate\n      won, so whether their text is about them is UNKNOWN, not clean. "
-              "Re-enrich to learn it.")
+              "Recover it without re-enriching:\n"
+              "      scripts/backfill-plot-provenance.py --enriched-dir <dir> --out-dir <dir>")
     return len(found)
 
 
