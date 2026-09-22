@@ -3,9 +3,9 @@
 
 The rule lives in `scripts/publish-dataset.sh`: the store-identity guard (`DEN_STORE_REBUILD`, which
 caught a silent overwrite the first time it ran), the ownership guard, the manifest prune, the record-count
-and coverage guards, the grounding ratchet, the dead-generation check, and the per-asset upload retries
-that exist because a single multi-file `gh release upload` is all-or-nothing. Every one of them was bought
-by something that shipped wrong. None of it is reimplemented here.
+and coverage guards, the grounding ratchet, the dead-generation check, the alias gate, and the per-asset
+upload retries that exist because a single multi-file `gh release upload` is all-or-nothing. Every one of
+them was bought by something that shipped wrong. None of it is reimplemented here.
 
 **This stage pre-empts nothing.** The other two resolve their inputs first, so a missing file is refused
 with the command that builds it; this one hands over a directory and lets the publisher answer. It already

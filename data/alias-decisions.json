@@ -1,10 +1,10 @@
 {
   "_": [
     "Judgements on aliases that are also some other title's canonical name. See",
-    "scripts/check-alias-collisions.py, which fails a publish on any such alias with no decision here.",
+    "scripts/check-alias-collisions.py, which refuses a publish on any such alias with no decision here.",
     "",
     "'drop' means the film was never released or known under that name and the Wikidata altLabel is wrong;",
-    "the alias is removed from the shipped facts. 'keep' means it is a real alternate title and stays, even",
+    "the store build removes the alias (store/aliases.py). 'keep' means it is a real alternate title and stays, even",
     "though it collides — that is what lets 'parasite' find 기생충 and '96 hours' find Taken.",
     "",
     "Matching ignores punctuation, accents, leading articles and format suffixes, so one entry covers every",

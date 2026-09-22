@@ -32,12 +32,19 @@ Three buckets, and only the third reaches a human:
      suffixes ("Beauty & the Beast" / "Beauty and the Beast", "Bait" / "Bait 3D"). Not errors.
   2. **Substring of its own title** — "Dead Reckoning" on "Mission: Impossible – Dead Reckoning Part One".
      Not errors either.
-  3. **Names a different title.** Every one of these needs a `keep` or `drop` decision. A residue entry with
-     no decision FAILS, the way `check-producers.py` fails an artifact with no producer: new junk surfaces on
-     the next rebuild instead of shipping quietly.
+  3. **Names a different title.** Every one of these needs a `keep` or `drop` decision. One with no
+     decision REFUSES the publish, the way `check-producers.py` refuses an artifact with no producer: new
+     junk surfaces on the next rebuild instead of shipping quietly.
 
-`--tmdb` sorts the review file by whether TMDB has ever recorded the alias as an alternative title, which is
-the difference between skimming a few hundred rows and reading them.
+The buckets and the folding are `store/aliases.py`, shared with the store build, which is where the
+decisions are applied: it removes every `drop` alias and records, as `aliasDecisions` in the manifest, the
+decisions file's hash and how many colliding aliases it shipped undecided. `--gate` is the publisher's half
+(`publish-dataset.sh` runs it): it refuses a manifest with no such record, one built from other decisions
+than the committed file, and one with an undecided collision.
+
+Given a facts file instead, it lists the collisions and writes the undecided ones to `--review` for a
+person. `--tmdb` sorts that file by whether TMDB has ever recorded the alias as an alternative title, which
+is the difference between skimming a few hundred rows and reading them.
 
 ## On TMDB
 
@@ -48,69 +55,20 @@ output comes from Wikidata.
 
     scripts/check-alias-collisions.py out-facts-full/facts-<hash>.json
     scripts/check-alias-collisions.py <facts.json> --tmdb --review out/alias-review.json
-    scripts/check-alias-collisions.py <facts.json> --apply out/facts-clean.json
+    scripts/check-alias-collisions.py --gate out/dataset.meta.json
 """
 import argparse
+import hashlib
 import json
 import os
-import re
 import sys
 import time
-import unicodedata
 import urllib.parse
 import urllib.request
-from collections import defaultdict
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-DECISIONS = os.path.join(HERE, os.pardir, "data", "alias-decisions.json")
-
-# Format and part markers that make two names of the same thing look different.
-SUFFIX = re.compile(
-    r"\s*(3d|2d|imax|part\s*(one|two|three|four|i{1,3}|\d+)|chapter\s*\d+|vol(ume)?\.?\s*\d+)$"
-)
-# Leading articles across the languages the corpus actually carries.
-ARTICLES = (
-    "the ", "an ", "a ", "le ", "la ", "les ", "el ", "los ", "las ", "il ", "lo ", "gli ",
-    "der ", "die ", "das ", "den ", "det ", "en ", "ett ", "o ", "os ", "as ", "de ", "het ",
-)
-
-
-def hard_fold(s):
-    """Folded harder than search folds — for telling two spellings of ONE name apart from two names."""
-    s = unicodedata.normalize("NFD", s)
-    s = "".join(c for c in s if not unicodedata.combining(c)).lower()
-    s = s.replace("&", " and ")
-    s = re.sub(r"[^\w\s]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    for _ in range(3):  # "Bait 3D Part One" needs more than one pass
-        before = s
-        s = SUFFIX.sub("", s).strip()
-        for article in ARTICLES:
-            if s.startswith(article):
-                s = s[len(article):]
-                break
-        if s == before:
-            break
-    return s
-
-
-def own_names(titles):
-    return [titles[k] for k in ("orig", "en") if isinstance(titles.get(k), str) and titles[k].strip()]
-
-
-def decision_key(media, tmdb_id, alias):
-    return f"{media}:{tmdb_id}:{hard_fold(alias)}"
-
-
-def load_decisions(path):
-    if not os.path.exists(path):
-        return {}, {"keep": [], "drop": []}
-    raw = json.load(open(path, encoding="utf-8"))
-    index = {}
-    for verdict in ("keep", "drop"):
-        for row in raw.get(verdict, []):
-            index[decision_key(row["mediaType"], row["tmdbId"], row["alias"])] = verdict
-    return index, raw
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from store.aliases import (DECISIONS, collisions, decision_key, hard_fold,  # noqa: E402
+                           load_decisions, own_names)
 
 
 class TMDBCorroboration:
@@ -163,80 +121,90 @@ class TMDBCorroboration:
             json.dump(self.cache, fh, indent=0, sort_keys=True)
 
 
+def gate(meta_path, decisions_path):
+    """The publisher's check, on the `aliasDecisions` record the store build stamped. 0 passes, 1 refuses.
+
+    Read off the manifest rather than recomputed from a facts file, because a publish dir may hold only
+    the store and the manifest — and because the question is what the STORE ships, which only the build
+    that wrote it saw.
+    """
+    with open(meta_path, encoding="utf-8") as fh:
+        meta = json.load(fh)
+    decisions = os.path.relpath(decisions_path)
+    rebuild = f"scripts/v2/build_store.py … --stamp-meta {meta_path}"
+    record = meta.get("aliasDecisions")
+    if not (isinstance(record, dict) and isinstance(record.get("undecided"), int)
+            and isinstance(record.get("sha256"), str)):
+        print(f"error: the manifest records no aliasDecisions, so nothing says the store applied "
+              f"{decisions} or how many of its aliases name another title undecided. Rebuild the store "
+              f"with {rebuild}, which applies the decisions and records them.", file=sys.stderr)
+        return 1
+
+    with open(decisions_path, "rb") as fh:
+        committed = hashlib.sha256(fh.read()).hexdigest()
+    if record["sha256"] != committed:
+        print(f"error: the store applied a different {decisions} ({record['sha256'][:12]}…) from the one in "
+              f"this tree ({committed[:12]}…), so a decision made since it was built — a drop above all — "
+              f"is not in what would ship. Rebuild the store with {rebuild}.", file=sys.stderr)
+        return 1
+
+    if record["undecided"]:
+        facts = next((e.get("path") for e in meta.get("storeInputs") or [] if e.get("arg") == "facts"),
+                     "<the store's facts-<version>.json>")
+        print(f"error: the store ships {record['undecided']} alias(es) that are another title's name, with no "
+              f"keep/drop decision in {decisions}.\n"
+              f"       atlas ranks an exact name hit above everything else, so an alias that is really another\n"
+              f"       title's name puts this title at the top of that search: Taxi Driver carried \"Alien\"\n"
+              f"       and ranked second for it. To decide them:\n"
+              f"         1. list them:\n"
+              f"              scripts/check-alias-collisions.py {facts} --review alias-review.json\n"
+              f"            (--tmdb sorts the list by whether TMDB records the alias; needs TMDB_API_KEY)\n"
+              f"         2. add each one to \"keep\" or \"drop\" in {decisions}: mediaType, tmdbId, alias,\n"
+              f"            and the evidence as \"why\". Keep a real release or translated title; drop only an\n"
+              f"            alias that names a different work.\n"
+              f"         3. rebuild the store, which removes the drops and records the count again:\n"
+              f"              {rebuild}", file=sys.stderr)
+        return 1
+
+    print(f"alias gate: the store applied {decisions} ({record['dropped']} dropped) and ships no undecided "
+          f"collision")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("facts")
+    ap.add_argument("facts", nargs="?")
+    ap.add_argument("--gate", metavar="META",
+                    help="refuse this manifest's store unless it applied the committed decisions and ships "
+                         "no undecided collision")
     ap.add_argument("--decisions", default=DECISIONS)
     ap.add_argument("--review", help="write the undecided residue here, for a human to judge")
     ap.add_argument("--tmdb", action="store_true", help="sort the review by TMDB corroboration")
     ap.add_argument("--cache", help="corroboration cache (booleans only); default beside --review")
-    ap.add_argument("--apply", help="write a facts file with every `drop` alias removed")
     args = ap.parse_args()
 
-    facts = json.load(open(args.facts, encoding="utf-8"))
-    records = facts["records"]
-    decided, raw_decisions = load_decisions(args.decisions)
+    if args.gate:
+        return gate(args.gate, args.decisions)
+    if not args.facts:
+        ap.error("give a facts file to review, or --gate <dataset.meta.json>")
 
-    canonical = defaultdict(set)
-    for r in records:
-        for name in own_names(r.get("titles") or {}):
-            canonical[hard_fold(name)].add((r.get("mediaType"), r.get("tmdbId")))
+    with open(args.facts, encoding="utf-8") as fh:
+        records = json.load(fh)["records"]
+    decided, _ = load_decisions(args.decisions)
 
-    counts = defaultdict(int)
-    residue = []
-    for r in records:
-        titles = r.get("titles") or {}
-        media, tmdb_id = r.get("mediaType"), r.get("tmdbId")
-        mine = {hard_fold(n) for n in own_names(titles)}
-        for alias in titles.get("aliases") or []:
-            if not isinstance(alias, str) or not alias.strip():
-                continue
-            folded = hard_fold(alias)
-            if not folded:
-                counts["empty after folding"] += 1
-                continue
-            if folded in mine:
-                counts["artefact: same after hard folding"] += 1
-                continue
-            if any(folded in n or n in folded for n in mine if n):
-                counts["artefact: substring of its own title"] += 1
-                continue
-            owners = sorted(canonical.get(folded, set()) - {(media, tmdb_id)})
-            if not owners:
-                counts["a name nothing else claims"] += 1
-                continue
-            counts["names a different title"] += 1
-            verdict = decided.get(decision_key(media, tmdb_id, alias))
-            if verdict is None:
-                residue.append({
-                    "mediaType": media, "tmdbId": tmdb_id,
-                    "title": (own_names(titles) or [None])[0],
-                    "alias": alias,
-                    "claimedBy": [{"mediaType": m, "tmdbId": i} for m, i in owners[:4]],
-                })
+    counts, colliding = collisions(
+        (r.get("mediaType"), r.get("tmdbId"), r.get("titles") or {}) for r in records)
+    residue = [{
+        "mediaType": media, "tmdbId": tmdb_id,
+        "title": (own_names(titles) or [None])[0],
+        "alias": alias,
+        "claimedBy": [{"mediaType": m, "tmdbId": i} for m, i in owners[:4]],
+    } for media, tmdb_id, titles, alias, owners in colliding
+        if decision_key(media, tmdb_id, alias) not in decided]
 
     for name in sorted(counts):
         print(f"{counts[name]:>7}  {name}")
     print(f"{len(residue):>7}  UNDECIDED — need a keep/drop in {os.path.relpath(args.decisions)}")
-
-    if args.apply:
-        drops = {decision_key(d["mediaType"], d["tmdbId"], d["alias"]) for d in raw_decisions.get("drop", [])}
-        removed = 0
-        for r in records:
-            titles = r.get("titles") or {}
-            aliases = titles.get("aliases")
-            if not aliases:
-                continue
-            kept = [a for a in aliases
-                    if decision_key(r.get("mediaType"), r.get("tmdbId"), a) not in drops]
-            removed += len(aliases) - len(kept)
-            if kept:
-                titles["aliases"] = kept
-            else:
-                titles.pop("aliases", None)
-        with open(args.apply, "w", encoding="utf-8") as fh:
-            json.dump(facts, fh, ensure_ascii=False)
-        print(f"applied: {removed} aliases dropped -> {args.apply}")
 
     if residue and args.review:
         if args.tmdb:
