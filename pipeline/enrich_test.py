@@ -109,12 +109,14 @@ class Batch(unittest.TestCase):
         self.out = self.directory.name
         self.cache = caching.ResponseCache("wiki", os.path.join(self.out, "cache"), 3600)
         self.mapping, self.plots, self.plot_calls, self.mapping_calls = {}, {}, [], []
+        # Wikidata P364 per (media, tmdbId): what orders the other-language plot fallback.
+        self.languages, self.language_calls = {}, []
         # IMDb: the id Wikidata names per (media, tmdbId), the dump's counts per id, and what loading the
         # dump does — a `Ratings`, or an exception to raise.
         self.imdb_ids, self.imdb_votes, self.imdb_id_calls = {}, {}, []
         self.dump = None
         for target, stub in ((enrich.wikidata, "mapping"), (enrich.plot, "plot"), (enrich.wikidata, "imdb_ids"),
-                             (enrich.imdb, "ratings")):
+                             (enrich.wikidata, "languages"), (enrich.imdb, "ratings")):
             patch = mock.patch.object(target, stub, getattr(self, stub + "_stub"))
             patch.start()
             self.addCleanup(patch.stop)
@@ -132,6 +134,10 @@ class Batch(unittest.TestCase):
     def mapping_stub(self, ids, media, languages, cache=None):
         self.mapping_calls.append((media, sorted(ids)))
         return {i: self.mapping[(media, i)] for i in ids if (media, i) in self.mapping}
+
+    def languages_stub(self, ids, media, cache=None):
+        self.language_calls.append((media, sorted(ids)))
+        return {i: self.languages[(media, i)] for i in ids if (media, i) in self.languages}
 
     def plot_stub(self, article, language="en", cache=None, token=None):
         self.plot_calls.append((article, language))
@@ -265,11 +271,39 @@ class Batch(unittest.TestCase):
     def test_the_fallback_reads_the_titles_own_language_first_then_the_rest_in_order(self):
         self.mapping[("movie", 1)] = {"article": "Thin", "articlesByLang": {"it": "Film", "de": "Film",
                                                                              "fr": "Film"}}
+        self.languages[("movie", 1)] = ["fr"]
         self.plots[("Film", "de")] = found("d" * 300, language="de")
-        self.run_batch({"/movie/1": detail(1, original_language="fr")}, [("movie", 1)])
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
         self.assertEqual(self.plot_calls, [("Thin", "en"), ("Film", "fr"), ("Film", "de"), ("Film", "it")])
         row = self.rows()["movie:1"]
         self.assertEqual((row["plotArticleRole"], row["plotLanguage"]), ("own-other-language", "de"))
+
+    def test_the_order_is_wikidatas_languages_not_tmdbs(self):
+        """P364, and every code it states. TMDB names one `original_language` and a co-production has
+        several, so the list is the better ordering as well as the CC0 one."""
+        self.mapping[("movie", 1)] = {"article": "Thin",
+                                      "articlesByLang": {"it": "F", "de": "F", "fr": "F", "sv": "F"}}
+        self.languages[("movie", 1)] = ["fr", "sv"]
+        self.run_batch({"/movie/1": detail(1, original_language="it")}, [("movie", 1)])
+        self.assertEqual(self.plot_calls,
+                         [("Thin", "en"), ("F", "fr"), ("F", "sv"), ("F", "de"), ("F", "it")])
+        self.assertEqual(self.language_calls, [("movie", [1])], "one query for the batch, per media")
+
+    def test_a_title_wikidata_states_no_language_for_reads_its_sitelinks_in_code_order(self):
+        """1,164 of the 12,611 corpus titles grounded this way have no P364. Nothing is preferred rather
+        than TMDB's code being preferred."""
+        self.mapping[("movie", 1)] = {"article": "Thin", "articlesByLang": {"it": "F", "de": "F"}}
+        self.run_batch({"/movie/1": detail(1, original_language="it")}, [("movie", 1)])
+        self.assertEqual(self.plot_calls, [("Thin", "en"), ("F", "de"), ("F", "it")])
+
+    def test_a_failed_language_lookup_aborts_the_batch_and_writes_nothing(self):
+        """It asks the same service as the mapping. Swallowed, it would silently reorder every fallback in
+        the batch to code order and record nothing about it."""
+        with mock.patch.object(enrich.wikidata, "languages", side_effect=http.HTTPError(0, "x")):
+            with self.assertRaises(enrich.Aborted):
+                self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
+        self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
+        self.assertFalse(os.path.exists(os.path.join(self.out, "enriched")))
 
     def test_a_title_with_no_english_article_reaches_the_fallback(self):
         """The case the fallback exists for — two thirds of the plotless films have no English article. The
@@ -296,9 +330,10 @@ class Batch(unittest.TestCase):
         """The fallback reads every sitelink until one is enough, and keeps the longest — the title's own
         language is asked first, not preferred at any length."""
         self.mapping[("movie", 1)] = {"articlesByLang": {"de": "Kurz", "fr": "Long"}}
+        self.languages[("movie", 1)] = ["de"]
         self.plots[("Kurz", "de")] = found("d" * 300, resolved="Kurz", language="de")
         self.plots[("Long", "fr")] = found("f" * 600, resolved="Long", language="fr")
-        self.run_batch({"/movie/1": detail(1, original_language="de")}, [("movie", 1)])
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
         self.assertEqual(self.plot_calls, [("Kurz", "de"), ("Long", "fr")])
         row = self.rows()["movie:1"]
         self.assertEqual((row["plotLanguage"], row["plotArticle"], len(row["overview"])), ("fr", "Long", 600))

@@ -273,11 +273,18 @@ def reground(record, facts, cache, token):
     try:
         enough = bool(facts.get("article")) and consider(facts["article"], "en", "own")
         # No English article, or a thin one: two thirds of the plotless films have none, and half of THOSE
-        # have one elsewhere. The title's own language first — right 8 times in 15 — then the rest, since
+        # have one elsewhere. The title's own languages first — right 8 times in 15 — then the rest, since
         # four of the misses were English-language films covered by the German or Italian Wikipedia.
         # Still this title's OWN article — `articlesByLang` is its sitelinks, never the source work's.
+        #
+        # The languages are Wikidata's P364, ALL of them, where this read TMDB's single `original_language`.
+        # A co-production states several and TMDB picks one, so the list is the better ordering as well as
+        # the CC0 one. Measured over the 12,611 corpus titles grounded this way: 11,142 keep TMDB's code
+        # inside the preferred block, 1,164 have no P364 and fall through to code order, and 305 lose it —
+        # of which 87 were actually served by the language P364 does not name. The order only decides which
+        # wiki is READ first; the longest article still wins, so a miss costs a fetch, not a plot.
         if not enough and by_language:
-            preferred = [record["originalLanguage"]] if record["originalLanguage"] is not None else []
+            preferred = list(facts.get("languages") or ())
             for language in preferred + sorted(code for code in by_language if code not in preferred):
                 article = by_language.get(language)
                 if article and consider(article, language, "own-other-language"):
@@ -518,13 +525,16 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
         else:
             titles.append(found)
 
-    # ONE mapping query per media type, keyed by both — see `lib/wikidata.mapping`.
+    # ONE mapping query per media type, keyed by both — see `lib/wikidata.mapping` — and one language query
+    # beside it. P364 is its own request rather than another OPTIONAL on the mapping, whose text is the
+    # cache key for ~770 bodies already on disk.
     facts = {}
     try:
         for media in sorted({record["mediaType"] for record in titles}):
             ids = [record["tmdbId"] for record in titles if record["mediaType"] == media]
+            spoken = wikidata.languages(ids, media, cache)
             for tmdb_id, found in wikidata.mapping(ids, media, plot.HEADINGS_BY_LANGUAGE, cache).items():
-                facts[key(media, tmdb_id)] = found
+                facts[key(media, tmdb_id)] = dict(found, languages=spoken.get(tmdb_id, []))
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise Aborted(f"Wikidata mapping failed for batch {batch_id} after retries ({error}); nothing "
                       f"written — re-run to retry this batch") from error
