@@ -30,6 +30,7 @@ import sys
 
 from . import artifacts
 from .contract import StageError, bind
+from lib import cache as caching
 from lib import http, wikidata
 
 NAME = "docfacts"
@@ -106,10 +107,15 @@ def batches(todo):
 
 
 def write(path, rows):
-    """The whole file, keys sorted, compact — byte-stable for one set of rows."""
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(json.dumps(rows, sort_keys=True, separators=(",", ":"),
-                                ensure_ascii=False).replace("/", r"\/"))
+    """The whole file, keys sorted, compact, `/` escaped — the Swift encoder's bytes, byte-stable for one
+    set of rows.
+
+    Serialised first and swapped in whole: this is rewritten after every batch of a resumable scrape, and
+    `existing` refuses a file that does not parse. An interruption between truncating the file and
+    refilling it would leave exactly that, and the next run would refuse to continue the scrape it was
+    interrupted in."""
+    body = json.dumps(rows, sort_keys=True, separators=(",", ":"), ensure_ascii=False).replace("/", r"\/")
+    caching.write_atomically(path, body.encode("utf-8"))
 
 
 def run(ctx, cache=None):

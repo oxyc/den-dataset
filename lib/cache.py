@@ -46,6 +46,38 @@ OFF = frozenset(("0", "off", "no", "false"))
 
 DAY_SECONDS = 24 * 60 * 60
 
+#: The checkout this module lives in. The default cache is `.cache` under it, not under the working
+#: directory: `den` run from anywhere else would find an empty cache there and re-fetch the whole corpus,
+#: which looks like a slow first run rather than a mistake.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+#: What the Swift passes' `Data.write(options: .atomic)` left under the default umask. `mkstemp` creates
+#: 0600, and a cache entry only its writer can read is one a second user or a backup silently skips.
+MODE = 0o644
+
+
+def write_atomically(path, body):
+    """`body` at `path` via a temp file in the same directory and a rename.
+
+    A reader — another worker, or the next run's resume — sees the old file or the new one, never one that
+    was truncated and not yet refilled. An interrupted in-place write leaves a 0-byte file, and a resumable
+    stage then either refuses it or starts over; neither is what the interruption asked for. Raises: the
+    caller decides whether a failed write is fatal.
+    """
+    parent = os.path.dirname(os.path.abspath(path))
+    handle, temp = tempfile.mkstemp(dir=parent, prefix=f".{os.path.basename(path)}.", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "wb") as fh:
+            os.fchmod(fh.fileno(), MODE)
+            fh.write(body)
+        os.replace(temp, path)
+    except BaseException:
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        raise
+
 
 class ResponseCache:
     """One namespace's entries. `namespace` separates one source's bodies from another's, so `/movie/1`
@@ -86,32 +118,25 @@ class ResponseCache:
         return body or None
 
     def write(self, key, body):
-        """Write via a unique temp file + atomic rename.
+        """Write via `write_atomically`.
 
         The pipeline fans out across threads, so two workers can write one key at once; without this a
         reader can see a half-written body and decode garbage — which is indistinguishable from an
         upstream that answered nonsense.
         """
         path = self.path_for(key)
-        parent = os.path.dirname(path)
         try:
-            os.makedirs(parent, exist_ok=True)
-            handle, temp = tempfile.mkstemp(dir=parent, prefix=f".{key}.", suffix=".tmp")
-            try:
-                with os.fdopen(handle, "wb") as fh:
-                    fh.write(body)
-                os.replace(temp, path)
-            except OSError:
-                os.unlink(temp)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            write_atomically(path, body)
         except OSError:
             # A cache that cannot be written is a slow run, not a failed one.
             return
 
 
 def root(env=None):
-    """Root directory for every namespace: `DEN_CACHE_DIR`, else `.cache`."""
+    """Root directory for every namespace: `DEN_CACHE_DIR`, else `.cache` in this checkout."""
     env = os.environ if env is None else env
-    return env.get("DEN_CACHE_DIR") or ".cache"
+    return env.get("DEN_CACHE_DIR") or os.path.join(REPO, ".cache")
 
 
 def configured(namespace, default_ttl_days, env=None):

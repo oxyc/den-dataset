@@ -79,6 +79,31 @@ class Writing(Staged):
         self.assertEqual(sorted(self.facts()), ["movie:95", "tv:95"])
         self.assertEqual(self.facts()["movie:95"]["directors"], ["Bay"])
 
+    def test_the_file_is_the_swift_encoders_bytes(self):
+        """A golden, not a round trip through `write`: keys sorted (so `movie:12` before `movie:3`),
+        compact, `/` escaped and UTF-8 left raw. The Swift scrape wrote the file this stage resumes, and a
+        second spelling of it moves every hash taken of it for a reason that is not a change in any fact."""
+        path = os.path.join(self.out, "doc-facts.json")
+        docfacts.write(path, {"tv:5": {"genres": ["action/adventure"], "directors": []},
+                              "movie:3": {"directors": ["Agnès Varda"], "genres": []},
+                              "movie:12": {"directors": ["Luc Besson"], "genres": ["science fiction"]}})
+        golden = ('{"movie:12":{"directors":["Luc Besson"],"genres":["science fiction"]},'
+                  '"movie:3":{"directors":["Agnès Varda"],"genres":[]},'
+                  '"tv:5":{"directors":[],"genres":["action\\/adventure"]}}')
+        with open(path, "rb") as fh:
+            self.assertEqual(fh.read(), golden.encode("utf-8"))
+
+    def test_a_write_that_fails_part_way_leaves_the_previous_file(self):
+        """The file is rewritten after every batch, and `existing` refuses one that does not parse. A
+        failure between truncating it and refilling it left a 0-byte file, and the next run refused to
+        continue the very scrape it was interrupted in."""
+        path = os.path.join(self.out, "doc-facts.json")
+        good = {f"movie:{n}": {"directors": ["X"], "genres": []} for n in range(100)}
+        docfacts.write(path, good)
+        with self.assertRaises(TypeError):
+            docfacts.write(path, dict(good, **{"movie:zz": {"directors": [object()], "genres": []}}))
+        self.assertEqual(docfacts.existing(path), good)
+
     def test_two_runs_over_one_corpus_write_one_file(self):
         self.labels([self.record(n) for n in range(1, 30)])
         docfacts.run(self.context())

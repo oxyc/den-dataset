@@ -10,18 +10,23 @@ The two digests below are not invented. Each one names a file that exists under 
 checkout, written by the Swift pass that built the shipped corpus — so this test is the derivation held
 against real evidence rather than against itself.
 """
+import json
 import os
+import stat
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 from . import cache as caching
+from . import wikipedia
 
 #: `en.wikipedia.org/w/api.php` + `articleProse`'s exact query for "Star Wars (film)". Present as
 #: `.cache/wiki/da/da9f30….json`.
 WIKI_QUERY = {"action": "parse", "prop": "wikitext|revid", "format": "json",
               "formatversion": "2", "redirects": "1", "page": "Star Wars (film)"}
 WIKI_DIGEST = "da9f30f7d87e9687f88315085805043bfd5cf19cfc6873463b178e925e234972"
+WIKI_HOST_PATH = "en.wikipedia.org/w/api.php"
 
 #: `/movie/11` with the sub-resources `enrich` appends. Present as `.cache/tmdb/33/333e08….json` — the
 #: entry the enrichment wrote, which the Python port of it has to find under the same name.
@@ -74,6 +79,35 @@ class Key(unittest.TestCase):
                          os.path.join("/root", "wiki", "da", f"{WIKI_DIGEST}.json"))
 
 
+class WikipediaKey(unittest.TestCase):
+    """The key `fetch_parse` actually files a body under — built from `PARSE_QUERY`, not from a copy of it.
+
+    `WIKI_QUERY` above pins the derivation; this pins the query the fetch sends. A parameter dropped from
+    `PARSE_QUERY` moves every one of ~80k keys, and a test holding its own literal of the query would not
+    notice."""
+
+    def test_the_query_the_fetch_sends_hashes_to_the_file_the_swift_pass_wrote(self):
+        cache = caching.ResponseCache("wiki", "/nowhere", 1)
+        query = dict(wikipedia.PARSE_QUERY, page="Star Wars (film)")
+        self.assertEqual(cache.key(WIKI_HOST_PATH, query), WIKI_DIGEST)
+
+    def test_a_fetched_article_lands_in_the_swift_passs_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = caching.ResponseCache("wiki", directory, 3600)
+            body = json.dumps({"parse": {"title": "Star Wars (film)", "revid": 1, "wikitext": "x"}}).encode()
+            with mock.patch.object(wikipedia.http, "request", lambda *args, **kwargs: body):
+                wikipedia.fetch_parse("Star Wars (film)", "en", cache)
+            self.assertTrue(os.path.isfile(cache.path_for(WIKI_DIGEST)))
+
+    @unittest.skipUnless(os.path.isfile(caching.ResponseCache("wiki", caching.root(), 1).path_for(WIKI_DIGEST)),
+                         "no Swift-written cache here (CI has none); DEN_CACHE_DIR points at one")
+    def test_the_digest_names_a_file_on_disk(self):
+        """The evidence the digest above stands on, checked wherever the cache is present."""
+        cache = caching.ResponseCache("wiki", caching.root(), 1)
+        with open(cache.path_for(WIKI_DIGEST), "rb") as handle:
+            self.assertEqual(json.loads(handle.read())["parse"]["title"], "Star Wars (film)")
+
+
 class Store(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -101,8 +135,48 @@ class Store(unittest.TestCase):
         self.cache.write(key, b"")
         self.assertIsNone(self.cache.read(key))
 
+    def test_a_write_that_fails_part_way_leaves_the_previous_entry(self):
+        """Written in place, the file is truncated before the body arrives, and a reader in between — or
+        after a failure — gets an empty entry: a live fetch at best, a decode of garbage at worst."""
+        key = self.cache.key("host/path", {})
+        self.cache.write(key, b'{"parse":{"old":1}}')
+        with self.assertRaises(TypeError):
+            self.cache.write(key, object())
+        self.assertEqual(self.cache.read(key), b'{"parse":{"old":1}}')
+        leftovers = [name for name in os.listdir(os.path.dirname(self.cache.path_for(key)))
+                     if name.endswith(".tmp")]
+        self.assertEqual(leftovers, [])
+
+    def test_an_entry_is_readable_by_others_as_the_swift_passes_left_it(self):
+        """0644, as the 2.1 GB the Swift passes wrote is. `mkstemp`'s 0600 would make every entry this
+        port writes one a second user or a backup silently cannot read."""
+        key = self.cache.key("host/path", {})
+        self.cache.write(key, b"{}")
+        self.assertEqual(stat.S_IMODE(os.stat(self.cache.path_for(key)).st_mode), 0o644)
+
+
+class Atomic(unittest.TestCase):
+    """`write_atomically`, which the resumable stages write their own files through as well."""
+
+    def test_an_interrupted_write_leaves_the_previous_file_whole(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "doc-facts.json")
+            caching.write_atomically(path, b"previous")
+            with self.assertRaises(TypeError):
+                caching.write_atomically(path, object())
+            with open(path, "rb") as handle:
+                self.assertEqual(handle.read(), b"previous")
+            self.assertEqual(os.listdir(directory), ["doc-facts.json"])
+
 
 class Configuration(unittest.TestCase):
+    def test_the_default_root_is_this_checkouts_cache_wherever_den_is_run_from(self):
+        """Relative to the working directory, `den` run from anywhere else finds an empty cache and
+        re-fetches the whole corpus — which reads as a slow first run, not a mistake."""
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.assertEqual(caching.root({}), os.path.join(repo, ".cache"))
+        self.assertEqual(caching.root({"DEN_CACHE_DIR": "/srv/cache"}), "/srv/cache")
+
     def test_a_source_can_be_switched_off_on_its_own_or_with_everything(self):
         self.assertIsNone(caching.configured("wiki", 180, {"DEN_CACHE": "0"}))
         self.assertIsNone(caching.configured("wiki", 180, {"WIKI_CACHE": "off"}))
