@@ -21,9 +21,10 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: after it, because nothing else here reads the articles; the doc facts before the embed pass, because
 #: they are two clauses of the document it composes and a run without them builds a different vector
 #: space; embedding before the corpus join, because its stores are what `finalize` turns into the vectors
-#: the store is built from; the corpus is joined before the store for the same reason; and publishing is
-#: last because it uploads what the store wrote. That ordering is the whole reason a stage can stop naming
-#: a producer for an artifact another stage makes.
+#: the store is built from; the corpus is joined before the store for the same reason; the poster sidecar
+#: after it, because its filename carries the version the manifest names and it declares itself in that
+#: manifest; and publishing is last because it uploads what the store wrote. That ordering is the whole
+#: reason a stage can stop naming a producer for an artifact another stage makes.
 #:
 #: `den run` STOPS BEFORE PUBLISHING unless asked with --publish: every other stage writes into the
 #: out-dir and can be run again, while publish replaces the moving `data-latest` release. The order below
@@ -32,7 +33,8 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: One short of the whole pipeline: `fetch` — the enrichment drain that turns the worklist into the
 #: enriched batches — still lives under `scripts/` and runs from `docs/OPERATE.md`. It lands in the gap
 #: between the worklist and the article dump (oxyc/den-dataset#27).
-STAGES = ("worklist", "articles", "classify", "docfacts", "embed", "corpus", "store", "publish")
+STAGES = ("worklist", "articles", "classify", "docfacts", "embed", "corpus", "store", "metadata",
+          "publish")
 
 
 def stage(name):

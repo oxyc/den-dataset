@@ -9,7 +9,7 @@
 # an INPUT to that build and stays there; step 0 prunes their keys out of the manifest.
 #
 #   taxonomy-backfill finalize --out-dir out   # labels-*.json + vectors-*.bin + dataset.meta.json
-#   taxonomy-backfill metadata --out-dir out   # the cards the store's card sections are built from
+#   ./den stage metadata --out-dir out --dataset-version <ver>   # the poster sidecar
 #   python3 scripts/v2/build_store.py … --stamp-meta out/dataset.meta.json    # THE artifact
 #   scripts/publish-dataset.sh [OUT_DIR]       # default: ./out, then ./data
 #

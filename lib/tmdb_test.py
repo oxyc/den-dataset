@@ -129,14 +129,30 @@ class Sidecar(unittest.TestCase):
         self.assertEqual(row, {"tmdbId": 11, "mediaType": "movie", "title": "Star Wars",
                                "posterPath": "/p.jpg", "year": 1977})
 
-    def test_a_title_with_no_poster_is_still_a_row(self):
-        """A missing poster is a fact about the title; a missing ROW is a card the app cannot render."""
+    def test_a_row_carries_only_the_fields_a_card_draws(self):
+        """Poster paths and titles are artwork and factual references, distinct from the expressive
+        overviews the pipeline strips at the client boundary."""
+        self.cache.write(self.cache.key("/movie/11", {"append_to_response": tmdb_api.APPENDED}),
+                         json.dumps({"id": 11, "title": "Star Wars", "poster_path": "/p.jpg",
+                                     "overview": "A long time ago…", "release_date": "1977-05-25"}).encode())
+        self.assertEqual(sorted(self.client.poster_meta("movie", 11)),
+                         ["mediaType", "posterPath", "title", "tmdbId", "year"])
+
+    def test_a_title_with_no_poster_is_still_a_row_and_omits_the_field(self):
+        """A missing poster is a fact about the title; a missing ROW is a card the app cannot render. The
+        field is left OUT rather than written as null, which is how the 47,539 rows already on disk are
+        shaped — and the app folds that file's sha into its syncKey."""
         self.cache.write(self.cache.key("/tv/1399", {"append_to_response": tmdb_api.APPENDED}),
                          json.dumps({"id": 1399, "name": "Game of Thrones",
                                      "first_air_date": "2011-04-17"}).encode())
         row = self.client.poster_meta("tv", 1399)
-        self.assertIsNone(row["posterPath"])
+        self.assertNotIn("posterPath", row)
         self.assertEqual((row["title"], row["year"]), ("Game of Thrones", 2011))
+
+    def test_a_title_with_no_year_omits_the_year(self):
+        self.cache.write(self.cache.key("/movie/1", {"append_to_response": tmdb_api.APPENDED}),
+                         json.dumps({"id": 1, "title": "Untitled", "poster_path": "/p.jpg"}).encode())
+        self.assertNotIn("year", self.client.poster_meta("movie", 1))
 
     def test_a_record_with_no_date_has_no_year_rather_than_a_wrong_one(self):
         self.assertIsNone(tmdb_api.year_of({"id": 1}))

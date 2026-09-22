@@ -154,6 +154,11 @@ class TMDB:
                     body = None
         if body is None:
             body = self.get(path)
-        return {"tmdbId": int(tmdb_id), "mediaType": media,
-                "title": body.get("title") or body.get("name") or "",
-                "posterPath": body.get("poster_path"), "year": year_of(body)}
+        row = {"tmdbId": int(tmdb_id), "mediaType": media,
+               "title": body.get("title") or body.get("name") or "",
+               "posterPath": body.get("poster_path"), "year": year_of(body)}
+        # A field with no value is OMITTED, not written as null. The 47,539-row sidecar already on disk is
+        # shaped that way — 4 of its rows carry no `posterPath` key and none carries an explicit null —
+        # and the app folds that file's sha into its syncKey, so a second spelling of "no poster" is a
+        # re-download of a file whose content did not change.
+        return {name: value for name, value in row.items() if value is not None}

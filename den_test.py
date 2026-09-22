@@ -37,7 +37,8 @@ class Listing(unittest.TestCase):
         # the articles are dumped before the pass that reads them, classified before the vectors are
         # embedded, the vectors before the corpus is joined, the corpus before the store is built from it,
         # and the publish that uploads it is last.
-        expected = ("worklist", "articles", "classify", "docfacts", "embed", "corpus", "store", "publish")
+        expected = ("worklist", "articles", "classify", "docfacts", "embed", "corpus", "store",
+                    "metadata", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]

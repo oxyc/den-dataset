@@ -257,7 +257,10 @@ $BIN finalize --out-dir out
 #    Its filename carries the datasetVersion, which step 6 just changed, so this belongs after EVERY finalize
 #    that adds titles. Skipping it leaves the manifest naming the previous version's sidecar: it still hashes
 #    correctly, so both consumers accept it and never re-sync — the new titles render with no poster forever.
-$BIN metadata --out-dir out
+./den stage metadata --out-dir out --dataset-version <ver>   # <ver> = what step 6 just wrote
+#    The stage refuses a run whose --dataset-version is not the one dataset.meta.json names, which is that
+#    same failure caught one step earlier. `--limit N` is a PROBE: it fetches N, reports, and writes
+#    nothing — the cheap way to check the credential without re-syncing every device onto a gutted file.
 
 # 7a. The CORPUS — the source of truth the store is built from, joining the pass shards, the facts and
 #     both label sets into one inspectable JSONL plus its entity sidecar. It was never written down here,

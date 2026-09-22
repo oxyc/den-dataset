@@ -187,8 +187,14 @@ for attempt in $(seq 1 200); do
     "$BIN" finalize --out-dir "$OUT_DIR" || { echo "finalize failed — nothing published"; exit 1; }
     # finalize just minted a new datasetVersion, and the sidecar's filename carries it. This is the only
     # finalize in the repo that runs with no operator present, so it is the one that most needs the step
-    # the runbook spells out — without it the manifest names the previous version's sidecar.
-    "$BIN" metadata --out-dir "$OUT_DIR" || { echo "metadata failed — do not publish this out-dir"; exit 1; }
+    # the runbook spells out — without it the manifest names the previous version's sidecar. The version
+    # is read back out of the manifest finalize just wrote rather than parsed out of its log line, and the
+    # stage refuses a run building any other one.
+    version=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["datasetVersion"])' \
+              "$OUT_DIR/dataset.meta.json") \
+      || { echo "could not read datasetVersion from $OUT_DIR/dataset.meta.json"; exit 1; }
+    ./den stage metadata --out-dir "$OUT_DIR" --dataset-version "$version" \
+      || { echo "metadata failed — do not publish this out-dir"; exit 1; }
     exit 0
   fi
 done

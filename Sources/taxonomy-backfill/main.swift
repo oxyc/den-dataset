@@ -480,9 +480,9 @@ enum Commands {
         // amount of re-running fixes a deleted TMDB record. A 404 is an answer; a 429 is not.
         let retryable = misses.filter { $0.contains("retryable") }.count
         let retryableShare = ids.isEmpty ? 0 : Double(retryable) / Double(ids.count)
-        guard retryableShare <= 1 - Self.metadataCoverageFloor else {
+        guard retryableShare <= 1 - Self.coverageFloor else {
             throw ToolError(message: "\(retryable) of \(ids.count) ids failed transiently "
-                + "(\(Int(retryableShare * 100))%, tolerance \(Int((1 - Self.metadataCoverageFloor) * 100))%) "
+                + "(\(Int(retryableShare * 100))%, tolerance \(Int((1 - Self.coverageFloor) * 100))%) "
                 + "— that is TMDB failing, not dead ids. Nothing written; re-run to retry this batch. "
                 + "First few: \(misses.prefix(3).joined(separator: "; "))")
         }
@@ -1546,101 +1546,11 @@ enum Commands {
         print("primary-genre dist: \(report.byPrimaryGenre.sorted { $0.value > $1.value }.map { "\($0.key):\($0.value)" }.joined(separator: " "))")
     }
 
-    // metadata — the on-device METADATA SIDECAR: a light TMDB pass over the finalized records fetching title +
-    // poster_path + year, written to metadata-<datasetVersion>.json. Ships as a ≤6-month SYNCED cache (den-atlas
-    // serves it beside labels/vectors; the app reads it to render a semantic/ANN neighbour without a detail call).
-    // Never bundled — a frozen poster snapshot would break TMDB's 6-month caching allowance.
-    /// Below this share of titles returning metadata, the run is a failure rather than a thin result.
-    /// Real coverage is ~99% (a title without a poster still returns a row); anything near zero is auth or
-    /// rate-limiting.
-    static let metadataCoverageFloor = 0.90
-
-    static func metadata(_ args: Args) async throws {
-        let outDir = try args.require("--out-dir")
-        let skipFetch = args.has("--skip-fetch")   // patch meta from an existing sidecar (no TMDB re-fetch)
-        let limit = args.int("--limit")
-        // --limit is only consulted inside the fetch path, so pairing it with --skip-fetch skipped the
-        // probe and went straight to patching the manifest — which usage() promises it never does.
-        if limit != nil && skipFetch {
-            throw ToolError(message: "--limit is a probe and --skip-fetch patches the manifest from an "
-                + "existing sidecar; together they would do the second without the first. Pick one.")
-        }
-        let meta: DatasetMeta = try JSON.read(Layout.datasetMeta(outDir))
-        let path = Layout.metadataArtifact(outDir, meta.datasetVersion)
-
-        if !skipFetch {
-            let labels: LabelsArtifact = try JSON.read(Layout.labelsArtifact(outDir, Taxonomy.current.version))
-            var records = labels.records
-            // --limit is a PROBE: fetch a handful, report, write nothing. It used to truncate `records`
-            // here — before the coverage floor below is computed against `records.count` — so coverage was
-            // always ~100% and the floor could never fire, and the N rows were then written over the
-            // shipped 37.5k-row sidecar with their sha stamped into the manifest. The app folds that sha
-            // into its syncKey, so `metadata --limit 50`, the obvious cheap credential smoke-test, would
-            // have re-synced every device to a sidecar missing 37,483 titles.
-            if let limit { records = Array(records.prefix(limit)) }
-            let client = try TMDB.client()
-            var out: [PosterMeta] = []
-            let chunk = 200   // the client's semaphore throttles the real fan-out; chunk bounds task spawn count
-            for start in stride(from: 0, to: records.count, by: chunk) {
-                let slice = Array(records[start..<min(start + chunk, records.count)])
-                let batch = await withTaskGroup(of: PosterMeta?.self) { group -> [PosterMeta] in
-                    for r in slice {
-                        let id = MediaIdentifier(r.tmdbId, MediaType(rawValue: r.mediaType) ?? .movie)
-                        group.addTask {
-                            do { return try await client.posterMeta(id) } catch {
-                                // Discarding these is what made the coverage floor below undiagnosable:
-                                // it asserts TMDB is failing without having looked at a single error.
-                                Log.append(Layout.enrichLog(outDir),
-                                           "metadata-miss \(r.mediaType):\(r.tmdbId) (\(error))")
-                                return nil
-                            }
-                        }
-                    }
-                    var acc: [PosterMeta] = []
-                    for await m in group where m != nil { acc.append(m!) }
-                    return acc
-                }
-                out += batch
-                FileHandle.standardError.write(Data("  metadata \(out.count)/\(records.count)…\n".utf8))
-            }
-            // Every fetch is a `try?`, so an expired TMDB_API_KEY or a rate-limit storm yields an EMPTY
-            // sidecar — which was then written over the good one and its sha stamped into the manifest.
-            // The app folds that sha into its syncKey, so the device happily re-syncs to a sidecar with no
-            // posters in it. A partial result is not a result; refuse it and leave what is there.
-            let coverage = records.isEmpty ? 1.0 : Double(out.count) / Double(records.count)
-            guard coverage >= Self.metadataCoverageFloor else {
-                throw ToolError(message: "only \(out.count) of \(records.count) titles returned metadata "
-                    + "(\(Int(coverage * 100))%, floor \(Int(Self.metadataCoverageFloor * 100))%) — that is "
-                    + "TMDB failing, not titles without posters. Nothing written; the existing sidecar and "
-                    + "manifest are unchanged.")
-            }
-            // A TOTAL order — (id, mediaType), not id alone. TaskGroup yields in completion order, so two
-            // identical runs produced different bytes, a different metadataSha256, and, since the app folds
-            // that into its syncKey, a forced 4.6 MB re-download on every device for a file that had not
-            // changed. Sorting on the id alone does not fix that: `sort` is unstable, and the corpus
-            // contains 940 ids that are BOTH a movie and a series — the very titles the media-qualified
-            // checkpoint restores. Measured: 8 shuffles of that corpus produced 8 distinct sha256.
-            out = SidecarOrder.sorted(out)
-            if limit != nil {
-                print(JSON.line(["probe": out.count, "of": records.count,
-                                 "withPoster": out.filter { $0.posterPath != nil }.count,
-                                 "wrote": "nothing (--limit is a probe)"]))
-                return
-            }
-            try JSON.write(out, to: path)
-        }
-
-        // Patch dataset.meta.json to reference the sidecar (the server reads meta to know what blobs to serve;
-        // the app folds `metadataSha256` into its syncKey so a new/updated sidecar triggers a re-sync).
-        let blob = try Data(contentsOf: URL(fileURLWithPath: path))
-        let patched = meta.namingSidecar(file: (path as NSString).lastPathComponent,
-                                         sha256: sha256Hex(blob), bytes: blob.count)
-        try JSON.writeMeta(patched, to: Layout.datasetMeta(outDir))
-        let all = (try? JSON.read(path) as [PosterMeta]) ?? []
-        print(JSON.line(["metadata": all.count, "withPoster": all.filter { $0.posterPath != nil }.count,
-                         "sha": patched.metadataSha256 ?? "", "bytes": patched.metadataBytes ?? 0]))
-    }
-
+    /// Below this share of a batch's ids coming back, the run is a failure rather than a thin result.
+    /// Real coverage is ~99%, so anything near zero is auth or rate-limiting. `enrich-ids` applies it to
+    /// TRANSIENT failures only: a 404 is an answer and a 429 is not, and on a five-id targeted re-pass
+    /// one dead id is 20% — under the floor, and no amount of re-running fixes a deleted TMDB record.
+    static let coverageFloor = 0.90
 
     // MARK: - recluster (DT-F weekly)
 
@@ -2255,7 +2165,6 @@ enum Layout {
     static func enrichCheckpoint(_ dir: String) -> String { join(dir, "enrich-checkpoint.json") }
     static func classifyCheckpoint(_ dir: String) -> String { join(dir, "classify-checkpoint.json") }
     static func wkConfirmed(_ dir: String) -> String { join(dir, "wk-confirmed.json") }
-    static func metadataArtifact(_ dir: String, _ version: String) -> String { join(dir, "metadata-\(version).json") }
     static func enrichLog(_ dir: String) -> String { join(dir, "enrich-log.txt") }
     static func enrichedDir(_ dir: String) -> String { join(dir, "enriched") }
     static func enrichedBatch(_ dir: String, _ id: Int) -> String { join(dir, "enriched/batch-\(id).json") }
@@ -2563,17 +2472,6 @@ enum Spec {
                        + "vectors, so a mislabelled blob is refused rather than shipped"),
             ],
             run: { try Commands.finalize($0) }),
-        Subcommand(
-            name: "metadata",
-            summary: "The poster sidecar. Its filename carries the datasetVersion — run it after EVERY finalize.",
-            flags: [
-                .value("--out-dir", "<dir>", "the run directory holding dataset.meta.json", required: true),
-                .bare("--skip-fetch", "patch the manifest from an existing sidecar, with no TMDB re-fetch"),
-                .value("--limit", "<n>",
-                       "a PROBE: fetch N and report, writing no sidecar and touching no manifest — a partial "
-                       + "sidecar would re-sync every device onto a gutted one"),
-            ],
-            run: { try await Commands.metadata($0) }),
         Subcommand(
             name: "score",
             summary: "Labels vs the golden set: primary-genre accuracy, multi-label F1, per-family precision.",

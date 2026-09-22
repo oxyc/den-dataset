@@ -97,44 +97,6 @@ public final class TMDBClient: Sendable {
         return wire.toEnrichedTitle(id: identifier.id.rawValue, mediaType: identifier.mediaType)
     }
 
-    /// Light detail fetch for the on-device METADATA SIDECAR — title + poster_path + year only (no
-    /// append_to_response). Lets the app render a semantic/ANN neighbour card without a per-result detail call.
-    /// Poster paths + titles are factual/artwork references (distinct from the expressive overviews the pipeline
-    /// strips); the sidecar ships as a ≤6-month synced cache, never bundled.
-    public func posterMeta(_ identifier: MediaIdentifier) async throws -> PosterMeta {
-        let path = "/\(identifier.mediaType.pathSegment)/\(identifier.id.rawValue)"
-
-        // Prefer the ENRICHMENT payload already on disk. `classificationRecord` fetched this same endpoint
-        // with `append_to_response=keywords,credits`, and the appended resources do not change the detail
-        // fields — title, poster_path and the release/first-air date are all present in it, and both
-        // responses decode as the same `ClassificationWire`.
-        //
-        // Without this the sidecar shares nothing with the enrichment cache, because the cache key covers
-        // the query string: a bare `/movie/11` and `/movie/11?append_to_response=…` hash differently, so a
-        // 100%-cached corpus still cost one live call per title. Measured on this corpus: 47,541 of 47,542
-        // titles are already cached under the enrichment key and none under the bare one, so building the
-        // sidecar went from ~47.5k TMDB requests to one.
-        //
-        // Artwork moves over time, so this trades freshness for not re-requesting the whole corpus. The
-        // sidecar is a ≤6-month synced cache of poster paths, not a source of truth, and a title whose
-        // poster changed is corrected by the next enrichment of that title.
-        let enrichedKey = cache?.key(path: path, query: ["append_to_response": "keywords,credits"])
-        if let enrichedKey, let hit = cache?.read(enrichedKey),
-           let wire = try? Self.decoder.decode(ClassificationWire.self, from: hit) {
-            return Self.posterMeta(wire, identifier)
-        }
-
-        let data = try await get(path, [:])
-        let wire = try Self.decoder.decode(ClassificationWire.self, from: data)
-        return Self.posterMeta(wire, identifier)
-    }
-
-    private static func posterMeta(_ wire: ClassificationWire, _ identifier: MediaIdentifier) -> PosterMeta {
-        let year = (wire.releaseDate ?? wire.firstAirDate).flatMap { Int($0.prefix(4)) }
-        return PosterMeta(tmdbId: identifier.id.rawValue, mediaType: identifier.mediaType.pathSegment,
-                          title: wire.title ?? wire.name ?? "", posterPath: wire.posterPath, year: year)
-    }
-
     // MARK: - Transport
 
     private func get(_ path: String, _ query: [String: String]) async throws -> Data {

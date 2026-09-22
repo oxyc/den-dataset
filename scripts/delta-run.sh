@@ -114,13 +114,14 @@ Next, by hand — these need the Haiku vote passes this repo cannot generate:
        $BIN assemble --batch-id <id> --out-dir $OUT_DIR --require-wiki-plot
   3. Then once:
        $BIN finalize --out-dir $OUT_DIR
-       $BIN metadata --out-dir $OUT_DIR
+       ./den stage metadata --out-dir $OUT_DIR --dataset-version <what finalize printed>
        scripts/publish-dataset.sh $OUT_DIR
 
-     \`metadata\` is not optional here. Its filename carries the datasetVersion that \`finalize\` just
-     changed, so skipping it leaves the manifest naming the PREVIOUS sidecar — which still hashes
+     The metadata stage is not optional here. Its filename carries the datasetVersion that \`finalize\`
+     just changed, so skipping it leaves the manifest naming the PREVIOUS sidecar — which still hashes
      correctly, so both consumers accept it and never re-sync, and the titles this pass just added
-     render with no poster metadata. Forever, and silently.
+     render with no poster metadata. Forever, and silently. (The stage refuses a --dataset-version the
+     manifest does not name, which catches the same mistake one step earlier.)
 
 (\`assemble\` classifies AND embeds — there is no separate embed step. \`embed-corpus\` is the whole-corpus
 re-embed path; pointing it at a delta skips every new title as \`missingLabel\`, because new ids are not in

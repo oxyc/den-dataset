@@ -168,29 +168,10 @@ extension ClassifyCheckpointTests {
     }
 }
 
-/// The sidecar's row order feeds `metadataSha256`, which the app folds into its sync key — so an unstable
-/// order costs every device a ~4.6 MB re-download of a file that did not change.
-final class SidecarOrderTests: XCTestCase {
-    private func row(_ id: Int, _ media: String) -> PosterMeta {
-        PosterMeta(tmdbId: id, mediaType: media, title: "t", posterPath: nil, year: nil)
-    }
-
-    /// Calls the PRODUCTION comparator. The previous version of this test declared its own copy and so
-    /// tested Swift's tuple `<` — mutation confirmed it stayed green while the real sort was reverted.
-    func testTheOrderIsTotalAcrossCollidingIds() {
-        let rows = [row(95, "tv"), row(95, "movie"), row(12, "movie")]
-        let expected = ["12:movie", "95:movie", "95:tv"]
-
-        for _ in 0..<50 {
-            let got = SidecarOrder.sorted(rows.shuffled()).map { "\($0.tmdbId):\($0.mediaType)" }
-            XCTAssertEqual(got, expected, "the same rows must always encode to the same bytes")
-        }
-    }
-
-    func testConfidenceInTheIdStillDominates() {
-        XCTAssertTrue(SidecarOrder.before(row(12, "tv"), row(95, "movie")))
-    }
-}
+// The sidecar's row order left with `metadata`, which is `pipeline/metadata.py` now;
+// `pipeline/metadata_test.py` holds the total-order rule. `DatasetMeta`'s three `metadata*` keys stay
+// here: the struct has to go on OWNING them, including by leaving them nil, or `ManifestMerge` inherits
+// the previous run's sidecar and swears to its sha — which both consumers hard-verify.
 
 /// Whether a run may append to an existing store. Disabling this decision wholesale used to leave the
 /// entire suite green, because it lived inline in the CLI target the tests cannot import.
