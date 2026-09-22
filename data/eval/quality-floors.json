@@ -1,7 +1,7 @@
 {
  "measuredOn": "2026-09-22",
- "labels": "labels-t02.json",
- "labelsSha256": "1d9f9896796de6a85b719c07836d2d2d4f3bac32b6323553faf21f71f14dcac7",
+ "labels": "genres-moods-curated.json",
+ "labelsSha256": "1dc6faad19d059a82eae50a93a611afe828a8c9a35bcf2418c767eae8d5b99ce",
  "goldenSha256": "9a4e672a0fe6e29fca21742bc620da361dc55c906eb65b63c2538a572426502f",
  "minSupport": 10,
  "confidenceFloor": 0.0,
@@ -11,12 +11,12 @@
    "macroF1": 0.7527616981886225
   },
   "subgenre": {
-   "microF1": 0.7652276759314015,
-   "macroF1": 0.7729344678151675
+   "microF1": 0.7726867003867897,
+   "macroF1": 0.7815798875028558
   },
   "mood": {
-   "microF1": 0.638623326959847,
-   "macroF1": 0.5641739792763087
+   "microF1": 0.6504688832054561,
+   "macroF1": 0.5770067076246432
   }
  }
 }

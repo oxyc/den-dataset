@@ -59,6 +59,21 @@ class Parsing(unittest.TestCase):
         self.assertEqual(ev.named([["Heist", 0.9]], 0.0), {"Heist"})
         self.assertEqual(ev.named(["Heist"], 0.0), {"Heist"})
 
+    def test_the_curated_file_shape_is_read(self):
+        """`data/genres-moods-curated.json` keys its titles `mediaType:tmdbId`; a series and a film sharing
+        a tmdbId stay two titles."""
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+            json.dump({"taxonomyVersion": "t02", "titles": {
+                "movie:95": {"primaryGenre": "Action", "subgenres": [], "moods": []},
+                "tv:95": {"primaryGenre": "Horror", "subgenres": [], "moods": []}}}, fh)
+        try:
+            version, got = ev.labels_by_key(fh.name)
+        finally:
+            os.unlink(fh.name)
+        self.assertEqual(version, "t02")
+        self.assertEqual({k: r["primaryGenre"] for k, r in got.items()},
+                         {("movie", 95): "Action", ("tv", 95): "Horror"})
+
     def test_a_confidence_floor_drops_the_labels_under_it(self):
         entries = [{"label": "Heist", "confidence": 0.9}, {"label": "Caper", "confidence": 0.3}]
         self.assertEqual(ev.named(entries, 0.5), {"Heist"})
@@ -242,6 +257,26 @@ class CommittedFloors(unittest.TestCase):
         for family in ev.FAMILIES:
             for metric in ("microF1", "macroF1"):
                 self.assertGreater(recorded["floors"][family][metric], 0.0, (family, metric))
+
+    def test_the_committed_genres_and_moods_are_what_the_floors_were_recorded_on_and_pass_them(self):
+        """The curated file is committed, so unlike the release asset it can be gated here: an edit to it
+        that lowers a score fails CI instead of the next publish."""
+        import contextlib, io, sys
+        curated = os.path.join(HERE, "..", "data", "genres-moods-curated.json")
+        with open(ev.FLOORS) as fh:
+            recorded = json.load(fh)
+        self.assertEqual(recorded["labelsSha256"], ev.sha256(curated),
+                         "genres-moods-curated.json changed: gate it, then --record the floors against it")
+        argv = sys.argv
+        sys.argv = ["eval-taxonomy.py", curated, "--golden",
+                    os.path.join(HERE, "..", "data", "eval", "golden-large.json"), "--gate"]
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                code = ev.main()
+        finally:
+            sys.argv = argv
+        self.assertEqual(code, 0, err.getvalue())
 
 
 if __name__ == "__main__":
