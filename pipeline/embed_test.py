@@ -127,10 +127,11 @@ class Staged(unittest.TestCase):
 
 class Declaration(Staged):
     def test_every_flag_it_sends_is_a_flag_the_command_reads(self):
-        """`Args` keeps a map of whatever begins with `--` and answers None for everything else, so an
-        unknown flag is not an error — it is silently absent. A misspelled `--doc-drop-director` composes
-        a different document, embeds it happily, and nothing downstream can tell. This is the parser check
-        the other stages get from running the real argument list through the script's own parser."""
+        """The command declares its flags per subcommand and refuses one it does not declare, so a
+        misspelling here is now a refusal rather than a different document embedded happily. This still
+        checks the stage's side of that: a flag the stage sends and the command dropped would fail the run
+        at the box rather than here. It is the parser check the other stages get from running the real
+        argument list through the script's own parser."""
         source = swift_source()
         for flag in [a for a in embed.argv(context(self.out, pause_ms=10, limit=5)) if a.startswith("--")]:
             self.assertIn(f'"{flag}"', source, f"{flag} is not a flag embed-corpus reads")

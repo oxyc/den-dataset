@@ -197,8 +197,10 @@ $BIN assemble --batch-id <id> --out-dir out    # per batch (default embedder = d
 #     `./den stage embed --out-dir out --dataset-version <ver>` runs exactly this, with the composition
 #     pinned rather than typed — `--doc-facts`, `--doc-drop-director` and `--plot-cap 3500` are what the
 #     shipped index was built with, and the stage checks the run's own index/composition.json against them
-#     afterwards because embed-corpus ignores a flag it does not recognise. It resumes the same way, adds
-#     `--pause-ms` and `--limit` for a long run, and refuses a run that recorded no verified space.
+#     afterwards, which is the proof that the composition asked for is the one recorded. (A misspelling is
+#     no longer a silently different document: embed-corpus refuses a flag it does not declare, and
+#     `--help` lists the ones it does.) It resumes the same way, adds `--pause-ms` and `--limit` for a long
+#     run, and refuses a run that recorded no verified space.
 $BIN embed-corpus --out-dir out --labels out/labels-t02.json \
     --doc-facts out/doc-facts.json --doc-drop-director --plot-cap 3500
 #     `--dump-docs <path>` writes the composed documents and embeds NOTHING, for embedding elsewhere — the

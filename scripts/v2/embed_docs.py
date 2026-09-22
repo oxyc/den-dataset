@@ -10,11 +10,18 @@ already has it); this writes `vectors.jsonl` keyed by the same `key`, plus `keys
 
 ## Why this exists rather than pointing embed-corpus at the box
 
-arm64 and x86_64 den-embed return different int8 vectors for identical input — 525 of 1024 dims, measured
-on the same pinned model sha256 and the same strings (oxyc/den-dataset#21). So the embed has to happen on
-the box. The plots and the composition logic live on the laptop. Rather than ship 148 MB of enriched
-batches and a Swift toolchain to the box, or publish a deliberately-internal service to reach it from the
-laptop, the composed documents travel and this embeds them in place.
+oxyc/den-dataset#21 measured two den-embeds disagreeing on 525 of 1024 dims for identical input, on the
+same pinned model sha256 and the same strings, and concluded the ISA was the cause. It was not: the hosts
+ran different MAX_TOKENS, which truncates different documents. Matched, arm64 and x86_64 return
+BYTE-IDENTICAL int8 vectors — 24/24 across Intel AVX2 and AMD AVX-512.
+
+The conclusion survives its own correction, for a better reason. A vector only means anything inside one
+embedding space, and that space is the SERVICE's configuration — model, MAX_TOKENS, the document shape —
+not the machine. So the embed happens wherever the space that will answer queries lives, and `--canary` is
+what proves the space, rather than an assumption about the CPU. The plots and the composition logic live on
+the laptop; rather than ship 148 MB of enriched batches and a Swift toolchain to the box, or publish a
+deliberately-internal service to reach it from the laptop, the composed documents travel and this embeds
+them in place.
 
 ## Batch size
 
