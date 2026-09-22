@@ -162,6 +162,9 @@ class Context:
     #: than time — $20.47 for the shipped corpus — so its launch procedure is written around a dry run
     #: that proves the input parses and prints the call plan before anything is paid for.
     plan: bool = False
+    #: The run was asked to buy (`--spend`). A stage with a free part (`FREE_WITHOUT_SPEND`) runs without
+    #: it and does only that part; the genres & moods stage asks Jev only when this is set.
+    spend: bool = False
     #: Which media type the enrichment drains, when only one is wanted. Empty drains both, which is what a
     #: full run needs: a worklist holds ONE media type, so a corpus is two drains and a stage that could
     #: only do one would leave the other to be remembered.

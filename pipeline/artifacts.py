@@ -86,6 +86,31 @@ COMBINED_MANIFEST = Artifact(
     shards=True,
 )
 
+#: The genres & moods answers Jev was paid for: one row per title, append-only, in `run_combined`'s row
+#: shape. One shard per article dump — the wildcard holds the dump's digest, because the pass's manifest
+#: hashes the dump and a rebuilt one could not resume the old shard — and a title answered in any shard is
+#: never asked again. They carry TMDB titles and years, so they are backed up, not published.
+GENRES_MOODS_ANSWERS = Artifact(
+    name="genres_moods_answers",
+    filename="genres-moods-v1*.jsonl",
+    shards=True,
+)
+
+#: Each answer shard's sidecar, named by `run_combined` from the shard: the run id, the model, the
+#: questions and the input hashes. The derive step reads each shard's label mapping from it.
+GENRES_MOODS_ANSWERS_MANIFEST = Artifact(
+    name="genres_moods_answers_manifest",
+    filename="genres-moods-v1*.jsonl.manifest.json",
+    shards=True,
+)
+
+#: Genres & moods per title: the curated file's entries plus those derived from the answers above under
+#: `data/genres-moods-rule.json`. Rebuilt on every run and never read back into its own production.
+GENRES_MOODS = Artifact(
+    name="genres_moods",
+    filename="genres-moods.json",
+)
+
 #: The second pass — the questions `combined-v1-r2` did not ask. It buys from a paid provider, and without
 #: `--spend` the script prints the estimate and stops, so the command a refusal quotes carries it.
 DELTA = Artifact(
@@ -292,7 +317,8 @@ RELEASE = Artifact(
 )
 
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
-             COMBINED_MANIFEST, DELTA, ENRICHED, ENRICH_CHECKPOINT, DOC_FACTS, EMBED_LABELS,
+             COMBINED_MANIFEST, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST, GENRES_MOODS,
+             DELTA, ENRICHED, ENRICH_CHECKPOINT, DOC_FACTS, EMBED_LABELS,
              EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
              DELTA_IDS, DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, VECTOR_LABELS_GZ, FINALIZE_REPORT,
              PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)

@@ -19,8 +19,9 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: The pipeline, in the order it runs. The worklist comes first because it is the universe everything after
 #: it is drawn from; the enrichment drain next, because the batches it fetches are what every later pass
 #: reads the plots and the evidence out of; the article dump after it, because it is what the classify
-#: pass reads; classification then, because nothing else here reads the articles; the doc facts before the
-#: embed pass, because they are two clauses of the document it composes and a run without them builds a
+#: pass reads; classification then, because nothing else here reads the articles; genres & moods after it,
+#: because the classify pass's section roles choose the premise text they are asked about; the doc facts
+#: before the embed pass, because they are two clauses of the document it composes and a run without them builds a
 #: different vector space; finalize straight after the embedding, because it turns the embed stores into
 #: `labels-t02.json`, the vector blob and the manifest; the facts after that, because the corpus facts pass
 #: scrapes the ids in that labels file; the facts before the corpus join and the store, because both of
@@ -34,9 +35,10 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: `embed` READS `labels-t02.json` for each title's tags and `finalize` rewrites it from the stores `embed`
 #: appended to, so the file an embed composes from is the previous finalize's. That is the loop a re-embed
 #: has always been — the labels are decided by the classify pass, not by the vectors — and it is why the
-#: labels artifact has one owner and two readers ahead of it.
-STAGES = ("worklist", "fetch", "articles", "classify", "docfacts", "embed", "finalize", "facts", "corpus",
-          "store", "publish")
+#: labels artifact has one owner and two readers ahead of it. `genres-moods.json` is not read by any of them
+#: yet; moving those readers onto it is what ends that loop.
+STAGES = ("worklist", "fetch", "articles", "classify", "genres_moods", "docfacts", "embed", "finalize",
+          "facts", "corpus", "store", "publish")
 
 
 def stage(name):

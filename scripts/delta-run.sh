@@ -106,11 +106,15 @@ Next, by hand — the classify stage BUYS, so it is not run unattended. In \`./d
   2. Classify — with --plan first, to see the call and cost plan:
        ./den stage classify --out-dir $OUT_DIR --plan
        ./den stage classify --out-dir $OUT_DIR
-  3. Scrape the document's director and genre, embed, and finalize:
+  3. Genres & moods for the new titles — --plan first, --spend to ask Jev, then it derives
+     \`genres-moods.json\` behind the quality floors:
+       ./den stage genres_moods --out-dir $OUT_DIR --plan
+       ./den stage genres_moods --out-dir $OUT_DIR --spend
+  4. Scrape the document's director and genre, embed, and finalize:
        ./den stage docfacts --out-dir $OUT_DIR
        ./den stage embed --out-dir $OUT_DIR
        ./den stage finalize --out-dir $OUT_DIR
-  4. Merge the facts (its two scrape passes are docs/OPERATE.md step 6a), join the corpus, build the
+  5. Merge the facts (its two scrape passes are docs/OPERATE.md step 6a), join the corpus, build the
      store, publish. <ver> is the datasetVersion finalize wrote into $OUT_DIR/dataset.meta.json:
        ./den stage facts --out-dir $OUT_DIR
        ./den stage corpus --out-dir $OUT_DIR --dataset-version <ver> --expect <titles>

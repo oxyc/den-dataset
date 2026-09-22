@@ -17,13 +17,16 @@ Options (both run forms):
     --since YYYY-MM-DD             the window a delta worklist collects titles from
     --expect N                     the title count the corpus join is held to
     --pause-ms N                   milliseconds the embed pass idles between requests
-    --limit N                      stop the embed pass after N new titles
+    --limit N                      stop the embed pass, or the genres & moods ask, after N new titles
     --media movie|tv               enrich only this media type (default: both)
     --vote-floor N                 the TMDB vote count the enrichment keeps a title above (worldwide tier)
     --regional-vote-floor N        the same, for European, South American and AU/NZ origins
     --imdb-floor N                 the IMDb vote count that admits a title TMDB's floor left out
     --regional-imdb-floor N        the same, for the regional tier
-    --plan                         the classify pass validates and reports, and buys nothing
+    --plan                         the classify and genres & moods passes validate and report, and buy
+                                   nothing
+    --spend                        buy from the paid provider: `run` includes the classify pass, and the
+                                   genres & moods stage asks Jev before it derives
     --dump-docs PATH               the embed pass writes its documents here and embeds nothing
     --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
                                    NAME to name every shard of a set
@@ -93,7 +96,7 @@ def context(args):
                             media=args.media or "", vote_floor=args.vote_floor,
                             regional_vote_floor=args.regional_vote_floor, imdb_floor=args.imdb_floor,
                             regional_imdb_floor=args.regional_imdb_floor, plan=args.plan,
-                            dump_docs=args.dump_docs or "")
+                            spend=args.spend, dump_docs=args.dump_docs or "")
 
 
 def execute(module, ctx):
@@ -131,7 +134,11 @@ def main(argv=None):
         sub.add_argument("--regional-imdb-floor", type=int,
                          help="the regional tier's IMDb vote floor (default 500)")
         sub.add_argument("--plan", action="store_true",
-                         help="the classify pass validates and reports its call plan, and buys nothing")
+                         help="the classify and genres & moods passes validate and report their call "
+                              "plan, and buy nothing")
+        sub.add_argument("--spend", action="store_true",
+                         help="buy from the paid provider: `run` includes the classify pass (~$20), and "
+                              "the genres & moods stage asks Jev before it derives")
         sub.add_argument("--dump-docs", metavar="PATH",
                          help="the embed pass writes the documents it composes here and embeds nothing")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
@@ -140,8 +147,6 @@ def main(argv=None):
     run = with_options(commands.add_parser("run", help="run every stage, in order"), version_required=True)
     run.add_argument("--publish", action="store_true",
                      help="also run the publishing stage, which CLOBBERS the moving data-latest release")
-    run.add_argument("--spend", action="store_true",
-                     help="also run the stages that BUY from a paid provider (the classify pass is ~$20)")
     with_options(commands.add_parser("stage", help="run one stage"), version_required=False).add_argument("name")
 
     genres_moods_enrich.register(commands)
@@ -170,8 +175,12 @@ def main(argv=None):
             # difference missing, and buys it. `--plan` cannot warn about that either: it estimates the
             # whole input without consulting what is done, so it reads ~$20 whether the run would buy
             # everything or nothing.
+            #
+            # A stage whose buying is one step of several (`FREE_WITHOUT_SPEND`) still runs, with
+            # `ctx.spend` false: the genres & moods stage then derives from the answers already bought.
             chosen = [m for m in pipeline.stages()
-                      if (args.publish or not m.PUBLISHES) and (args.spend or not m.SPENDS)]
+                      if (args.publish or not m.PUBLISHES)
+                      and (args.spend or not m.SPENDS or getattr(m, "FREE_WITHOUT_SPEND", False))]
         for module in chosen:
             execute(module, ctx)
     except pipeline.StageError as refusal:

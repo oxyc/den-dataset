@@ -99,6 +99,11 @@ jobs:
       # from the documented command's arguments, which a run the stage launches must accept unchanged —
       # plus the `--plan` dry run, which IS deterministic and is compared byte for byte.
       #
+      # The genres & moods stage runs against the same provider stubbed out: which titles it asks, what
+      # the state carries, that a second run buys nothing, what `data/genres-moods-rule.json` derives, and
+      # that a result below the quality floors is refused rather than written. It also pins the question
+      # set's digest — the thresholds in that rule were fitted on the answers to exactly those questions.
+      #
       # The enrichment is Python (`pipeline/enrich.py`, `lib/plot.py`). Its equivalence with the Swift pass
       # was a one-off replay — the merge-base binary and the port over out-repass worklists, on a scratch
       # copy of the response cache with the network denied — and cannot run here: CI has no cache. What
@@ -110,7 +115,7 @@ jobs:
       # to; this fails the build on a module under `pipeline/` that no stage reaches, and on one under
       # `store/` that the writer the store stage runs does not reach.
       - name: The pipeline
-        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/docfacts_test.py pipeline/compose_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/wikidata_facts_test.py lib/imdb_test.py lib/plot_test.py lib/enterprise_test.py lib/denembed_test.py guards/reachable_test.py den_test.py
+        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/genres_moods_test.py pipeline/docfacts_test.py pipeline/compose_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/wikidata_facts_test.py lib/imdb_test.py lib/plot_test.py lib/enterprise_test.py lib/denembed_test.py guards/reachable_test.py den_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The
       # guards above are the pieces; this is whether the script wires them up — that it refuses a wrong
       # hash, a missing blob, a dropped key, a shrunk count and a blob from a dead generation, and that
