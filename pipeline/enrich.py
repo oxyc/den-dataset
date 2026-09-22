@@ -495,7 +495,26 @@ def tmdb_votes(label, record, worklist_votes):
     return record.get("voteCount")
 
 
-def admit(records, floors, ratings, cache, worklist_votes=None):
+def identities(records, client, cache):
+    """`(key -> resolution, media -> items to leave out)`: which ONE Wikidata item answers for each title
+    (`lib/wikidata.resolve`), and the claimants every Wikidata query of this batch must set aside.
+
+    Two items can state one TMDB id, and every query here is keyed by that id, so without this a title's
+    fields came from both: series 2559 shipped Boon's IMDb id under Bonn's name. TMDB's own IMDb id and year
+    are what choose, read from the detail call this batch has just made — a series asks it once more with
+    `external_ids`, since its record names no IMDb id otherwise — and only for the contested titles.
+    """
+    found, excluded = {}, {}
+    for media in sorted({record["mediaType"] for record in records}):
+        ids = [record["tmdbId"] for record in records if record["mediaType"] == media]
+        resolved = wikidata.resolve(ids, media, cache,
+                                    lambda tmdb_id, media=media: tmdb_api.title_identity(client, media, tmdb_id))
+        found.update({key(media, tmdb_id): value for tmdb_id, value in resolved.items()})
+        excluded[media] = wikidata.set_aside(resolved)
+    return found, excluded
+
+
+def admit(records, floors, ratings, cache, worklist_votes=None, excluded=None):
     """`(admitted, unidentified, from_worklist)`: key → which count admitted it (`TMDB`, `IMDB` or `BOTH`),
     how many of the titles TMDB left short have no IMDb id and were therefore judged on TMDB's count alone,
     and how many titles were judged on a count their worklist row carried.
@@ -504,12 +523,13 @@ def admit(records, floors, ratings, cache, worklist_votes=None):
     off and this is TMDB's floor alone. Raises what the IMDb-id lookup raises — the caller aborts on it, as
     it does on the mapping, which asks the same service.
     """
-    worklist_votes = worklist_votes or {}
+    worklist_votes, excluded = worklist_votes or {}, excluded or {}
     admitted, unidentified, from_worklist = {}, 0, 0
     ids = {}
     if ratings is not None:
         for media in sorted({record["mediaType"] for record in records}):
-            found = wikidata.imdb_ids([r["tmdbId"] for r in records if r["mediaType"] == media], media, cache)
+            found = wikidata.imdb_ids([r["tmdbId"] for r in records if r["mediaType"] == media], media, cache,
+                                      excluded=excluded.get(media))
             ids.update({key(media, tmdb_id): imdb_id for tmdb_id, imdb_id in found.items()})
     for record in records:
         label = key(record["mediaType"], record["tmdbId"])
@@ -598,7 +618,14 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
         print(f"  warning: the IMDb half of the admission gate is {gate}. This batch admits on TMDB's count "
               f"alone; a title only IMDb would admit stays pending for the next batch.", file=sys.stderr)
     try:
-        admitted, unidentified, from_worklist = admit(records, floors, ratings, cache, worklist_votes)
+        resolved, excluded = identities(records, client, cache)
+    except wikidata.DecisionError as stale:
+        raise StageError(f"enrich: {stale}") from None
+    except (http.HTTPError, wikidata.WikidataError) as error:
+        raise Aborted(f"choosing each title's Wikidata item failed for batch {batch_id} after retries ({error}); "
+                      f"nothing written — re-run to retry this batch") from error
+    try:
+        admitted, unidentified, from_worklist = admit(records, floors, ratings, cache, worklist_votes, excluded)
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise Aborted(f"Wikidata IMDb-id lookup failed for batch {batch_id} after retries ({error}); nothing "
                       f"written — re-run to retry this batch") from error
@@ -610,7 +637,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
         try:
             for media in sorted({record["mediaType"] for record in admitted_records}):
                 ids = [r["tmdbId"] for r in admitted_records if r["mediaType"] == media]
-                for tmdb_id, labels in wikidata.kinds(ids, media, cache).items():
+                for tmdb_id, labels in wikidata.kinds(ids, media, cache, excluded=excluded.get(media)).items():
                     kinds[key(media, tmdb_id)] = labels
         except (http.HTTPError, wikidata.WikidataError) as error:
             raise Aborted(f"Wikidata genre/type lookup failed for batch {batch_id} after retries ({error}); "
@@ -634,7 +661,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
             # `overview` holds a Wikipedia plot or nothing, so the length said nothing about what this
             # title would be grounded on, and every admitted title is grounded on Wikipedia or written
             # plotless regardless: over the whole repass it refused 3 titles out of 59,209.
-            titles.append(found)
+            titles.append(dict(found, **wikidata.provenance(resolved.get(label))))
 
     # ONE mapping query per media type, keyed by both — see `lib/wikidata.mapping` — and one language query
     # beside it. P364 is its own request rather than another OPTIONAL on the mapping, whose text is the
@@ -644,10 +671,10 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     try:
         for media in sorted({record["mediaType"] for record in titles}):
             ids = [record["tmdbId"] for record in titles if record["mediaType"] == media]
-            spoken = wikidata.languages(ids, media, cache)
-            mapped = wikidata.mapping(ids, media, plot.HEADINGS_BY_LANGUAGE, cache)
+            spoken = wikidata.languages(ids, media, cache, excluded=excluded.get(media))
+            mapped = wikidata.mapping(ids, media, plot.HEADINGS_BY_LANGUAGE, cache, excluded=excluded.get(media))
             works = wikidata.sources(sorted(i for i, found in mapped.items() if found.get("sourceArticle")),
-                                     media, cache)
+                                     media, cache, excluded=excluded.get(media))
             for tmdb_id, found in mapped.items():
                 facts[key(media, tmdb_id)] = dict(found, languages=spoken.get(tmdb_id, []),
                                                   sourceWorks=works.get(tmdb_id, {}))

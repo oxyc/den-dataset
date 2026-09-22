@@ -10,6 +10,8 @@ fixed order and which the binary itself read first-wins. Three of the Swift's ru
 purpose, each measured in its commit: a genre's rename keeps the rest of its entity, a title's strings are
 chosen by rule rather than by row order, and a stated day wins over the year that contains it.
 """
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -41,20 +43,56 @@ class Wikidata:
         self.failing = set()    # (media, tmdbId) whose batch raises
         self.languages = []     # (media, the languages the titles hop was told) per call
         self.live = False       # answered from the cache, so nothing is paced
+        # Items per (media, tmdbId), when more than the tables above answer for; each item's own facts and
+        # evidence; and what each call was told to leave out.
+        self.claimants = {}     # (media, tmdbId) -> [qid]
+        self.by_item = {}       # qid -> {spec key: value}
+        self.evidence = {}      # qid -> item_evidence row
+        self.excluded = []
 
-    def fetch_facts(self, ids, media, item, cache=None):
+    def answer(self, media, tmdb_id, excluded, table):
+        """A contested title answers from its items that were not left out, merged the way WDQS merges
+        rows keyed by the TMDB id — which is the bug when more than one is left in."""
+        qids = self.claimants.get((media, tmdb_id))
+        if not qids:
+            return table.get((media, tmdb_id), {})
+        kept = [q for q in qids if q not in (excluded or {}).get(tmdb_id, ())]
+        merged = {}
+        for qid in kept:
+            for name, value in self.by_item.get(qid, {}).items():
+                if isinstance(value, list):
+                    merged[name] = sorted(set(merged.get(name, [])) | set(value))
+                else:
+                    # The least value wins, as `collapse` and `titles` choose among several.
+                    merged[name] = min((merged[name], value) if name in merged else (value,),
+                                       key=lambda v: json.dumps(v, sort_keys=True))
+        return merged
+
+    def fetch_facts(self, ids, media, item, cache=None, excluded=None):
         self.asked["facts"].append((media, tuple(ids), item.key))
+        self.excluded.append((media, excluded))
         # Late in the batch, so the properties before it have already landed on the row.
         if item.key == "cast" and any((media, i) in self.failing for i in ids):
             raise wd.WikidataError("maintenance page")
-        found = {i: self.facts[(media, i)][item.key] for i in ids
-                 if item.key in self.facts.get((media, i), {})}
+        found = {i: self.answer(media, i, excluded, self.facts)[item.key] for i in ids
+                 if item.key in self.answer(media, i, excluded, self.facts)}
         return found, self.live
 
-    def titles_of(self, ids, media, languages=None):
+    def titles_of(self, ids, media, languages=None, excluded=None):
         self.asked["titles"].append((media, tuple(ids)))
         self.languages.append((media, languages))
-        return {i: self.titles[(media, i)] for i in ids if (media, i) in self.titles}
+        out = {}
+        for i in ids:
+            found = self.answer(media, i, excluded, {k: {"t": v} for k, v in self.titles.items()})
+            if "t" in found:
+                out[i] = found["t"]
+        return out
+
+    def claimants_of(self, ids, media, cache=None):
+        return {i: self.claimants[(media, i)] for i in ids if (media, i) in self.claimants}
+
+    def item_evidence(self, qids, media, cache=None):
+        return {q: self.evidence[q] for q in qids if q in self.evidence}
 
     def entity_details(self, qids):
         self.asked["names"].append(tuple(qids))
@@ -81,6 +119,11 @@ class Staged(unittest.TestCase):
             original = getattr(facts.wd, name)
             setattr(facts.wd, name, stub)
             self.addCleanup(setattr, facts.wd, name, original)
+        for name, stub in (("claimants", self.wd.claimants_of), ("item_evidence", self.wd.item_evidence)):
+            original = getattr(facts.wikidata, name)
+            setattr(facts.wikidata, name, stub)
+            self.addCleanup(setattr, facts.wikidata, name, original)
+        self.tmdb = {}          # path -> TMDB detail body, for the contested titles only
         self.wd.facts = {
             ("movie", 1): {"imdbId": "tt1", "directors": ["Q10"], "genres": ["Q20"], "basedOn": ["Q30"],
                            "franchise": ["Q40"], "released": {"date": "1999", "precision": "year"}},
@@ -106,7 +149,11 @@ class Staged(unittest.TestCase):
         return Context(out_dir=self.out, dataset_version=version)
 
     def run_stage(self, version=VERSION):
-        return facts.run(self.context(version), cache=object())
+        return facts.run(self.context(version), cache=object(), client=self)
+
+    def get(self, path, params=None):
+        """The TMDB client `facts.run` is given: answers the contested titles' detail calls."""
+        return self.tmdb[path]
 
     def read(self, name):
         with open(os.path.join(self.out, name), encoding="utf-8") as fh:
@@ -376,6 +423,103 @@ class Version(Staged):
         with self.assertRaises(StageError) as refused:
             self.run_stage(version="")
         self.assertIn("./den stage finalize", str(refused.exception))
+
+
+BONN, BOON = "Q116226000", "Q132860965"
+
+
+class OneItemPerTitle(Staged):
+    """Series 2559, as Wikidata has it: "Boon" (1986) states the TMDB id, and so does "Bonn – Alte Freunde,
+    neue Feinde" (2023), which also states its own 215780 and carries Boon's 1986 start date. Every query
+    was keyed by the TMDB id, so the shipped row read "Bonn" with Boon's IMDb id."""
+
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(self.out, "labels-t02.json"), "w", encoding="utf-8") as fh:
+            json.dump({"records": [{"mediaType": "tv", "tmdbId": 2559}, {"mediaType": "movie", "tmdbId": 1}]}, fh)
+        self.wd.by_item = {
+            BONN: {"imdbId": "tt13905034", "cast": ["Q76172"], "started": {"date": "1986-01-14", "precision": "day"},
+                   "released": {"date": "2022-10-22", "precision": "day"},
+                   "t": {"article": "Bonn – Alte Freunde, neue Feinde", "label": "Bonn", "original": None,
+                         "aliases": []}},
+            BOON: {"imdbId": "tt0090400", "cast": ["Q5362535"],
+                   "t": {"article": "Boon (TV series)", "label": "Boon", "original": None, "aliases": []}}}
+        self.wd.evidence = {BONN: {"imdb": ["tt13905034"], "years": [1986, 2022], "claims": [2559, 215780]},
+                            BOON: {"imdb": ["tt0090400"], "years": [], "claims": [2559]}}
+        self.tmdb["/tv/2559"] = {"id": 2559, "name": "Boon", "first_air_date": "1986-01-14",
+                                 "external_ids": {"imdb_id": "tt0090400"}}
+
+    def record(self):
+        return next(r for r in self.read(f"facts-{VERSION}.pre-merge.json")["records"]
+                    if (r["mediaType"], r["tmdbId"]) == ("tv", 2559))
+
+    def test_every_field_comes_from_the_item_tmdb_names(self):
+        for order in ([BOON, BONN], [BONN, BOON]):
+            with self.subTest(order=order):
+                for name in ("facts-fields.json", "facts-entities.json", "facts-source-types.json"):
+                    if os.path.exists(os.path.join(self.out, name)):
+                        os.remove(os.path.join(self.out, name))
+                self.wd.claimants[("tv", 2559)] = order
+                self.run_stage()
+                record = self.record()
+                self.assertEqual(record["titles"]["en"], "Boon")
+                self.assertEqual(record["imdbId"], "tt0090400")
+                self.assertEqual(record["cast"], ["Q5362535"])
+                self.assertNotIn("started", record, "Bonn's dates are Bonn's")
+                self.assertNotIn("released", record)
+                self.assertEqual(record["wikidataItem"], BOON)
+                self.assertEqual(record["wikidataCandidates"], [BONN, BOON])
+
+    def test_an_uncontested_title_is_asked_as_before(self):
+        self.wd.claimants[("tv", 2559)] = [BOON, BONN]
+        self.run_stage()
+        movie = next(r for r in self.read(f"facts-{VERSION}.pre-merge.json")["records"] if r["mediaType"] == "movie")
+        self.assertNotIn("wikidataCandidates", movie)
+        self.assertNotIn("wikidataItem", movie)
+        told = {media: excluded for media, excluded in self.wd.excluded}
+        self.assertFalse(told["movie"], "a batch holding no contested id is told nothing, so its query is as before")
+        self.assertEqual(told["tv"], {2559: [BONN]})
+
+    def test_a_title_nothing_singles_out_ships_no_field_from_either(self):
+        self.ambiguous()
+        self.run_stage()
+        self.assertEqual(self.record(), {"mediaType": "tv", "tmdbId": 2559, "hasVector": True,
+                                         "wikidataCandidates": [BONN, BOON]})
+
+    def ambiguous(self):
+        self.wd.claimants[("tv", 2559)] = [BOON, BONN]
+        self.wd.evidence = {BONN: {"imdb": [], "years": [], "claims": [2559]},
+                            BOON: {"imdb": [], "years": [], "claims": [2559]}}
+        self.tmdb["/tv/2559"] = {"id": 2559, "name": "Boon"}
+
+    def test_an_ambiguous_title_is_counted_loudly_in_the_report(self):
+        self.ambiguous()
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said):
+            self.run_stage()
+        self.assertIn("WARNING: 1 titles ship with NO Wikidata fields", said.getvalue())
+        self.assertIn("data/wikidata-item-decisions.json", said.getvalue())
+        self.assertIn('"ambiguousItems": 1', said.getvalue())
+
+    def test_a_decision_chooses_and_the_row_checkpointed_as_ambiguous_is_scraped_again(self):
+        self.ambiguous()
+        self.run_stage()
+        self.assertNotIn("wikidataItem", self.record())
+        original = facts.wikidata.load_decisions
+        facts.wikidata.load_decisions = lambda path=None: {("tv", 2559): BOON}
+        self.addCleanup(setattr, facts.wikidata, "load_decisions", original)
+        self.run_stage()
+        record = self.record()
+        self.assertEqual((record["wikidataItem"], record["titles"]["en"], record["imdbId"]),
+                         (BOON, "Boon", "tt0090400"))
+
+    def test_a_checkpointed_row_that_merged_its_claimants_is_scraped_again(self):
+        """A checkpoint written before the choice existed holds the merged row, and resuming would keep it."""
+        self.wd.claimants[("tv", 2559)] = [BOON, BONN]
+        with open(os.path.join(self.out, "facts-fields.json"), "w", encoding="utf-8") as fh:
+            json.dump({"tv:2559": {"imdbId": "tt0090400", "titles": {"en": "Bonn"}}}, fh)
+        self.run_stage()
+        self.assertEqual(self.record()["titles"]["en"], "Boon")
 
 
 class Topology(unittest.TestCase):

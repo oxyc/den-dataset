@@ -23,7 +23,7 @@ import unicodedata
 import urllib.parse
 
 from . import http
-from .wikidata import HOST, ID_PROPERTY, PATH, WikidataError
+from .wikidata import HOST, ID_PROPERTY, PATH, WikidataError, exclusion
 
 #: The per-property requests, keyed on their text like the doc-facts ones — a different namespace path, so
 #: the two scrapes' entries cannot collide.
@@ -119,8 +119,9 @@ def _values(ids):
     return " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(v) for v in ids)))
 
 
-def facts_query(ids, media, item):
-    """The per-property query, byte for byte what the Swift sent — it is the cache key."""
+def facts_query(ids, media, item, excluded=None):
+    """The per-property query, byte for byte what the Swift sent — it is the cache key. A batch holding a
+    contested id also leaves out the items not chosen for it (`lib/wikidata.exclusion`)."""
     if item.kind == "iso":
         select, body = "?tmdb ?code", f"?film wdt:{item.prop} ?v . ?v wdt:{item.iso_via or 'P297'} ?code ."
     elif item.kind == "date":
@@ -132,6 +133,7 @@ def facts_query(ids, media, item):
     return (f"SELECT {select} WHERE {{\n"
             f"  VALUES ?tmdb {{ {_values(ids)} }}\n"
             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"{exclusion(ids, excluded)}"
             f"  {body}\n"
             f"}}")
 
@@ -244,10 +246,10 @@ def _sparql(query):
                                  "Accept": "application/sparql-results+json"})
 
 
-def fetch_facts(ids, media, item, cache=None):
+def fetch_facts(ids, media, item, cache=None, excluded=None):
     """`(tmdbId -> value, whether it was asked live)`. A body is kept only once it parses, so a WDQS
     maintenance page cannot outlive the outage; a kept body that no longer parses is asked again."""
-    query = facts_query(ids, media, item)
+    query = facts_query(ids, media, item, excluded)
     key = cache.key(CACHE_PATH, {"q": query}) if cache is not None else None
     if key is not None:
         hit = cache.read(key)
@@ -343,10 +345,11 @@ def article_title(url):
     return title or None
 
 
-def _run(select, body, ids, media):
+def _run(select, body, ids, media, excluded=None):
     query = (f"SELECT ?tmdb {select} WHERE {{\n"
              f"  VALUES ?tmdb {{ {_values(ids)} }}\n"
              f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+             f"{exclusion(ids, excluded)}"
              f"  {body}\n"
              f"}}")
     return bindings(_sparql(query))
@@ -357,7 +360,7 @@ def _language(tag):
     return (tag or "").split("-")[0].lower()
 
 
-def titles(ids, media, languages=None):
+def titles(ids, media, languages=None, excluded=None):
     """`tmdbId -> {article, label, original, aliases}` — the enwiki article, `rdfs:label`, P1476 and every
     English alias. Search needs all of them: a title index holding only the original title misses
     "parasite" and "spirited away". Aliases are their own request because `skos:altLabel` is
@@ -383,7 +386,7 @@ def titles(ids, media, languages=None):
                         "  OPTIONAL { ?article schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/> . }\n"
                         "  OPTIONAL { ?film wdt:P1476 ?orig . }\n"
                         "  OPTIONAL { ?film rdfs:label ?label . FILTER(LANG(?label) IN ('en','mul')) }",
-                        ids, media):
+                        ids, media, excluded):
         tmdb_id = _int(_value(binding, "tmdb"))
         if tmdb_id is None:
             continue
@@ -404,7 +407,7 @@ def titles(ids, media, languages=None):
                         "label": min(seen["label"], default=(None, None))[1],
                         "original": original[1], "aliases": []}
     for binding in _run("?alias", "  ?film skos:altLabel ?alias . FILTER(LANG(?alias) IN ('en','mul'))",
-                        ids, media):
+                        ids, media, excluded):
         tmdb_id, alias = _int(_value(binding, "tmdb")), _value(binding, "alias")
         if tmdb_id is None or alias is None:
             continue

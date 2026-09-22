@@ -155,16 +155,24 @@ def targets(records, cache):
 
     Asked before anything is written. A lookup that fails is a refusal, not a row with no target: the
     classify pass would pay to judge an article against a blank name.
+
+    Named from the item the enrichment chose, where several claim the title's TMDB id: the row records its
+    `wikidataCandidates` and `wikidataItem`, and the others are left out of the lookup. Otherwise the plot
+    comes from one work and the name it is judged against from another.
     """
-    ids = {}
+    ids, excluded = {}, {}
     for record in records:
         ids.setdefault(record["mediaType"], set()).add(record["tmdbId"])
+        others = [q for q in record.get("wikidataCandidates") or () if q != record.get("wikidataItem")]
+        if others:
+            excluded.setdefault(record["mediaType"], {})[record["tmdbId"]] = others
     out = {}
     for media in sorted(ids):
         ordered = sorted(ids[media])
         for start in range(0, len(ordered), TARGET_BATCH):
             try:
-                found = wikidata.targets(ordered[start:start + TARGET_BATCH], media, cache)
+                found = wikidata.targets(ordered[start:start + TARGET_BATCH], media, cache,
+                                         excluded=excluded.get(media))
             except (http.HTTPError, wikidata.WikidataError) as error:
                 raise StageError(f"articles: the Wikidata lookup that names each title failed ({error}). "
                                  f"Nothing was written; re-run once Wikidata answers.") from None

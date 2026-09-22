@@ -1184,3 +1184,24 @@ class TheAliasDecisionsAreApplied(StoreFixture, unittest.TestCase):
         self.assertEqual(names("movie:103"), ["Taxi Driver"], "the dropped alias reached alias_titles")
         self.assertEqual(names("movie:9"), ["Gamma", "Beta"], "an undecided alias still ships until decided")
         self.assertEqual(record, {"sha256": sha256(self.DECISIONS), "dropped": 1, "undecided": 1})
+
+
+class TheTitlesWithNoItemChosenAreRecorded(StoreFixture, unittest.TestCase):
+    """A title several Wikidata items claim, with nothing chosen between them, has no Wikidata fields and so
+    no card. The store records each one as `wikidataItems.ambiguous`, which `check-wikidata-items.py
+    --gate` refuses a publish on; a contested title with its item chosen is not listed."""
+
+    def test_only_a_contested_title_with_no_item_is_listed(self):
+        def contested(key, **facts):
+            media, tmdb_id = key.split(":")
+            return {"key": key, "mediaType": media, "tmdbId": int(tmdb_id), "labels": None, "premiseLabels": None,
+                    "facts": dict(facts, wikidataCandidates=["Q1", "Q2"])}
+        titles = self.TITLES + [contested("tv:6618"),
+                                contested("tv:2559", wikidataItem="Q2", titles={"en": "Boon"})]
+        with tempfile.TemporaryDirectory() as out:
+            meta = os.path.join(out, "dataset.meta.json")
+            with open(meta, "w") as fh:
+                json.dump({"datasetVersion": "test"}, fh)
+            self.build(out, titles=titles, stamp=meta)
+            with open(meta) as fh:
+                self.assertEqual(json.load(fh)["wikidataItems"], {"ambiguous": ["tv:6618"]})

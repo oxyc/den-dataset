@@ -398,6 +398,12 @@ fi
 python3 "$(dirname "$0")/check-alias-collisions.py" --gate "$meta" \
   || { echo "       Nothing uploaded." >&2; exit 1; }
 
+# WIKIDATA ITEM GATE. Where several Wikidata items claim one TMDB id and nothing chooses between them, the
+# title is written with no Wikidata fields rather than two works mixed, so it has no card. This refuses a
+# store that ships one; the refusal points at data/wikidata-item-decisions.json.
+python3 "$(dirname "$0")/check-wikidata-items.py" --gate "$meta" \
+  || { echo "       Nothing uploaded." >&2; exit 1; }
+
 # SHAPE GUARD. A producer can exist, be committed, be run correctly — and still emit a shape its consumer
 # cannot read. One entity carrying `"aliases": "Adrian Anthony Lester"` where atlas types Vec<String> made a
 # 27 MB facts file unparseable at its first entity; atlas does not partially load one, so it dropped the

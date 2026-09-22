@@ -9,6 +9,7 @@ Both are 200s. Neither raises anywhere without a check written for it:
     sits in the cache for its whole TTL as a title with no keywords, no director and no cast.
 """
 import json
+import os
 import tempfile
 import unittest
 from unittest import mock
@@ -175,6 +176,35 @@ class Record(unittest.TestCase):
                      {"id": 1, "vote_count": True}):
             with self.assertRaises(ValueError):
                 tmdb_api.title_record(body, 1, "movie")
+
+
+class Identity(unittest.TestCase):
+    """What chooses between two Wikidata items claiming one TMDB id: TMDB's own IMDb id and year."""
+
+    def test_a_film_names_its_imdb_id_and_a_series_needs_external_ids(self):
+        self.assertEqual(tmdb_api.identity(SHAWSHANK, "movie"), {"imdb": None, "year": 1994})
+        self.assertEqual(tmdb_api.identity(dict(SHAWSHANK, imdb_id="tt0111161"), "movie"),
+                         {"imdb": "tt0111161", "year": 1994})
+        boon = {"id": 2559, "name": "Boon", "first_air_date": "1986-01-14", "external_ids": {"imdb_id": "tt0090400"}}
+        self.assertEqual(tmdb_api.identity(boon, "tv"), {"imdb": "tt0090400", "year": 1986})
+        self.assertEqual(tmdb_api.identity({"first_air_date": "", "imdb_id": "tt1"}, "tv"), {"imdb": None, "year": None})
+
+    def test_a_film_asks_the_enrichments_own_call_and_a_series_appends_external_ids(self):
+        """The film's call is the one whose bodies are already on disk, so it costs nothing."""
+        self.assertEqual(tmdb_api.IDENTITY_APPEND["movie"], tmdb_api.APPEND)
+        self.assertEqual(tmdb_api.IDENTITY_APPEND["tv"], tmdb_api.APPEND + ",external_ids")
+
+    def test_an_id_tmdb_no_longer_has_is_no_evidence(self):
+        class Gone:
+            def get(self, path, params=None):
+                raise tmdb_api.http.HTTPError(404, "https://api.themoviedb.org/3" + path)
+        self.assertEqual(tmdb_api.title_identity(Gone(), "tv", 1), {})
+
+    def test_a_client_that_need_not_ask_needs_no_key(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            client = tmdb_api.TMDB(cache=None, require_key=False)
+            with self.assertRaises(tmdb_api.TMDBError):
+                client.get("/tv/1")
 
 
 if __name__ == "__main__":

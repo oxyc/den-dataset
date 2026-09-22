@@ -59,7 +59,7 @@ class Staged(unittest.TestCase):
         articles.wikipedia.article_prose = self.stub
         # Wikidata's name for each title: `(media, id) -> {"title", "year"}`, a default for any other id, or
         # an exception to raise.
-        self.named, self.named_calls, self.naming = {}, [], None
+        self.named, self.named_calls, self.naming, self.named_excluded = {}, [], None, []
         self.original_targets = articles.wikidata.targets
         articles.wikidata.targets = self.targets_stub
 
@@ -68,8 +68,9 @@ class Staged(unittest.TestCase):
         articles.wikidata.targets = self.original_targets
         self.directory.cleanup()
 
-    def targets_stub(self, ids, media, cache=None):
+    def targets_stub(self, ids, media, cache=None, excluded=None):
         self.named_calls.append((media, list(ids)))
+        self.named_excluded.append((media, excluded))
         if self.naming is not None:
             raise self.naming
         return {i: self.named.get((media, i), {"title": f"Wikidata {i}", "year": 2001}) for i in ids
@@ -225,6 +226,14 @@ class Output(Staged):
         self.assertEqual((row["title"], row["year"], row["targetSource"]), ("Solaris", 1972, "wikidata"))
         self.assertNotIn("TMDB Title", json.dumps(row))
         self.assertEqual(self.named_calls, [("movie", [7])])
+
+    def test_a_contested_title_is_named_from_the_item_its_plot_came_from(self):
+        """Two items claim series 2559. The enriched row records which one it was grounded on, and the
+        name the classify pass judges the article against is that item's alone."""
+        self.batch(1, [dict(record(2559, media="tv"), wikidataItem="Q132860965",
+                            wikidataCandidates=["Q116226000", "Q132860965"]), record(7)])
+        articles.run(self.context())
+        self.assertEqual(dict(self.named_excluded), {"tv": {2559: ["Q116226000"]}, "movie": None})
 
     def test_the_classify_state_names_the_wikidata_target(self):
         """`run_combined.py` builds `requestedTarget` from the row as it stands, and fills an ABSENT `year`

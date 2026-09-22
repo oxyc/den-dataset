@@ -21,6 +21,7 @@ are Wikidata. Licences per file are in [`LICENSES.md`](../LICENSES.md).
 | `embed-canary.json` | fixed texts and the exact int8 vectors den-embed must return for them | only when the space is meant to move (`docs/OPERATE.md`) |
 | `alias-decisions.json` | keep/drop judgements on alternate titles that collide with another title's name | by hand |
 | `iconic-studios.json` | the studios a viewer browses by, each with every Wikidata item that is the same studio; the store writes the ones the corpus credits | by hand ([den#132](https://github.com/oxyc/den/issues/132)) |
+| `wikidata-item-decisions.json` | which Wikidata item answers for a title whose TMDB id several items claim, where no rule decides | by hand |
 | `classify-queue.json` | titles whose labels were not read from the plot the corpus now holds | derived |
 | `eval/golden-large.json` | 2,568 hand-labelled titles, the genres & moods quality ruler | by hand |
 | `eval/quality-floors.json` | the scores a publish is held to (`scripts/eval-taxonomy.py`) | recorded, not rebuilt |
