@@ -91,7 +91,11 @@ class StubTMDB:
         return answer
 
 
-def found(text, resolved="Resolved", revid=7, language="en", sections=("Plot",)):
+#: `found`'s default: the fetch landed on the page it asked for. Filled in by `plot_stub`, which knows it.
+ASKED = object()
+
+
+def found(text, resolved=ASKED, revid=7, language="en", sections=("Plot",)):
     return {"text": text, "revId": revid, "resolvedArticle": resolved, "sections": list(sections),
             "language": language}
 
@@ -136,6 +140,8 @@ class Batch(unittest.TestCase):
             raise answer
         if isinstance(answer, dict) and answer.get("source") == enrich.plot.ENTERPRISE:
             enrich.enterprise.gate.sent_this_run += 1   # what one Enterprise request costs the gate
+        if isinstance(answer, dict) and answer["resolvedArticle"] is ASKED:
+            answer = dict(answer, resolvedArticle=article)
         return answer
 
     def worklist(self, *entries):
@@ -171,16 +177,50 @@ class Batch(unittest.TestCase):
 
     # -- candidate selection --------------------------------------------------------------------------
 
-    def test_the_longest_candidate_wins_and_carries_its_own_role(self):
-        """Silo's own article gives 189 characters and the novel 12,415: first-over-the-line kept 189."""
-        self.mapping[("tv", 1)] = {"article": "Silo", "sourceArticle": "Wool"}
-        self.plots[("Silo", "en")] = found("s" * 189, resolved="Silo")
-        self.plots[("Wool", "en")] = found("w" * 900, resolved="Wool (novel)")
+    def test_an_own_premise_beats_a_longer_source_work(self):
+        """Gen V's own Premise is 668 characters; its P144 work is The Boys, whose 3,164 won on length and
+        described the parent series instead. A plot of its own that clears the floor is never out-read."""
+        self.mapping[("tv", 1)] = {"article": "Gen V", "sourceArticle": "The Boys (TV series)"}
+        self.plots[("Gen V", "en")] = found("g" * 668, resolved="Gen V")
+        self.plots[("The Boys (TV series)", "en")] = found("b" * 3164, resolved="The Boys (TV series)")
         self.run_batch({"/tv/1": detail(1)}, [("tv", 1)])
         row = self.rows()["tv:1"]
         self.assertEqual((row["plotArticleRole"], row["plotArticle"], len(row["overview"])),
-                         ("source-work", "Wool (novel)", 900))
-        self.assertTrue(row["plotArticleRedirected"], "Wool → Wool (novel) moved")
+                         ("own", "Gen V", 668))
+        self.assertNotIn(("The Boys (TV series)", "en"), self.plot_calls, "the source work is not even read")
+
+    def test_an_own_other_language_plot_beats_the_source_work_too(self):
+        """The source work is the last resort after EVERY own article, not after English: a title whose
+        English page has no plot section is still described by its German one before by the book."""
+        self.mapping[("tv", 1)] = {"article": "Series", "sourceArticle": "Novel",
+                                   "articlesByLang": {"de": "Serie"}}
+        self.plots[("Serie", "de")] = found("d" * 300, resolved="Serie", language="de")
+        self.plots[("Novel", "en")] = found("n" * 6000, resolved="Novel")
+        self.run_batch({"/tv/1": detail(1)}, [("tv", 1)])
+        row = self.rows()["tv:1"]
+        self.assertEqual((row["plotArticleRole"], row["plotLanguage"]), ("own-other-language", "de"))
+        self.assertNotIn(("Novel", "en"), self.plot_calls)
+
+    def test_the_source_work_grounds_a_title_with_no_plot_of_its_own(self):
+        """What the fallback is for: an adaptation whose article is cast and episode tables. Below the floor
+        counts as none — 80 characters of its own lose to the novel."""
+        self.mapping.update({("tv", 1): {"article": "Bare", "sourceArticle": "Book"},
+                             ("tv", 2): {"article": "Stub", "sourceArticle": "Book"}})
+        self.plots[("Stub", "en")] = found("s" * 80, resolved="Stub")
+        self.plots[("Book", "en")] = found("b" * 900, resolved="Book")
+        self.run_batch({"/tv/1": detail(1), "/tv/2": detail(2)}, [("tv", 1), ("tv", 2)])
+        rows = self.rows()
+        self.assertEqual([(rows[k]["plotArticleRole"], rows[k]["plotArticle"]) for k in ("tv:1", "tv:2")],
+                         [("source-work", "Book")] * 2)
+
+    def test_a_source_work_that_redirects_is_not_read_as_one(self):
+        """A P144 sitelink that lands elsewhere is not the work either: `La noia` landed on the article about
+        its author."""
+        self.mapping[("movie", 1)] = {"sourceArticle": "La noia"}
+        self.plots[("La noia", "en")] = found("a" * 900, resolved="Alberto Moravia")
+        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
+        row = self.rows()["movie:1"]
+        self.assertEqual((row["hasWikiPlot"], row["noPlotReason"]), (False, "noArticle"))
 
     def test_an_own_article_that_is_enough_stops_the_search(self):
         """A well-covered adaptation must not pay for a second fetch it cannot use."""
@@ -229,17 +269,6 @@ class Batch(unittest.TestCase):
         self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
         self.assertIn(("Eigen", "de"), self.plot_calls, "999 is not enough, so the fallback is asked")
         self.assertEqual(self.rows()["movie:1"]["plotArticleRole"], "own", "a tie keeps the earlier")
-
-    def test_an_own_article_keeps_a_tie_with_its_source_work(self):
-        """Strictly longer wins, as the Swift pass's `>` had it, so at equal length the EARLIER candidate
-        stays. That is the right way round: the own article describes this title, the source work describes
-        the book, and nothing about equal length says the book is the better description."""
-        self.mapping[("movie", 1)] = {"article": "Own", "sourceArticle": "Book"}
-        self.plots[("Own", "en")] = found("o" * 500, resolved="Own")
-        self.plots[("Book", "en")] = found("b" * 500, resolved="Book")
-        self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
-        row = self.rows()["movie:1"]
-        self.assertEqual((row["plotArticleRole"], row["plotArticle"]), ("own", "Own"))
 
     def test_the_longest_other_language_article_wins_not_the_first(self):
         """The fallback reads every sitelink until one is enough, and keeps the longest — the title's own
@@ -323,20 +352,30 @@ class Batch(unittest.TestCase):
         self.assertEqual(sorted(self.checkpoint()["processed"]), [f"movie:{i}" for i in range(1, 5)],
                          "an answer, so checkpointed like any other")
 
-    def test_the_stored_article_is_the_resolved_one_and_unknown_stays_unknown(self):
-        """A redirect's content and revid are the target's; storing the requested name beside them makes a
-        revision refresh compare two different pages. The Enterprise path names no page, and absent is
-        UNKNOWN — never `false`."""
-        self.mapping.update({("movie", 1): {"article": "Jarhead 2"}, ("movie", 2): {"article": "Wire"}})
+    def test_a_sitelink_that_redirects_into_another_page_is_no_article(self):
+        """`Jarhead 2: Field of Fire`'s sitelink is a redirect into `Jarhead (film)`: grounding on it described
+        the first film. It counts as no article on that wiki, so the other-language fallback still runs."""
+        self.mapping.update({("movie", 1): {"article": "Jarhead 2"},
+                             ("movie", 2): {"article": "Jarhead 3", "articlesByLang": {"de": "Jarhead 3"}}})
         self.plots[("Jarhead 2", "en")] = found("j" * 300, resolved="Jarhead (film)")
-        self.plots[("Wire", "en")] = found("w" * 300, resolved=None, revid=None)
+        self.plots[("Jarhead 3", "en")] = found("j" * 300, resolved="Jarhead (film)")
+        self.plots[("Jarhead 3", "de")] = found("d" * 300, resolved="Jarhead 3", language="de")
         self.run_batch({"/movie/1": detail(1), "/movie/2": detail(2)}, [("movie", 1), ("movie", 2)])
         rows = self.rows()
-        self.assertEqual((rows["movie:1"]["plotArticle"], rows["movie:1"]["plotArticleRedirected"]),
-                         ("Jarhead (film)", True))
-        self.assertEqual(rows["movie:2"]["plotArticle"], "Wire")
-        self.assertNotIn("plotArticleRedirected", rows["movie:2"])
-        self.assertNotIn("plotRevId", rows["movie:2"])
+        self.assertEqual((rows["movie:1"]["hasWikiPlot"], rows["movie:1"]["noPlotReason"]), (False, "noArticle"))
+        self.assertEqual((rows["movie:2"]["plotArticleRole"], rows["movie:2"]["plotArticle"],
+                          rows["movie:2"]["plotArticleRedirected"]), ("own-other-language", "Jarhead 3", False))
+
+    def test_an_unseen_redirect_stays_unknown(self):
+        """The Enterprise path names no page, so it cannot be refused as a redirect, and absent is UNKNOWN —
+        never `false`."""
+        self.mapping[("movie", 2)] = {"article": "Wire"}
+        self.plots[("Wire", "en")] = found("w" * 300, resolved=None, revid=None)
+        self.run_batch({"/movie/2": detail(2)}, [("movie", 2)])
+        row = self.rows()["movie:2"]
+        self.assertEqual(row["plotArticle"], "Wire")
+        self.assertNotIn("plotArticleRedirected", row)
+        self.assertNotIn("plotRevId", row)
 
     def test_the_report_counts_the_source_that_served_each_plot(self):
         """Which source was ASKED is not which answered: a throttled bearer falls back title by title."""

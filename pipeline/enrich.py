@@ -49,9 +49,9 @@ TMDB, IMDB, BOTH = "tmdb", "imdb", "both"
 #: explores the life and career of John le Carré", 55).
 WIKI_PLOT_FLOOR = 120
 
-#: Long enough that a title's OWN article is clearly its best source. The floor cannot also do this job: as
-#: accept-threshold AND fall-through trigger, lowering it stopped Silo, Dark Matter and Defending Jacob
-#: falling through to the novels that carry their real plots — 12,415 characters traded for 189.
+#: Long enough that the title's English article is not worth supplementing from its other-language ones.
+#: It no longer decides whether the P144 source work is read: that is read only when the title has no plot
+#: of its own that clears `WIKI_PLOT_FLOOR` on any Wikipedia (see `reground`).
 OWN_ARTICLE_SUFFICIENT = 1000
 
 #: An overview shorter than this is a stub too thin to classify. Judged on the LENGTH only.
@@ -208,12 +208,21 @@ def reground(record, facts, cache, token):
     error for `missed` and `deferred`, and for `grounded` which source served the plot (`plot.ENTERPRISE`
     or `plot.ACTION_API`).
 
-    Candidates in order: the title's OWN article, then the Wikidata P144 work it adapts — an adaptation's
-    article is often production and episodes with no story in it ("Attack on Titan (TV series)"). The
-    LONGEST wins rather than the first over the line, so a thin own article no longer blocks the source
-    work; the search stops once an article is clearly enough. The source article describes the BOOK, so it
-    can diverge from this cut — accepted for premise similarity, and recorded as `source-work` so no census
-    has to replay the decision to find out.
+    The title's OWN articles first: English, then — when English gives less than `OWN_ARTICLE_SUFFICIENT`
+    — its other-language sitelinks, the longest of them winning. The Wikidata P144 work it is based on is
+    read only when none of those yields a plot that clears `WIKI_PLOT_FLOOR`. That source article is about
+    a DIFFERENT work: a novel, or for a spin-off or remake the parent screen work (Gen V is based on The
+    Boys, the 2015 Limitless series on the novel The Dark Fields). Letting it compete on length made it win
+    wherever the title's own premise was short, and the classify pass judged 1.0% of the 1,986 texts it
+    won to be about the requested title, against 98.7% for own-article text — at every plot length,
+    including under 300 characters. It stays as the last resort for an adaptation whose own article has no
+    story in it ("Attack on Titan (TV series)"), recorded as `source-work` so every reader can tell.
+
+    A sitelink that REDIRECTS is not the title's article either: Wikidata links an item to a redirect when
+    its page was merged into another work's (`Jarhead 2: Field of Fire` → `Jarhead (film)`, `Naruto:
+    Shippūden` → `Naruto (TV series)`), and 7 of 99 such texts were judged the requested title. It is
+    treated as no article on that wiki. Only a redirect the fetch SAW can be refused — the Enterprise path
+    names no page, so its answer is taken as it comes.
     """
     facts = facts or {}
     # Runtime and creators ride the same hop, so they fold in for EVERY title, plot or not. Wikidata's
@@ -234,42 +243,44 @@ def reground(record, facts, cache, token):
     best, saw_section, saw_article = None, False, False
 
     def read(article, language):
-        """The plot, or None — and a page the wiki does not have is not an article that was read."""
+        """The plot, or None — and neither a page the wiki does not have nor a sitelink that redirects into
+        another page is an article that was read."""
         nonlocal saw_article
         try:
             found = plot.plot(article, language, cache, token)
         except plot.NoPage:
             return None
+        if found is not None and found["resolvedArticle"] not in (None, article):
+            return None
         saw_article = True
         return found
 
+    def consider(article, language, role):
+        """Read one candidate into `best`; True once it alone is enough to stop looking."""
+        nonlocal best, saw_section
+        found = read(article, language)
+        if found is None:
+            return False
+        saw_section = True
+        # Strictly longer: at equal length the earlier candidate stays.
+        if best is None or len(found["text"]) > len(best[0]["text"]):
+            best = (found, article, role)
+        return len(found["text"]) >= OWN_ARTICLE_SUFFICIENT
+
     try:
-        for article, role in candidates:
-            found = read(article, "en")
-            if found is None:
-                continue
-            saw_section = True
-            if best is None or len(found["text"]) > len(best[0]["text"]):
-                best = (found, article, role)
-            if len(found["text"]) >= OWN_ARTICLE_SUFFICIENT:
-                break
+        enough = bool(facts.get("article")) and consider(facts["article"], "en", "own")
         # No English article, or a thin one: two thirds of the plotless films have none, and half of THOSE
         # have one elsewhere. The title's own language first — right 8 times in 15 — then the rest, since
         # four of the misses were English-language films covered by the German or Italian Wikipedia.
-        if (best is None or len(best[0]["text"]) < OWN_ARTICLE_SUFFICIENT) and by_language:
+        # Still this title's OWN article — `articlesByLang` is its sitelinks, never the source work's.
+        if not enough and by_language:
             preferred = [record["originalLanguage"]] if record["originalLanguage"] is not None else []
             for language in preferred + sorted(code for code in by_language if code not in preferred):
                 article = by_language.get(language)
-                found = read(article, language) if article else None
-                if found is None:
-                    continue
-                saw_section = True
-                if best is None or len(found["text"]) > len(best[0]["text"]):
-                    # Still this title's OWN article — `articlesByLang` is its sitelinks, never the
-                    # source work's.
-                    best = (found, article, "own-other-language")
-                if len(found["text"]) >= OWN_ARTICLE_SUFFICIENT:
+                if article and consider(article, language, "own-other-language"):
                     break
+        if facts.get("sourceArticle") and (best is None or len(best[0]["text"]) < WIKI_PLOT_FLOOR):
+            consider(facts["sourceArticle"], "en", "source-work")
     except http.HTTPError as error:
         if is_transient(error):
             return "deferred", None, error
