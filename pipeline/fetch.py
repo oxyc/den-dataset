@@ -197,16 +197,24 @@ def drain(ctx, media):
             return batches
         if remaining == previous:
             if report.get("belowFloor", 0) > 0 and report.get("count", 0) == 0:
-                raise StageError(
-                    f"fetch: every title in this {media} batch is below the vote floor, so the worklist "
-                    f"cannot drain at it — below-floor ids are not checkpointed, because a vote count only "
-                    f"climbs. Re-run with --vote-floor 0 to include the low-vote tail, or filter the "
-                    f"worklist. This is not an upstream failure.")
+                # Only when NOTHING was deferred: a batch of both is still waiting on an upstream, and
+                # reporting it as all below the floor named the wrong cause.
+                if not report.get("deferred", 0):
+                    raise StageError(
+                        f"fetch: every title in this {media} batch is below the vote floor, so the worklist "
+                        f"cannot drain at it — below-floor ids are not checkpointed, because a vote count "
+                        f"only climbs. Re-run with --vote-floor 0 to include the low-vote tail, or filter "
+                        f"the worklist. This is not an upstream failure.")
             stalls += 1
             if stalls >= STALLS:
+                below, deferred = report.get("belowFloor", 0), report.get("deferred", 0)
+                cause = ("the ids are being attempted and deferred, which is an upstream refusing rather than "
+                         "a worklist that is done")
+                if below:
+                    cause = (f"{deferred} of them deferred by an upstream refusing, and {below} below the vote "
+                             f"floor, which never drain at it (--vote-floor 0, or filter the worklist)")
                 raise StageError(f"fetch: {STALLS} {media} batches in a row finished with {remaining} "
-                                 f"still pending — the ids are being attempted and deferred, which is an "
-                                 f"upstream refusing rather than a worklist that is done. Stopping.")
+                                 f"still pending — {cause}. Stopping.")
             pause(stalls * 60)
         else:
             stalls = 0

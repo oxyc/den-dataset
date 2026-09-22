@@ -203,6 +203,27 @@ class Loop(Staged):
         self.assertEqual((self.slept, len(self.calls)), ([], 2))
 
 
+class MixedStall(Staged):
+    def test_a_batch_of_below_floor_and_deferred_ids_is_a_stall_that_names_both(self):
+        """The last batch of a drain can hold both. Called "every title below the floor", the refusal sent the
+        operator to lower a floor while an upstream was the reason 300 of them were still there."""
+        self.script({"remaining": 700, "count": 0, "belowFloor": 400, "deferred": 300})
+        with self.assertRaises(StageError) as refused:
+            fetch.drain(context(self.out), "movie")
+        message = str(refused.exception)
+        self.assertNotIn("every title", message)
+        self.assertIn("300 of them deferred by an upstream refusing, and 400 below the vote floor", message)
+        self.assertEqual(self.slept, [60, 120, 180, 240, 300], "backed off like any stall")
+
+    def test_once_the_deferred_ids_clear_the_rest_is_named_as_below_the_floor(self):
+        self.script({"remaining": 700, "count": 0, "belowFloor": 400, "deferred": 300},
+                    {"remaining": 400, "count": 300}, {"remaining": 400, "count": 0, "belowFloor": 400})
+        with self.assertRaises(StageError) as refused:
+            fetch.drain(context(self.out), "movie")
+        self.assertIn("every title in this movie batch is below the vote floor", str(refused.exception))
+        self.assertEqual(len(self.calls), 3)
+
+
 class Served(Staged):
     def test_the_drain_reports_which_source_served_its_plots_summed_over_its_batches(self):
         """Not which was asked. Announcing a held bearer as the source before anything was read hid a bearer
