@@ -18,43 +18,21 @@ Of the four genre rows that differ, one is the SCRAPE being wrong — it recorde
 (`http://www.wikidata.org/.well-known/genid/…`) as a genre, which this derivation drops because no such QID
 resolves to a label. The rest differ by a single genre QID the sidecar resolved differently.
 
-The genre normalisation below mirrors `WikipediaSource.strippedGenre` exactly — Wikidata appends the medium
-to genre labels where TMDB does not, and the comment there records that mean overlap with TMDB measured
-0.01 before the strip and 0.40 after. Reimplementing it is the one risky part of this script, which is why
-it is validated against a real scrape rather than reasoned about.
+The genre normalisation is `lib/wikidata.stripped_genre` — Wikidata appends the medium to genre labels
+where TMDB does not, and mean overlap with TMDB measured 0.01 before the strip and 0.40 after. It used to
+be reimplemented here, and it drifted: this copy kept the original six medium words for as long as the
+other side had eight, so the two disagreed on `reality television`, `crime fiction` and 36 other genre
+labels while this docstring claimed it mirrored the rule exactly. There is one copy in Python now, and
+this file imports it.
 """
 import argparse
 import json
+import os
+import sys
 
-# WikipediaSource.strippedGenre's list, in its order — LONGEST FIRST, so "television series" is taken
-# whole before "series" can bite into it.
-#
-# This is a second implementation of a rule that lives in Swift, and it drifted: it kept the original
-# six words for as long as the Swift side had eight, so the two disagreed on `reality television`,
-# `crime fiction` and 36 other genre labels while this file's docstring claimed it mirrored it exactly.
-# Change one, change both — or better, delete this one and read the Swift side's output.
-MEDIA = ["television program", "television series", "anime and manga", "tv series",
-         "television", "series", "movie", "anime", "film"]
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-
-def stripped_genre(label):
-    """`"science fiction film"` → `"science fiction"`; a label that is ONLY a medium → `""`."""
-    s = label.lower().strip()
-    changed = True
-    while changed:
-        changed = False
-        for word in MEDIA:
-            if s.endswith(" " + word):
-                s = s[: -(len(word) + 1)].strip()
-                changed = True
-        # `fiction` only when something survives it, and never off a genre that ENDS in "science
-        # fiction" — "hard science fiction" is a real referenced genre and "hard science" is not.
-        if not changed and s.endswith(" fiction") and not s.endswith("science fiction") \
-                and len(s) > len(" fiction") + 1:
-            s = s[: -len(" fiction")].strip()
-            changed = True
-    return "" if s in MEDIA else s
-
+from lib.wikidata import stripped_genre  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--facts", required=True, help="facts-<version>.json (records + entities)")

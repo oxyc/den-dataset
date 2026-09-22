@@ -186,7 +186,7 @@ class CommandLine(Staged):
         os.remove(os.path.join(self.out, "doc-facts.json"))
         with self.assertRaises(StageError) as refused:
             embed.argv(context(self.out))
-        self.assertIn("taxonomy-backfill doc-facts", str(refused.exception))
+        self.assertIn("./den stage docfacts", str(refused.exception))
 
     def test_a_missing_enrichment_stops_the_stage(self):
         os.rmdir(os.path.join(self.out, "enriched"))
@@ -282,10 +282,11 @@ class Topology(unittest.TestCase):
         self.assertLess(pipeline.STAGES.index("corpus"), pipeline.STAGES.index("store"))
 
     def test_an_input_no_stage_produces_still_names_its_own_producer(self):
-        """The seam: the enrichment and the Wikidata scrape are stages that are not ported, so they answer
-        for themselves until they land."""
-        self.assertEqual(pipeline.producers()["doc_facts"],
-                         (artifacts.DOC_FACTS.producer, artifacts.DOC_FACTS.how, False))
+        """The seam, at what is left of it: the enrichment is a stage that is not ported, so it answers
+        for itself. The Wikidata scrape used to and no longer does — `pipeline/docfacts.py` writes it now,
+        and the ownership moved with the stage."""
+        self.assertEqual(artifacts.DOC_FACTS.producer, "")
+        self.assertEqual(pipeline.producers()["doc_facts"][0], "pipeline/docfacts.py")
         self.assertEqual(pipeline.producers()["enriched"][0], artifacts.ENRICHED.producer)
         self.assertIn(artifacts.VECTOR_LABELS, [bind(e).artifact for e in corpus.INPUTS])
 

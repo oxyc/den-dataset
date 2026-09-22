@@ -119,16 +119,7 @@ final class ComposedDocTests: XCTestCase {
         XCTAssertEqual(WikipediaSource.strippedGenre("science fiction"), "science fiction")
     }
 
-    func testUnresolvedQIdLabelsAreDropped() throws {
-        // When the label service cannot resolve a value it returns the bare Q-id. Embedding "Q1379241" as a
-        // director teaches the model nothing, so it must not reach the doc.
-        let json = """
-        {"results":{"bindings":[
-          {"tmdb":{"value":"603"},"vLabel":{"value":"Lana Wachowski"}},
-          {"tmdb":{"value":"603"},"vLabel":{"value":"Q1379241"}}
-        ]}}
-        """
-        let parsed = try WikipediaSource.parseLabelled(Data(json.utf8))
-        XCTAssertEqual(parsed[603], ["Lana Wachowski"])
-    }
+    // The label-service parse that dropped unresolved Q-ids left with `doc-facts`, which is
+    // `pipeline/docfacts.py` now; `lib/wikidata_test.py` holds that rule. `strippedGenre` stays here
+    // because `facts` still uses it, so the rule has one copy on each side rather than three.
 }

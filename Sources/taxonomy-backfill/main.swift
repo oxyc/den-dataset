@@ -793,58 +793,6 @@ enum Commands {
                          "skippedAfterFailure": skipped, "hasVector": hasVector ? 1 : 0]))
     }
 
-    // doc-facts — scrape the two embedding-doc clauses that still came from TMDB (director, genre) from
-    // Wikidata, so the vectors can be built with no TMDB Content in them at all. Writes `doc-facts.json` keyed
-    // "mediaType:tmdbId". Kept SEPARATE from embed-corpus because the scrape is ~770 SPARQL requests and the
-    // embed is hours: pay each once, and let a failure in one not cost the other.
-    static func docFacts(_ args: Args) async throws {
-        let outDir = try args.require("--out-dir")
-        let labelsPath = try args.require("--labels")
-        let batchSize = args.int("--batch") ?? 100
-        let path = (outDir as NSString).appendingPathComponent("doc-facts.json")
-
-        struct Row: Codable { let directors: [String]; let genres: [String] }
-        // RESUME: an id already present is not re-queried. A 38.5k-title scrape WILL be interrupted, and
-        // re-running from zero each time is how a polite scrape turns into an impolite one.
-        var facts: [String: Row] = (try? JSON.read(path)) ?? [:]
-        let before = facts.count
-
-        let labels: LabelsArtifact = try JSON.read(labelsPath)
-        var byType: [String: [Int]] = [:]
-        for record in labels.records where facts["\(record.mediaType):\(record.tmdbId)"] == nil {
-            byType[record.mediaType, default: []].append(record.tmdbId)
-        }
-        let todo = byType.values.reduce(0) { $0 + $1.count }
-        FileHandle.standardError.write(Data("  doc-facts: \(before) cached, \(todo) to fetch\n".utf8))
-
-        let source = WikipediaSource()
-        var done = 0
-        for (type, ids) in byType {
-            let mediaType: MediaType = type == "tv" ? .tv : .movie
-            for start in stride(from: 0, to: ids.count, by: batchSize) {
-                let slice = Array(ids[start..<min(start + batchSize, ids.count)])
-                let got = try await source.docFacts(forTMDBIds: slice, mediaType: mediaType)
-                for id in slice {
-                    // Absent from the result means Wikidata states neither — record the empty row so the
-                    // resume does not re-query it forever. The COMPOSER treats both as "no clause"; the
-                    // unknown-vs-none distinction matters for the facts sidecar, not for prose.
-                    let f = got[id]
-                    facts["\(type):\(id)"] = Row(directors: f?.directors ?? [], genres: f?.genres ?? [])
-                }
-                done += slice.count
-                // Write every batch, not at the end: an interrupted scrape keeps everything it paid for.
-                try JSON.write(facts, to: path)
-                if done % 1000 < batchSize {
-                    FileHandle.standardError.write(Data("  doc-facts \(done)/\(todo)…\n".utf8))
-                }
-            }
-        }
-        let withDirector = facts.values.filter { !$0.directors.isEmpty }.count
-        let withGenre = facts.values.filter { !$0.genres.isEmpty }.count
-        print(JSON.line(["docFacts": facts.count, "fetched": todo, "withDirector": withDirector,
-                         "withGenre": withGenre, "path": path]))
-    }
-
     // embed-corpus — build bge-m3 vectors for the EXISTING (already-shipped) labels from the Wikipedia-plot
     // enrichment, WITHOUT re-classifying. Composes facts + the existing tags + the wiki plot, batch-embeds via
     // den-embed, and writes a FRESH index store (labels = the existing records verbatim, aligned to new
@@ -2586,16 +2534,6 @@ enum Spec {
                        + "(MAX_TOKENS above all), not its CPU — the canary is what checks it"),
             ],
             run: { try await Commands.embedCorpus($0) }),
-        Subcommand(
-            name: "doc-facts",
-            summary: "Scrape Wikidata P57 director + P136 genre for the shipped corpus into doc-facts.json.",
-            flags: [
-                .value("--out-dir", "<dir>", "doc-facts.json is written here", required: true),
-                .value("--labels", "<labels-t02.json>", "the corpus to scrape facts for", required: true),
-                .value("--batch", "<n>", "ids per SPARQL request (default 100). Resumable: a re-run skips "
-                       + "ids already in the file"),
-            ],
-            run: { try await Commands.docFacts($0) }),
         Subcommand(
             name: "facts",
             summary: "The CC0 facts sidecar den-atlas /recommend ranks on. Needs no plot and no embedding.",

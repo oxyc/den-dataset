@@ -102,7 +102,7 @@ jobs:
       # to; this fails the build on a module under `pipeline/` that no stage reaches, and on one under
       # `store/` that the writer the store stage runs does not reach.
       - name: The pipeline
-        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/embed_test.py pipeline/publish_test.py store/build_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py guards/reachable_test.py den_test.py
+        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/docfacts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/embed_test.py pipeline/publish_test.py store/build_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py guards/reachable_test.py den_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The
       # guards above are the pieces; this is whether the script wires them up — that it refuses a wrong
       # hash, a missing blob, a dropped key, a shrunk count and a blob from a dead generation, and that

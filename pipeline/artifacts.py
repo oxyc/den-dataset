@@ -115,9 +115,6 @@ ENRICHED = Artifact(
 DOC_FACTS = Artifact(
     name="doc_facts",
     filename="doc-facts.json",
-    producer=BACKFILL,
-    how="taxonomy-backfill doc-facts",
-    dedicated=False,
 )
 
 CORPUS = Artifact(

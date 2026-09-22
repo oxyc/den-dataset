@@ -219,6 +219,12 @@ $BIN assemble --batch-id <id> --out-dir out    # per batch (default embedder = d
 #     no longer a silently different document: embed-corpus refuses a flag it does not declare, and
 #     `--help` lists the ones it does.) It resumes the same way, adds `--pause-ms` and `--limit` for a long
 #     run, and refuses a run that recorded no verified space.
+#     `doc-facts.json` is two of the document's clauses — director and genre, from Wikidata — and without
+#     it the command composes the FULL shape instead, which is a different vector space with nothing in
+#     the output saying so. `./den stage embed` runs the scrape as its own stage first; by hand it is
+#     `./den stage docfacts --out-dir out --dataset-version <ver>` (~770 SPARQL requests, resumable), or
+#     `scripts/v2/derive_doc_facts.py --facts out/facts-<ver>.json --out out/doc-facts.json` when a facts
+#     sidecar already exists, which needs no requests at all.
 $BIN embed-corpus --out-dir out --labels out/labels-t02.json \
     --doc-facts out/doc-facts.json --doc-drop-director --plot-cap 3500
 #     `--dump-docs <path>` writes the composed documents and embeds NOTHING, for embedding elsewhere — the
