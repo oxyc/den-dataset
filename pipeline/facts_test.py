@@ -159,6 +159,16 @@ class Passes(Staged):
         self.assertNotIn("basedOnKind", self.read("facts-fields.json")["movie:1"],
                          "derived kinds are not checkpointed")
 
+    def test_a_source_work_with_no_type_has_no_kind(self):
+        """Adapted from a novel and from a work Wikidata types as nothing: the kind is the novel's, and a
+        title adapted only from the untyped one ships no kind at all."""
+        self.wd.facts[("movie", 1)]["basedOn"] = ["Q30", "Q31"]
+        self.wd.facts[("tv", 1)]["basedOn"] = ["Q31"]
+        self.run_stage()
+        records = {(r["mediaType"], r["tmdbId"]): r for r in self.read(f"facts-{VERSION}.pre-merge.json")["records"]}
+        self.assertEqual(records[("movie", 1)]["basedOnKind"], ["book"])
+        self.assertNotIn("basedOnKind", records[("tv", 1)])
+
     def test_the_file_is_the_swift_encoders_bytes(self):
         """Keys sorted by code point, compact, `/` escaped, UTF-8 raw. Measured identical to the binary's
         over 1,500 titles; pinned here on one."""

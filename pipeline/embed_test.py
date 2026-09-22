@@ -174,6 +174,21 @@ class Resume(Staged):
         self.run_stage()
         self.assertEqual([r["tmdbId"] for r in self.store()], [r["tmdbId"] for r in self.store("vectors.jsonl")])
 
+    def test_a_label_line_that_is_not_a_record_is_a_tear_too(self):
+        """It parses and names the vector's title, but finalize would refuse it as a record — so it is not a
+        finished row, and resume must not count its title as embedded."""
+        self.run_stage(limit=2)
+        index = os.path.join(self.out, "index")
+        with open(os.path.join(index, "labels.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"tmdbId": 3, "mediaType": "tv"}) + "\n")
+        with open(os.path.join(index, "vectors.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"tmdbId": 3, "v": [0] * 8}) + "\n")
+        self.run_stage()
+        for row in self.store():
+            embed.finalize.parse_record(row, "store")
+        self.assertEqual([(r["mediaType"], r["tmdbId"]) for r in self.store()],
+                         [("movie", 1), ("movie", 2), ("tv", 3)])
+
     def test_a_divergence_past_one_chunk_is_refused_and_nothing_is_changed(self):
         """Truncating to a divergence at line 1 of a 1,001-row store is data loss, not a repair."""
         index = os.path.join(self.out, "index")
@@ -278,6 +293,24 @@ class Gates(Staged):
         canary_for(self.service, os.environ["DEN_EMBED_CANARY"])
         self.assertIn("a plot cap of 3500", self.refused())
         self.assertEqual(self.posts(), [], "nothing is embedded, not even the canary")
+
+    def test_the_fit_counts_the_facts_half_of_the_document(self):
+        """At 900 tokens the service keeps ~3,600 characters: the plot cap alone fits, the document built
+        around it (~4,000) does not."""
+        self.service.health = dict(self.service.health, max_tokens=900)
+        canary_for(self.service, os.environ["DEN_EMBED_CANARY"])
+        self.assertIn("a plot cap of 3500", self.refused())
+
+    def test_empty_stores_with_no_embedder_record_are_a_first_use(self):
+        """A store that exists and holds no rows has nothing to mix a second embedder into, so the run
+        records this one and proceeds rather than asking for a record of what built nothing."""
+        index = os.path.join(self.out, "index")
+        os.makedirs(index)
+        for name in ("labels.jsonl", "vectors.jsonl"):
+            open(os.path.join(index, name), "w").close()
+        _, summary = self.run_stage()
+        self.assertEqual(summary["written"], 3)
+        self.assertTrue(os.path.exists(os.path.join(index, "embedder.json")))
 
     def test_the_writer_needs_a_verified_space(self):
         """The stage used to check for the space record after the binary ran, because a binary built

@@ -85,6 +85,17 @@ class Batches(unittest.TestCase):
             self.assertEqual([doc for _, _, doc in docs], ["Plot: A pirate sets sail."])
             self.assertEqual(tally, {})
 
+    def test_an_overview_that_is_not_a_wikipedia_plot_is_never_composed(self):
+        """`overview` holds TMDB's text wherever the enrichment found no Wikipedia plot, and TMDB's terms bar
+        it from the corpus. Only a row that says `hasWikiPlot` may put it in the document."""
+        with tempfile.TemporaryDirectory() as out:
+            with open(os.path.join(out, "batch-1.json"), "w", encoding="utf-8") as fh:
+                json.dump([{"tmdbId": 1, "mediaType": "movie", "overview": "TMDB's synopsis.", "hasWikiPlot": False},
+                           {"tmdbId": 2, "mediaType": "movie", "overview": "TMDB's synopsis."}], fh)
+            label = {"subgenres": [], "moods": []}
+            docs = list(compose.documents(out, {"movie:1": label, "movie:2": label}, {}, set(), 3500, {}))
+            self.assertEqual([doc for _, _, doc in docs], ["Plot:", "Plot:"])
+
 
 if __name__ == "__main__":
     unittest.main()

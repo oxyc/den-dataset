@@ -22,6 +22,9 @@ LABELS = ("Heist", "Neo-Noir", "Slasher", "Time Travel")
 #: `fixture()` through the Swift binary with `ARGS`.
 ARGS = ["--k", "6", "--iterations", "4", "--min-size", "3", "--max-purity", "0.9", "--min-cohesion", "0.1"]
 GOLDEN_SHA = "8cc76013d96bcb158dfcda6019704776d8989a7e6163d1f895d18186068c452a"
+#: The same, stopped after ONE iteration. The fixture settles at the second, so every count from 2 up is
+#: `GOLDEN_SHA` — the Swift binary agrees at each — and only a run at 1 or 2 can tell them apart.
+ONE_ITERATION_SHA = "413331bc761cef25699d671d2ecb89458dde4f7cb9e48768e8358ac94b739773"
 
 
 def vector(i, dim=16):
@@ -60,6 +63,15 @@ class Report(unittest.TestCase):
         with open(self.out, "rb") as fh:
             self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), GOLDEN_SHA)
 
+    def test_every_iteration_asked_for_is_run(self):
+        """At 4 the fixture has long converged, so a run one iteration short reads the same. At 2 it has
+        not: the second iteration still moves members."""
+        for iterations, digest in (("1", ONE_ITERATION_SHA), ("2", GOLDEN_SHA)):
+            with self.subTest(iterations=iterations):
+                self.run_it("--iterations", iterations)
+                with open(self.out, "rb") as fh:
+                    self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), digest)
+
     def test_it_is_deterministic(self):
         """Stride-seeded, so this week's cluster ids are comparable to last week's."""
         self.run_it()
@@ -85,6 +97,17 @@ class Report(unittest.TestCase):
         with self.assertRaises(SystemExit) as refused:
             self.run_it()
         self.assertIn("row 3", str(refused.exception.code))
+
+
+class Candidates(unittest.TestCase):
+    def test_purity_at_the_limit_is_a_candidate(self):
+        """`--max-purity` is the most dominant a label may be and still count as unexplained; the Swift
+        dropped a cluster only above it. Two of four members share a label: purity 0.5 at a limit of 0.5."""
+        records = [{"mediaType": "movie", "tmdbId": i, "subgenres": [{"label": label}]}
+                   for i, label in enumerate(("Heist", "Heist", "Slasher", "Neo-Noir"))]
+        vectors = [[1.0, 0.0]] * 4
+        found = recluster.candidates(records, vectors, [0] * 4, [[1.0, 0.0]], 1, 0.5, 0.0)
+        self.assertEqual([(row["purity"], row["dominantLabel"]) for row in found], [(0.5, "Heist")])
 
 
 class Arithmetic(unittest.TestCase):

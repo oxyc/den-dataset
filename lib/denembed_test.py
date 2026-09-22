@@ -144,6 +144,17 @@ class Canary(Served):
             denembed.verify(self.canary, self.service.url, lambda line: None)
         self.assertIn("1 of 2 cases (b)", str(refused.exception))
 
+    def test_a_vector_of_another_length_refuses_however_its_prefix_reads(self):
+        """No vector at all, a truncated one, one with an extra dimension: none is comparable dimension by
+        dimension, and each counts as every dimension differing rather than as a near miss."""
+        canary_for(self.service, self.canary)
+        for returned in ([], vector("second text")[:4], vector("second text") + [0]):
+            with self.subTest(length=len(returned)):
+                self.service.override = {"second text": returned}
+                with self.assertRaises(denembed.CanaryFailure) as refused:
+                    denembed.verify(self.canary, self.service.url, lambda line: None)
+                self.assertIn("1 of 2 cases (b)", str(refused.exception))
+
     def test_a_different_token_cap_refuses_before_embedding_anything(self):
         canary_for(self.service, self.canary)
         self.service.health = dict(self.service.health, max_tokens=512)

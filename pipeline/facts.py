@@ -224,7 +224,8 @@ def resolve_sources(fields, path):
     for row in fields.values():
         if not isinstance(row.get("basedOn"), list):
             continue
-        found = {wd.strongest_kind(kinds[qid]) for qid in row["basedOn"] if kinds.get(qid)}
+        # A work Wikidata states no type for has no kind: left out, never a null beside the real ones.
+        found = {wd.strongest_kind(kinds.get(qid) or []) for qid in row["basedOn"]} - {None}
         if found:
             row["basedOnKind"] = sorted(found)
             for kind in found:

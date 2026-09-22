@@ -304,21 +304,25 @@ class Identity(Staged):
 
     def test_an_unreadable_identity_is_refused_rather_than_skipped(self):
         """Skipped, it drops the identity from the manifest and looks like a store that never had one."""
-        for name in ("embedder.json", "embedding-space.json"):
-            with self.subTest(name=name):
+        for name, body in (("embedder.json", "{not json"), ("embedding-space.json", "{not json"),
+                           ("embedder.json", '{"model": "bge-m3", "dims": 1024}'),
+                           ("embedding-space.json", '{"canarySet": "canary-v1"}')):
+            with self.subTest(name=name, body=body):
                 lay_down(self.out)
                 with open(os.path.join(self.out, "index", name), "w", encoding="utf-8") as fh:
-                    fh.write("{not json")
+                    fh.write(body)
                 self.assertIn("unreadable", self.refused())
 
     def test_an_absent_identity_is_an_absent_key_not_an_inherited_one(self):
         """The manifest OWNS these keys: a rewrite that has no space must not keep the last run's."""
         lay_down(self.out, embedder=False, space=False,
-                 previous={"embeddingSpace": "canary-v1:stale", "embedderRuntime": "old", "storeFile": "s"})
+                 previous={"embeddingSpace": "canary-v1:stale", "embedderRuntime": "old", "embedderMaxTokens": 512,
+                           "storeFile": "s"})
         self.run_stage()
         meta = json.loads(read(os.path.join(self.out, "dataset.meta.json")))
         self.assertNotIn("embeddingSpace", meta)
         self.assertNotIn("embedderRuntime", meta)
+        self.assertNotIn("embedderMaxTokens", meta)
         self.assertEqual(meta["storeFile"], "s")
 
 
