@@ -55,10 +55,10 @@ jobs:
         run: python3 -m py_compile scripts/v2/embed_canary.py scripts/v2/embed_docs.py scripts/v2/embed_premise_v2.py scripts/v2/import_box_vectors.py
       - name: Jev facet contracts
         run: |
-          python3 -m py_compile pipeline/run_facets.py pipeline/run_combined.py scripts/v2/run_delta.py scripts/v2/audit_combined.py scripts/v2/consolidate_corpus.py
+          python3 -m py_compile pipeline/run_facets.py pipeline/run_combined.py scripts/v2/run_delta.py pipeline/audit_combined.py scripts/v2/consolidate_corpus.py
           # The auditor is included deliberately: it is the only thing standing between a corrupted bundle
           # and a published dataset, and the pass it audits cost $20.47 and will not be run again.
-          python3 -m unittest pipeline/run_facets_test.py pipeline/run_combined_test.py scripts/v2/test_audit_combined.py scripts/v2/test_run_delta.py lib/typesafe_client_test.py
+          python3 -m unittest pipeline/run_facets_test.py pipeline/run_combined_test.py pipeline/audit_combined_test.py scripts/v2/test_run_delta.py lib/typesafe_client_test.py
       # The committed genres & moods (`data/genres-moods-curated.json`) and the one-off that seeded them. The
       # file itself is gated against the baseline by `scripts/test_eval_taxonomy.py` below.
       - name: Genres & moods seed

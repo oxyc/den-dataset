@@ -32,6 +32,7 @@ from datetime import datetime
 import pipeline
 
 from . import artifacts, corpus, store
+from . import audit_combined  # the bundle auditor the stage runs, for its recorded lineage
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -46,8 +47,6 @@ def load(name, path):
     spec.loader.exec_module(module)
     return module
 
-
-import audit_combined  # noqa: E402  — the bundle auditor the stage runs, for its recorded lineage
 
 script = load("consolidate_corpus", os.path.join(V2, "consolidate_corpus.py"))
 fixture = load("test_consolidate_corpus", os.path.join(V2, "test_consolidate_corpus.py"))

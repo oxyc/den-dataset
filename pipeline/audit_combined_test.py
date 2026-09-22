@@ -2,13 +2,10 @@
 import copy
 import json
 import os
-import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import audit_combined
-from pipeline import combined_questions, run_combined
+from . import audit_combined, combined_questions, run_combined
 
 #: The `taxonomySha256` every shard in `out-repass` records: the genres & moods vocabulary as the Swift
 #: source it was written in until oxyc/den-dataset#27 converted it to JSON.

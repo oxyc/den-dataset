@@ -13,18 +13,18 @@ import re
 import statistics
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from pipeline.combined_questions import PROMPT, ROOT, TAXONOMY, section_question
+if not __package__:
+    # Run as a file: the repo, not pipeline/, is the import root.
+    sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from lib.typesafe_client import TypeSafe
 from pipeline.article_sections import (encoded_chars, is_oversized, public_section, select_global_sections,
                                        sha256_text, state_for)
+from pipeline.combined_questions import PROMPT, ROOT, TAXONOMY, section_question
 from pipeline.run_combined import (IMPLEMENTATION as SOURCES, SCHEMA_VERSION, article_key,
                                    attach_enriched_evidence, canonical, load_articles, sections_for_record,
                                    sha256_file, validate_answers)
-from lib.typesafe_client import TypeSafe
 
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 #: Superseded digests of the source files the pass hashes into every manifest, each with the commit that
 #: superseded it and why its rows still mean the same thing. See `validate_implementation`.
 LINEAGE = os.path.join(ROOT, "data", "implementation-lineage.json")

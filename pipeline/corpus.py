@@ -39,10 +39,10 @@ import subprocess
 import sys
 
 from . import artifacts
+from . import audit_combined  # the bundle auditor, run against each shard's sidecar manifest
 from .contract import REPO, StageError, bind
 
 sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
-import audit_combined  # noqa: E402  — the bundle auditor, run against each shard's sidecar manifest
 import consolidate_corpus  # noqa: E402  — for `shard_order`, the join's own supersede order
 
 NAME = "corpus"

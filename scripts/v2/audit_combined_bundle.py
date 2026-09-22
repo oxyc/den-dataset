@@ -5,8 +5,8 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from audit_combined import audit, validate_manifest
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from pipeline.audit_combined import audit, validate_manifest
 from pipeline.article_sections import sha256_text
 from pipeline.run_combined import (article_key, attach_enriched_evidence, canonical, load_articles,
                                    sha256_file)
