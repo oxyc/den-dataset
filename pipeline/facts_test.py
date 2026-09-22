@@ -6,7 +6,9 @@ does with the answers: which ids it asks about, what it checkpoints, what each p
 merge gets both. Equivalence with the Swift `facts` was measured separately (oxyc/den-dataset#27): over
 1,500 corpus titles and 500 delta ids, replayed from the cache the binary filled, the output and all three
 checkpoints were byte-identical — bar one delta record whose P1476 has two values, which WDQS returns in no
-fixed order and which the binary itself reads first-wins.
+fixed order and which the binary itself read first-wins. Three of the Swift's rules were then changed on
+purpose, each measured in its commit: a genre's rename keeps the rest of its entity, a title's strings are
+chosen by rule rather than by row order, and a stated day wins over the year that contains it.
 """
 import json
 import os

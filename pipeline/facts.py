@@ -289,6 +289,11 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE):
     names = resolve_entities(fields, os.path.join(directory, "facts-entities.json"))
     resolve_sources(fields, os.path.join(directory, "facts-source-types.json"))
     entities = shipped_entities(names, fields)
+    # Built over EVERY entity, not only the Q-ids some record names as a genre — the Swift's rule, kept. So
+    # a type, a subject or a studio whose name matches passes as a genre: 14 of the shipped 82 entries are
+    # no record's genre ("anime television series" as instanceOf, "family" as a main subject, a studio
+    # called Lunanime). Harmless while atlas looks genreMap up only by a record's `genres`; restricting it
+    # to them changes the published map, which is a decision for the consumer's side.
     genre_map = wd.genre_map(entities)
     say(f"genreMap: {len(genre_map)} genres map to TMDB ids")
 
