@@ -16,7 +16,7 @@ prose somewhere that can go stale without anything failing.
 ## The part that is still being rebuilt
 
 `pipeline/` holds **eleven** stages today — the worklist, the enrichment drain, the article dump, the
-classify pass, the Wikidata doc facts, the embed pass, finalize, the facts merge, the corpus join, the
+classify pass, the Wikidata doc facts, the embed pass, finalize, the facts scrape and merge, the corpus join, the
 store build and the publish. Every step `docs/OPERATE.md` walks through is one of them. What is left
 outside are the side passes nothing here runs but two stages read —
 the second classify pass and the premise tags under `scripts/v2/` — and each still answers for itself in

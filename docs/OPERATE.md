@@ -154,7 +154,7 @@ ssh root@pve 'incus exec den -- podman run --rm --network den docker.io/curlimag
 
 # 1. Secrets — copy the template and fill it (gitignored via *.env). The fetch stage sources this.
 cd ~/Projects/Personal/den-dataset
-swift build -c release && BIN=.build/release/taxonomy-backfill
+swift build -c release            # the enrichment still drains through the Swift binary
 cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterprise username/password (optional)
 
 # 2. Worklist — the universe, ORDERED popularity-desc so we process the titles most likely to have a
@@ -243,19 +243,20 @@ python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels ou
 #    hashes, so this is where the version the later stages take is decided.
 ./den stage finalize --out-dir out --dataset-version <ver>
 
-# 6a. The FACTS the store ranks on — the two scrape passes merged. The scrape runs TWICE and cannot run
-#     once: the corpus pass covers the ids in labels-t02.json and is stamped --has-vector, the delta pass
-#     covers ids given outright and is not, and /recommend must never let a vectorless record into an ANN
-#     path. Both passes and the merge all write facts-<ver>.json, so move the corpus pass aside first —
-#     without that the delta pass overwrites it and the merged file is short by every delta title, which
-#     is how a rebuild once dropped 137 of them and nothing but /recommend noticed.
-$BIN facts --out-dir out --labels out/labels-t02.json --has-vector
-mv out/facts-<ver>.json out/facts-<ver>.pre-merge.json
-$BIN facts --out-dir out --ids <the delta ids>     # writes out/facts-unversioned.json
+# 6a. The FACTS the store ranks on — both Wikidata scrape passes, merged. The scrape runs TWICE and cannot
+#     run once: the corpus pass covers the ids in labels-t02.json and is stamped hasVector, the delta pass
+#     covers the ids in out/facts-delta-ids.txt and is not, and /recommend must never let a vectorless record
+#     into an ANN path. The delta list is YOURS to write: the titles /recommend needs facts for that have no
+#     vector, no labels and no facets row (the last one was 8,949 ids), `movie:1` / `tv:2`, one per line or
+#     comma-separated. Nothing in this repo derives it, and the stage refuses to run without it — a merge
+#     missing the delta pass is short by every title only it covers, which is how a rebuild once dropped 137
+#     of them and nothing but /recommend noticed.
 ./den stage facts --out-dir out --dataset-version <ver>
-#     The stage runs scripts/merge-facts.py with those two files and --version, built from
-#     `pipeline/facts.py`'s declaration rather than retyped; `pipeline/facts_test.py` holds the two to the
-#     same bytes. A missing pass is a refusal naming what writes it, not a smaller merge.
+#     Each pass writes straight to the name the merge reads (facts-<ver>.pre-merge.json and
+#     facts-<ver>.delta.json), keeps its own checkpoint (the corpus pass in the out-dir, where the Swift
+#     scrape left one; the delta pass under facts-delta/), and resumes from it. A batch WDQS fails is dropped
+#     whole and the stage refuses to merge a pass that skipped one; `scripts/facts-run.sh out <ver>` loops
+#     until nothing is skipped. The merge is scripts/merge-facts.py, run with --version.
 
 # 7. (retired) There used to be a poster sidecar here — `metadata-<ver>.json`, title/poster/year per
 #    shipped id, fetched from TMDB. The release stopped carrying it when the store took the card fields
@@ -302,8 +303,6 @@ python3 scripts/v2/build_store.py \
 #     Every override is an environment variable and reaches the guards either way (DEN_STORE_REBUILD,
 #     DEN_ALLOW_SHARED_PLOTS, DEN_ALLOW_DROPPING_BLOBS).
 ```
-
-`$BIN` is `.build/release/taxonomy-backfill` (`swift build -c release`).
 
 ## Recovering a store's composition
 

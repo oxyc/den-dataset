@@ -145,8 +145,8 @@ the other 421 would be dropped by the ToS rule regardless.
   types. `Taxonomy.swift` is referenced by no Swift code any more and is still load-bearing:
   `scripts/v2/combined_questions.py` parses it as the classify pass's vocabulary and hashes it into that
   pass's manifest.
-- `Sources/taxonomy-backfill/` — the CLI that drives the phases not ported yet (`facts`, `recluster`).
-- `Tests/DenDatasetTests/` — the argument reader, the facts scrape's rules and the vector blob's format.
+- `Sources/taxonomy-backfill/` — the CLI that drives the phase not ported yet (`recluster`).
+- `Tests/DenDatasetTests/` — the argument reader and the vector blob's format.
 
 ## Build / test
 
@@ -165,6 +165,7 @@ swift test
 ./den stage docfacts  --out-dir <dir> --dataset-version <ver>
 ./den stage embed     --out-dir <dir> --dataset-version <ver> [--limit N] [--dump-docs PATH]
 ./den stage finalize  --out-dir <dir> --dataset-version <ver>
+./den stage facts     --out-dir <dir> --dataset-version <ver>     # needs <dir>/facts-delta-ids.txt
 ```
 
 Or `./den run`, which is the whole order — see `./den stages`.

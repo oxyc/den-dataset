@@ -6,10 +6,10 @@ import Foundation
 // produces the labels and facets the corpus join reads, so this tool gathers the inputs that pass needs and
 // turns already-decided labels into the shipped artifacts.
 //
-//   facts         — the CC0 Wikidata facts den-atlas /recommend ranks on.
 //   recluster     — k-means over the shipped vectors; groups the vocabulary has no word for.
 //
-// The embedding is `pipeline/embed.py` and the shipped artifacts are `pipeline/finalize.py`.
+// The embedding is `pipeline/embed.py`, the shipped artifacts are `pipeline/finalize.py`, and the facts are
+// `pipeline/facts.py`.
 //
 // The enrichment that feeds them is `pipeline/enrich.py`. No LLM key — this tool does not classify.
 
@@ -42,273 +42,6 @@ struct ToolError: Error { let message: String }
 // MARK: - Commands
 
 enum Commands {
-    // facts — the CC0 facts sidecar den-atlas /recommend ranks on. Takes an explicit id list (the DELTA: the
-    // titles atlas has never seen) or the shipped labels. Needs no plot, no classification and no embedding,
-    // which is what lets it cover brand-new releases the >=50-vote worklist floor cannot reach.
-    static func facts(_ args: Args) async throws {
-        let outDir = try args.require("--out-dir")
-        let batchSize = args.int("--batch") ?? 100
-        // Ids as "movie:123,tv:456" or a file of the same, one per line or whitespace-separated.
-        var keys: [String] = []
-        if let inline = args["--ids"] {
-            let text = FileManager.default.fileExists(atPath: inline)
-                ? try String(contentsOfFile: inline, encoding: .utf8) : inline
-            keys = text.split(whereSeparator: { ", \n\t".contains($0) }).map(String.init)
-        } else {
-            let labels: LabelsArtifact = try JSON.read(try args.require("--labels"))
-            keys = labels.records.map { "\($0.mediaType):\($0.tmdbId)" }
-        }
-        // hasVector is FALSE for delta records and true for corpus ones. /recommend must never let a
-        // vectorless record into an ANN path, so this is stated per record rather than inferred.
-        let hasVector = args.has("--has-vector")
-
-        var byType: [String: [Int]] = [:]
-        for key in keys {
-            let parts = key.split(separator: ":")
-            guard parts.count == 2, let id = Int(parts[1]) else { continue }
-            byType[String(parts[0]), default: []].append(id)
-        }
-        let total = byType.values.reduce(0) { $0 + $1.count }
-        FileHandle.standardError.write(Data("  facts: \(total) titles, \(WikidataFacts.specs.count) properties\n".utf8))
-
-        let source = WikipediaSource()
-        // RESUME. A full-corpus pass is ~9k SPARQL requests over hours, and writing only at the end means one
-        // dropped connection loses all of it. The raw per-title fields are checkpointed as they arrive, and a
-        // re-run skips ids already present.
-        let checkpoint = (outDir as NSString).appendingPathComponent("facts-fields.json")
-        var fields: [String: [String: WikidataFacts.FieldValue]] = (try? JSON.read(checkpoint)) ?? [:]
-        // --titles-only backfills just the titles hop over records the checkpoint already holds. Without it
-        // the resume skips every finished id, so a field added after a completed scrape could never be filled
-        // without re-fetching all 24 properties.
-        let titlesOnly = args.has("--titles-only")
-        if !fields.isEmpty {
-            FileHandle.standardError.write(Data("  resuming from \(fields.count) checkpointed titles\n".utf8))
-            for (type, ids) in byType {
-                byType[type] = ids.filter {
-                    let r = fields["\(type):\($0)"]
-                    return titlesOnly ? (r?["titles"] == nil) : (r == nil)
-                }
-            }
-        }
-        var done = 0
-        var skipped = 0
-        for (type, ids) in byType {
-            let mediaType: MediaType = type == "tv" ? .tv : .movie
-            for start in stride(from: 0, to: ids.count, by: batchSize) {
-                let slice = Array(ids[start..<min(start + batchSize, ids.count)])
-                do {
-                    for spec in WikidataFacts.specs where !titlesOnly && !(spec.tvOnly && mediaType != .tv) {
-                        let got = try await source.facts(spec: spec, forTMDBIds: slice, mediaType: mediaType)
-                        for (id, value) in got { fields["\(type):\(id)", default: [:]][spec.key] = value }
-                        // Pace the scrape. Firing 24 requests back-to-back per batch sustains ~3/s for hours,
-                        // which WDQS throttles: the run then fast-fails on intermittent 429s rather than timing
-                        // out, and a restart loop retries the same batch forever without advancing. Measured at
-                        // 0.36 s/request, this roughly halves throughput and is the difference between finishing
-                        // and stalling at 16,500.
-                        try await Task.sleep(nanoseconds: 300_000_000)
-                    }
-                    // Titles are their own hop: search needs the enwiki article title, the label, P1476 and every
-                    // alias, and atlas's title index carries only TMDB's ORIGINAL title today — so "parasite" and
-                    // "spirited away" miss while "Gisaengchung" and "Sen to Chihiro" hit.
-                    let t = try await source.titles(forTMDBIds: slice, mediaType: mediaType)
-                    for (id, v) in t {
-                        var m: [String: WikidataFacts.FieldValue] = [:]
-                        if let a = v.article ?? v.label { m["en"] = .string(WikidataFacts.strippedArticleSuffix(a)) }
-                        if let o = v.original ?? v.label { m["orig"] = .string(o) }
-                        if !v.aliases.isEmpty { m["aliases"] = .list(v.aliases.sorted()) }
-                        if !m.isEmpty { fields["\(type):\(id)", default: [:]]["titles"] = .object(m) }
-                    }
-                } catch {
-                    // A batch that dies after Transport's retries must not end the run. This is 24 requests
-                    // per 100 ids against WDQS for hours: one of them WILL eventually time out, and throwing
-                    // here abandoned every title after it — a scrape died at 3,100 of 8,949 with the other
-                    // 5,849 untouched, despite the checkpoint being per batch.
-                    //
-                    // A full pass also drops whatever this batch half-wrote. Its resume keys on a row
-                    // EXISTING, so a row holding the 9 properties that landed before the timeout would read
-                    // as finished and the title would ship missing the other 15 — silently, and only in the
-                    // titles unlucky enough to straddle a failure. One re-fetch is cheaper than that.
-                    //
-                    // `--titles-only` must NOT drop the row: there the resume deliberately keeps rows that
-                    // already exist (it selects on a missing `titles` key), so those rows hold a COMPLETE
-                    // set of facts from an earlier pass, and deleting one over a failed titles hop would
-                    // destroy 24 properties to retry a 25th.
-                    if !titlesOnly {
-                        for id in slice { fields.removeValue(forKey: "\(type):\(id)") }
-                    }
-                    skipped += slice.count
-                    try JSON.write(fields, to: checkpoint)
-                    FileHandle.standardError.write(Data(
-                        "  facts: batch of \(slice.count) \(type) FAILED, left for a later pass — \(error)\n".utf8))
-                    continue
-                }
-                done += slice.count
-                try JSON.write(fields, to: checkpoint)
-                FileHandle.standardError.write(Data("  facts \(done)/\(total)…\n".utf8))
-            }
-        }
-
-        // Resolve every Q-id that actually appears, once, into the shared `entities` map. Names come from the
-        // label service with "en,mul" — Wikidata has moved proper names to `mul`, and asking for "en" alone
-        // returns the bare Q-id, which is how Christopher Nolan went missing from the doc facts.
-        // BOTH shapes. A spec that is `single: true` collapses to `.string(qid)`, never `.list`, so a
-        // harvest that only walked lists never saw it: `franchise` is the one entity spec declared that
-        // way, and all 3,019 of its Q-ids went unlabelled for as long as this loop existed. The 68 that
-        // did resolve only did so because they happened to appear in some other field's list. Downstream,
-        // an unlabelled entity is silently dropped, so the column read as "almost no title has a
-        // franchise" rather than as a bug.
-        var qids = Set<String>()
-        for row in fields.values {
-            for (_, value) in row {
-                switch value {
-                case .list(let items): for i in items where i.hasPrefix("Q") { qids.insert(i) }
-                case .string(let s) where s.hasPrefix("Q"): qids.insert(s)
-                default: break
-                }
-            }
-        }
-        // Resolve ONLY names we do not already have, and persist them beside the fields. This pass ran over
-        // every Q-id in the whole accumulated checkpoint on every restart: at 16,500 titles that is 92,036
-        // entities, 307 sequential requests, minutes of work redone each attempt — so a resumed run spent its
-        // entire life here and never reached a new batch. The checkpoint froze at exactly the point where this
-        // pass outgrew the run, which looked like a WDQS timeout and was not.
-        let namesPath = (outDir as NSString).appendingPathComponent("facts-entities.json")
-        var rawEntities: [String: [String: String]] = (try? JSON.read(namesPath)) ?? [:]
-        let unresolved = qids.subtracting(rawEntities.keys)
-        FileHandle.standardError.write(Data(
-            "  entity names: \(rawEntities.count) cached, \(unresolved.count) to resolve\n".utf8))
-        if !unresolved.isEmpty {
-            // entityDetails, not entityNames: search needs the ALIASES ("tom hanks" against a record holding
-            // only a Q-id) and P4985 lets a client open a person page without a name lookup.
-            for (qid, info) in try await source.entityDetails(Array(unresolved)) {
-                var e: [String: String] = [:]
-                if let n = info.name { e["en"] = n }
-                if let p = info.tmdbPersonId { e["tmdbPersonId"] = p }
-                if !info.aliases.isEmpty { e["aliases"] = info.aliases.sorted().joined(separator: "\u{1F}") }
-                if !e.isEmpty { rawEntities[qid] = e }
-            }
-            try JSON.write(rawEntities, to: namesPath)
-        }
-
-        // WHAT EACH ADAPTATION IS ADAPTED FROM. `basedOn` is a bare Q-id, which links adaptations of one
-        // source to each other but cannot answer "films based on books" — nothing in it says whether the
-        // target is a novel, a manga or a video game. One P31 hop over the distinct targets does, and it is
-        // cheap: ~6k source works against 38.7k titles, resolved once and checkpointed like the names above.
-        //
-        // It earns a browse row (4,750 titles) and a ranking signal — someone who reliably picks adaptations
-        // should see more of them — so it belongs on the record rather than in a hardcoded catalogue.
-        let sourceTypesPath = (outDir as NSString).appendingPathComponent("facts-source-types.json")
-        var sourceTypes: [String: [String]] = (try? JSON.read(sourceTypesPath)) ?? [:]
-        let sourceQIDs = Set(fields.values.flatMap { row -> [String] in
-            if case .list(let items)? = row["basedOn"] { return items }
-            return []
-        })
-        let unresolvedSources = sourceQIDs.subtracting(sourceTypes.keys)
-        FileHandle.standardError.write(Data(
-            "  source kinds: \(sourceTypes.count) cached, \(unresolvedSources.count) to resolve\n".utf8))
-        if !unresolvedSources.isEmpty {
-            for (qid, types) in try await source.instanceOf(Array(unresolvedSources)) {
-                sourceTypes[qid] = types
-            }
-            // Remember the ones Wikidata states nothing for, or every run re-asks the same dead ends.
-            for qid in unresolvedSources where sourceTypes[qid] == nil { sourceTypes[qid] = [] }
-            try JSON.write(sourceTypes, to: sourceTypesPath)
-        }
-        var kindCounts: [String: Int] = [:]
-        for (key, row) in fields {
-            guard case .list(let targets)? = row["basedOn"] else { continue }
-            let kinds = Set(targets.compactMap { qid -> String? in
-                guard let types = sourceTypes[qid], !types.isEmpty else { return nil }
-                return WikidataFacts.sourceKind(forTypes: types)?.rawValue
-            })
-            guard !kinds.isEmpty else { continue }
-            fields[key]?["basedOnKind"] = .list(kinds.sorted())
-            for kind in kinds { kindCounts[kind, default: 0] += 1 }
-        }
-        FileHandle.standardError.write(Data(
-            "  basedOnKind: \(kindCounts.sorted { $0.value > $1.value }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))\n".utf8))
-
-        // Genre names keep Wikidata's media suffix ("drama television series"), which is a poor display string
-        // and would defeat the TMDB match. Strip it for genres only — a PERSON named "... film" is not a thing
-        // we want to rewrite.
-        var entities = rawEntities
-        let genreQIDs = Set(fields.values.flatMap { row -> [String] in
-            if case .list(let items)? = row["genres"] { return items }
-            return []
-        })
-        for qid in genreQIDs {
-            if let name = entities[qid]?["en"] {
-                let stripped = WikipediaSource.strippedGenre(name)
-                if !stripped.isEmpty { entities[qid] = ["en": stripped] }
-            }
-        }
-        let genreMap = WikidataFacts.genreMap(entities: entities) { $0 }
-        FileHandle.standardError.write(Data("  genreMap: \(genreMap.count) of \(genreQIDs.count) genres map to TMDB ids\n".utf8))
-
-        struct Out: Encodable {
-            let schema: Int
-            let datasetVersion: String
-            let genreMap: [String: [String: Int]]
-            let entities: [String: Entity]
-            let records: [Rec]
-            /// One entity as it SHIPS. The scrape checkpoints aliases as a 0x1F-joined string because its
-            /// store is `[String: String]`, but that is an internal encoding: consumers read `aliases` as a
-            /// LIST, and atlas's `RawEntity.aliases` is typed `Vec<String>`. Emitting the joined string
-            /// instead made a 27 MB facts file unparseable at its first entity — atlas dropped the whole
-            /// file and ran `facts_unusable`, losing people search, imdbId, countries and /recommend, from
-            /// one character in one field. The split belongs here, once, at the boundary.
-            struct Entity: Encodable {
-                let en: String?
-                let tmdbPersonId: String?
-                let aliases: [String]?
-
-                init(_ fields: [String: String]) {
-                    en = fields["en"]
-                    tmdbPersonId = fields["tmdbPersonId"]
-                    let joined = fields["aliases"] ?? ""
-                    let parts = joined.split(separator: "\u{1F}").map(String.init)
-                    aliases = parts.isEmpty ? nil : parts
-                }
-            }
-            struct Rec: Encodable {
-                let mediaType: String
-                let tmdbId: Int
-                let hasVector: Bool
-                let fields: [String: WikidataFacts.FieldValue]
-                func encode(to encoder: Encoder) throws {
-                    var c = encoder.container(keyedBy: Key.self)
-                    try c.encode(mediaType, forKey: Key("mediaType"))
-                    try c.encode(tmdbId, forKey: Key("tmdbId"))
-                    try c.encode(hasVector, forKey: Key("hasVector"))
-                    // Fields are inlined, not nested under "fields": atlas reads record.genres, not
-                    // record.fields.genres, and an absent key is how "unknown" is expressed.
-                    for (k, v) in fields { try c.encode(v, forKey: Key(k)) }
-                }
-                struct Key: CodingKey {
-                    let stringValue: String; var intValue: Int? { nil }
-                    init(_ s: String) { stringValue = s }
-                    init?(stringValue s: String) { stringValue = s }
-                    init?(intValue: Int) { nil }
-                }
-            }
-        }
-        let meta: DatasetMeta? = try? JSON.read(Layout.datasetMeta(outDir))
-        let records = fields.keys.sorted().compactMap { key -> Out.Rec? in
-            let parts = key.split(separator: ":")
-            guard parts.count == 2, let id = Int(parts[1]) else { return nil }
-            return Out.Rec(mediaType: String(parts[0]), tmdbId: id, hasVector: hasVector,
-                           fields: fields[key] ?? [:])
-        }
-        let version = meta?.datasetVersion ?? "unversioned"
-        let path = (outDir as NSString).appendingPathComponent("facts-\(version).json")
-        try JSON.write(Out(schema: 1, datasetVersion: version, genreMap: genreMap,
-                           entities: entities.mapValues(Out.Entity.init), records: records), to: path)
-        // `skipped` is reported rather than swallowed: a pass that gave up on batches is not a finished
-        // scrape, and the caller's next move (run it again to sweep them) depends on knowing the number.
-        print(JSON.line(["facts": records.count, "entities": entities.count, "genreMap": genreMap.count, "path": path,
-                         "skippedAfterFailure": skipped, "hasVector": hasVector ? 1 : 0]))
-    }
-
     // MARK: - recluster (DT-F weekly)
 
     /// Cluster the shipped vectors and report groups the existing vocabulary does NOT explain — candidate
@@ -449,13 +182,6 @@ enum Commands {
 
 }
 
-// MARK: - Paths
-
-enum Layout {
-    static func datasetMeta(_ dir: String) -> String { join(dir, "dataset.meta.json") }
-    static func join(_ dir: String, _ rel: String) -> String { (dir as NSString).appendingPathComponent(rel) }
-}
-
 // MARK: - JSON / file IO
 
 enum JSON {
@@ -480,10 +206,6 @@ enum JSON {
     static func encodeSorted<T: Encodable>(_ value: T) throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(value)
-    }
-    static func line(_ dict: [String: Any]) -> String {
-        (try? JSONSerialization.data(withJSONObject: dict))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
     }
 }
 
@@ -554,25 +276,6 @@ struct Subcommand {
 enum Spec {
     /// Every subcommand, in pipeline order — which is also the order `--help` lists them in.
     static let commands: [Subcommand] = [
-        Subcommand(
-            name: "facts",
-            summary: "The CC0 facts sidecar den-atlas /recommend ranks on. Needs no plot and no embedding.",
-            flags: [
-                .value("--out-dir", "<dir>", "facts-fields.json (the resumable checkpoint) is written here",
-                       required: true),
-                .value("--ids", "<movie:1,tv:2|path>",
-                       "the ids to scrape, inline or as a file of the same — the DELTA path. Without it, "
-                       + "--labels names the corpus"),
-                .value("--labels", "<labels-t02.json>", "the shipped labels, when --ids is not given"),
-                .value("--batch", "<n>", "ids per SPARQL request (default 100)"),
-                .bare("--has-vector",
-                      "mark each record as having a vector. FALSE for delta records: /recommend must never "
-                      + "let a vectorless record into an ANN path"),
-                .bare("--titles-only",
-                      "backfill just the titles hop over ids the checkpoint already holds — the resume "
-                      + "otherwise skips every finished id"),
-            ],
-            run: { try await Commands.facts($0) }),
         Subcommand(
             name: "recluster",
             summary: "Cluster the shipped vectors and report groups the vocabulary does not explain (DT-F weekly).",

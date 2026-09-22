@@ -149,7 +149,7 @@ class CommandLine(unittest.TestCase):
             os.remove(os.path.join(out, FIXTURE_FILES["facts"][0]))
             with self.assertRaises(StageError) as refused:
                 corpus.argv(context(out))
-            self.assertIn("merge-facts.py", str(refused.exception))
+            self.assertIn("./den stage facts", str(refused.exception))
 
     def test_the_expected_count_is_only_passed_when_one_is_named(self):
         """`--expect` is the guard that refuses a short run. Passing it unasked would make every run

@@ -86,8 +86,8 @@ PRODUCERS = {
 # producer is a real tracked file — so a stale entry breaks the test rather than protecting anything.
 #
 # `factsFile` stays, now as the `manifest_key` on the `facts` entry in `pipeline/artifacts.py`. Its producer
-# is `scripts/merge-facts.py`, the stage that merges the two scrape passes — the scrape builds the halves and
-# the merge builds the file, which is the distinction the 137 lost delta records were bought with. The key is
+# is the facts stage, which scrapes both halves and merges them — one owner for the whole file, which is the
+# distinction the 137 lost delta records were bought with. The key is
 # merely unpublished, not unbuildable: the loop below only visits keys the manifest actually names, so the
 # entry costs nothing and covers a generation that publishes facts again.
 #

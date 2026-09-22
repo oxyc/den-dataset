@@ -15,8 +15,9 @@ held to: a declaration nothing reaches is deleted, not kept for later.
 """
 from .contract import Artifact
 
-#: `taxonomy-backfill` builds four of these from one source file, so a staleness warning on it would fire
-#: for reasons that have nothing to do with any one artifact — which is how a guard gets ignored to death.
+#: The binary the fetch stage still drains `enrich` through. It builds two artifacts from one source file
+#: that holds a whole tool, so a staleness warning on it would fire for reasons that have nothing to do with
+#: either — which is how a guard gets ignored to death.
 BACKFILL = "Sources/taxonomy-backfill/main.swift"
 
 #: The article dump the classify pass reads: one JSON object per title carrying the whole Wikipedia article
@@ -182,33 +183,35 @@ EMBEDDING_SPACE = Artifact(
     required=False,
 )
 
-#: The corpus pass's scrape: the titles that have a vector, written with `--has-vector`. It lands under
-#: `facts-<version>.json` — the name the merge's output takes back — so it is moved aside first, under the
-#: suffix `doc-facts.pre-merge.json` and `labels-t02.pre-classify.json` already use for the copy of an
-#: artifact from before the step that consumes it.
+#: The corpus pass's scrape: the titles that have a vector, stamped `hasVector`. Named with the suffix
+#: `doc-facts.pre-merge.json` and `labels-t02.pre-classify.json` already use for the copy of an artifact
+#: from before the step that consumes it — the merge's output takes `facts-<version>.json`.
 CORPUS_FACTS = Artifact(
     name="corpus_facts",
     filename="facts-{version}.pre-merge.json",
-    producer=BACKFILL,
-    how="taxonomy-backfill facts --labels labels-t02.json --has-vector, then move the "
-        "facts-<version>.json it wrote aside to facts-<version>.pre-merge.json",
-    dedicated=False,
 )
 
-#: The delta pass: ids given outright, scraped WITHOUT `--has-vector`. These titles have no vector, no
-#: labels and no facets row — which is not the same as new. The Wire, Lost and Black Mirror are in this set
-#: because they have no plot. The name is what the pass writes when the out-dir holds no manifest to take a
-#: version from, and it is the one of the two passes that needs no renaming.
+#: The ids the delta pass scrapes: titles /recommend needs facts for that have no vector, no labels and no
+#: facets row — which is not the same as new. The Wire, Lost and Black Mirror are in this set because they
+#: have no plot. Nothing in this repo derives the list; it is assembled by whoever knows which titles
+#: atlas is missing (the last one was 8,949 ids), `movie:1` / `tv:2`, one per line or comma-separated.
+DELTA_IDS = Artifact(
+    name="delta_ids",
+    filename="facts-delta-ids.txt",
+    producer="docs/OPERATE.md",
+    how="list the ids to scrape without a vector (movie:1, tv:2 …) into facts-delta-ids.txt — "
+        "docs/OPERATE.md step 6a",
+)
+
+#: The delta pass: the ids above, scraped WITHOUT `hasVector`.
 DELTA_FACTS = Artifact(
     name="delta_facts",
-    filename="facts-unversioned.json",
-    producer=BACKFILL,
-    how="taxonomy-backfill facts --ids <the delta ids>",
-    dedicated=False,
+    filename="facts-{version}.delta.json",
 )
 
-#: What ships, and what the corpus join and the store read: the two passes merged. The MERGE owns it, not
-#: either scrape — a facts file rebuilt from one pass is the rebuild that dropped 137 delta titles.
+#: What ships, and what the corpus join and the store read: the two passes merged. One stage owns the
+#: passes and the merge together — a facts file rebuilt from one pass is the rebuild that dropped 137 delta
+#: titles.
 FACTS = Artifact(
     name="facts",
     filename="facts-{version}.json",
@@ -276,5 +279,5 @@ RELEASE = Artifact(
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
              COMBINED_MANIFEST, DELTA, ENRICHED, ENRICH_CHECKPOINT, DOC_FACTS, EMBED_LABELS,
              EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
-             DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, PREMISE_VECTORS, PREMISE_LABELS, STORE,
+             DELTA_IDS, DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, PREMISE_VECTORS, PREMISE_LABELS, STORE,
              MANIFEST, RELEASE)
