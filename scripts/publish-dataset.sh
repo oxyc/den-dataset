@@ -406,17 +406,18 @@ done
 
 # QUALITY GATE. Every check above asks whether the right number of records arrived in the right shape.
 # This one asks whether they are CORRECT: the committed golden set, scored against these labels, per label
-# family, against the floors in `data/eval/quality-floors.json`.
+# family, against the baseline in `data/eval/quality-floors.json`.
 #
 # It moved here from the tvOS app (`ShippedDatasetEvalTests`), which scored the 45.8 MB index that app
 # bundled. oxyc/den#113 Phase 2 deletes that bundle, and the only quality signal in the whole system would
 # have gone with it as a side effect of a delivery change.
 #
-# ENFORCED, as a ratchet. The floors are the scores of the labels that ship, recorded with the date and
-# the labels' sha256, and a publish whose labels score below any of them is refused. The fixed floors this
-# replaced sat above the shipped mood scores (micro .639 vs .640, macro .564 vs .580), so enforcing them
-# would have refused a publish of unchanged labels, and the gate ran as a report that nothing acted on.
-# Accepting a drop is `eval-taxonomy.py --record` and a commit, which the refusal prints.
+# ENFORCED, as a ratchet. The baseline is the scores of the labels that ship, recorded with the date and
+# the labels' sha256, and a publish whose labels score more than the recorded tolerance under it is
+# refused. The fixed floors this replaced sat above the shipped mood scores (micro .639 vs .640, macro
+# .564 vs .580), so enforcing them would have refused a publish of unchanged labels, and the gate ran as a
+# report that nothing acted on. Accepting a drop is `eval-taxonomy.py --record --accept-drop` and a
+# commit, which the refusal prints.
 #
 # The labels are read from the OUT-DIR, not from `labelsFile` — the prune above retires that key, and
 # reading it here would hand the scorer an empty path. `finalize` names the file after the taxonomy (`labels-<tax>.json`)

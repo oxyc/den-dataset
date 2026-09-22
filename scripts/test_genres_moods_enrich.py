@@ -343,6 +343,25 @@ class Merge(Fixture):
         self.assertEqual((self.read(), self.read(self.floors)), (curated, floors))
         self.assertEqual([n for n in os.listdir(self.dir) if n.startswith(".tmp-")], [])
 
+    def test_a_pass_inside_the_tolerance_leaves_the_baseline_where_it_is(self):
+        """The gate tolerates a small drop; the ratchet still only ever rises on its own. Recording the
+        lower score here is what would turn the band into a slide — a merge a run, each one a fraction
+        worse, each one moving the reference point down behind it."""
+        self.prepare()
+        self.answer()
+        self.merge()
+        floors = json.loads(self.read(self.floors))
+        for metric in floors["baseline"]["mood"]:
+            floors["baseline"]["mood"][metric] += 0.002
+        with open(self.floors, "w") as fh:
+            json.dump(floors, fh)
+        raised = self.read(self.floors)
+        # The same answers again: the file does not move, so what it scores is now 0.002 under.
+        result, printed = self.merge()
+        self.assertTrue(result["gatePassed"], printed)
+        self.assertEqual(self.read(self.floors), raised, "a passing merge did not lower the baseline")
+        self.assertIn("left where it was", printed)
+
     def test_accept_drop_writes_and_leaves_recording_the_floors_to_the_operator(self):
         floors = self.read(self.floors)
         self.prepare()

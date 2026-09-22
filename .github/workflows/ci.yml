@@ -60,12 +60,12 @@ jobs:
           # and a published dataset, and the pass it audits cost $20.47 and will not be run again.
           python3 -m unittest scripts/v2/test_facets.py scripts/v2/test_combined.py scripts/v2/test_audit_combined.py scripts/v2/test_run_delta.py scripts/v2/test_typesafe_client.py
       # The committed genres & moods (`data/genres-moods-curated.json`) and the one-off that seeded them. The
-      # file itself is gated against the floors by `scripts/test_eval_taxonomy.py` below.
+      # file itself is gated against the baseline by `scripts/test_eval_taxonomy.py` below.
       - name: Genres & moods seed
         run: python3 -m unittest scripts/v2/test_seed_genres_moods_curated.py
       # The hand enrichment that writes into that file (`./den genres-moods prepare|merge`): what it selects,
       # the batches and validator the agents get, July's assemble thresholds, and that a merge keeps the
-      # file's bytes and refuses a result below the floors.
+      # file's bytes, refuses a result past the tolerance and never lowers the baseline on its own.
       - name: Genres & moods enrichment
         run: python3 -m unittest scripts/test_genres_moods_enrich.py
       # The publish path. Nothing tested any of it until now, and it is the half that decides what the box
@@ -101,7 +101,7 @@ jobs:
       #
       # The genres & moods stage runs against the same provider stubbed out: which titles it asks, what
       # the state carries, that a second run buys nothing, what `data/genres-moods-rule.json` derives, and
-      # that a result below the quality floors is refused rather than written. It also pins the question
+      # that a result below the quality baseline is refused rather than written. It also pins the question
       # set's digest — the thresholds in that rule were fitted on the answers to exactly those questions.
       #
       # The enrichment is Python (`pipeline/enrich.py`, `lib/plot.py`). Its equivalence with the Swift pass

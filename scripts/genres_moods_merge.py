@@ -22,6 +22,9 @@ from pipeline.contract import StageError
 EVAL = os.path.join(gm.HERE, "eval-taxonomy.py")
 GOLDEN = os.path.join(gm.REPO, "data", "eval", "golden-large.json")
 FLOORS = os.path.join(gm.REPO, "data", "eval", "quality-floors.json")
+#: `eval-taxonomy.py`'s `WOULD_LOWER`: --record declining to lower the baseline. Kept as a number rather
+#: than imported, because the script's name is not an importable module.
+WOULD_LOWER = 3
 #: July's `assemble` cut-offs: blended subgenres, themes, moods; and the cap per family.
 T_SUB, T_THEME, T_MOOD, CAP = 0.55, 0.50, 0.55, 3
 MODEL = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
@@ -218,14 +221,21 @@ def merge(work, model, web=False, accept_drop=False, curated=gm.CURATED, golden=
     out(gate.stdout.strip())
     if passed:
         recorded = run_eval(curated, golden, floors, "--record")
-        if recorded.returncode != 0:
-            raise StageError(f"the gate passed but recording the floors failed:\n{recorded.stderr}")
-        out(f"\nThe gate passed and the floors in {floors} are recorded against the new file. "
-            f"Review the summary, then commit both.")
+        if recorded.returncode == WOULD_LOWER:
+            # Inside the tolerance, so the gate passed, but still under the baseline. The ratchet only
+            # ever rises on its own; lowering it is the operator's `--record --accept-drop` and a commit.
+            out(recorded.stderr.strip())
+            out(f"\nThe gate passed, and the baseline in {floors} is left where it was. Review the "
+                f"summary, then commit {curated}.")
+        elif recorded.returncode != 0:
+            raise StageError(f"the gate passed but recording the baseline failed:\n{recorded.stderr}")
+        else:
+            out(f"\nThe gate passed and the baseline in {floors} is recorded against the new file. "
+                f"Review the summary, then commit both.")
     else:
         out(gate.stderr.strip())
-        out(f"\nWritten below the floors (--accept-drop). Record them and commit both files:\n"
-            f"  scripts/eval-taxonomy.py {curated} --record")
+        out(f"\nWritten below the baseline (--accept-drop). Record it and commit both files:\n"
+            f"  scripts/eval-taxonomy.py {curated} --record --accept-drop")
     return {**summary, "source": source, "gatePassed": passed}
 
 
