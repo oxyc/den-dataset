@@ -61,8 +61,17 @@ DIMS = 1024
 TAXONOMY = "t02"
 QUANTIZATION = "int8-symmetric-x127"
 
-INPUTS = (artifacts.EMBED_LABELS, artifacts.EMBED_VECTORS, artifacts.EMBEDDER, artifacts.EMBEDDING_SPACE)
-OUTPUTS = (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST)
+#: The enrichment's checkpoint is read for three counters in `report.json` and nothing else. The Swift
+#: also read `classify-checkpoint.json` for a fourth, `noPrimary`; the only thing that wrote that file was
+#: the vote-pass `assemble`, deleted in #48, so it is not read here and the counter is gone with it.
+INPUTS = (artifacts.EMBED_LABELS, artifacts.EMBED_VECTORS, artifacts.EMBEDDER, artifacts.EMBEDDING_SPACE,
+          artifacts.ENRICH_CHECKPOINT)
+OUTPUTS = (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST, artifacts.VECTOR_LABELS_GZ,
+           artifacts.FINALIZE_REPORT)
+
+#: What the enrichment's checkpoint tallies. The Swift decoded all four, so a malformed one of them made the
+#: whole checkpoint unreadable, which the report shows as zeros.
+ENRICH_TOTALS = ("belowFloor", "anime", "failures", "noOverview")
 
 #: Every key the manifest this stage writes is authoritative for — including when it leaves one out. The
 #: three `metadata*` keys belong to the retired poster sidecar and stay OWNED so a rewrite drops them
@@ -193,8 +202,9 @@ def prohibited(value, found=None):
     return sorted(found)
 
 
-def gzip_like_the_cli(path):
-    """`gzip -k <path>`: the input's basename and mtime in the header, level-6 deflate, OS byte Unix.
+def gzip_like_the_cli(path, out):
+    """`gzip -k <path>`, written to `out`: the input's basename and mtime in the header, level-6 deflate,
+    OS byte Unix.
 
     Byte-for-byte what `/usr/bin/gzip` wrote beside the labels, so the only thing two runs disagree on is
     the four mtime bytes — the input's, which `gzip` records and which moves with every write.
@@ -206,7 +216,6 @@ def gzip_like_the_cli(path):
     header = (b"\x1f\x8b\x08\x08" + struct.pack("<I", mtime) + b"\x00\x03"
               + os.path.basename(path).encode("utf-8") + b"\x00")
     trailer = struct.pack("<II", zlib.crc32(body) & 0xFFFFFFFF, len(body) & 0xFFFFFFFF)
-    out = path + ".gz"
     caching.write_atomically(out, header + deflate.compress(body) + deflate.flush() + trailer)
     os.utime(out, (mtime, mtime))
     return out
@@ -217,30 +226,47 @@ def bucket(confidence):
     return "%.1f-%.1f" % (low, low + 0.1)
 
 
-def counters(out_dir):
-    """The enrichment's and the retired classify checkpoint's totals, for the report and nothing else.
-    A file that is absent or will not parse reports zeros, as it always did: this is a diagnostic."""
-    totals = {}
-    for name, needs in (("enrich-checkpoint.json", "processed"), ("classify-checkpoint.json", "done")):
-        try:
-            with open(os.path.join(out_dir, name), encoding="utf-8") as handle:
-                found = json.load(handle)
-            if needs in found:
-                totals.update(found.get("totals") or {})
-        except (OSError, ValueError, TypeError):
-            continue
-    return totals
+def _int_or_absent(value):
+    return value is None or (isinstance(value, int) and not isinstance(value, bool))
 
 
-def report(records, out_dir):
+def enrichment_totals(path):
+    """The enrichment checkpoint's tallies, for the report and nothing else.
+
+    Read the way the Swift decoded the checkpoint: it is one only with a `processed` list (keys, or the
+    movie pilot's bare ids), an integer `nextBatch` if any, and integer tallies. Anything else — absent,
+    unparseable, or some other file under the name — reports zeros, as it always did: this is a diagnostic.
+    """
+    if path is None:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            found = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(found, dict):
+        return {}
+    processed, totals = found.get("processed"), found.get("totals")
+    is_checkpoint = (isinstance(processed, list)
+                     and (all(isinstance(key, str) for key in processed)
+                          or all(isinstance(key, int) and not isinstance(key, bool) for key in processed))
+                     and _int_or_absent(found.get("nextBatch"))
+                     and (totals is None or (isinstance(totals, dict)
+                                             and all(_int_or_absent(totals.get(k)) for k in ENRICH_TOTALS))))
+    if not is_checkpoint:
+        return {}
+    return {k: totals[k] for k in ENRICH_TOTALS if totals and totals.get(k) is not None}
+
+
+def report(records, enrich_checkpoint):
     by_genre, histogram = {}, {}
     for rec in records:
         by_genre[rec["primaryGenre"]] = by_genre.get(rec["primaryGenre"], 0) + 1
         for item in rec["subgenres"] + rec["moods"]:
             key = bucket(item["confidence"])
             histogram[key] = histogram.get(key, 0) + 1
-    totals = counters(out_dir)
-    return {"anime": totals.get("anime", 0), "noPrimary": totals.get("noPrimary", 0),
+    totals = enrichment_totals(enrich_checkpoint)
+    return {"anime": totals.get("anime", 0),
             "report": {"byPrimaryGenre": by_genre, "confidenceHistogram": histogram,
                        "fetchFailures": totals.get("failures", 0), "llmCalls": 0,
                        "processed": len(records), "skippedBelowVoteFloor": totals.get("belowFloor", 0)}}
@@ -278,12 +304,13 @@ def run(ctx, now=None):
     vectors_blob = vector_blob.header(keys, dim) + bytes(x & 0xFF for row in vectors for x in row)
 
     labels_path, vectors_path = ctx.path(artifacts.VECTOR_LABELS), ctx.path(artifacts.VECTORS)
-    meta_path = ctx.path(artifacts.MANIFEST)
-    for path in (labels_path, vectors_path, meta_path):
+    meta_path, labels_gz = ctx.path(artifacts.MANIFEST), ctx.path(artifacts.VECTOR_LABELS_GZ)
+    report_path = ctx.path(artifacts.FINALIZE_REPORT)
+    for path in (labels_path, vectors_path, meta_path, labels_gz, report_path):
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     caching.write_atomically(labels_path, labels_blob)
     caching.write_atomically(vectors_path, vectors_blob)
-    labels_gz = gzip_like_the_cli(labels_path)
+    gzip_like_the_cli(labels_path, labels_gz)
 
     labels_sha = hashlib.sha256(labels_blob).hexdigest()
     vectors_sha = hashlib.sha256(vectors_blob).hexdigest()
@@ -308,9 +335,8 @@ def run(ctx, now=None):
     merged = jsonbytes.merge_manifest(meta, existing, OWNED)
     caching.write_atomically(meta_path, jsonbytes.manifest(merged).encode("utf-8"))
 
-    summary = report(records, ctx.out_dir)
-    caching.write_atomically(os.path.join(ctx.out_dir, "report.json"),
-                             jsonbytes.pretty(summary).encode("utf-8"))
+    summary = report(records, ctx.require(artifacts.ENRICH_CHECKPOINT))
+    caching.write_atomically(report_path, jsonbytes.pretty(summary).encode("utf-8"))
     print(f"  finalize: {len(records)} titles · labels={labels_path} vectors={vectors_path} "
           f"meta={meta_path} dataset={version}", file=sys.stderr)
     genres = sorted(summary["report"]["byPrimaryGenre"].items(), key=lambda kv: (-kv[1], kv[0]))

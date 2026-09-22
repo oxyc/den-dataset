@@ -108,9 +108,10 @@ GOLDEN_MANIFEST = """{
   }
 }"""
 
+#: The Swift's report for this fixture, less `noPrimary`: that came from `classify-checkpoint.json`, which
+#: nothing has written since #48 deleted the vote-pass `assemble`.
 GOLDEN_REPORT = """{
   "anime" : 2,
-  "noPrimary" : 9,
   "report" : {
     "byPrimaryGenre" : {
       "Comedy" : 1,
@@ -164,8 +165,6 @@ def lay_down(out, records=RECORDS, vectors=None, previous=PREVIOUS, embedder=Tru
     with open(os.path.join(out, "enrich-checkpoint.json"), "w", encoding="utf-8") as fh:
         json.dump({"processed": [], "nextBatch": 3, "totals": {"belowFloor": 4, "anime": 2, "failures": 1}},
                   fh)
-    with open(os.path.join(out, "classify-checkpoint.json"), "w", encoding="utf-8") as fh:
-        json.dump({"done": ["movie:1"], "totals": {"noPrimary": 9}}, fh)
 
 
 def read(path, mode="r"):
@@ -206,7 +205,52 @@ class Bytes(Staged):
         self.run_stage()
         labels = os.path.join(self.out, "labels-t02.json")
         os.utime(labels, (GZ_MTIME, GZ_MTIME))
-        self.assertEqual(hashlib.sha256(read(finalize.gzip_like_the_cli(labels), "rb")).hexdigest(), GZ_SHA)
+        finalize.gzip_like_the_cli(labels, labels + ".gz")
+        self.assertEqual(hashlib.sha256(read(labels + ".gz", "rb")).hexdigest(), GZ_SHA)
+
+
+class Report(Staged):
+    def counters(self):
+        self.run_stage()
+        return json.loads(read(os.path.join(self.out, "report.json")))
+
+    def write_checkpoint(self, body):
+        with open(os.path.join(self.out, "enrich-checkpoint.json"), "w", encoding="utf-8") as fh:
+            json.dump(body, fh)
+
+    def test_counters_come_from_a_file_only_if_it_is_an_enrichment_checkpoint(self):
+        """The Swift decoded the checkpoint before reading its totals, so `totals` in a file with no
+        `processed` — or with a `processed` that is not a list of keys — are not the enrichment's."""
+        lay_down(self.out)
+        for body in ({"totals": {"belowFloor": 4, "anime": 2, "failures": 1}},
+                     {"processed": "movie:1", "totals": {"anime": 2}},
+                     {"processed": [], "totals": {"anime": "2"}}):
+            with self.subTest(body=body):
+                self.write_checkpoint(body)
+                found = self.counters()
+                self.assertEqual((found["anime"], found["report"]["skippedBelowVoteFloor"],
+                                  found["report"]["fetchFailures"]), (0, 0, 0))
+
+    def test_the_movie_pilots_bare_ids_are_still_a_checkpoint(self):
+        lay_down(self.out)
+        self.write_checkpoint({"processed": [1, 2], "totals": {"anime": 3}})
+        self.assertEqual(self.counters()["anime"], 3)
+
+    def test_no_checkpoint_is_zeros_not_a_refusal(self):
+        lay_down(self.out)
+        os.remove(os.path.join(self.out, "enrich-checkpoint.json"))
+        self.assertEqual(self.counters()["report"]["fetchFailures"], 0)
+
+    def test_the_counters_are_read_from_the_declared_checkpoint(self):
+        """An operator pointing `--set enrich_checkpoint=` elsewhere gets that file's counters, not the
+        out-dir's."""
+        lay_down(self.out)
+        elsewhere = os.path.join(self.out, "elsewhere.json")
+        with open(elsewhere, "w", encoding="utf-8") as fh:
+            json.dump({"processed": [], "totals": {"anime": 7}}, fh)
+        finalize.run(Context(out_dir=self.out, dataset_version="test",
+                             overrides={"enrich_checkpoint": elsewhere}), now=BUILT)
+        self.assertEqual(json.loads(read(os.path.join(self.out, "report.json")))["anime"], 7)
 
 
 class Store(Staged):
@@ -295,10 +339,25 @@ class Topology(unittest.TestCase):
         self.assertEqual(pipeline.STAGES.index("facts"), pipeline.STAGES.index("finalize") + 1)
 
     def test_it_owns_what_it_writes(self):
-        for artifact in (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST):
+        for artifact in (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST, artifacts.VECTOR_LABELS_GZ,
+                         artifacts.FINALIZE_REPORT):
             self.assertEqual(artifact.producer, "")
             self.assertEqual(pipeline.producers()[artifact.name][0], finalize.PRODUCER)
-        self.assertEqual([bind(e).name for e in finalize.OUTPUTS], ["vector_labels", "vectors", "manifest"])
+        self.assertEqual([bind(e).name for e in finalize.OUTPUTS],
+                         ["vector_labels", "vectors", "manifest", "vector_labels_gz", "finalize_report"])
+
+    def test_every_file_it_touches_is_declared(self):
+        """Run it over a fixture and compare what changed on disk with the declaration. An undeclared read
+        or write is a file the registry cannot answer for."""
+        with tempfile.TemporaryDirectory() as out:
+            lay_down(out)
+            before = {os.path.relpath(os.path.join(d, f), out) for d, _, fs in os.walk(out) for f in fs}
+            finalize.run(Context(out_dir=out, dataset_version="test"), now=BUILT)
+            after = {os.path.relpath(os.path.join(d, f), out) for d, _, fs in os.walk(out) for f in fs}
+        declared_out = {bind(e).artifact.filename for e in finalize.OUTPUTS}
+        declared_in = {bind(e).artifact.filename for e in finalize.INPUTS}
+        self.assertEqual(after - before, declared_out - before)
+        self.assertLessEqual(before - {"dataset.meta.json"}, declared_in)
 
 
 if __name__ == "__main__":
