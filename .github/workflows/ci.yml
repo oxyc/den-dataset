@@ -88,7 +88,8 @@ jobs:
       #
       # `guards/reachable_test.py` is the one that matters over time. `scripts/v2/` exists because
       # "delete what nothing runs" was a habit, and a habit loses to a branch someone might come back
-      # to; this fails the build on a module under `pipeline/` that no stage reaches.
+      # to; this fails the build on a module under `pipeline/` that no stage reaches, and on one under
+      # `store/` that the writer the store stage runs does not reach.
       - name: The pipeline
         run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/embed_test.py pipeline/publish_test.py store/build_test.py guards/reachable_test.py den_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The
