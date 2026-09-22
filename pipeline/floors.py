@@ -22,6 +22,12 @@ floor.
     worldwide   50           72 (non-regional)   2,110         2,302         2,000
     regional    15           469                 457           490           500
 
+**Where each count comes from.** The TMDB count is the one on the title's WORKLIST row — `/discover`
+stated it when the universe was built, and it is the number that query selected on, so the gate does not
+ask TMDB for it again per title (oxyc/den-dataset#53). An export row carries none, because the daily dump
+states popularity; those fall back to the detail call while it is still made. A title nothing states a
+TMDB count for is judged on IMDb's count alone rather than as a title with zero votes.
+
 2,000 is also the whole corpus's ±10% median at 50 (1,992), the figure the decision was made on. Rounded
 DOWN for the worldwide tier, since the union only ever adds: a floor a little low admits a few more titles
 IMDb rates, and costs a TMDB detail call and a plot fetch each, while a floor a little high silently keeps

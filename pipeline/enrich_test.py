@@ -144,15 +144,23 @@ class Batch(unittest.TestCase):
             answer = dict(answer, resolvedArticle=article)
         return answer
 
-    def worklist(self, *entries):
+    def worklist(self, *entries, votes=None):
+        """An export-shaped worklist — two keys per row — unless `votes` names a count per `(media, id)`,
+        which is the shape `/discover` and the delta write."""
         path = os.path.join(self.out, "worklist.json")
+        rows = []
+        for media, tmdb_id in entries:
+            row = {"tmdbId": tmdb_id, "mediaType": media}
+            if votes and (media, tmdb_id) in votes:
+                row["voteCount"] = votes[(media, tmdb_id)]
+            rows.append(row)
         with open(path, "w") as fh:
-            json.dump([{"tmdbId": i, "mediaType": m} for m, i in entries], fh)
+            json.dump(rows, fh)
         return path
 
-    def run_batch(self, bodies, entries, **kwargs):
-        return enrich.run(self.worklist(*entries), self.out, client=StubTMDB(bodies), cache=self.cache,
-                          **kwargs)
+    def run_batch(self, bodies, entries, votes=None, **kwargs):
+        return enrich.run(self.worklist(*entries, votes=votes), self.out, client=StubTMDB(bodies),
+                          cache=self.cache, **kwargs)
 
     def rows(self, batch_id=1):
         with open(enrich.batch_path(self.out, batch_id)) as fh:
@@ -471,6 +479,32 @@ class Batch(unittest.TestCase):
         self.imdb_votes["tt1"] = 900
         report = self.run_batch(bodies, [("movie", 1)], floors=enrich.floor_rules.given(imdb=800))
         self.assertEqual(report["admittedByImdb"], 1)
+
+    def test_the_gate_judges_by_the_count_on_the_worklist_row(self):
+        """`/discover` stated it when the universe was built, and that is the query the floor selected on.
+        Reading it back off the detail call asks TMDB the same number a second time, per title."""
+        bodies = {"/movie/1": detail(1, votes=5), "/movie/2": detail(2, votes=500)}
+        report = self.run_batch(bodies, [("movie", 1), ("movie", 2)],
+                                votes={("movie", 1): 500, ("movie", 2): 5})
+        self.assertEqual(set(self.rows()), {"movie:1"}, "the worklist's count decides, not the record's")
+        self.assertEqual((report["admittedByTmdb"], report["belowFloor"]), (1, 1))
+        self.assertEqual(report["votesFromWorklist"], 2)
+
+    def test_a_row_that_states_no_count_falls_back_to_the_detail_call(self):
+        """An export universe is built from the daily dump, which states popularity and not votes."""
+        report = self.run_batch({"/movie/1": detail(1, votes=500)}, [("movie", 1)])
+        self.assertEqual(set(self.rows()), {"movie:1"})
+        self.assertEqual(report["votesFromWorklist"], 0)
+
+    def test_a_title_no_tmdb_count_is_stated_for_is_still_admitted_on_imdbs(self):
+        """The union's IMDb half exists for the titles TMDB undercounts, so a title neither the worklist
+        nor the record names a count for is judged on IMDb's alone — not compared against a floor."""
+        record = dict(tmdb_record(1), voteCount=None, originCountry=["US"])
+        ratings = enrich.imdb.Ratings({"tt1": 5000}, "unchanged")
+        self.imdb_ids[("movie", 1)] = "tt1"
+        admitted, _short, from_worklist = enrich.admit([record], enrich.floor_rules.DEFAULT, ratings,
+                                                       self.cache, {})
+        self.assertEqual((admitted, from_worklist), ({"movie:1": enrich.IMDB}, 0))
 
     def test_a_title_with_no_imdb_id_is_judged_on_tmdb_alone_and_counted(self):
         report, written = self.admission((1, 30, ["US"], None, 0), (2, 80, ["US"], None, 0))

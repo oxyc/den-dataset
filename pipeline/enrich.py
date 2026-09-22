@@ -11,9 +11,11 @@ the record's `overview`. Every one of those goes through `lib/`, so the response
 `.cache/` answer a re-run.
 
 **Admission is decided before any of the expensive work**, on TMDB's vote count OR IMDb's — see
-`pipeline/floors.py` for the floors and why there are four. A title TMDB's count leaves short costs one
-more thing: its IMDb id, one Wikidata SPARQL per media for all of them together. IMDb's counts are read,
-compared and forgotten; none is written into a batch, a log line or the report.
+`pipeline/floors.py` for the floors and why there are four. TMDB's count comes off the WORKLIST row, which
+`/discover` stated when the universe was built; only an export universe, whose dump states popularity and
+not votes, falls back to the detail call's. A title TMDB's count leaves short costs one more thing: its
+IMDb id, one Wikidata SPARQL per media for all of them together. IMDb's counts are read, compared and
+forgotten; none is written into a batch, a log line or the report.
 
 **TMDB's prose never enters the record.** `lib/tmdb.title_record` keeps only the overview's LENGTH, and a
 title with no Wikipedia plot is written `hasWikiPlot: false` with an empty `overview` — nothing downstream
@@ -351,11 +353,19 @@ def unrecorded(out_dir, next_batch):
 
 
 def read_worklist(path):
-    """`[(media, tmdbId)]`, in the worklist's order."""
+    """`([(media, tmdbId)], {key: voteCount})`, in the worklist's order.
+
+    The counts are the TMDB votes `/discover` stated when the universe was built (`pipeline/worklist.entry`)
+    — what the admission gate judges by. A row that states none is absent from the map, never zero: the
+    export dump carries no count, and zero is below every floor.
+    """
     try:
         with open(path, encoding="utf-8") as handle:
-            return [("tv" if row["mediaType"] == "tv" else "movie", int(row["tmdbId"]))
-                    for row in json.load(handle)]
+            rows = json.load(handle)
+        entries = [("tv" if row["mediaType"] == "tv" else "movie", int(row["tmdbId"])) for row in rows]
+        votes = {key(*pair): int(row["voteCount"]) for pair, row in zip(entries, rows)
+                 if row.get("voteCount") is not None}
+        return entries, votes
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise StageError(f"enrich: {path} is not a worklist of {{tmdbId, mediaType}} rows ({error})")
 
@@ -377,15 +387,32 @@ def imdb_counts(floors):
     return ratings, ratings.note
 
 
-def admit(records, floors, ratings, cache):
-    """`(admitted, unidentified)`: key → which count admitted it (`TMDB`, `IMDB` or `BOTH`), and how many of
-    the titles TMDB left short have no IMDb id and were therefore judged on TMDB's count alone.
+def tmdb_votes(label, record, worklist_votes):
+    """The TMDB count the gate judges one title by, or None when nothing states one.
+
+    The WORKLIST's count first: `/discover` answered it when the universe was built, and it is the number
+    the query selected on. Only an `export` row has none — the daily dump states popularity — and those
+    fall back to the detail call's count while that call is still made (oxyc/den-dataset#53).
+
+    None is not zero. A title nothing states a TMDB count for is judged on IMDb's count alone; read as
+    zero it would be below every floor, which is a refusal rather than an absence.
+    """
+    if label in worklist_votes:
+        return worklist_votes[label]
+    return record.get("voteCount")
+
+
+def admit(records, floors, ratings, cache, worklist_votes=None):
+    """`(admitted, unidentified, from_worklist)`: key → which count admitted it (`TMDB`, `IMDB` or `BOTH`),
+    how many of the titles TMDB left short have no IMDb id and were therefore judged on TMDB's count alone,
+    and how many titles were judged on a count their worklist row carried.
 
     A key absent from `admitted` is below every floor its tiers set. With `ratings` None the IMDb half is
     off and this is TMDB's floor alone. Raises what the IMDb-id lookup raises — the caller aborts on it, as
     it does on the mapping, which asks the same service.
     """
-    admitted, unidentified = {}, 0
+    worklist_votes = worklist_votes or {}
+    admitted, unidentified, from_worklist = {}, 0, 0
     ids = {}
     if ratings is not None:
         for media in sorted({record["mediaType"] for record in records}):
@@ -394,14 +421,16 @@ def admit(records, floors, ratings, cache):
     for record in records:
         label = key(record["mediaType"], record["tmdbId"])
         tmdb_floor, imdb_floor = floors.of(record)
-        by_tmdb = record["voteCount"] >= tmdb_floor
+        votes = tmdb_votes(label, record, worklist_votes)
+        from_worklist += label in worklist_votes
+        by_tmdb = votes is not None and votes >= tmdb_floor
         imdb_id = ids.get(label)
         by_imdb = imdb_id is not None and ratings.get(imdb_id) >= imdb_floor
         if by_tmdb or by_imdb:
             admitted[label] = BOTH if by_tmdb and by_imdb else TMDB if by_tmdb else IMDB
         if not by_tmdb and ratings is not None and imdb_id is None:
             unidentified += 1
-    return admitted, unidentified
+    return admitted, unidentified, from_worklist
 
 
 def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude_anime=False, client=None,
@@ -428,7 +457,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     if token:
         # Read now, so a malformed reserve refuses the run instead of being swallowed as a failed fast path.
         enterprise.gate.headroom()
-    worklist = read_worklist(worklist_path)
+    worklist, worklist_votes = read_worklist(worklist_path)
     ck_path = checkpoint_path(out_dir)
     present = os.path.exists(ck_path)
     checkpoint = read_checkpoint(ck_path)
@@ -468,7 +497,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
         print(f"  warning: the IMDb half of the admission gate is {gate}. This batch admits on TMDB's count "
               f"alone; a title only IMDb would admit stays pending for the next batch.", file=sys.stderr)
     try:
-        admitted, unidentified = admit(records, floors, ratings, cache)
+        admitted, unidentified, from_worklist = admit(records, floors, ratings, cache, worklist_votes)
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise Aborted(f"Wikidata IMDb-id lookup failed for batch {batch_id} after retries ({error}); nothing "
                       f"written — re-run to retry this batch") from error
@@ -560,7 +589,11 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
               "admittedByTmdb": sum(v == TMDB for v in admitted.values()),
               "admittedByImdb": sum(v == IMDB for v in admitted.values()),
               "admittedByBoth": sum(v == BOTH for v in admitted.values()),
-              "shortOfImdbId": unidentified, "imdbGate": gate}
+              "shortOfImdbId": unidentified, "imdbGate": gate,
+              # How many titles were judged on the count their worklist row carried rather than on the
+              # detail call's. It is the whole batch for a discover or delta universe, and none of it for
+              # an export one — so this is what says how much of the gate still depends on that call.
+              "votesFromWorklist": from_worklist}
     if token and enterprise.gate.off:
         report["enterpriseOff"] = enterprise.gate.off
     return report

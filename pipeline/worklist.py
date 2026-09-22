@@ -24,6 +24,11 @@ on a quiet day, so refusing it there would fail the daily pass for doing its job
 silence is checked one line finer: the ids written against the dump's own line count, because a dump that
 arrived half-written parses to half a catalogue, and half a catalogue looks like a catalogue.
 
+**A `discover` or `delta` row carries the vote count `/discover` stated.** The admission gate needs it
+(`pipeline/floors.py`), and this stage is where TMDB already answered the question — so `enrich` judges a
+title by the count on its worklist row rather than asking TMDB for the same number again per title. An
+`export` row has none: the daily dump states popularity, not votes.
+
 **A delta writes the same two filenames as a full run**, which is why `scripts/delta-run.sh` keeps its
 lists in `$OUT_DIR/delta/`. Point the two outputs there with `--set` rather than moving the whole out-dir,
 so the labels a delta must skip are still found beside everything else: forty delta rows written over a
@@ -101,9 +106,20 @@ def mode(ctx):
     return ctx.mode
 
 
-def entry(tmdb_id, media):
-    """One row of a worklist. `enrich` refuses a list that mixes media, so the type rides on every row."""
-    return {"tmdbId": int(tmdb_id), "mediaType": media}
+def entry(tmdb_id, media, votes=None):
+    """One row of a worklist. `enrich` refuses a list that mixes media, so the type rides on every row.
+
+    `voteCount` is TMDB's count as `/discover` stated it when this universe was built — the number the
+    admission gate judges the title by (`pipeline/floors.py`). It rides here because `/discover` already
+    answered it: reading it back off a per-title detail call asks TMDB the same question a second time,
+    which is the call oxyc/den-dataset#53 is emptying. A row built from the daily export dump carries no
+    count, because the dump states popularity and not votes; the key is then ABSENT rather than zero,
+    since zero is below every floor and would read as a title TMDB refused.
+    """
+    row = {"tmdbId": int(tmdb_id), "mediaType": media}
+    if votes is not None:
+        row["voteCount"] = int(votes)
+    return row
 
 
 def parse_export(path, media):
@@ -151,6 +167,9 @@ def collect(client, media, params, limit=None):
 
     Stops at TMDB's 500-page ceiling or at `limit`. A page whose body carries no `results` is a refusal
     inside the client, not an empty page — see `lib/tmdb.py`.
+
+    Each row's `vote_count` is kept. It is the number the query SELECTED on, so it is already the gate's
+    answer for that title; a row that states none is written without one rather than as zero.
     """
     rows, seen, page = [], set(), 1
     while page <= tmdb_api.MAX_PAGES and (limit is None or len(rows) < limit):
@@ -159,7 +178,9 @@ def collect(client, media, params, limit=None):
             tmdb_id = item.get("id")
             if isinstance(tmdb_id, int) and tmdb_id not in seen:
                 seen.add(tmdb_id)
-                rows.append(entry(tmdb_id, media))
+                votes = item.get("vote_count")
+                rows.append(entry(tmdb_id, media,
+                                  votes if isinstance(votes, int) and not isinstance(votes, bool) else None))
         if page >= total:
             break
         page += 1
