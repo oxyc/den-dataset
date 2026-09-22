@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 import json
 import os
-import sys
 import tempfile
 import threading
 import unittest
 from unittest import mock
 from types import SimpleNamespace
 
-from . import article_sections, combined_questions, run_combined
-from .contract import REPO
-
-sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
-import resume_combined_excluding  # noqa: E402
+from . import article_sections, combined_questions, resume_combined_excluding, run_combined
 
 
 def answer_for(question):

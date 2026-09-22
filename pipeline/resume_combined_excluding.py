@@ -9,7 +9,9 @@ import json
 import os
 import sys
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+if not __package__:
+    # Run as a file: the repo, not pipeline/, is the import root.
+    sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from pipeline.combined_questions import global_questions
 from pipeline.run_combined import (acquire_output_lock, argument_parser, article_key, attach_enriched_evidence,
                                    load_articles, paid_run, release_output_lock)
