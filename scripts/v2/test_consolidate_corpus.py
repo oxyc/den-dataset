@@ -13,14 +13,18 @@ failing. Each test below is one of them.
 
 Run: `python3 scripts/v2/test_consolidate_corpus.py`
 """
+import contextlib
 import gzip
 import importlib.util
+import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "consolidate_corpus.py")
@@ -200,8 +204,8 @@ class Shards(unittest.TestCase):
             self.assertEqual(sorted(r["key"] for r in read(out)), ["movie:1", "movie:2"])
 
     def test_the_same_title_in_two_shards_is_refused(self):
-        """Shards of one pass are disjoint by construction; an overlap means the same title was
-        classified twice and one answer would win arbitrarily."""
+        """An overlap means the same title was classified twice. With no manifest recording when either
+        run started, nothing says which answer is newer, and one would win arbitrarily."""
         with tempfile.TemporaryDirectory() as dir:
             a, b = os.path.join(dir, "a.jsonl"), os.path.join(dir, "b.jsonl")
             d = os.path.join(dir, "d.jsonl")
@@ -228,6 +232,201 @@ class Shards(unittest.TestCase):
             code, err = run(dir, [c], [d], f, l, out, extra=["--expect", "2"])
             self.assertEqual(code, 1)
             self.assertIn("a shard is missing", err)
+
+
+def started(shard, when):
+    """The sidecar a pass writes beside a shard, reduced to the stamp the supersede rule reads."""
+    with open(shard + ".manifest.json", "w", encoding="utf-8") as fh:
+        json.dump({"runId": os.path.basename(shard), "runStartedAt": when}, fh)
+
+
+EARLY, LATE = "2026-09-19T16:13:40+00:00", "2026-09-23T09:00:00+00:00"
+
+
+class Supersede(unittest.TestCase):
+    """A title classified again on a corrected article, into a new shard beside the old one (#64)."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.p ={n: os.path.join(self.dir, n) for n in ("f.json", "l.json", "corpus.jsonl")}
+        # Named so that path order and run order disagree: the NEWER run sorts first by name.
+        self.old, self.new = os.path.join(self.dir, "z-old.jsonl"), os.path.join(self.dir, "a-new.jsonl")
+        self.old_d, self.new_d = os.path.join(self.dir, "z-old-d.jsonl"), os.path.join(self.dir, "a-new-d.jsonl")
+        write(self.old, [combined(1, answers={"tone": {"choice": "bleak"}}) | {"articleSha256": "wrong"},
+                         combined(2) | {"articleSha256": "two"}])
+        write(self.new, [combined(1, answers={"tone": {"choice": "hopeful"}}) | {"articleSha256": "right"}])
+        write(self.old_d, [{"mediaType": "movie", "tmdbId": 1, "articleSha256": "wrong",
+                            "answers": {"critique__craft": {"p": 0.1}}}])
+        write(self.new_d, [{"mediaType": "movie", "tmdbId": 1, "articleSha256": "right",
+                            "answers": {"critique__craft": {"p": 0.9}}}])
+        for shard, when in ((self.old, EARLY), (self.new, LATE), (self.old_d, EARLY), (self.new_d, LATE)):
+            started(shard, when)
+        facts_file(self.p["f.json"], ["movie:1", "movie:2"])
+        labels_file(self.p["l.json"], ["movie:1", "movie:2"])
+
+    def join(self, combined_paths, delta_paths, extra=(), out=None):
+        argv = [sys.executable, SCRIPT]
+        for path in combined_paths:
+            argv += ["--combined", path]
+        for path in delta_paths:
+            argv += ["--delta", path]
+        argv += ["--facts", self.p["f.json"], "--labels", self.p["l.json"],
+                 "--out", out or self.p["corpus.jsonl"], *extra]
+        return subprocess.run(argv, capture_output=True, text=True)
+
+    def test_the_run_that_started_later_wins_whatever_order_the_shards_are_passed_in(self):
+        first = os.path.join(self.dir, "first.jsonl")
+        done = self.join([self.old, self.new], [self.old_d, self.new_d], out=first)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        rows = {r["key"]: r for r in read(first)}
+        self.assertEqual(rows["movie:1"]["facets"]["tone"]["choice"], "hopeful")
+        self.assertEqual(rows["movie:1"]["critique"]["craft"], {"p": 0.9})
+        self.assertEqual(rows["movie:2"]["facets"]["tone"]["choice"], "bleak", "the old shard's other title")
+        second = os.path.join(self.dir, "second.jsonl")
+        done = self.join([self.new, self.old], [self.new_d, self.old_d], out=second)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        with open(first, "rb") as a, open(second, "rb") as b:
+            self.assertEqual(a.read(), b.read())
+
+    def test_the_report_says_how_many_keys_each_shard_superseded(self):
+        done = self.join([self.new, self.old], [self.new_d, self.old_d])
+        self.assertEqual(done.returncode, 0, done.stderr)
+        shards = json.loads(done.stdout)["combined"]["shards"]
+        self.assertEqual([(s["shard"], s["runStartedAt"], s["rows"], s["supersedes"], s["superseded"])
+                          for s in shards],
+                         [("z-old.jsonl", EARLY, 2, 0, 1), ("a-new.jsonl", LATE, 1, 1, 0)],
+                         "oldest run first, by the manifest, not by name")
+        delta = json.loads(done.stdout)["delta"]["shards"]
+        self.assertEqual([(s["shard"], s["supersedes"]) for s in delta], [("z-old-d.jsonl", 0), ("a-new-d.jsonl", 1)])
+
+    def test_a_key_twice_within_one_shard_is_still_refused(self):
+        write(self.new, [combined(1) | {"articleSha256": "right"}, combined(1) | {"articleSha256": "right"}])
+        done = self.join([self.old, self.new], [self.old_d, self.new_d])
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("duplicate key within combined shard", done.stderr)
+
+    def test_two_runs_that_started_at_the_same_instant_are_refused(self):
+        started(self.new, EARLY)
+        done = self.join([self.old, self.new], [self.old_d, self.new_d])
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("neither is later", done.stderr)
+
+    def test_an_overlap_with_a_shard_that_records_no_start_is_refused(self):
+        os.remove(self.new + ".manifest.json")
+        done = self.join([self.old, self.new], [self.old_d, self.new_d])
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("records none", done.stderr)
+
+    def test_a_reclassified_title_whose_critique_was_not_rerun_is_refused(self):
+        """Half a fold-in: facets from the corrected article beside a critique of the wrong one."""
+        done = self.join([self.old, self.new], [self.old_d])
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("read a different article", done.stderr)
+        self.assertIn("movie:1", done.stderr)
+
+
+class Withdrawn(unittest.TestCase):
+    """A title a re-fetch left with no plot: its rows stop shipping, the title does not."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.c, self.d = os.path.join(self.dir, "c.jsonl"), os.path.join(self.dir, "d.jsonl")
+        self.f, self.l = os.path.join(self.dir, "f.json"), os.path.join(self.dir, "l.json")
+        self.out = os.path.join(self.dir, "corpus.jsonl")
+        self.tombstones = os.path.join(self.dir, "withdrawn.jsonl")
+        self.keys = os.path.join(self.dir, "A-to-plotless.txt")
+        write(self.c, [combined(1, answers={"tax__survival": {"noul": 0.9}}), combined(2)])
+        write(self.d, [{"mediaType": "movie", "tmdbId": 1, "answers": {"critique__craft": {"p": 0.7}}}])
+        started(self.c, EARLY)
+        started(self.d, EARLY)
+        facts_file(self.f, ["movie:1", "movie:2"])
+        labels_file(self.l, ["movie:1", "movie:2"])
+        with open(self.keys, "w", encoding="utf-8") as fh:
+            fh.write("movie:1\n")
+
+    def withdraw(self, when="2026-09-22T20:00:00+00:00"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return cc.withdraw(["--keys", self.keys, "--reason", "#64: the sitelink is a redirect",
+                                "--out", self.tombstones], now=datetime.fromisoformat(when))
+
+    def join(self, *shards):
+        return run(self.dir, [self.c, *shards], [self.d], self.f, self.l, self.out,
+                   extra=["--withdrawn", self.tombstones, "--expect", "2"])
+
+    def test_a_withdrawn_titles_rows_stop_shipping_and_the_title_stays(self):
+        self.withdraw()
+        code, err = self.join()
+        self.assertEqual(code, 0, err)
+        rows = {r["key"]: r for r in read(self.out)}
+        self.assertEqual(sorted(rows), ["movie:1", "movie:2"], "withdrawn is not deleted")
+        self.assertEqual(rows["movie:1"]["nouls"], {})
+        self.assertEqual(rows["movie:1"]["critique"], {})
+        self.assertEqual(rows["movie:1"]["facts"]["countries"], ["US"])
+        self.assertEqual(rows["movie:1"]["labels"]["primaryGenre"], "Crime")
+        self.assertEqual(rows["movie:2"]["facets"]["tone"]["choice"], "bleak", "only the listed title")
+
+    def test_the_report_counts_the_withdrawals(self):
+        self.withdraw()
+        done = subprocess.run([sys.executable, SCRIPT, "--combined", self.c, "--delta", self.d,
+                               "--facts", self.f, "--labels", self.l, "--out", self.out,
+                               "--withdrawn", self.tombstones], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        report = json.loads(done.stdout)
+        self.assertEqual(report["tombstones"], 1)
+        self.assertEqual((report["combined"]["withdrawn"], report["delta"]["withdrawn"]), (1, 1))
+        self.assertEqual(report["combined"]["shards"][0]["withdrawn"], 1)
+        self.assertEqual((report["withPass"], report["factsOnly"]), (1, 0))
+
+    def test_a_run_that_started_after_the_withdrawal_stands(self):
+        """The title regained a plot and was answered again: the tombstone does not have to be edited."""
+        self.withdraw()
+        again, again_d = os.path.join(self.dir, "c2.jsonl"), os.path.join(self.dir, "d2.jsonl")
+        write(again, [combined(1, answers={"tone": {"choice": "hopeful"}})])
+        write(again_d, [{"mediaType": "movie", "tmdbId": 1, "answers": {"critique__craft": {"p": 0.2}}}])
+        started(again, LATE)
+        started(again_d, LATE)
+        done = subprocess.run([sys.executable, SCRIPT, "--combined", self.c, "--combined", again,
+                               "--delta", self.d, "--delta", again_d, "--facts", self.f, "--labels", self.l,
+                               "--out", self.out, "--withdrawn", self.tombstones],
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        rows = {r["key"]: r for r in read(self.out)}
+        self.assertEqual(rows["movie:1"]["facets"]["tone"]["choice"], "hopeful")
+        self.assertEqual(json.loads(done.stdout)["combined"]["answeredAfterWithdrawal"], 1)
+
+    def test_a_withdrawal_against_a_shard_with_no_recorded_start_is_refused(self):
+        self.withdraw()
+        os.remove(self.c + ".manifest.json")
+        code, err = self.join()
+        self.assertEqual(code, 1)
+        self.assertIn("before or after the withdrawal", err)
+
+    def test_the_tombstone_records_why_when_and_from_which_list(self):
+        self.withdraw()
+        with open(self.tombstones, encoding="utf-8") as fh:
+            [row] = [json.loads(line) for line in fh]
+        self.assertEqual((row["mediaType"], row["tmdbId"]), ("movie", 1))
+        self.assertEqual(row["reason"], "#64: the sitelink is a redirect")
+        self.assertEqual(row["withdrawnAt"], "2026-09-22T20:00:00+00:00")
+        self.assertEqual(row["keysFile"], "A-to-plotless.txt")
+        self.assertEqual(len(row["keysSha256"]), 64)
+
+    def test_a_title_is_withdrawn_once(self):
+        self.withdraw()
+        with self.assertRaises(SystemExit) as refused:
+            self.withdraw()
+        self.assertIn("already withdrawn", str(refused.exception))
+        with open(self.tombstones, encoding="utf-8") as fh:
+            self.assertEqual(len(fh.readlines()), 1, "a refusal appends nothing")
+
+    def test_a_tombstone_with_no_reason_is_refused(self):
+        with open(self.tombstones, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"mediaType": "movie", "tmdbId": 1, "withdrawnAt": LATE}) + "\n")
+        code, err = self.join()
+        self.assertEqual(code, 1)
+        self.assertIn("no reason", err)
 
 
 class Prose(unittest.TestCase):

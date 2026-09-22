@@ -3,10 +3,10 @@
 
 The rule lives in `scripts/v2/consolidate_corpus.py`: the spine that is the union of the facts and the
 pass rather than the pass alone, the labels lookup that fails instead of returning something dict-like,
-the shard duplicate check, the prose refusal, and the join guards that count against the ARTIFACT rather
-than against a fraction of the corpus. Every one of them was bought by a failure that happened silently,
-and none of it is reimplemented or wrapped in new behaviour here: this stage decides which files the join
-is handed and runs it, byte for byte.
+the shard supersede rule and its tombstones, the prose refusal, and the join guards that count against
+the ARTIFACT rather than against a fraction of the corpus. Every one of them was bought by a failure that
+happened silently, and none of it is reimplemented or wrapped in new behaviour here: this stage decides
+which files the join is handed and runs it, byte for byte.
 
 What the stage adds is the declaration below, and two things it had to teach the contract:
 
@@ -43,6 +43,7 @@ from .contract import REPO, StageError, bind
 
 sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
 import audit_combined  # noqa: E402  — the bundle auditor, run against each shard's sidecar manifest
+import consolidate_corpus  # noqa: E402  — for `shard_order`, the join's own supersede order
 
 NAME = "corpus"
 
@@ -64,6 +65,7 @@ INPUTS = (
     artifacts.FACTS,
     artifacts.VECTOR_LABELS.called("labels"),
     artifacts.PREMISE_LABELS,
+    artifacts.WITHDRAWN,
 )
 
 OUTPUTS = (artifacts.CORPUS, artifacts.ENTITIES)
@@ -111,14 +113,15 @@ def audit_bundles(ctx):
 def argv(ctx):
     """The join's command line, built from the declaration.
 
-    A shard set contributes its flag once per member, in sorted order; the join refuses a key that
-    appears in two shards, so the order changes nothing it writes. A required input that is absent stops
-    here, naming its producer — see `Context.require`.
+    A shard set contributes its flag once per member, oldest run first: the order in which the join lets
+    a later shard supersede an earlier one, so the command line reads in the order it is applied. The join
+    derives that order from the manifests itself, so the argument order changes nothing it writes. A
+    required input that is absent stops here, naming its producer — see `Context.require`.
     """
     command = [sys.executable, SCRIPT]
     for entry in (bind(e) for e in INPUTS):
         if entry.artifact.shards:
-            for path in ctx.require_all(entry.artifact):
+            for path in consolidate_corpus.shard_order(ctx.require_all(entry.artifact)):
                 command += [entry.flag(), path]
             continue
         path = ctx.require(entry.artifact)

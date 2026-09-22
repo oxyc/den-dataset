@@ -17,14 +17,17 @@ stage around it, which had to answer two questions the store stage did not:
 The fixture is `scripts/v2/test_consolidate_corpus.py`'s, reused rather than rebuilt: a second definition
 of what a valid pass shard looks like is a second thing to keep true.
 """
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 
 import pipeline
 
@@ -77,17 +80,21 @@ def sha256(path):
         return hashlib.sha256(fh.read()).hexdigest()
 
 
-def write_manifest(shard, implementation=None):
+def write_manifest(shard, implementation=None, started=None):
     """The sidecar the pass writes beside a shard, under the name it derives from `--out`.
 
-    Only the provenance the stage's audit reads is filled in; the rest of a real manifest belongs to the
-    row-level readback, which is not a precondition of a join.
+    Only the provenance the stage's audit reads is filled in, plus the run start when a test orders
+    shards by it; the rest of a real manifest belongs to the row-level readback, which is not a
+    precondition of a join.
     """
     digests = {name: sha256(os.path.join(V2, name)) for name in IMPLEMENTATION}
     digests.update(implementation or {})
+    manifest = {"runId": "corpus-stage-test", "configSha256": "config-test",
+                "config": {"implementationSha256": digests}}
+    if started:
+        manifest["runStartedAt"] = started
     with open(shard + ".manifest.json", "w", encoding="utf-8") as fh:
-        json.dump({"runId": "corpus-stage-test", "configSha256": "config-test",
-                   "config": {"implementationSha256": digests}}, fh)
+        json.dump(manifest, fh)
 
 
 def write_inputs(out):
@@ -144,14 +151,15 @@ class CommandLine(unittest.TestCase):
         with tempfile.TemporaryDirectory() as out:
             write_inputs(out)
             parsed = script.build_parser().parse_args(corpus.argv(context(out))[2:])
-            # Sorted, so one out-dir gives one command line. The join refuses a key that appears in two
-            # shards, so the order it reads them in changes nothing it writes.
+            # No manifest here records a run start, so the order falls back to the paths, sorted: one
+            # out-dir gives one command line. `Supersede` below covers shards the manifests order.
             self.assertEqual(parsed.combined,
                              sorted(os.path.join(out, n) for n in FIXTURE_FILES["combined"]))
             self.assertEqual(parsed.delta,
                              sorted(os.path.join(out, n) for n in FIXTURE_FILES["delta"]))
             self.assertEqual(parsed.labels, os.path.join(out, "labels-t02.json"))
             self.assertEqual(parsed.premise_labels, os.path.join(out, "labels-premise.json"))
+            self.assertIsNone(parsed.withdrawn, "no tombstone file, no flag")
             self.assertEqual(parsed.out, os.path.join(out, f"corpus-{VERSION}.jsonl.gz"))
 
     def test_every_shard_of_a_set_is_handed_over(self):
@@ -351,6 +359,87 @@ class Equivalence(unittest.TestCase):
             write_inputs(out)
             with self.assertRaises(StageError):
                 corpus.run(context(out, expect=999))
+
+
+class Supersede(unittest.TestCase):
+    """A re-grounded title's new classify and critique shards, folded in beside the shipped ones (#64).
+
+    The fold-in names the new shards so they match the declared globs; their names say nothing about
+    which run is newer, and here they sort BEFORE the shards they supersede.
+    """
+
+    MAIN, FALLBACK, NEW = ("2026-09-19T16:13:40+00:00", "2026-09-19T18:02:22+00:00",
+                           "2026-09-23T09:00:00+00:00")
+    REGROUND = ("combined-v1-r2-reground.jsonl", "delta-v2-reground.jsonl")
+
+    def fold_in(self, out):
+        write_inputs(out)
+        # delta-v2-rest's stamp is an hour EARLIER than delta-v2's in UTC though it reads later as text.
+        for name, started in ((FIXTURE_FILES["combined"][0], self.MAIN),
+                              (FIXTURE_FILES["combined"][1], self.FALLBACK),
+                              (FIXTURE_FILES["delta"][0], self.MAIN),
+                              (FIXTURE_FILES["delta"][1], "2026-09-19T16:13:40+01:00")):
+            write_manifest(os.path.join(out, name), started=started)
+        combined_path, delta_path = (os.path.join(out, n) for n in self.REGROUND)
+        fixture.write(combined_path, [fixture.combined(1, answers={"tone": {"choice": "hopeful"}})])
+        fixture.write(delta_path, [{"mediaType": "movie", "tmdbId": 1,
+                                    "answers": {"critique__craft": {"p": 0.95}}}])
+        for path in (combined_path, delta_path):
+            write_manifest(path, started=self.NEW)
+        with open(os.path.join(out, "keys.txt"), "w", encoding="utf-8") as fh:
+            fh.write("movie:2\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            script.withdraw(["--keys", os.path.join(out, "keys.txt"), "--reason", "#64 redirect",
+                             "--out", os.path.join(out, "withdrawn.jsonl")],
+                            now=datetime.fromisoformat("2026-09-22T20:00:00+00:00"))
+
+    def test_the_stage_passes_the_shards_oldest_run_first(self):
+        with tempfile.TemporaryDirectory() as out:
+            self.fold_in(out)
+            parsed = script.build_parser().parse_args(corpus.argv(context(out))[2:])
+            self.assertEqual([os.path.basename(p) for p in parsed.combined],
+                             ["combined-v1-r2.jsonl", "combined-v1-r2-token-fallback.jsonl",
+                              "combined-v1-r2-reground.jsonl"])
+            self.assertEqual([os.path.basename(p) for p in parsed.delta],
+                             ["delta-v2-rest.jsonl", "delta-v2.jsonl", "delta-v2-reground.jsonl"],
+                             "ordered as instants, not as strings")
+            self.assertEqual(parsed.withdrawn, os.path.join(out, "withdrawn.jsonl"))
+
+    def test_the_folded_in_shards_pass_the_bundle_audit(self):
+        with tempfile.TemporaryDirectory() as out:
+            self.fold_in(out)
+            self.assertEqual(corpus.audit_bundles(context(out)), [])
+
+    def test_the_stage_writes_the_bytes_the_hand_typed_command_writes_with_shards_in_name_order(self):
+        """The join orders the shards by their manifests, so a hand-typed command that lists them in
+        name order — the reverse of the run order — writes the same corpus as the stage."""
+        with tempfile.TemporaryDirectory() as out:
+            self.fold_in(out)
+            reference = os.path.join(out, "reference.jsonl.gz")
+            command = [sys.executable, os.path.join(V2, "consolidate_corpus.py")]
+            for name in sorted(FIXTURE_FILES["combined"] + self.REGROUND[:1]):
+                command += ["--combined", os.path.join(out, name)]
+            for name in sorted(FIXTURE_FILES["delta"] + self.REGROUND[1:]):
+                command += ["--delta", os.path.join(out, name)]
+            command += ["--facts", os.path.join(out, FIXTURE_FILES["facts"][0]),
+                        "--labels", os.path.join(out, FIXTURE_FILES["vector_labels"][0]),
+                        "--premise-labels", os.path.join(out, FIXTURE_FILES["premise_labels"][0]),
+                        "--withdrawn", os.path.join(out, "withdrawn.jsonl"),
+                        "--expect", "4", "--out", reference]
+            self.assertNotEqual(command, corpus.argv(context(out, expect=4))[:-2] + ["--out", reference])
+            done = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            made = corpus.run(context(out, expect=4))
+            self.assertEqual(sha256(made), sha256(reference))
+            rows = {r["key"]: r for r in fixture.read(made)}
+            self.assertEqual(rows["movie:1"]["facets"]["tone"]["choice"], "hopeful")
+            self.assertEqual(rows["movie:1"]["critique"]["craft"], {"p": 0.95})
+            self.assertEqual(rows["movie:2"]["facets"], {}, "withdrawn")
+            report = json.loads(done.stdout)
+            self.assertEqual([(s["shard"], s["supersedes"]) for s in report["combined"]["shards"]],
+                             [("combined-v1-r2.jsonl", 0), ("combined-v1-r2-token-fallback.jsonl", 0),
+                              ("combined-v1-r2-reground.jsonl", 1)])
+            self.assertEqual(report["combined"]["withdrawn"], 1)
 
 
 class Rows(unittest.TestCase):
