@@ -184,7 +184,9 @@ class CommandLine(unittest.TestCase):
             os.rmdir(os.path.join(out, artifacts.ENRICHED.filename))
             with self.assertRaises(StageError) as refused:
                 classify.argv(context(out))
-            self.assertIn("enrich-run.sh", str(refused.exception))
+            # The drain is a stage, so the batches are owned rather than answering for themselves: the
+            # refusal names what the pipeline runs, not the shell driver that stage replaced.
+            self.assertIn("./den stage fetch", str(refused.exception))
 
     def test_the_dry_run_is_only_asked_for_when_it_is_asked_for(self):
         """`--plan` decides whether the stage buys anything. Passing it unasked would make every run a

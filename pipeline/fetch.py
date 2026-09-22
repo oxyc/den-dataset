@@ -52,18 +52,22 @@ HOW = "./den stage fetch"
 #: Writes into the out-dir and nowhere else. Expensive to repeat in TMDB quota and in hours, and resumable,
 #: which is a different thing from reversible.
 PUBLISHES = False
+#: TMDB's own API and live Wikipedia, neither of them billed. The cost is quota and hours, not money, so a
+#: `den run` that drains a worklist buys nothing back from a paid provider.
+SPENDS = False
 COMMAND = "enrich"
 
-#: A worklist holds ONE media type, so the universe is two files and a full drain is two runs of the loop.
+#: The universe holds ONE media type per file, so it is two files and a full drain is two runs of the loop.
 #: Each is bound to the one name the command spells them by: whichever media a batch is drawing from, the
-#: flag is `--worklist`. The pipeline goes on seeing two files, and the command line carries the word its
-#: reader has for whichever one it was handed.
+#: flag is `--worklist`. The pipeline goes on seeing `universe_movie` and `universe_tv` — the name the
+#: worklist stage writes them under — and the command line carries the word its reader has for whichever
+#: one it was handed.
 MEDIA = ("movie", "tv")
-WORKLISTS = {"movie": artifacts.WORKLIST_MOVIE.called("worklist"),
-             "tv": artifacts.WORKLIST_TV.called("worklist")}
+UNIVERSES = {"movie": artifacts.UNIVERSE_MOVIE.called("worklist"),
+             "tv": artifacts.UNIVERSE_TV.called("worklist")}
 
 #: A run that names a media requires only that media's file; a run that names none requires both.
-INPUTS = (WORKLISTS["movie"], WORKLISTS["tv"])
+INPUTS = (UNIVERSES["movie"], UNIVERSES["tv"])
 
 #: The batches, and the checkpoint that decides what a resumed run does. A stage that declared only the
 #: batches would leave the resume state owned by nobody — and an absent checkpoint is not an empty one:
@@ -115,7 +119,7 @@ def argv(ctx, media):
     The worklist is required: a drain pointed at a worklist that is not there would checkpoint nothing and
     report `remaining` 0, which reads exactly like a finished run.
     """
-    entry = bind(WORKLISTS[media])
+    entry = bind(UNIVERSES[media])
     command = [binary(), COMMAND,
                entry.flag(), ctx.require(entry.artifact),
                "--limit", str(BATCH),

@@ -37,7 +37,7 @@ import unittest
 
 import pipeline
 
-from . import artifacts, embed, fetch
+from . import artifacts, embed, fetch, worklist
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,6 +48,11 @@ VERSION = "testver"
 #: because TMDB's movie and series id spaces overlap, so "the drained state" is that pair of spellings.
 WORKLIST = {"movie": [{"tmdbId": 550, "mediaType": "movie"}],
             "tv": [{"tmdbId": 1396, "mediaType": "tv"}]}
+
+#: Where each media's universe is written, taken from the declaration rather than spelled again here. The
+#: file the stage hands to `--worklist` is whatever `pipeline/worklist.py` wrote; a fixture carrying its
+#: own copy of that filename would go on passing against a file the stage no longer reads.
+UNIVERSE = {"movie": artifacts.UNIVERSE_MOVIE, "tv": artifacts.UNIVERSE_TV}
 DRAINED = {"processed": ["movie:550", "tv:1396"], "nextBatch": 3}
 
 #: A stand-in for `taxonomy-backfill enrich`. It records its argument list, then plays one entry of
@@ -89,7 +94,7 @@ def write_stub(directory):
 def write_inputs(out, drained=False):
     """Both worklists, under their declared filenames, and optionally the checkpoint that drains them."""
     for media, entries in WORKLIST.items():
-        with open(os.path.join(out, f"worklist-{media}.json"), "w", encoding="utf-8") as fh:
+        with open(os.path.join(out, UNIVERSE[media].filename), "w", encoding="utf-8") as fh:
             json.dump(entries, fh)
     if drained:
         with open(os.path.join(out, artifacts.ENRICH_CHECKPOINT.filename), "w", encoding="utf-8") as fh:
@@ -100,11 +105,14 @@ def write_inputs(out, drained=False):
 def hand_typed(out, media, size=fetch.BATCH):
     """The arguments `scripts/enrich-all.sh` hands the command, on this out-dir.
 
-    Its `$WORKLIST` is `$OUT_DIR/worklist-$MEDIA.json`, which is the declared filename, and `$SIZE` is the
-    batch. `test_the_documented_driver_still_spells_it_this_way` holds this against the script itself
-    rather than against anyone's memory of it.
+    The flags and their order are the driver's, and `$SIZE` is the batch;
+    `test_the_documented_driver_still_spells_it_this_way` holds those against the script itself rather than
+    against anyone's memory of it. The PATH is not the driver's any more: its `$WORKLIST` is
+    `$OUT_DIR/worklist-$MEDIA.json`, the file `scripts/build-worklist.py` writes, and the pipeline's
+    universe is a different list under a different name. Taking it from the declaration is the point of the
+    rename — a fixture that followed the driver here would drain the list the stage is no longer fed.
     """
-    return ["--worklist", os.path.join(out, f"worklist-{media}.json"),
+    return ["--worklist", os.path.join(out, UNIVERSE[media].filename),
             "--limit", str(size),
             "--out-dir", out]
 
@@ -199,7 +207,7 @@ class Declaration(Staged):
         """The universe is two files because `enrich` refuses a batch that mixes media — a film and a
         series can share a tmdbId. Each is its own artifact; the flag is the reader's single word."""
         bound = {bind(e).name: bind(e) for e in fetch.INPUTS}
-        self.assertEqual(sorted(bound), ["worklist_movie", "worklist_tv"])
+        self.assertEqual(sorted(bound), ["universe_movie", "universe_tv"])
         for entry in bound.values():
             self.assertEqual(entry.flag(), "--worklist")
 
@@ -210,11 +218,22 @@ class CommandLine(Staged):
             self.assertEqual(fetch.argv(context(self.out), media)[2:], hand_typed(self.out, media))
 
     def test_the_documented_driver_still_spells_it_this_way(self):
-        """`hand_typed` is only an oracle while it is the driver's line. Held against the script so a
-        change there fails here rather than making this test agree with itself."""
+        """`hand_typed` is only an oracle while its flags are the driver's. Held against the script so a
+        change there fails here rather than making this test agree with itself.
+
+        The driver's `$WORKLIST` is deliberately NOT asserted against the stage's path. It is
+        `$OUT_DIR/worklist-$MEDIA.json` — the list `scripts/build-worklist.py` writes, which enumerates the
+        ids Den already ships — while the pipeline's universe enumerates everything TMDB has. The two once
+        shared that filename and whichever tool ran last decided what the next enrich billed for, which is
+        why the artifact is `universe-<media>.json` now. Holding the stage to the driver's path would hold
+        it to the collision.
+        """
         self.assertIn('enrich --worklist "$WORKLIST" --limit "$SIZE" --out-dir "$OUT_DIR"', driver())
         self.assertIn('FLOOR_ARG="--vote-floor $VOTE_FLOOR"', driver())
         self.assertIn('WORKLIST="$OUT_DIR/worklist-$MEDIA.json"', driver())
+        # The divergence, asserted rather than the agreement: pointing the stage back at the driver's list
+        # is what the rename exists to stop, so it fails here instead of billing an enrich for it.
+        self.assertNotIn("worklist-movie.json", hand_typed(self.out, "movie")[1])
 
     def test_the_vote_floor_is_only_passed_when_it_is_named(self):
         """The driver passes it only when `VOTE_FLOOR` is set, and for the same reason: the command's
@@ -227,10 +246,12 @@ class CommandLine(Staged):
     def test_a_missing_worklist_stops_the_stage(self):
         """A drain pointed at a worklist that is not there checkpoints nothing and reports `remaining` 0,
         which reads exactly like a finished run."""
-        os.remove(os.path.join(self.out, "worklist-movie.json"))
+        os.remove(os.path.join(self.out, artifacts.UNIVERSE_MOVIE.filename))
         with self.assertRaises(StageError) as refused:
             fetch.argv(context(self.out), "movie")
-        self.assertIn("taxonomy-backfill worklist --media movie", str(refused.exception))
+        # The worklist stage owns the universe now, so the refusal sends an operator to the rule that
+        # stage runs rather than to a `how` the artifact carried for itself.
+        self.assertIn("taxonomy-backfill worklist", str(refused.exception))
 
     def test_a_media_the_worklists_do_not_come_in_is_refused(self):
         with self.assertRaises(StageError) as refused:
@@ -354,13 +375,13 @@ class Run(Staged):
         made = fetch.run(context(self.out))
         worklists = [call[call.index("--worklist") + 1] for call in invocations(self.out)]
         self.assertEqual([os.path.basename(path) for path in worklists],
-                         ["worklist-movie.json", "worklist-tv.json"])
+                         [UNIVERSE["movie"].filename, UNIVERSE["tv"].filename])
         self.assertIn(os.path.join(self.out, "enriched"), made)
 
     def test_naming_a_media_drains_only_that_one(self):
         fetch.run(context(self.out, media="tv"))
         worklists = [call[call.index("--worklist") + 1] for call in invocations(self.out)]
-        self.assertEqual([os.path.basename(path) for path in worklists], ["worklist-tv.json"])
+        self.assertEqual([os.path.basename(path) for path in worklists], [UNIVERSE["tv"].filename])
 
     def test_a_run_whose_outputs_landed_elsewhere_is_refused(self):
         """Both are derived by the command from `--out-dir`. An override that names one elsewhere does not
@@ -470,7 +491,7 @@ class Oracle(unittest.TestCase):
         """A mixed worklist is the one input the command rejects outright: the vote files written from it
         carry no media type, so an id that exists as both a film and a series would be labelled once and
         applied to both. The loop must surface that rather than retry it six times."""
-        mixed = os.path.join(self.out, "worklist-movie.json")
+        mixed = os.path.join(self.out, artifacts.UNIVERSE_MOVIE.filename)
         with open(mixed, "w", encoding="utf-8") as fh:
             json.dump(WORKLIST["movie"] + WORKLIST["tv"], fh)
         with open(os.path.join(self.out, artifacts.ENRICH_CHECKPOINT.filename), "w", encoding="utf-8") as fh:
@@ -496,12 +517,16 @@ class Topology(unittest.TestCase):
         self.assertLess(pipeline.STAGES.index("fetch"), pipeline.STAGES.index("embed"))
         self.assertIn(artifacts.ENRICHED, [bind(e).artifact for e in embed.INPUTS])
 
-    def test_the_worklists_are_an_input_that_still_names_its_own_producer(self):
-        """The seam: the worklist build is a stage that is not ported, so it answers for itself until it
-        lands, and then these two fields empty the way `enriched`'s just did."""
-        for artifact in (artifacts.WORKLIST_MOVIE, artifacts.WORKLIST_TV):
+    def test_the_universes_it_drains_are_owned_by_the_stage_that_builds_them(self):
+        """The seam this input sat behind is closed. The worklist build landed as a stage while this one
+        was in flight, so the two files stopped answering for themselves the way `enriched`'s fields just
+        emptied — and a drain that finds one missing is sent to the stage that writes it, not to a `how`
+        the artifact carried."""
+        self.assertLess(pipeline.STAGES.index("worklist"), pipeline.STAGES.index("fetch"))
+        for artifact in (artifacts.UNIVERSE_MOVIE, artifacts.UNIVERSE_TV):
+            self.assertEqual(artifact.producer, "")
             self.assertEqual(pipeline.producers()[artifact.name],
-                             (artifact.producer, artifact.how, False))
+                             (worklist.PRODUCER, worklist.HOW, False))
 
 
 if __name__ == "__main__":
