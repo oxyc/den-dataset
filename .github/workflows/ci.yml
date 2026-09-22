@@ -72,6 +72,11 @@ jobs:
       # file itself is gated against the floors by `scripts/test_eval_taxonomy.py` below.
       - name: Genres & moods seed
         run: python3 -m unittest scripts/v2/test_seed_genres_moods_curated.py
+      # The hand enrichment that writes into that file (`./den genres-moods prepare|merge`): what it selects,
+      # the batches and validator the agents get, July's assemble thresholds, and that a merge keeps the
+      # file's bytes and refuses a result below the floors.
+      - name: Genres & moods enrichment
+        run: python3 -m unittest scripts/test_genres_moods_enrich.py
       # The publish path. Nothing tested any of it until now, and it is the half that decides what the box
       # is allowed to serve: the store writer against den-spec's fixture, and the record-count guard that
       # refuses a silent shrink.
