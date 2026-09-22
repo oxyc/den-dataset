@@ -9,10 +9,8 @@ file the embed stage reads, in that file's own record shape.
 
 ## What is dropped on the way in
 
-`validate_classify_batch.py` reports these; this is where they are acted on, so the two must agree:
-
   - a row whose `primary_genre` is missing or outside the vocabulary — the row carries no usable
-    label, so it is not written. `build_classify_backfill.py` sweeps it.
+    label, so it is not written.
   - a subgenre or mood outside the vocabulary, with a confidence out of range, below the 0.5 floor,
     or repeated within its own list — that ENTRY is dropped, the row is kept.
   - anything past the third subgenre or mood, weakest first.

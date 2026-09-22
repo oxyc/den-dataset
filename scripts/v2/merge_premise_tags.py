@@ -4,8 +4,8 @@
   scripts/v2/merge_premise_tags.py --phase out-premise-v2/gen --out data/premise-tags-v2.json
 
 v1 is NOT overwritten. `vectors-premise.bin` is aligned to v1's tag strings, so rewriting them in place
-would leave every vector describing text that no longer exists — the failure `merge-premise-coverage.py`
-is written to avoid, in a form no checksum would catch.
+would leave every vector describing text that no longer exists — a blob paired with the wrong strings, in
+a form no checksum would catch.
 
 ## Keying
 
@@ -168,8 +168,8 @@ out = {
     "embeddedBy": v1["embeddedBy"],
     "supersedes": v1["index"],
     "tags": merged,
-    # Carried forward verbatim: these titles have tags and no vector because the DT-N merge never ran, and
-    # that is still true of the v2 artifact until scripts/merge-premise-coverage.py runs.
+    # Carried forward verbatim: in v1 these titles had tags and no vector because the DT-N merge never ran.
+    # The v2 blob covers them — `embed_premise_v2.py` embeds every title in this file.
     "coverageFilled": v1.get("coverageFilled", []),
     "vectorsMissingFor": v1.get("vectorsMissingFor", []),
 }
