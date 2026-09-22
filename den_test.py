@@ -6,6 +6,7 @@ The acceptance this covers is small and specific: the pipeline can be LISTED and
 run.
 """
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -33,11 +34,12 @@ class Listing(unittest.TestCase):
         result = den("stages")
         self.assertEqual(result.returncode, 0, result.stderr)
         # The order, and that it is the real one: the universe is built before anything is drawn from it,
-        # the titles are enriched before anything reads their plots, the articles are classified before the
-        # vectors are embedded, the vectors before the facts passes are merged over their ids, the merged
-        # facts before the corpus that joins them, the corpus before the store built from it, and the
-        # publish that uploads the store is last.
-        expected = ("worklist", "fetch", "classify", "embed", "facts", "corpus", "store", "publish")
+        # the titles are enriched before anything reads their plots, the articles dumped before the pass
+        # that reads them, classified before the vectors are embedded, the vectors before the facts passes
+        # are merged over their ids, the merged facts before the corpus that joins them, the corpus before
+        # the store built from it, and the publish that uploads the store is last.
+        expected = ("worklist", "fetch", "articles", "classify", "docfacts", "embed", "facts", "corpus",
+                    "store", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
@@ -119,13 +121,15 @@ class Dispatch(unittest.TestCase):
         EVERY unpaid stage before it has to SUCCEED for this to say anything. An out-dir holding nothing
         refuses at stage one, and then classify is unreached whether or not the gate works — the assertion
         passes while testing nothing, which is the shape the publish gate's own test has to live with
-        because publish is last. So one stub answers for both stages that run first, and the two runs are
-        compared at the stage after them.
+        because publish is last. This test has now been falsified twice that way, each time a stage landed
+        ahead of classify, so it seeds every one of them and asserts it got past the last.
 
-        The stub is `taxonomy-backfill` for the worklist AND for the drain, because both wrap the same
-        binary: it writes a universe of one id, then reports that universe already drained. The
-        credentials are in the environment so the drain does not go through `scripts/lib/den-env.sh` for
-        a `den.env` this checkout has no reason to own — nothing here reaches TMDB to use them.
+        Three stages run first and they need different things. `worklist` and `articles` are Python and
+        read files, so they are given files: a one-row TMDB dump apiece, and an enriched batch naming a
+        grounded title plus an `articles.jsonl` row for it, because a row already in the dump's output is
+        a row it resumes past rather than fetches. `fetch` still wraps the binary, so it gets a stub that
+        reports the universe already drained, with credentials in the environment so the drain does not go
+        hunting for a `den.env` this checkout has no reason to own. Nothing here reaches TMDB.
         """
         with tempfile.TemporaryDirectory() as out:
             stub = os.path.join(out, "stub")
@@ -133,15 +137,11 @@ class Dispatch(unittest.TestCase):
                 fh.write("#!/usr/bin/env python3\n"
                          "import json, os, sys\n"
                          "argv = sys.argv[1:]\n"
-                         "if argv[0] == 'enrich':\n"
-                         "    where = argv[argv.index('--out-dir') + 1]\n"
-                         "    os.makedirs(os.path.join(where, 'enriched'), exist_ok=True)\n"
-                         "    with open(os.path.join(where, 'enrich-checkpoint.json'), 'w') as fh:\n"
-                         "        json.dump({'processed': [], 'nextBatch': 1}, fh)\n"
-                         "    print(json.dumps({'remaining': 0, 'count': 0}))\n"
-                         "else:\n"
-                         "    json.dump([{'tmdbId': 1, 'mediaType': 'movie'}],\n"
-                         "              open(argv[argv.index('--out') + 1], 'w'))\n")
+                         "where = argv[argv.index('--out-dir') + 1]\n"
+                         "os.makedirs(os.path.join(where, 'enriched'), exist_ok=True)\n"
+                         "with open(os.path.join(where, 'enrich-checkpoint.json'), 'w') as fh:\n"
+                         "    json.dump({'processed': [], 'nextBatch': 1}, fh)\n"
+                         "print(json.dumps({'remaining': 0, 'count': 0}))\n")
             os.chmod(stub, 0o755)
             for name, value in (("DEN_BACKFILL_BIN", stub),
                                 ("TMDB_API_KEY", "stub-key-nothing-here-calls-tmdb"),
@@ -149,9 +149,18 @@ class Dispatch(unittest.TestCase):
                 previous = os.environ.get(name)
                 os.environ[name] = value
                 self.addCleanup(os.environ.__setitem__, name, previous or "")
-            # `discover` because it is the one mode that reads no input file — this test is about which
-            # stages run, not about feeding the first one a TMDB dump.
-            run = ("run", "--dataset-version", "test", "--out-dir", out, "--mode", "discover")
+            # `export` because it is the one mode that touches no network — this test is about which
+            # stages run, not about what TMDB answers.
+            for name in ("movie_ids.json", "tv_series_ids.json"):
+                with open(os.path.join(out, name), "w", encoding="utf-8") as fh:
+                    fh.write('{"id":11,"popularity":1.0}\n')
+            os.makedirs(os.path.join(out, "enriched"), exist_ok=True)
+            with open(os.path.join(out, "enriched", "batch-1.json"), "w", encoding="utf-8") as fh:
+                json.dump([{"tmdbId": 11, "mediaType": "movie", "title": "t", "year": 1977,
+                            "hasWikiPlot": True, "plotArticle": "Star Wars (film)"}], fh)
+            with open(os.path.join(out, "articles.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write('{"mediaType":"movie","tmdbId":11,"text":"prose"}\n')
+            run = ("run", "--dataset-version", "test", "--out-dir", out, "--mode", "export")
 
             gated = den(*run)
             self.assertIn("==> worklist", gated.stderr, "the stub did not get the run past stage one")

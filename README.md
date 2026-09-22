@@ -48,7 +48,8 @@ it never reads:
 `labels-t02.json`, `labels-premise.json`, `metadata-<ver>.json`, `facets.bin`, `facts-<ver>.json`,
 `rail-facets-<ver>.json`, `plot-facets-<ver>.json`, every `.gz` twin. The store carries what they held.
 They are still BUILT — they are the store's inputs and they stay in the out-dir — but `publish-dataset.sh`
-prunes their keys out of the manifest, so nothing fetches them. They were all one row per title, keyed
+prunes their keys out of the manifest, so nothing fetches them. The exception is `metadata-<ver>.json`, the
+TMDB poster sidecar: nothing builds it any more, because posters are no longer fetched from TMDB at all. They were all one row per title, keyed
 identically, and nothing checked they agreed: eleven titles (House of the Dragon and Moon Knight among
 them) sat in `facts` and `labels` but not in `rail-facets` for a day, with no error anywhere. `facts-slim`
 is separately retired: it dropped `composers`, `cinematographers`, `narrativeLocations` and `mainSubjects`
@@ -133,10 +134,14 @@ the other 421 would be dropped by the ToS rule regardless.
 
 ## Layout
 
-- `Sources/DenDataset/` — the library: the `t02` `Taxonomy`, the `HashingEmbedder` + `Quantizer`, the
-  format + producer model types, and a thin `TMDBClient` (two endpoints only).
-- `Sources/taxonomy-backfill/` — the CLI that drives the resumable phases (`worklist`, `enrich`,
-  `embed-corpus`, `dump-articles`, `doc-facts`, `facts`, `finalize`, `metadata`, `recluster`).
+- `pipeline/` — the pipeline, in order (`pipeline/__init__.py`). One module per stage, each declaring what
+  it reads and writes; `./den stages` prints it.
+- `lib/` — what a stage needs from outside the machine: HTTP with retry, the response cache, and the
+  upstream clients.
+- `Sources/DenDataset/` — the library the remaining Swift phases still need: the `t02` `Taxonomy`, the
+  `HashingEmbedder` + `Quantizer`, the format + producer model types, and a thin `TMDBClient`.
+- `Sources/taxonomy-backfill/` — the CLI that drives the phases not ported yet (`enrich`, `embed-corpus`,
+  `facts`, `finalize`, `recluster`).
 - `Tests/DenDatasetTests/` — golden (embedder/quantizer determinism), conformance (artifact format), and a
   fixture-based end-to-end smoke test (no TMDB, no network).
 
@@ -150,20 +155,23 @@ swift test
 ## The tool — phases
 
 ```
-taxonomy-backfill worklist      --mode discover|export|delta --media movie|tv [--count N] --out <path>
-taxonomy-backfill enrich        --worklist <path> [--limit 150] --out-dir <dir>
-taxonomy-backfill dump-articles --enriched-dir <dir> --out <articles.jsonl>
-./den stage classify            --out-dir <dir> --dataset-version <ver> [--plan]
+./den stage worklist  --mode discover|export|delta --out-dir <dir> --dataset-version <ver>
+./den stage fetch     --out-dir <dir> --dataset-version <ver> [--media movie|tv]
+./den stage articles  --out-dir <dir> --dataset-version <ver>
+./den stage classify  --out-dir <dir> --dataset-version <ver> [--plan]
+./den stage docfacts  --out-dir <dir> --dataset-version <ver>
 taxonomy-backfill embed-corpus  --out-dir <dir> --labels labels-t02.json [--doc-facts …]
 taxonomy-backfill finalize      --out-dir <dir>
-taxonomy-backfill metadata      --out-dir <dir> [--skip-fetch]   # the poster sidecar; after EVERY finalize
 ```
 
-`worklist`/`enrich` hit TMDB and need `TMDB_API_KEY`. The per-title labels and facets come from the
-`classify` stage — the decision-only pass in `scripts/v2/run_combined.py`, which reads the dumped articles
-and writes the `combined-v1-r2*.jsonl` shards the corpus join consumes. `embed-corpus` composes and embeds
-those already-decided labels; `finalize` writes the shipped artifacts. Label quality is scored by
-`scripts/eval-taxonomy.py`, which CI runs and which gates a publish.
+Or `./den run`, which is the whole order — see `./den stages`.
+
+The worklist builds BOTH media in one call: `enrich` refuses a list that mixes them, so it writes one per
+media rather than taking a `--media`. It and the drain hit TMDB and need `TMDB_API_KEY`. The per-title
+labels and facets come from the `classify` stage — the decision-only pass in `scripts/v2/run_combined.py`,
+which reads the dumped articles and writes the `combined-v1-r2*.jsonl` shards the corpus join consumes.
+`embed-corpus` composes and embeds those already-decided labels; `finalize` writes the shipped artifacts.
+Label quality is scored by `scripts/eval-taxonomy.py`, which CI runs and which gates a publish.
 
 ## `finalize` outputs
 

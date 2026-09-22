@@ -31,7 +31,7 @@ import unittest
 
 import pipeline
 
-from . import artifacts, classify, corpus, embed
+from . import artifacts, classify, corpus, embed, fetch
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -176,7 +176,7 @@ class CommandLine(unittest.TestCase):
             os.remove(os.path.join(out, artifacts.ARTICLES.filename))
             with self.assertRaises(StageError) as refused:
                 classify.argv(context(out))
-            self.assertIn("taxonomy-backfill dump-articles", str(refused.exception))
+            self.assertIn("./den stage articles", str(refused.exception))
 
     def test_a_missing_enrichment_stops_the_stage(self):
         with tempfile.TemporaryDirectory() as out:
@@ -288,10 +288,17 @@ class Topology(unittest.TestCase):
         self.assertEqual(classify.SCRIPT, os.path.join(REPO, classify.PRODUCER))
         self.assertTrue(os.path.isfile(classify.SCRIPT))
 
-    def test_an_input_no_stage_produces_still_names_its_own_producer(self):
-        """The seam. The article dump comes from a stage that is not ported, so it answers for itself."""
-        self.assertEqual(pipeline.producers()["articles"],
-                         (artifacts.ARTICLES.producer, artifacts.ARTICLES.how, False))
+    def test_both_of_its_inputs_are_owned_by_the_stages_that_write_them(self):
+        """The seam is CLOSED on both. Each was an artifact answering for itself because no stage wrote
+        it; the enrichment drain and the article dump landed, and the ownership moved with them, so the
+        registry names a stage rather than a script an operator would have to find.
+
+        Kept as an assertion rather than deleted: an artifact going back to naming a producer would mean
+        a stage stopped running what it claims to, and the derived registry is what would notice."""
+        self.assertEqual(artifacts.ENRICHED.producer, "")
+        self.assertEqual(artifacts.ARTICLES.producer, "")
+        self.assertEqual(pipeline.producers()["enriched"][0], fetch.PRODUCER)
+        self.assertEqual(pipeline.producers()["articles"][0], "pipeline/articles.py")
 
     def test_the_delta_pass_is_a_different_rule_and_keeps_its_own_producer(self):
         """`delta` is a second pass over a second article dump, run by a second script. This stage writes

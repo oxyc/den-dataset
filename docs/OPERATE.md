@@ -162,7 +162,7 @@ cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterpr
 #    the shipped labels (re-embeds exactly what we ship) and sort by TMDB daily-export popularity:
 python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popularity-sorted)
 #    THIS IS THE RE-EMBED'S UNIVERSE — the ids we already ship, reordered. It is not the same universe as
-#    `taxonomy-backfill worklist`, which is where new titles come from, and both write these two filenames:
+#    the worklist stage, which is where new titles come from:
 #      ./den stage worklist --mode export --out-dir out --dataset-version <ver>
 #        every id in TMDB's daily dump (put movie_ids.json / tv_series_ids.json in the out-dir first —
 #        `fetch_export` above leaves them gzipped, so gunzip them). The stage refuses a run that did not
@@ -190,7 +190,7 @@ scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. 
 #     the dumped article, into the `combined-v1-r2*.jsonl` shards the corpus join reads. It is the only step
 #     here that costs money ($20.47 for 47,529 titles), so run it with --plan first; it resumes, so a repeat
 #     buys only what is missing. The questions, the planner and the audit are in `scripts/v2/FACETS-V2.md`.
-taxonomy-backfill dump-articles --enriched-dir out/enriched --out out/articles.jsonl
+./den stage articles --out-dir out --dataset-version <ver>            # the whole article per grounded title
 ./den stage classify --out-dir out --dataset-version <ver> --plan     # then again without --plan
 
 # 4. embed-corpus — compose(facts + already-decided tags + Wikipedia plot) -> den-embed -> int8[1024];
@@ -212,6 +212,12 @@ export DEN_EMBED_URL=http://127.0.0.1:8791     # default; set if the service is 
 #     no longer a silently different document: embed-corpus refuses a flag it does not declare, and
 #     `--help` lists the ones it does.) It resumes the same way, adds `--pause-ms` and `--limit` for a long
 #     run, and refuses a run that recorded no verified space.
+#     `doc-facts.json` is two of the document's clauses — director and genre, from Wikidata — and without
+#     it the command composes the FULL shape instead, which is a different vector space with nothing in
+#     the output saying so. `./den stage embed` runs the scrape as its own stage first; by hand it is
+#     `./den stage docfacts --out-dir out --dataset-version <ver>` (~770 SPARQL requests, resumable), or
+#     `scripts/v2/derive_doc_facts.py --facts out/facts-<ver>.json --out out/doc-facts.json` when a facts
+#     sidecar already exists, which needs no requests at all.
 $BIN embed-corpus --out-dir out --labels out/labels-t02.json \
     --doc-facts out/doc-facts.json --doc-drop-director --plot-cap 3500
 #     `--dump-docs <path>` writes the composed documents and embeds NOTHING, for embedding elsewhere — the
@@ -254,11 +260,10 @@ $BIN facts --out-dir out --ids <the delta ids>     # writes out/facts-unversione
 #     `pipeline/facts.py`'s declaration rather than retyped; `pipeline/facts_test.py` holds the two to the
 #     same bytes. A missing pass is a refusal naming what writes it, not a smaller merge.
 
-# 7. Metadata sidecar — poster/title/year per shipped id, so a neighbour renders without a TMDB detail call.
-#    Its filename carries the datasetVersion, which step 6 just changed, so this belongs after EVERY finalize
-#    that adds titles. Skipping it leaves the manifest naming the previous version's sidecar: it still hashes
-#    correctly, so both consumers accept it and never re-sync — the new titles render with no poster forever.
-$BIN metadata --out-dir out
+# 7. (retired) There used to be a poster sidecar here — `metadata-<ver>.json`, title/poster/year per
+#    shipped id, fetched from TMDB. The release stopped carrying it when the store took the card fields
+#    from Wikidata (oxyc/den#113, #118), and posters are no longer fetched from TMDB at all. Nothing builds
+#    it; `prune-manifest.py` still strips a `metadataFile` key an older manifest carries.
 
 # 7a. The CORPUS — the source of truth the store is built from, joining the pass shards, the facts and
 #     both label sets into one inspectable JSONL plus its entity sidecar. It was never written down here,
@@ -286,8 +291,8 @@ python3 scripts/v2/build_store.py \
 #     No --metadata and no --enriched: the card's title and year come from the corpus's own `facts`
 #     (`titles.en` and `released`), the poster path is not published, and the vote count is gone — a
 #     browse row is ordered by IMDb's public ratings dump, which den-atlas joins on `imdb` at run time
-#     (oxyc/den#118). Both metadata-<ver>.json and out/enriched are still BUILT and read by other things;
-#     they are simply no longer inputs to the store, which now reads no TMDB artifact at all.
+#     (oxyc/den#118). out/enriched is still BUILT and read by other stages; it is simply no longer an
+#     input to the store, which now reads no TMDB artifact at all.
 
 # 8. Publish — the moving `data-latest` GitHub release den-atlas fetches. It uploads the store and the
 #    manifest, and prunes every retired blob's keys out of that manifest first.

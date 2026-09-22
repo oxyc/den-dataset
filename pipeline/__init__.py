@@ -18,8 +18,10 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 
 #: The pipeline, in the order it runs. The worklist comes first because it is the universe everything after
 #: it is drawn from; the enrichment drain next, because the batches it fetches are what every later pass
-#: reads the plots and the evidence out of; classification after that, because it reads the articles and
-#: nothing else here does; embedding before the facts merge, because its stores are what `finalize` turns
+#: reads the plots and the evidence out of; the article dump after it, because it is what the classify
+#: pass reads; classification then, because nothing else here reads the articles; the doc facts before the
+#: embed pass, because they are two clauses of the document it composes and a run without them builds a
+#: different vector space; embedding before the facts merge, because its stores are what `finalize` turns
 #: into `labels-t02.json` and the corpus facts pass scrapes the ids in that file; the merge before the
 #: corpus join and the store, because both of them read the merged facts; and publishing is last because
 #: it uploads what the store wrote. That ordering is the whole reason a stage can stop naming a producer
@@ -32,7 +34,8 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: `facts` sits after `embed` because the corpus pass scrapes the ids in `labels-t02.json`, which
 #: `finalize` writes from the embed stores — and before `corpus` and `store`, which both read the file
 #: it merges.
-STAGES = ("worklist", "fetch", "classify", "embed", "facts", "corpus", "store", "publish")
+STAGES = ("worklist", "fetch", "articles", "classify", "docfacts", "embed", "facts", "corpus", "store",
+          "publish")
 
 
 def stage(name):

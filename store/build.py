@@ -179,10 +179,10 @@ def run(args, inputs, prose_check, provenance_check):
 
     # Declare it in the manifest, here, from the bytes just written.
     #
-    # NOT a field on Swift's `DatasetMeta`: `namingSidecar` there enumerates every field by hand while
-    # `ownedKeys` comes from `CodingKeys`, so a new key with a default compiles, is treated as owned, and
-    # is silently dropped by the next `metadata` run. `ManifestMerge` carries unowned keys forward
-    # instead, which is why `maxBatchId` is stamped from a script too.
+    # NOT a field on Swift's `DatasetMeta`: every key that struct declares is owned, and `ManifestMerge`
+    # drops an owned key the new manifest omits, so a key `finalize` does not compute would be erased by
+    # the next `finalize`. `ManifestMerge` carries unowned keys forward instead, which is why `maxBatchId`
+    # is stamped from a script too.
     #
     # No `storeGzFile`, ever: atlas MMAPS this file and a compressed one cannot be mapped.
     if args.stamp_meta:

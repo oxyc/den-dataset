@@ -1,84 +1,83 @@
 #!/usr/bin/env python3
-"""The WORKLIST — the universe of titles, behind the stage contract.
+"""The WORKLIST — the universe of titles everything after it is drawn from.
 
-The rule lives in `taxonomy-backfill worklist`: which ids exist, in which order, and which of them are
-already published. None of it is reimplemented here. The stage decides which files the command is handed,
-which universe it is allowed to build, and reads back what it wrote.
+Which ids exist, in which order, and which of them are already published. The rule used to live in
+`taxonomy-backfill worklist` and this module handed it files; it is the rule now (oxyc/den-dataset#27).
 
-**The universe is three different questions, and the command answers whichever `--mode` asks.** They are
-modes of one command rather than three commands, and the stage keeps them that way:
+**The universe is three different questions, and `--mode` asks whichever one is wanted.**
 
-  * `export` — TMDB's daily id dump, parsed. Every id that exists: the full run's universe.
+  * `export` — TMDB's daily id dump, parsed. Every id that exists: the full run's universe. Offline, and
+    the only mode that is deterministic end to end.
   * `discover` — `/discover` sorted `vote_count.desc`, the highest-vote titles first. The pilot seed.
   * `delta` — titles released since `--since` that clear the vote floor and are NOT in the published
     labels. The daily freshness pass `scripts/delta-run.sh` drives.
 
-**The mode is not defaulted.** The command defaults to `discover`, which for a full run means enriching the
-500 highest-vote titles and calling that the catalogue, and for a delta means re-enriching everything that
-is already published. Enrichment is the step that costs money per title, so a run that did not say which
-universe it is building is refused here rather than given the cheapest-looking one.
+**The mode is not defaulted.** For a full run the cheapest-looking answer means enriching the 500
+highest-vote titles and calling that the catalogue; for a delta it means re-enriching everything already
+published. Enrichment is the step that costs money per title, so a run that did not say which universe it
+is building is refused rather than given one.
 
-**An empty worklist is a refusal in every mode but `delta`.** `Worklist.parse` drops every line it cannot
-decode, so a truncated dump, an error page saved as one, or a still-gzipped file parses to nothing, writes
-`[]` and exits 0 — and `enrich` then reports `remaining: 0`, which is exactly what a finished run looks
-like. (The same hole in the `/discover` path was closed in `TMDBClient.PagedList`, where a required
-`results` stops an error body decoding as an empty page.) In `delta` an empty list is the answer on a quiet
-day, so refusing it there would fail the daily pass for doing its job. For `export` the same silence is
-checked one line finer — the ids written against the dump's own line count — because a dump that arrived
-half-written parses to half a catalogue, and half a catalogue looks like a catalogue.
+**An empty worklist is a refusal in every mode but `delta`.** A truncated dump, an error page saved as
+one, or a still-gzipped file parses to nothing and writes `[]` — and `enrich` reads an empty worklist as a
+finished run, which is exactly what a successful pass looks like. In `delta` an empty list is the answer
+on a quiet day, so refusing it there would fail the daily pass for doing its job. For `export` the same
+silence is checked one line finer: the ids written against the dump's own line count, because a dump that
+arrived half-written parses to half a catalogue, and half a catalogue looks like a catalogue.
 
 **A delta writes the same two filenames as a full run**, which is why `scripts/delta-run.sh` keeps its
 lists in `$OUT_DIR/delta/`. Point the two outputs there with `--set` rather than moving the whole out-dir,
-so the labels a delta must skip are still found beside everything else: `enrich` drains whichever list it
-is handed, and forty delta rows written over a 47k-title one do not corrupt anything — they end the full
-run, quietly, as a batch that reports nothing remaining.
+so the labels a delta must skip are still found beside everything else: forty delta rows written over a
+47k-title one do not corrupt anything — they end the full run, quietly, as a batch that reports nothing
+remaining.
 """
 import json
 import os
-import subprocess
+import sys
 
 from . import artifacts
-from .contract import REPO, StageError, bind
+from .contract import StageError, bind
+from lib import cache as caching
+from lib import tmdb as tmdb_api
 
 NAME = "worklist"
 
-#: The rule this stage runs. One binary builds several artifacts, so `dedicated` is false on what it owns.
-PRODUCER = artifacts.BACKFILL
-HOW = "taxonomy-backfill worklist"
+#: The rule this stage runs. It is this file now, so the producer registry names what actually executes.
+PRODUCER = "pipeline/worklist.py"
+HOW = "./den stage worklist --mode export --out-dir <dir> --dataset-version <ver>"
 #: Writes two files into the out-dir. Cheap to repeat — the cost is downstream, at `enrich`.
 PUBLISHES = False
-#: TMDB's own API and its public daily dumps, neither of them billed. What this stage DECIDES is expensive —
-#: a universe of 1.2M ids is an enrichment nobody meant to start — which is why the mode is refused rather
-#: than defaulted here, rather than gated by a flag: the size is the choice, not the running.
+#: TMDB's own API and its public daily dumps, neither of them billed. What this stage DECIDES is expensive
+#: — a universe of 1.2M ids is an enrichment nobody meant to start — which is why the mode is refused
+#: rather than defaulted: the size is the choice, not the running.
 SPENDS = False
-COMMAND = "worklist"
-
-#: Where `swift build -c release` leaves the binary, repo-relative. The same build `pipeline/embed.py`
-#: names: one binary, one place, and each wrapper refuses in its own name so an operator learns which
-#: stage stopped.
-BUILT = os.path.join(".build", "release", "taxonomy-backfill")
 
 DISCOVER, EXPORT, DELTA = "discover", "export", "delta"
-#: In the order the command's own usage line lists them.
+#: In the order the stage's own refusal lists them.
 MODES = (DISCOVER, EXPORT, DELTA)
 
 #: The vote floor the shipped catalogue was built at, and the one `scripts/delta-run.sh` passes daily.
-#: Passed explicitly rather than inherited from the command's default, so the universe this stage builds
-#: does not move when that default does. `enrich` re-checks it per title, so this only decides how much
-#: gets looked at — a brand-new release with no votes has no plot worth classifying and would be re-billed
-#: every day it stayed in the list.
+#: Pinned rather than inherited from a default somewhere else, so the universe this stage builds does not
+#: move when that default does. `enrich` re-checks it per title, so this only decides how much gets looked
+#: at — a brand-new release with no votes has no plot worth classifying and would be re-billed every day
+#: it stayed in the list.
 VOTE_FLOOR = 50
 
+#: How many titles a `discover` seed collects. The pilot's number, pinned here for the same reason.
+DISCOVER_COUNT = 500
+
+#: Highest-vote first. A discover universe is a BUDGET — whatever it does not reach is not enriched — so
+#: the order is the selection, not a presentation choice.
+SORT_BY = "vote_count.desc"
+
 #: media -> (its slice of the daily dump, the worklist built from it). `enrich` takes one media at a time
-#: and refuses a mixed list, so the command runs once per entry here.
+#: and refuses a mixed list, so the universe is built once per entry here.
 MEDIA = {
     "movie": (artifacts.EXPORT_MOVIE, artifacts.UNIVERSE_MOVIE),
     "tv": (artifacts.EXPORT_TV, artifacts.UNIVERSE_TV),
 }
 
-#: Both dumps are `--file` to the command — one per invocation — and `labels-t02.json` is `--known` here,
-#: `--labels` to the corpus join and `--vector-labels` to the store writer. The file keeps one pipeline-wide
-#: name; the word on the command line belongs to whoever is reading.
+#: `labels-t02.json` is `--known` here, `--labels` to the corpus join and `--vector-labels` to the store
+#: writer. The file keeps one pipeline-wide name; the word on the command line belongs to whoever reads it.
 INPUTS = (
     artifacts.EXPORT_MOVIE.called("file"),
     artifacts.EXPORT_TV.called("file"),
@@ -87,30 +86,11 @@ INPUTS = (
 
 OUTPUTS = (artifacts.UNIVERSE_MOVIE, artifacts.UNIVERSE_TV)
 
-#: The declaration, by artifact name, so `argv` spells no flag of its own — a declaration that has drifted
-#: from the command dies at its parser rather than composing a different universe.
 BOUND = {bind(entry).name: bind(entry) for entry in INPUTS}
 
 
-def binary():
-    """The built executable, or a refusal naming the build that makes it.
-
-    `DEN_BACKFILL_BIN` points at one elsewhere. `.build/` is gitignored and per-checkout, so a worktree or
-    a machine that was handed the binary rather than the toolchain does not have it under this repo.
-    """
-    path = os.environ.get("DEN_BACKFILL_BIN") or os.path.join(REPO, BUILT)
-    if not os.path.exists(path):
-        raise StageError(f"worklist: no taxonomy-backfill at {path}. Build it with: swift build -c "
-                         f"release, or point DEN_BACKFILL_BIN at a built one.")
-    return path
-
-
 def mode(ctx):
-    """The universe this run builds, as the operator named it.
-
-    Refused when it is unset, because the three answers are three different catalogues and the one the
-    command would pick unasked is the pilot's 500 titles.
-    """
+    """The universe this run builds, as the operator named it."""
     if ctx.mode not in MODES:
         raise StageError(
             f"worklist: --mode is {ctx.mode or 'unset'}, and it decides which universe this builds: "
@@ -120,89 +100,144 @@ def mode(ctx):
     return ctx.mode
 
 
-def argv(ctx, media):
-    """The command line for one media, built from the declaration and the mode.
+def entry(tmdb_id, media):
+    """One row of a worklist. `enrich` refuses a list that mixes media, so the type rides on every row."""
+    return {"tmdbId": int(tmdb_id), "mediaType": media}
 
-    Each mode is handed only what it reads: a dump for `export`, the window and the published labels for
-    `delta`. `--known` is required rather than optional there — without it a delta re-enriches the whole
-    published catalogue, which is the one cost the pass exists to avoid, and it does so while reporting
-    a perfectly ordinary count.
+
+def parse_export(path, media):
+    """TMDB's daily id dump — one JSON object per line — as worklist rows, and the lines it offered.
+
+    The count comes back alongside because a line that cannot be read as an id is DROPPED, and dropping
+    them quietly is how a dump that arrived half-written becomes half a catalogue with no complaint
+    anywhere. The caller compares the two.
     """
+    rows, offered = [], 0
+    with open(path, "rb") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            offered += 1
+            try:
+                tmdb_id = json.loads(line)["id"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if isinstance(tmdb_id, int):
+                rows.append(entry(tmdb_id, media))
+    return rows, offered
+
+
+def known_ids(path, media):
+    """The tmdbIds of this media already in the published labels — the titles a delta must skip.
+
+    Without them the pass re-enriches the whole published catalogue, at the per-title price the vote floor
+    exists to bound, and nothing in its output says that is what happened.
+    """
+    with open(path, encoding="utf-8") as handle:
+        labels = json.load(handle)
+    # A file with no records is not "nothing published" — it is the wrong file, and read as an empty set
+    # it skips nothing, so the delta bills the whole catalogue again. `docfacts` refuses the same shape.
+    records = labels.get("records") if isinstance(labels, dict) else None
+    if not records:
+        raise StageError(f"worklist: {path} names no records, so there is nothing to tell a delta what is "
+                         f"already published. Point vector_labels at the published labels; build them "
+                         f"with: taxonomy-backfill finalize")
+    return {record["tmdbId"] for record in records if record.get("mediaType") == media}
+
+
+def collect(client, media, params, limit=None):
+    """Page a `/discover` query, newest page last, de-duped, in the order TMDB returned them.
+
+    Stops at TMDB's 500-page ceiling or at `limit`. A page whose body carries no `results` is a refusal
+    inside the client, not an empty page — see `lib/tmdb.py`.
+    """
+    rows, seen, page = [], set(), 1
+    while page <= tmdb_api.MAX_PAGES and (limit is None or len(rows) < limit):
+        items, _page, total = client.discover(media, params, page)
+        for item in items:
+            tmdb_id = item.get("id")
+            if isinstance(tmdb_id, int) and tmdb_id not in seen:
+                seen.add(tmdb_id)
+                rows.append(entry(tmdb_id, media))
+        if page >= total:
+            break
+        page += 1
+    return rows[:limit] if limit is not None else rows
+
+
+def universe(ctx, media, client=None):
+    """The rows for one media, in the mode this run asked for."""
     chosen = mode(ctx)
-    export, out = MEDIA[media]
-    command = [binary(), COMMAND, "--mode", chosen, "--media", media]
-    if chosen == EXPORT:
-        command += [BOUND[export.name].flag(), ctx.require(export)]
-    else:
-        command += ["--vote-floor", str(VOTE_FLOOR)]
-    if chosen == DELTA:
-        if not ctx.since:
-            raise StageError("worklist: --mode delta needs --since YYYY-MM-DD — the window it collects "
-                             "titles from. There is no default window: a delta with no date is either "
-                             "every title ever released or none of them.")
-        known = BOUND[artifacts.VECTOR_LABELS.name]
-        command += ["--since", ctx.since, known.flag(), ctx.require(known.artifact)]
-    command += ["--out", ctx.path(out)]
-    return command
-
-
-def rows(path):
-    """Ids the dump offers: its non-blank lines, one object each.
-
-    Counted over bytes rather than parsed, because what is being checked is how many lines the command was
-    given — the decision about what each one holds is the command's.
-    """
-    with open(path, "rb") as fh:
-        return sum(1 for line in fh if line.strip())
-
-
-def check_output(ctx, media):
-    """What the run left for one media, read back rather than inferred from the exit code.
-
-    Two things the exit code cannot say, both of which leave a short universe that enrich drains happily:
-
-      * nothing was built. `[]` is what a still-gzipped file, a truncated dump or a saved error page
-        parses to, and `enrich` reads an empty worklist as a finished run. A `delta` that found nothing is
-        the exception — that is the answer on a quiet day.
-      * the parse dropped lines. `Worklist.parse` skips every line it cannot decode as an id, silently, so
-        a dump that arrived half-written becomes half a catalogue with no complaint anywhere. Today's dump
-        turns each of its 1,246,659 lines into an id, so anything short of the file's own line count is a
-        universe with a hole in it.
-    """
-    export, artifact = MEDIA[media]
-    path = ctx.path(artifact)
-    if not os.path.exists(path):
-        raise StageError(f"worklist: the run finished and wrote no {media} worklist at {path}.")
-    with open(path, encoding="utf-8") as fh:
-        entries = json.load(fh)
-    chosen = mode(ctx)
-    if not entries and chosen != DELTA:
-        raise StageError(
-            f"worklist: the run wrote an empty {path} and exited 0, so there is no {media} universe to "
-            f"enrich. `enrich` reads that as a finished run rather than as a failure.")
+    export, _out = MEDIA[media]
     if chosen == EXPORT:
         dump = ctx.require(export)
-        offered = rows(dump)
-        if len(entries) != offered:
+        rows, offered = parse_export(dump, media)
+        if len(rows) != offered:
             raise StageError(
-                f"worklist: {dump} holds {offered} lines and {path} holds {len(entries)} ids. A line that "
-                f"cannot be read as an id is dropped without a word, so the difference is a universe with "
-                f"a hole in it, not a filter.")
-    return path
+                f"worklist: {dump} holds {offered} lines and {len(rows)} of them read as an id. A line "
+                f"that cannot be read as one is dropped without a word, so the difference is a universe "
+                f"with a hole in it, not a filter.")
+        return rows
+
+    # A missing key or a dead upstream is a REFUSAL, not a traceback: `den` prints a StageError and stops,
+    # and an operator reading a stack trace from inside an HTTP client learns nothing about which stage
+    # could not run.
+    try:
+        client = client or tmdb_api.TMDB()
+    except tmdb_api.TMDBError as refusal:
+        raise StageError(f"worklist: {refusal}") from None
+    if chosen == DISCOVER:
+        params = tmdb_api.discover_params(media, vote_count_gte=VOTE_FLOOR, sort_by=SORT_BY)
+        return collect(client, media, params, limit=DISCOVER_COUNT)
+
+    if not ctx.since:
+        raise StageError("worklist: --mode delta needs --since YYYY-MM-DD — the window it collects titles "
+                         "from. There is no default window: a delta with no date is either every title "
+                         "ever released or none of them.")
+    # `/discover` with a release-date window rather than `/movie/changes`. `/changes` is a firehose of ids
+    # with no vote or date signal, so it costs one detail lookup PER id just to discover that almost all
+    # of them are below the floor. A dated `vote_count.desc` slice selects the same titles in a few paged
+    # calls. The trade: a re-release or a late metadata fix on an OLD title is not picked up — acceptable,
+    # because a periodic full pass covers drift and paying per id daily does not scale.
+    known = known_ids(ctx.require(BOUND[artifacts.VECTOR_LABELS.name].artifact), media)
+    params = tmdb_api.discover_params(media, vote_count_gte=VOTE_FLOOR, release_date_gte=ctx.since,
+                                      sort_by=SORT_BY)
+    return [row for row in collect(client, media, params) if row["tmdbId"] not in known]
 
 
-def run(ctx):
+def write(path, rows):
+    """The worklist, pretty-printed with sorted keys and ` : ` — the Swift encoder's layout.
+
+    Byte-stable across runs: the file is read by a human as often as by `enrich`, and a key order that
+    moves makes every diff of two universes unreadable. Swift's layout rather than Python's so a universe
+    diffs cleanly against every one the Swift command wrote. The one place it does not follow Swift is an
+    empty list: `[]`, where Swift wrote `[\\n\\n]`. Nothing hashes a worklist, both parse to the same
+    nothing, and an empty one only ever comes from a quiet delta, never from a list worth diffing.
+
+    Swapped in whole rather than written in place: an interrupted write leaves a truncated universe, and
+    `enrich` drains a short worklist as a finished run.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    body = json.dumps(rows, indent=2, separators=(",", " : "), sort_keys=True, ensure_ascii=False)
+    caching.write_atomically(path, body.encode("utf-8"))
+
+
+def run(ctx, client=None):
     """Build the universe for both media. Returns the two worklists.
 
-    One invocation per media, in order, each checked before the next runs: a second media that cannot be
-    built is not a reason to leave the first one unread.
+    One media at a time, each written before the next is built: a second media that cannot be built is not
+    a reason to leave the first one unwritten.
     """
-    os.makedirs(os.path.abspath(ctx.out_dir), exist_ok=True)
+    chosen = mode(ctx)
     built = []
-    for media in MEDIA:
-        result = subprocess.run(argv(ctx, media))
-        if result.returncode != 0:
-            raise StageError(f"worklist: {HOW} --mode {mode(ctx)} --media {media} exited "
-                             f"{result.returncode}")
-        built.append(check_output(ctx, media))
+    for media, (_export, artifact) in MEDIA.items():
+        rows = universe(ctx, media, client)
+        if not rows and chosen != DELTA:
+            raise StageError(
+                f"worklist: {chosen} built an empty {media} universe, so there is nothing to enrich. "
+                f"`enrich` reads an empty worklist as a finished run rather than as a failure.")
+        path = ctx.path(artifact)
+        write(path, rows)
+        print(f"worklist: {len(rows)} {media} ids -> {path}", file=sys.stderr)
+        built.append(path)
     return ", ".join(built)

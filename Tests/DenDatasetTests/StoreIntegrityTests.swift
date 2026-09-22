@@ -316,26 +316,11 @@ final class RedactTests: XCTestCase {
     }
 }
 
-/// Two fixes that shipped with no test at all — verified: reverting either left the whole suite green.
+/// A fix that shipped with no test at all — verified: reverting it left the whole suite green.
+///
+/// The `/discover` half of this class moved out with the worklist: the guard that an error body must not
+/// decode as an empty page is now `lib/tmdb.py`'s, and `lib/tmdb_test.py` holds it.
 final class SilentEmptyDecodeTests: XCTestCase {
-
-    /// `PagedList.results` defaulting to [] turned any unexpected body — an auth error, a schema change —
-    /// into a valid EMPTY page. `worklist`'s collect loop stops after page 1, and the delta pass reports
-    /// "0 new titles" rather than failing. Silently, and every day.
-    func testAResponseWithoutResultsIsAnError() throws {
-        let decoder = JSONDecoder()
-
-        // A real page decodes.
-        XCTAssertNoThrow(try decoder.decode(
-            TMDBClient.PagedList.self,
-            from: Data(#"{"page":1,"total_pages":3,"results":[]}"#.utf8)))
-
-        // An error body is NOT a page with no titles in it.
-        XCTAssertThrowsError(try decoder.decode(
-            TMDBClient.PagedList.self,
-            from: Data(#"{"success":false,"status_message":"Invalid API key"}"#.utf8)),
-            "an auth failure must not read as an empty page")
-    }
 
     /// Redact has two passes: the query-parameter regex, and a verbatim sweep for known secret VALUES.
     /// The second exists for text where the key appears without its parameter name.

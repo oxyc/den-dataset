@@ -86,7 +86,7 @@ ap = argparse.ArgumentParser()
 # and Moon Knight among them — ended up absent from a derived artifact. Repeat once per shard.
 ap.add_argument("--combined", required=True, action="append",
                 help="a shard of the Jev bundle; repeat for each (incl. the token-fallback shards)")
-ap.add_argument("--articles", required=True, help="dump-articles output, for the section text")
+ap.add_argument("--articles", required=True, help="the articles stage's output, for the section text")
 ap.add_argument("--out-dir", required=True)
 args = ap.parse_args()
 

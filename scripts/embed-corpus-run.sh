@@ -185,10 +185,6 @@ for attempt in $(seq 1 200); do
     echo "=== all titles embedded → finalizing ==="
     stop_embed
     "$BIN" finalize --out-dir "$OUT_DIR" || { echo "finalize failed — nothing published"; exit 1; }
-    # finalize just minted a new datasetVersion, and the sidecar's filename carries it. This is the only
-    # finalize in the repo that runs with no operator present, so it is the one that most needs the step
-    # the runbook spells out — without it the manifest names the previous version's sidecar.
-    "$BIN" metadata --out-dir "$OUT_DIR" || { echo "metadata failed — do not publish this out-dir"; exit 1; }
     exit 0
   fi
 done

@@ -251,10 +251,9 @@ def highest_batch_id(base):
     from "this batch was written later". Any invariant relating enriched records to shipped labels needs
     that boundary or it reports every normal enrich-after-embed run as a violation.
 
-    Deliberately stamped HERE and not added to `DatasetMeta`. That struct's `namingSidecar` enumerates every
-    field by hand while `ownedKeys` comes from `CodingKeys`, so a new field with a default compiles, is
-    treated as owned, and is then dropped on the next `metadata` run — the exact trap `Manifest.swift`
-    documents. Unowned keys stamped here are carried forward by `ManifestMerge` instead.
+    Deliberately stamped HERE and not added to `DatasetMeta`. Every key that struct declares is OWNED, and
+    `ManifestMerge` drops an owned key the new manifest omits — so a field `finalize` does not itself
+    compute would be erased by the next `finalize`. Unowned keys stamped here are carried forward instead.
     """
     enriched = os.path.join(base, "enriched")
     if not os.path.isdir(enriched):

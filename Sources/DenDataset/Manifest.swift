@@ -19,8 +19,10 @@ public struct DatasetMeta: Codable {
     public let vectorsBytes: Int
     public let builtAt: String
     public let lastModifiedHttp: String
-    // Metadata sidecar (optional; set by the `metadata` command AFTER finalize). Absent ⇒ no sidecar → the
-    // server serves labels+vectors only and the app hydrates poster cards via TMDB as before (no regression).
+    // The retired poster sidecar. Nothing sets these any more, and they stay declared anyway: an OWNED key
+    // the new manifest leaves nil is dropped by `ManifestMerge`, while an unowned one is carried forward —
+    // so un-declaring them would let a rewrite inherit a previous run's `metadataFile` and vouch for its
+    // sha, which both consumers hard-verify.
     public let metadataFile: String?
     public let metadataSha256: String?
     public let metadataBytes: Int?
@@ -70,18 +72,6 @@ public struct DatasetMeta: Codable {
         self.metadataBytes = metadataBytes
         self.embedderRuntime = embedderRuntime; self.embedderMaxTokens = embedderMaxTokens
         self.embeddingSpace = embeddingSpace
-    }
-
-    /// A copy naming a metadata sidecar. `metadata` patches an existing manifest rather than rebuilding it.
-    public func namingSidecar(file: String, sha256: String, bytes: Int) -> DatasetMeta {
-        DatasetMeta(datasetVersion: datasetVersion, taxonomyVersion: taxonomyVersion,
-                    embeddingModel: embeddingModel, dims: dims, count: count, quantization: quantization,
-                    labelsFile: labelsFile, vectorsFile: vectorsFile, labelsGzFile: labelsGzFile,
-                    labelsSha256: labelsSha256, labelsBytes: labelsBytes, vectorsSha256: vectorsSha256,
-                    vectorsBytes: vectorsBytes, builtAt: builtAt, lastModifiedHttp: lastModifiedHttp,
-                    metadataFile: file, metadataSha256: sha256, metadataBytes: bytes,
-                    embedderRuntime: embedderRuntime, embedderMaxTokens: embedderMaxTokens,
-                    embeddingSpace: embeddingSpace)
     }
 
     /// The keys this struct is authoritative for — including when it omits one. Everything else in the file
@@ -162,27 +152,10 @@ public struct ClassifyCheckpoint: Codable {
 
 
 
-/// The sidecar's row order feeds `metadataSha256`, and the app folds that into its sync key — so an
-/// unstable order costs every device a ~4.6 MB re-download of a file that did not change.
-///
-/// A free function, in the library, because it is the ONE line of the sidecar write that can be wrong: as
-/// a closure inside the CLI it was unreachable from the tests, and mutation proved it — reverting it to
-/// `$0.tmdbId < $1.tmdbId` left the whole suite green while a test claiming to cover it restated the
-/// comparator locally instead of calling it.
-public enum SidecarOrder {
-    /// A TOTAL order. `tmdbId` alone is not one here: 940 ids in the corpus are both a movie and a series,
-    /// and Swift's `sort` is unstable, so ties landed in TaskGroup completion order.
-    public static func before(_ a: PosterMeta, _ b: PosterMeta) -> Bool {
-        (a.tmdbId, a.mediaType) < (b.tmdbId, b.mediaType)
-    }
-
-    public static func sorted(_ rows: [PosterMeta]) -> [PosterMeta] { rows.sorted(by: before) }
-}
-
 /// Whether a run may append to an existing store, given what built it and what is about to.
 ///
-/// Free function for the same reason: the decision lived inline in `recordEmbedder`, and disabling it
-/// wholesale left every test green.
+/// A free function, in the library, because the decision lived inline in `recordEmbedder` and disabling
+/// it wholesale left every test green.
 public enum EmbedderGate {
     public enum Decision: Equatable {
         /// The store was built by this same embedder — append.

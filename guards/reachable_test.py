@@ -5,15 +5,17 @@ A guard nobody has seen fail is not known to work. So the tests below build a pa
 nothing imports and require it to be named — the same shape `scripts/v2/` has today — before asserting
 the real `pipeline/` and `store/` are clean.
 
-The two guarded packages are entered differently and so are asserted separately: `pipeline/` from the
-modules in `STAGES`, `store/` from the import block of the script the store stage runs. Two assertions
-rather than one loop, because what a reader needs from a failure is the remedy for THAT tree, and the
-two remedies are different sentences.
+The three guarded packages are entered differently and so are asserted separately: `pipeline/` from the
+modules in `STAGES`, `store/` from the import block of the script the store stage runs, `lib/` from the
+import blocks of the stages that reach outside the machine. Three assertions rather than one loop,
+because what a reader needs from a failure is the remedy for THAT tree, and the remedies are different
+sentences.
 """
 import os
 import tempfile
 import unittest
 
+import lib
 import pipeline
 import store
 from pipeline.contract import REPO
@@ -22,6 +24,7 @@ from . import reachable
 
 PIPELINE = os.path.dirname(os.path.abspath(pipeline.__file__))
 STORE = os.path.dirname(os.path.abspath(store.__file__))
+LIB = os.path.dirname(os.path.abspath(lib.__file__))
 #: The one spelling of the store's entry point: the file the store stage actually executes.
 STORE_PRODUCER = pipeline.stage("store").PRODUCER
 STORE_ENTRY = os.path.join(REPO, STORE_PRODUCER)
@@ -137,9 +140,22 @@ class ThisRepo(unittest.TestCase):
                                        f"import it from the group that needs it. Nothing in the repo "
                                        f"imports store/, so this is the only thing that would notice.")
 
+    def test_nothing_under_lib_is_unreachable(self):
+        """`lib/` is entered by import, from whichever stages leave the machine — so its roots are those
+        stages' own import blocks, over the stages `STAGES` actually reaches. A stage that drops an
+        upstream, or leaves the order entirely, strands the client only it talked to in the same commit."""
+        entries = [os.path.join(PIPELINE, f"{name}.py")
+                   for name in sorted(reachable.reached(PIPELINE, pipeline.STAGES))]
+        stranded = reachable.unreachable(LIB, reachable.roots(LIB, *entries))
+        self.assertEqual(stranded, [], f"unreachable from the pipeline: "
+                                       f"{[f'lib/{name}.py' for name in stranded]}. `lib/` holds what a "
+                                       f"stage needs from outside the machine — delete it, or import it "
+                                       f"from the stage that needs it.")
+
     def test_no_test_outlives_its_subject(self):
         self.assertEqual(reachable.orphan_tests(PIPELINE), [])
         self.assertEqual(reachable.orphan_tests(STORE), [])
+        self.assertEqual(reachable.orphan_tests(LIB), [])
 
     def test_every_stage_in_the_order_is_a_stage(self):
         """`STAGES` is what a reader is promised describes the pipeline. A name in it that loads

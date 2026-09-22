@@ -186,7 +186,7 @@ class CommandLine(Staged):
         os.remove(os.path.join(self.out, "doc-facts.json"))
         with self.assertRaises(StageError) as refused:
             embed.argv(context(self.out))
-        self.assertIn("taxonomy-backfill doc-facts", str(refused.exception))
+        self.assertIn("./den stage docfacts", str(refused.exception))
 
     def test_a_missing_enrichment_stops_the_stage(self):
         os.rmdir(os.path.join(self.out, "enriched"))
@@ -282,11 +282,13 @@ class Topology(unittest.TestCase):
         self.assertLess(pipeline.STAGES.index("corpus"), pipeline.STAGES.index("store"))
 
     def test_an_input_no_stage_produces_still_names_its_own_producer(self):
-        """The seam: the Wikidata scrape is a stage that is not ported, so it answers for itself until it
-        lands. The enrichment no longer does — the fetch stage writes it, so the registry names that stage's
-        rule, which is what an operator handed a missing `out/enriched` is sent to run."""
-        self.assertEqual(pipeline.producers()["doc_facts"],
-                         (artifacts.DOC_FACTS.producer, artifacts.DOC_FACTS.how, False))
+        """The seam, CLOSED on both of this stage's inputs. Each was an artifact that answered for itself
+        because no stage wrote it; each is now owned, and the registry names the owning stage's rule —
+        which is what an operator handed a missing file is sent to run. Asserted rather than deleted,
+        because the seam closing is the thing #27 is for, and an artifact that quietly went back to naming
+        a script would mean a stage stopped running what it claims to."""
+        self.assertEqual(artifacts.DOC_FACTS.producer, "")
+        self.assertEqual(pipeline.producers()["doc_facts"][0], "pipeline/docfacts.py")
         self.assertEqual(artifacts.ENRICHED.producer, "")
         self.assertEqual(pipeline.producers()["enriched"], (fetch.PRODUCER, fetch.HOW, False))
         self.assertIn(artifacts.VECTOR_LABELS, [bind(e).artifact for e in corpus.INPUTS])

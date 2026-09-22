@@ -70,11 +70,12 @@ REGISTRY = pipeline.producers()
 # manifest key -> (producer, how to run it, is the producer DEDICATED to this artifact?).
 #
 # ADDING A PUBLISHED ARTIFACT MEANS DECLARING IT. For anything the pipeline handles that is an entry in
-# `pipeline/artifacts.py` carrying a `manifest_key`; the two below are the remainder — artifacts of stages
-# not ported yet (oxyc/den-dataset#27), which is why they are still spelled out. Each moves into the
-# catalogue with the stage that builds it, and this dict shrinks to the merge.
+# `pipeline/artifacts.py` carrying a `manifest_key`; the one below is the remainder — an artifact of a
+# step not ported yet (oxyc/den-dataset#27), which is why it is still spelled out. It moves into the
+# catalogue with the stage that builds it, and this dict shrinks to the merge. `metadataFile` has no entry
+# at all: the poster sidecar is retired, nothing builds it, and `prune-manifest.py` strips the key from a
+# manifest that still carries one before this check sees it.
 PRODUCERS = {
-    "metadataFile": ("Sources/taxonomy-backfill/main.swift", "taxonomy-backfill metadata", False),
     "facetsFile": ("scripts/build-facets-bin.py", "scripts/build-facets-bin.py", True),
     **{a.manifest_key: REGISTRY[a.name] for a in DECLARED.values() if a.manifest_key},
 }

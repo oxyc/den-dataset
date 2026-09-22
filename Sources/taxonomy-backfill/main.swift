@@ -7,12 +7,9 @@ import Foundation
 // produces the labels and facets the corpus join reads, so this tool gathers the inputs that pass needs and
 // turns already-decided labels into the shipped artifacts.
 //
-//   worklist      — build the universe (TMDB /discover sorted vote_count.desc for the pilot; daily-export
-//                   parse for the full run) → out/worklist-<media>.json
 //   enrich        — next N un-enriched ids → ONE TMDB call each (append_to_response=keywords), drop below the
 //                   vote floor / anime / fetch failures (logged) → out/enriched/batch-<id>.json (+ checkpoint).
 //                   The enriched batch is SCRATCH (holds raw TMDB text) and is never shipped.
-//   dump-articles — each grounded title's whole Wikipedia article as prose → the classify pass's input.
 //   embed-corpus  — compose(facts + already-decided tags + plot) → den-embed → append to the index store.
 //   finalize      — index store → labels-<taxonomy>.json + vectors-<embed>.bin + report.json +
 //                   dataset.meta.json (DERIVED only). Folds in the former import-dataset.mjs job.
@@ -48,107 +45,6 @@ struct ToolError: Error { let message: String }
 // MARK: - Commands
 
 enum Commands {
-    // worklist — the universe. `discover` (vote_count.desc, the highest-vote titles first — the pilot seed);
-    // `export` (TMDB's daily ID export, the full run). Anime is filtered uniformly at enrich, not here.
-    static func worklist(_ args: Args) async throws {
-        let mediaType: MediaType = args["--media"] == "tv" ? .tv : .movie
-        let out = try args.require("--out")
-        var entries: [WLEntry] = []
-
-        switch args["--mode"] ?? "discover" {
-        // DT-F — the daily freshness pass: titles released since `--since` that clear the vote floor and are
-        // NOT already in the published labels.
-        //
-        // Uses `discover` with a release-date window rather than `/movie/changes`. `/changes` is a firehose of
-        // ids with no vote or date signal, so it costs one detail lookup PER id just to discover that almost
-        // all of them are below the floor. A dated `vote_count.desc` slice selects the same titles in a few
-        // paged calls. The trade: a re-release or a late metadata fix on an OLD title won't be picked up —
-        // acceptable, because a periodic full pass covers drift, whereas paying per-id daily does not scale.
-        case "delta":
-            let since = try args.require("--since")
-            let floor = args.int("--vote-floor") ?? 50
-            let tmdb = try TMDB.client()
-            // Titles already published are skipped: the point of a delta is to classify what is NEW, and
-            // re-running the catalogue daily is exactly the cost this pass exists to avoid.
-            var known = Set<Int>()
-            if let knownPath = args["--known"] {
-                struct KnownLabels: Decodable {
-                    struct Record: Decodable { let tmdbId: Int; let mediaType: String }
-                    let records: [Record]
-                }
-                let labels: KnownLabels = try JSON.read(knownPath)
-                known = Set(labels.records.filter { $0.mediaType == mediaType.rawValue }.map(\.tmdbId))
-            }
-            var seen = Set<Int>()
-            var page = 1
-            while page <= 500 {
-                let query = DiscoverQuery(mediaType: mediaType, voteCountGte: floor,
-                                          releaseDateGte: since, sortBy: "vote_count.desc")
-                let result = try await tmdb.discover(query, page: page)
-                for item in result.items where seen.insert(item.tmdbID.rawValue).inserted {
-                    guard !known.contains(item.tmdbID.rawValue) else { continue }
-                    entries.append(WLEntry(tmdbId: item.tmdbID.rawValue, mediaType: mediaType.rawValue))
-                }
-                if page >= result.totalPages { break }
-                page += 1
-            }
-            FileHandle.standardError.write(Data(
-                "delta: \(entries.count) new title(s) since \(since) at vote-floor \(floor) (skipped \(known.count) known)\n".utf8))
-        case "export":
-            let file = try args.require("--file")
-            guard let text = try? String(contentsOfFile: file, encoding: .utf8) else {
-                throw ToolError(message: "can't read export \(file)")
-            }
-            entries = Worklist.parse(jsonLines: text, mediaType: mediaType).map { WLEntry($0) }
-        default:
-            let count = args.int("--count") ?? 500
-            let floor = args.int("--vote-floor") ?? 50
-            let tmdb = try TMDB.client()
-            let origins = (args["--origins"] ?? "").split(separator: ",").map(String.init)
-            var seen = Set<Int>()
-            // Page one `vote_count.desc` query until exhausted or `target` reached.
-            func collect(_ query: DiscoverQuery, until target: Int) async throws {
-                var page = 1
-                while entries.count < target && page <= 500 {
-                    let result = try await tmdb.discover(query, page: page)
-                    for item in result.items where seen.insert(item.tmdbID.rawValue).inserted {
-                        entries.append(WLEntry(tmdbId: item.tmdbID.rawValue, mediaType: mediaType.rawValue))
-                    }
-                    if page >= result.totalPages { break }
-                    page += 1
-                }
-            }
-            if !origins.isEmpty {
-                // Foreign-depth expansion (DT-C region-aware floor): one `vote_count.gte` slice per origin
-                // country, fully paged. The expansion uses a low floor (e.g. 15) for EU/SA/AU-NZ origins —
-                // the band where regional titles live. The vote floor is re-checked at enrich; ids already in
-                // the base worklist / checkpoint are skipped there, so this is purely additive.
-                for country in origins {
-                    try await collect(DiscoverQuery(mediaType: mediaType, originCountry: [country],
-                                                    voteCountGte: floor, sortBy: "vote_count.desc"), until: .max)
-                }
-            } else if count <= 10_000 {
-                // A single global query suffices (TMDB serves ≤500 pages × 20 = 10k results) — highest vote first.
-                try await collect(DiscoverQuery(mediaType: mediaType, voteCountGte: floor, sortBy: "vote_count.desc"), until: count)
-            } else {
-                // Past 10k, partition by release year (newest first) to page beyond the per-query ceiling —
-                // each year's `vote_count.desc` slice, accumulated + de-duped until `count`.
-                let yearMax = args.int("--year-max") ?? 2026
-                let yearMin = args.int("--year-min") ?? 1920
-                for year in stride(from: yearMax, through: yearMin, by: -1) where entries.count < count {
-                    try await collect(DiscoverQuery(
-                        mediaType: mediaType, voteCountGte: floor,
-                        releaseDateGte: "\(year)-01-01", releaseDateLte: "\(year)-12-31",
-                        sortBy: "vote_count.desc"), until: count)
-                }
-            }
-            if origins.isEmpty { entries = Array(entries.prefix(count)) }
-        }
-
-        try JSON.writePretty(entries, to: out)
-        print("worklist: \(entries.count) \(mediaType.rawValue) ids → \(out)")
-    }
-
     // enrich — next `limit` un-enriched worklist ids → one TMDB call each (append_to_response=keywords),
     // bounded concurrency. Drops below the vote floor / anime / fetch failures (each logged + counted).
     // Writes one scratch batch file the article dump and the embed pass read + advances the resumable
@@ -806,158 +702,12 @@ enum Commands {
                          "skippedAfterFailure": skipped, "hasVector": hasVector ? 1 : 0]))
     }
 
-    // doc-facts — scrape the two embedding-doc clauses that still came from TMDB (director, genre) from
-    // Wikidata, so the vectors can be built with no TMDB Content in them at all. Writes `doc-facts.json` keyed
-    // "mediaType:tmdbId". Kept SEPARATE from embed-corpus because the scrape is ~770 SPARQL requests and the
-    // embed is hours: pay each once, and let a failure in one not cost the other.
-    static func docFacts(_ args: Args) async throws {
-        let outDir = try args.require("--out-dir")
-        let labelsPath = try args.require("--labels")
-        let batchSize = args.int("--batch") ?? 100
-        let path = (outDir as NSString).appendingPathComponent("doc-facts.json")
-
-        struct Row: Codable { let directors: [String]; let genres: [String] }
-        // RESUME: an id already present is not re-queried. A 38.5k-title scrape WILL be interrupted, and
-        // re-running from zero each time is how a polite scrape turns into an impolite one.
-        var facts: [String: Row] = (try? JSON.read(path)) ?? [:]
-        let before = facts.count
-
-        let labels: LabelsArtifact = try JSON.read(labelsPath)
-        var byType: [String: [Int]] = [:]
-        for record in labels.records where facts["\(record.mediaType):\(record.tmdbId)"] == nil {
-            byType[record.mediaType, default: []].append(record.tmdbId)
-        }
-        let todo = byType.values.reduce(0) { $0 + $1.count }
-        FileHandle.standardError.write(Data("  doc-facts: \(before) cached, \(todo) to fetch\n".utf8))
-
-        let source = WikipediaSource()
-        var done = 0
-        for (type, ids) in byType {
-            let mediaType: MediaType = type == "tv" ? .tv : .movie
-            for start in stride(from: 0, to: ids.count, by: batchSize) {
-                let slice = Array(ids[start..<min(start + batchSize, ids.count)])
-                let got = try await source.docFacts(forTMDBIds: slice, mediaType: mediaType)
-                for id in slice {
-                    // Absent from the result means Wikidata states neither — record the empty row so the
-                    // resume does not re-query it forever. The COMPOSER treats both as "no clause"; the
-                    // unknown-vs-none distinction matters for the facts sidecar, not for prose.
-                    let f = got[id]
-                    facts["\(type):\(id)"] = Row(directors: f?.directors ?? [], genres: f?.genres ?? [])
-                }
-                done += slice.count
-                // Write every batch, not at the end: an interrupted scrape keeps everything it paid for.
-                try JSON.write(facts, to: path)
-                if done % 1000 < batchSize {
-                    FileHandle.standardError.write(Data("  doc-facts \(done)/\(todo)…\n".utf8))
-                }
-            }
-        }
-        let withDirector = facts.values.filter { !$0.directors.isEmpty }.count
-        let withGenre = facts.values.filter { !$0.genres.isEmpty }.count
-        print(JSON.line(["docFacts": facts.count, "fetched": todo, "withDirector": withDirector,
-                         "withGenre": withGenre, "path": path]))
-    }
-
     // embed-corpus — build bge-m3 vectors for the EXISTING (already-shipped) labels from the Wikipedia-plot
     // enrichment, WITHOUT re-classifying. Composes facts + the existing tags + the wiki plot, batch-embeds via
     // den-embed, and writes a FRESH index store (labels = the existing records verbatim, aligned to new
     // vectors) into a dedicated out-dir. This is the "semantic vectors now" path: it upgrades the app's ANN
     // from lexical FNV to bge-m3 immediately, reusing the labels we already ship, while the fresh plot-grounded
     // reclassification (which improves the LABELS) is run later. `finalize --out-dir <same>` emits the artifact.
-    /// Write each grounded title's WHOLE Wikipedia article as prose, one JSON object per line.
-    ///
-    /// The classifier reads the article; the embedder reads the extracted plot. Two consumers with genuinely
-    /// different needs — see `WikipediaSource.articleProse` — and this is what feeds the first. Keeping them
-    /// apart also means a future extractor bug degrades similarity without silently corrupting labels.
-    ///
-    /// Every article was already fetched once to find its plot, and `plotArticle` + `plotLanguage` were
-    /// recorded per title, so this re-requests the same URL and the response cache answers nearly all of it.
-    /// That is why it goes through `WikipediaSource` rather than reading the cache directly: the cache is
-    /// keyed by a hash of the request, so reconstructing keys by hand would be a second implementation of
-    /// something that already works, and wrong the first time a parameter moves.
-    ///
-    /// Resumable by re-reading its own output — a kill costs at most the titles in flight.
-    static func dumpArticles(_ args: Args) async throws {
-        let outPath = try args.require("--out")
-        let enrichedDir = try args.require("--enriched-dir")
-        let limit = args.int("--limit")
-
-        var done: Set<String> = []
-        if FileManager.default.fileExists(atPath: outPath) {
-            for line in try FileIO.readLines(outPath) {
-                struct Row: Decodable { let mediaType: String; let tmdbId: Int }
-                if let r: Row = try? JSON.decode(line) { done.insert("\(r.mediaType):\(r.tmdbId)") }
-            }
-            FileHandle.standardError.write(Data("  resuming: \(done.count) already dumped\n".utf8))
-        }
-
-        // Newest batch wins, matching how every other reader folds this directory.
-        var wanted: [(key: String, dto: EnrichedDTO)] = []
-        var seen: Set<String> = []
-        for file in EnrichedBatches.orderedNames(inDirectory: enrichedDir).reversed() {
-            let dtos: [EnrichedDTO] = try JSON.read((enrichedDir as NSString).appendingPathComponent(file))
-            for dto in dtos {
-                let key = "\(dto.mediaType):\(dto.tmdbId)"
-                guard !seen.contains(key) else { continue }
-                seen.insert(key)
-                // ToS: only a title with a Wikipedia plot may reach an LLM, and only such a title has a
-                // recorded article to fetch.
-                guard dto.hasWikiPlot, let article = dto.plotArticle, !article.isEmpty else { continue }
-                guard !done.contains(key) else { continue }
-                wanted.append((key, dto))
-            }
-        }
-        if let limit { wanted = Array(wanted.prefix(limit)) }
-        FileHandle.standardError.write(Data("  \(wanted.count) articles to fetch\n".utf8))
-
-        let wiki = WikipediaSource()
-        let handle = try FileIO.appender(outPath)
-        defer { try? handle.close() }
-        struct ArticleRow: Encodable {
-            let mediaType: String, tmdbId: Int, title: String?, year: Int?, article: String, language: String
-            let resolvedArticle: String?, revId: Int?, extractorArticleRevId: Int?
-            let sections: [String], plotSections: [String]
-            let chars: Int, text: String
-        }
-
-        let gate = 4   // gentle on the public Wikipedia API, same as the plot pass
-        var written = 0, missing = 0
-        var index = 0
-        while index < wanted.count {
-            let slice = Array(wanted[index..<min(index + gate, wanted.count)])
-            let rows = try await withThrowingTaskGroup(of: ArticleRow?.self) { group -> [ArticleRow] in
-                for item in slice {
-                    group.addTask {
-                        let lang = item.dto.plotLanguage ?? "en"
-                        guard let article = item.dto.plotArticle,
-                              let found = try? await wiki.articleProse(articleTitle: article, language: lang)
-                        else { return nil }
-                        return ArticleRow(
-                            mediaType: item.dto.mediaType, tmdbId: item.dto.tmdbId, title: item.dto.title,
-                            year: item.dto.year,
-                            article: article, language: lang, resolvedArticle: found.resolvedArticle,
-                            revId: found.revId, extractorArticleRevId: item.dto.plotRevId,
-                            sections: found.sections,
-                            plotSections: item.dto.plotSections, chars: found.text.count,
-                            text: found.text)
-                    }
-                }
-                var out: [ArticleRow] = []
-                for try await row in group { if let row { out.append(row) } else { missing += 1 } }
-                return out
-            }
-            for row in rows {
-                try handle.writeLine(JSON.encodeLine(row))
-                written += 1
-            }
-            index += gate
-            if written % 500 == 0 && !rows.isEmpty {
-                FileHandle.standardError.write(Data("  dumped \(written) (no article \(missing))…\n".utf8))
-            }
-        }
-        print(JSON.line(["written": written, "noArticle": missing, "out": outPath]))
-    }
-
     static func embedCorpus(_ args: Args) async throws {
         let outDir = try args.require("--out-dir")
         let labelsPath = try args.require("--labels")            // the existing labels-t02.json (its tags per title)
@@ -1533,101 +1283,11 @@ enum Commands {
         print("primary-genre dist: \(report.byPrimaryGenre.sorted { $0.value > $1.value }.map { "\($0.key):\($0.value)" }.joined(separator: " "))")
     }
 
-    // metadata — the on-device METADATA SIDECAR: a light TMDB pass over the finalized records fetching title +
-    // poster_path + year, written to metadata-<datasetVersion>.json. Ships as a ≤6-month SYNCED cache (den-atlas
-    // serves it beside labels/vectors; the app reads it to render a semantic/ANN neighbour without a detail call).
-    // Never bundled — a frozen poster snapshot would break TMDB's 6-month caching allowance.
-    /// Below this share of titles returning metadata, the run is a failure rather than a thin result.
-    /// Real coverage is ~99% (a title without a poster still returns a row); anything near zero is auth or
-    /// rate-limiting.
-    static let metadataCoverageFloor = 0.90
-
-    static func metadata(_ args: Args) async throws {
-        let outDir = try args.require("--out-dir")
-        let skipFetch = args.has("--skip-fetch")   // patch meta from an existing sidecar (no TMDB re-fetch)
-        let limit = args.int("--limit")
-        // --limit is only consulted inside the fetch path, so pairing it with --skip-fetch skipped the
-        // probe and went straight to patching the manifest — which usage() promises it never does.
-        if limit != nil && skipFetch {
-            throw ToolError(message: "--limit is a probe and --skip-fetch patches the manifest from an "
-                + "existing sidecar; together they would do the second without the first. Pick one.")
-        }
-        let meta: DatasetMeta = try JSON.read(Layout.datasetMeta(outDir))
-        let path = Layout.metadataArtifact(outDir, meta.datasetVersion)
-
-        if !skipFetch {
-            let labels: LabelsArtifact = try JSON.read(Layout.labelsArtifact(outDir, Taxonomy.current.version))
-            var records = labels.records
-            // --limit is a PROBE: fetch a handful, report, write nothing. It used to truncate `records`
-            // here — before the coverage floor below is computed against `records.count` — so coverage was
-            // always ~100% and the floor could never fire, and the N rows were then written over the
-            // shipped 37.5k-row sidecar with their sha stamped into the manifest. The app folds that sha
-            // into its syncKey, so `metadata --limit 50`, the obvious cheap credential smoke-test, would
-            // have re-synced every device to a sidecar missing 37,483 titles.
-            if let limit { records = Array(records.prefix(limit)) }
-            let client = try TMDB.client()
-            var out: [PosterMeta] = []
-            let chunk = 200   // the client's semaphore throttles the real fan-out; chunk bounds task spawn count
-            for start in stride(from: 0, to: records.count, by: chunk) {
-                let slice = Array(records[start..<min(start + chunk, records.count)])
-                let batch = await withTaskGroup(of: PosterMeta?.self) { group -> [PosterMeta] in
-                    for r in slice {
-                        let id = MediaIdentifier(r.tmdbId, MediaType(rawValue: r.mediaType) ?? .movie)
-                        group.addTask {
-                            do { return try await client.posterMeta(id) } catch {
-                                // Discarding these is what made the coverage floor below undiagnosable:
-                                // it asserts TMDB is failing without having looked at a single error.
-                                Log.append(Layout.enrichLog(outDir),
-                                           "metadata-miss \(r.mediaType):\(r.tmdbId) (\(error))")
-                                return nil
-                            }
-                        }
-                    }
-                    var acc: [PosterMeta] = []
-                    for await m in group where m != nil { acc.append(m!) }
-                    return acc
-                }
-                out += batch
-                FileHandle.standardError.write(Data("  metadata \(out.count)/\(records.count)…\n".utf8))
-            }
-            // Every fetch is a `try?`, so an expired TMDB_API_KEY or a rate-limit storm yields an EMPTY
-            // sidecar — which was then written over the good one and its sha stamped into the manifest.
-            // The app folds that sha into its syncKey, so the device happily re-syncs to a sidecar with no
-            // posters in it. A partial result is not a result; refuse it and leave what is there.
-            let coverage = records.isEmpty ? 1.0 : Double(out.count) / Double(records.count)
-            guard coverage >= Self.metadataCoverageFloor else {
-                throw ToolError(message: "only \(out.count) of \(records.count) titles returned metadata "
-                    + "(\(Int(coverage * 100))%, floor \(Int(Self.metadataCoverageFloor * 100))%) — that is "
-                    + "TMDB failing, not titles without posters. Nothing written; the existing sidecar and "
-                    + "manifest are unchanged.")
-            }
-            // A TOTAL order — (id, mediaType), not id alone. TaskGroup yields in completion order, so two
-            // identical runs produced different bytes, a different metadataSha256, and, since the app folds
-            // that into its syncKey, a forced 4.6 MB re-download on every device for a file that had not
-            // changed. Sorting on the id alone does not fix that: `sort` is unstable, and the corpus
-            // contains 940 ids that are BOTH a movie and a series — the very titles the media-qualified
-            // checkpoint restores. Measured: 8 shuffles of that corpus produced 8 distinct sha256.
-            out = SidecarOrder.sorted(out)
-            if limit != nil {
-                print(JSON.line(["probe": out.count, "of": records.count,
-                                 "withPoster": out.filter { $0.posterPath != nil }.count,
-                                 "wrote": "nothing (--limit is a probe)"]))
-                return
-            }
-            try JSON.write(out, to: path)
-        }
-
-        // Patch dataset.meta.json to reference the sidecar (the server reads meta to know what blobs to serve;
-        // the app folds `metadataSha256` into its syncKey so a new/updated sidecar triggers a re-sync).
-        let blob = try Data(contentsOf: URL(fileURLWithPath: path))
-        let patched = meta.namingSidecar(file: (path as NSString).lastPathComponent,
-                                         sha256: sha256Hex(blob), bytes: blob.count)
-        try JSON.writeMeta(patched, to: Layout.datasetMeta(outDir))
-        let all = (try? JSON.read(path) as [PosterMeta]) ?? []
-        print(JSON.line(["metadata": all.count, "withPoster": all.filter { $0.posterPath != nil }.count,
-                         "sha": patched.metadataSha256 ?? "", "bytes": patched.metadataBytes ?? 0]))
-    }
-
+    /// Below this share of a batch's ids coming back, the run is a failure rather than a thin result.
+    /// Real coverage is ~99%, so anything near zero is auth or rate-limiting. `enrich-ids` applies it to
+    /// TRANSIENT failures only: a 404 is an answer and a 429 is not, and on a five-id targeted re-pass
+    /// one dead id is 20% — under the floor, and no amount of re-running fixes a deleted TMDB record.
+    static let coverageFloor = 0.90
 
     // MARK: - recluster (DT-F weekly)
 
@@ -1835,12 +1495,12 @@ enum Shell {
 
 // MARK: - DTOs
 
+/// A row of the universe `pipeline/worklist.py` writes, as `enrich` reads it back.
 struct WLEntry: Codable {
     let tmdbId: Int
     let mediaType: String
     var media: MediaType { mediaType == "tv" ? .tv : .movie }
     init(tmdbId: Int, mediaType: String) { self.tmdbId = tmdbId; self.mediaType = mediaType }
-    init(_ e: WorklistEntry) { tmdbId = e.tmdbId; mediaType = e.mediaType.rawValue }
 }
 
 /// A TMDB id together with its media type — the only safe key for anything holding both. The two id spaces
@@ -2046,7 +1706,6 @@ struct ReportExtras: Codable {
 enum Layout {
     static func enrichCheckpoint(_ dir: String) -> String { join(dir, "enrich-checkpoint.json") }
     static func classifyCheckpoint(_ dir: String) -> String { join(dir, "classify-checkpoint.json") }
-    static func metadataArtifact(_ dir: String, _ version: String) -> String { join(dir, "metadata-\(version).json") }
     static func enrichLog(_ dir: String) -> String { join(dir, "enrich-log.txt") }
     static func enrichedDir(_ dir: String) -> String { join(dir, "enriched") }
     static func enrichedBatch(_ dir: String, _ id: Int) -> String { join(dir, "enriched/batch-\(id).json") }
@@ -2236,29 +1895,6 @@ enum Spec {
     /// Every subcommand, in pipeline order — which is also the order `--help` lists them in.
     static let commands: [Subcommand] = [
         Subcommand(
-            name: "worklist",
-            summary: "Build the universe of ids to classify → worklist-<media>.json.",
-            flags: [
-                .value("--out", "<path>", "where to write the worklist JSON", required: true),
-                .value("--mode", "<discover|export|delta>",
-                       "discover (default): TMDB /discover, vote_count.desc. export: parse TMDB's daily id "
-                       + "export. delta: the DT-F daily freshness pass over titles released since --since"),
-                .value("--media", "<movie|tv>", "movie (default) or tv — a worklist holds ONE media type"),
-                .value("--count", "<n>", "how many ids to collect in discover mode (default 500)"),
-                .value("--vote-floor", "<n>", "minimum TMDB vote count (default 50); re-checked at enrich"),
-                .value("--origins", "<cc,cc>",
-                       "discover: comma-separated origin countries, one fully-paged vote_count.gte slice each "
-                       + "— the foreign-depth expansion. Additive; --count is not applied"),
-                .value("--year-max", "<yyyy>",
-                       "discover past 10k results: newest release year to partition from (default 2026)"),
-                .value("--year-min", "<yyyy>", "discover past 10k results: oldest release year (default 1920)"),
-                .value("--since", "<yyyy-mm-dd>", "delta: only titles released on or after this date (required in delta)"),
-                .value("--known", "<labels-tNN.json>",
-                       "delta: already-published labels whose titles are skipped — a delta classifies what is NEW"),
-                .value("--file", "<export.json>", "export: the TMDB daily-export file to parse (required in export)"),
-            ],
-            run: { try await Commands.worklist($0) }),
-        Subcommand(
             name: "enrich",
             summary: "Next N un-enriched worklist ids → one TMDB call each → a scratch batch.",
             flags: [
@@ -2305,25 +1941,6 @@ enum Spec {
             ],
             run: { try await Commands.embedCorpus($0) }),
         Subcommand(
-            name: "dump-articles",
-            summary: "Write each grounded title's WHOLE Wikipedia article as prose, one JSON object per line.",
-            flags: [
-                .value("--out", "<path>", "the JSONL to append to; re-running resumes from it", required: true),
-                .value("--enriched-dir", "<dir>", "the enriched batches naming each title's article", required: true),
-                .value("--limit", "<n>", "stop after N articles (smoke tests)"),
-            ],
-            run: { try await Commands.dumpArticles($0) }),
-        Subcommand(
-            name: "doc-facts",
-            summary: "Scrape Wikidata P57 director + P136 genre for the shipped corpus into doc-facts.json.",
-            flags: [
-                .value("--out-dir", "<dir>", "doc-facts.json is written here", required: true),
-                .value("--labels", "<labels-t02.json>", "the corpus to scrape facts for", required: true),
-                .value("--batch", "<n>", "ids per SPARQL request (default 100). Resumable: a re-run skips "
-                       + "ids already in the file"),
-            ],
-            run: { try await Commands.docFacts($0) }),
-        Subcommand(
             name: "facts",
             summary: "The CC0 facts sidecar den-atlas /recommend ranks on. Needs no plot and no embedding.",
             flags: [
@@ -2352,17 +1969,6 @@ enum Spec {
                        + "vectors, so a mislabelled blob is refused rather than shipped"),
             ],
             run: { try Commands.finalize($0) }),
-        Subcommand(
-            name: "metadata",
-            summary: "The poster sidecar. Its filename carries the datasetVersion — run it after EVERY finalize.",
-            flags: [
-                .value("--out-dir", "<dir>", "the run directory holding dataset.meta.json", required: true),
-                .bare("--skip-fetch", "patch the manifest from an existing sidecar, with no TMDB re-fetch"),
-                .value("--limit", "<n>",
-                       "a PROBE: fetch N and report, writing no sidecar and touching no manifest — a partial "
-                       + "sidecar would re-sync every device onto a gutted one"),
-            ],
-            run: { try await Commands.metadata($0) }),
         Subcommand(
             name: "recluster",
             summary: "Cluster the shipped vectors and report groups the vocabulary does not explain (DT-F weekly).",

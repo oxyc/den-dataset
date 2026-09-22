@@ -250,8 +250,10 @@ class CommandLine(Staged):
         with self.assertRaises(StageError) as refused:
             fetch.argv(context(self.out), "movie")
         # The worklist stage owns the universe now, so the refusal sends an operator to the rule that
-        # stage runs rather than to a `how` the artifact carried for itself.
-        self.assertIn("taxonomy-backfill worklist", str(refused.exception))
+        # stage runs rather than to a `how` the artifact carried for itself. Read off that stage rather
+        # than spelled here: the rule moved from Swift to Python under this branch, and a copy of the
+        # string would have gone on asserting a command that no longer exists.
+        self.assertIn(worklist.HOW, str(refused.exception))
 
     def test_a_media_the_worklists_do_not_come_in_is_refused(self):
         with self.assertRaises(StageError) as refused:
@@ -525,8 +527,10 @@ class Topology(unittest.TestCase):
         self.assertLess(pipeline.STAGES.index("worklist"), pipeline.STAGES.index("fetch"))
         for artifact in (artifacts.UNIVERSE_MOVIE, artifacts.UNIVERSE_TV):
             self.assertEqual(artifact.producer, "")
-            self.assertEqual(pipeline.producers()[artifact.name],
-                             (worklist.PRODUCER, worklist.HOW, False))
+            # The producer and its rule, not the `dedicated` flag beside them: that flag says whether the
+            # rule builds this artifact alone, and it flipped when the worklist stopped being one
+            # subcommand of a binary that builds several and became a module of its own.
+            self.assertEqual(pipeline.producers()[artifact.name][:2], (worklist.PRODUCER, worklist.HOW))
 
 
 if __name__ == "__main__":
