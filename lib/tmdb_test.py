@@ -146,14 +146,15 @@ class Record(unittest.TestCase):
                          "billing order, four names, an unordered name last")
         self.assertEqual((record["genreIDs"], record["keywords"]), ([18, 80], ["prison"]))
 
-    def test_a_series_carries_its_creators_and_an_empty_list_is_an_answer(self):
+    def test_tmdb_creators_never_cross(self):
+        """`createdBy` is composed into the embedding document; it comes from Wikidata (P170) alone."""
         series = {"id": 1438, "name": "The Wire", "first_air_date": "2002-06-02",
                   "created_by": [{"name": "David Simon"}], "credits": {"crew": [{"name": "X", "job": "Creator"}]}}
-        self.assertEqual(tmdb_api.title_record(series, 1438, "tv")["createdBy"], ["David Simon"])
-        self.assertEqual(tmdb_api.title_record(dict(series, created_by=[]), 1438, "tv")["createdBy"], [],
-                         "a present, empty created_by does not fall through to the crew")
         film = {"id": 1, "title": "F", "credits": {"crew": [{"name": "Y", "job": "Creator"}]}}
-        self.assertEqual(tmdb_api.title_record(film, 1, "movie")["createdBy"], ["Y"])
+        for body, media in ((series, "tv"), (film, "movie")):
+            record = tmdb_api.title_record(body, body["id"], media)
+            self.assertNotIn("createdBy", record)
+            self.assertNotIn("David Simon", json.dumps(record))
 
     def test_a_present_empty_value_does_not_fall_through(self):
         """Swift's `??`: an empty release date is no year, not a reason to read the air date."""

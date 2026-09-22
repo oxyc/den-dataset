@@ -303,5 +303,53 @@ class ImdbIds(unittest.TestCase):
         sent.assert_not_called()
 
 
+class Targets(unittest.TestCase):
+    """What names a title to the classify pass — Wikidata's label and year, in place of TMDB's."""
+
+    def test_the_query_matches_the_media_and_a_series_asks_for_its_start(self):
+        film, series = wikidata.target_query([12, 11, 11], "movie"), wikidata.target_query([1], "tv")
+        self.assertIn('VALUES ?tmdb { "11" "12" }', film, "sorted and unique, so one set is one key")
+        self.assertIn("wdt:P4947 ?tmdb", film)
+        self.assertIn("wdt:P577 ?released", film)
+        self.assertNotIn("P580", film)
+        self.assertIn("wdt:P4983 ?tmdb", series)
+        self.assertIn("wdt:P580 ?start", series)
+        self.assertIn('wikibase:language "en,mul"', film)
+
+    def test_the_earliest_year_and_a_series_start_wins(self):
+        payload = rows(
+            {"tmdb": cell("1"), "filmLabel": cell("Solaris"), "released": cell("1972-05-13T00:00:00Z")},
+            {"tmdb": cell("1"), "filmLabel": cell("Solaris"), "released": cell("+1972-03-20T00:00:00Z")},
+            {"tmdb": cell("1"), "filmLabel": cell("Solaris"), "released": cell("1973-01-01T00:00:00Z")},
+            {"tmdb": cell("2"), "filmLabel": cell("The Wire"), "released": cell("2001-01-01T00:00:00Z"),
+             "start": cell("2002-06-02T00:00:00Z")})
+        self.assertEqual(wikidata.parse_targets(payload),
+                         {1: {"title": "Solaris", "year": 1972}, 2: {"title": "The Wire", "year": 2002}})
+
+    def test_a_bare_qid_is_no_title_and_an_item_with_nothing_is_present_and_empty(self):
+        """The label service answers the Q-id when the item has no `en` or `mul` label: an identifier, not a
+        name. An unknown or blank date is no year, not year zero."""
+        payload = rows({"tmdb": cell("3"), "filmLabel": cell("Q123"), "released": cell("t2891")})
+        self.assertEqual(wikidata.parse_targets(payload), {3: {"title": None, "year": None}})
+
+    def test_a_body_that_is_not_a_result_is_refused_and_not_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = caching.ResponseCache("wiki", directory, 3600)
+            with mock.patch.object(wikidata.http, "request", return_value=b"<html>busy</html>"):
+                with self.assertRaises(wikidata.WikidataError):
+                    wikidata.targets([1], "movie", cache)
+            self.assertIsNone(cache.read(cache.key("sparql-target", {"q": wikidata.target_query([1], "movie")})))
+            answer = rows({"tmdb": cell("1"), "filmLabel": cell("F")})
+            with mock.patch.object(wikidata.http, "request", return_value=answer) as sent:
+                self.assertEqual(wikidata.targets([1], "movie", cache), {1: {"title": "F", "year": None}})
+                self.assertEqual(wikidata.targets([1], "movie", cache), {1: {"title": "F", "year": None}})
+            self.assertEqual(sent.call_count, 1, "a real answer is served from disk the second time")
+
+    def test_no_ids_asks_nothing(self):
+        with mock.patch.object(wikidata.http, "request") as sent:
+            self.assertEqual(wikidata.targets([], "movie"), {})
+        sent.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

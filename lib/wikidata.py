@@ -406,6 +406,81 @@ def imdb_ids(ids, media, cache=None):
     return parsed
 
 
+def target_query(ids, media):
+    """The SPARQL that names one batch of TMDB ids: the item's label and its publication dates (P577),
+    plus its start time (P580) for a series, whose first air date is what a series' year means."""
+    values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
+    start = "  OPTIONAL { ?film wdt:P580 ?start . }\n" if media == "tv" else ""
+    return (f"SELECT ?tmdb ?filmLabel ?released ?start WHERE {{\n"
+            f"  VALUES ?tmdb {{ {values} }}\n"
+            f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"  OPTIONAL {{ ?film wdt:P577 ?released . }}\n"
+            f"{start}"
+            f'  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul". }}\n'
+            f"}}\n"
+            f"ORDER BY ?tmdb ?filmLabel")
+
+
+_DATE_YEAR = re.compile(r"^\+?([0-9]{1,4})-")
+
+
+def parse_targets(payload):
+    """`tmdbId -> {"title", "year"}` for one SPARQL body. RAISES on a body that is not a SPARQL result.
+
+    The title is the first label in the query's order; a bare Q-id is the label service finding none, and
+    is None rather than a name. The year is the EARLIEST — a festival premiere before a wide release, the
+    original before a restoration — and a series' start time wins over any publication date. An id with
+    neither is present with both None: Wikidata answered, and said nothing.
+    """
+    try:
+        bindings = json.loads(payload.decode("utf-8"))["results"]["bindings"]
+        if not isinstance(bindings, list):
+            raise TypeError(bindings)
+    except (ValueError, KeyError, TypeError):
+        raise WikidataError(f"not a SPARQL result: {payload[:200]!r}") from None
+    seen = {}
+    for binding in bindings:
+        raw = _cell(binding, "tmdb")
+        if raw is None or not _INTEGER.fullmatch(raw):
+            continue
+        entry = seen.setdefault(int(raw), {"title": None, "released": set(), "start": set()})
+        label = _cell(binding, "filmLabel")
+        if entry["title"] is None and label and not QID.match(label):
+            entry["title"] = label
+        for name in ("released", "start"):
+            found = _DATE_YEAR.match(_cell(binding, name) or "")
+            if found:
+                entry[name].add(int(found.group(1)))
+    return {tmdb_id: {"title": entry["title"],
+                      "year": min(entry["start"] or entry["released"], default=None)}
+            for tmdb_id, entry in seen.items()}
+
+
+def targets(ids, media, cache=None):
+    """`tmdbId -> {"title", "year"}` for one batch of one media type, from disk where the same batch was
+    asked before. What names a title to anything that asks whether an article is about it — Wikidata's,
+    CC0, rather than TMDB's."""
+    if not ids:
+        return {}
+    query = target_query(ids, media)
+    key = None
+    if cache is not None:
+        key = cache.key("sparql-target", {"q": query})
+        hit = cache.read(key)
+        if hit is not None:
+            try:
+                return parse_targets(hit)
+            except WikidataError:
+                pass
+    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
+                           headers={"Content-Type": "application/sparql-query",
+                                    "Accept": "application/sparql-results+json"})
+    parsed = parse_targets(payload)
+    if key is not None:
+        cache.write(key, payload)
+    return parsed
+
+
 def cache_for(env=None):
     """Wikidata shares the `wiki` namespace with Wikipedia — one cache to age out, one to clear."""
     return caching.wiki(env)

@@ -148,13 +148,9 @@ def title_record(body, tmdb_id, media):
     cast = _named(_field(credits, "cast", list) or [], "name")
     genres = _named(_field(body, "genres", list) or [], "name", (("id", int),))
     director = next((person["name"] for person in crew if person.get("job") == "Director"), None)
-    # Showrunners. `created_by` is a top-level TV field, so a series carries its creators even though
-    # `director` is null for nearly all of them — which is what made same-creator series invisible. Films
-    # have no `created_by`; the crew "Creator" credit is the rare stand-in. An EMPTY `created_by` is an
-    # answer and is kept, not fallen through.
-    created = _field(body, "created_by", list)
-    creators = ([person["name"] for person in _named(created, "name")] if created is not None
-                else [person["name"] for person in crew if person.get("job") == "Creator"])
+    # No `createdBy` here. TMDB's `created_by` names were the fallback when Wikidata had no P170, and the
+    # enriched record's `createdBy` is composed into the embedding document — so TMDB text reached the
+    # shipped vectors. The enrichment fills `createdBy` from Wikidata alone.
     # Billing order; a name with no `order` goes last, and ties keep TMDB's own order.
     billed = sorted(cast, key=lambda person: person["order"] if isinstance(person.get("order"), int)
                     else float("inf"))
@@ -169,7 +165,6 @@ def title_record(body, tmdb_id, media):
         "originCountry": countries, "originalLanguage": _field(body, "original_language", str),
         "voteCount": _field(body, "vote_count", int) or 0,
         "director": director, "topCast": [person["name"] for person in billed[:TOP_CAST]],
-        "createdBy": creators,
         # CODE POINTS, where the Swift pass counted grapheme clusters (`String.count`) — here and for every
         # other length it judged, the plot floor and the 1,000-character sufficiency included. The Python
         # enrichment measures all of them with `len()`. They differ only where text carries combining marks

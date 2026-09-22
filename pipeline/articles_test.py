@@ -18,6 +18,7 @@ on 7 rows — see `row()`. It cannot run in CI, which has neither the toolchain 
 """
 import json
 import os
+import sys
 import tempfile
 import unittest
 
@@ -56,10 +57,23 @@ class Staged(unittest.TestCase):
         self.answers = {}
         self.original = articles.wikipedia.article_prose
         articles.wikipedia.article_prose = self.stub
+        # Wikidata's name for each title: `(media, id) -> {"title", "year"}`, a default for any other id, or
+        # an exception to raise.
+        self.named, self.named_calls, self.naming = {}, [], None
+        self.original_targets = articles.wikidata.targets
+        articles.wikidata.targets = self.targets_stub
 
     def tearDown(self):
         articles.wikipedia.article_prose = self.original
+        articles.wikidata.targets = self.original_targets
         self.directory.cleanup()
+
+    def targets_stub(self, ids, media, cache=None):
+        self.named_calls.append((media, list(ids)))
+        if self.naming is not None:
+            raise self.naming
+        return {i: self.named.get((media, i), {"title": f"Wikidata {i}", "year": 2001}) for i in ids
+                if self.named.get((media, i), True) is not None}
 
     def stub(self, article, language="en", cache=None):
         self.fetched.append((article, language))
@@ -201,6 +215,60 @@ class Output(Staged):
         self.assertEqual(row["extractorArticleRevId"], 107)
         self.assertEqual(row["chars"], len(row["text"]))
 
+    def test_the_target_is_wikidatas_never_the_enriched_records(self):
+        """`title` and `year` are what the classify pass judges the article against, and the enriched
+        record's are TMDB's — which is how TMDB Content came to sit on every row of this file."""
+        self.batch(1, [record(7, article="Solaris (1972 film)", title="TMDB Title", year=1971)])
+        self.named[("movie", 7)] = {"title": "Solaris", "year": 1972}
+        articles.run(self.context())
+        row = self.dumped()[0]
+        self.assertEqual((row["title"], row["year"], row["targetSource"]), ("Solaris", 1972, "wikidata"))
+        self.assertNotIn("TMDB Title", json.dumps(row))
+        self.assertEqual(self.named_calls, [("movie", [7])])
+
+    def test_the_classify_state_names_the_wikidata_target(self):
+        """`run_combined.py` builds `requestedTarget` from the row as it stands, and fills an ABSENT `year`
+        from the enriched batches — TMDB's. A row this stage writes reaches the state as Wikidata's."""
+        sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
+        import article_sections
+        import run_combined
+        self.batch(1, [record(7, title="TMDB Title", year=1971), record(8, title="TMDB Other", year=1980)])
+        self.named[("movie", 7)] = {"title": "Solaris", "year": 1972}
+        self.named[("movie", 8)] = None   # Wikidata answers nothing for this one
+        articles.run(self.context())
+        records, _keys = run_combined.load_articles(os.path.join(self.out, "articles.jsonl"))
+        run_combined.attach_enriched_evidence(records, self.enriched)
+        targets = {rec["tmdbId"]: article_sections.target(rec) for rec in records}
+        self.assertEqual((targets[7]["title"], targets[7]["year"]), ("Solaris", 1972))
+        self.assertEqual((targets[8]["title"], targets[8]["year"]), ("", None),
+                         "unknown stays unknown rather than falling back to TMDB's")
+
+    def test_a_target_wikidata_does_not_know_is_null_and_never_omitted(self):
+        self.batch(1, [record(7)])
+        self.named[("movie", 7)] = None
+        articles.run(self.context())
+        with open(os.path.join(self.out, "articles.jsonl"), encoding="utf-8") as fh:
+            raw = fh.readline()
+        self.assertIn('"title":null,"year":null,"targetSource":"wikidata"', raw)
+
+    def test_each_media_is_named_apart_in_fixed_batches(self):
+        """Movie 95 and series 95 are different works, and batch membership is part of the cache key."""
+        self.batch(1, [record(n, media=m) for n in range(articles.TARGET_BATCH + 1, 0, -1)
+                       for m in ("tv", "movie")])
+        articles.run(self.context())
+        self.assertEqual([(media, len(ids), ids[0]) for media, ids in self.named_calls],
+                         [("movie", articles.TARGET_BATCH, 1), ("movie", 1, articles.TARGET_BATCH + 1),
+                          ("tv", articles.TARGET_BATCH, 1), ("tv", 1, articles.TARGET_BATCH + 1)])
+
+    def test_a_failed_lookup_writes_nothing(self):
+        """A row with no target would have the classify pass pay to judge an article against no name."""
+        self.batch(1, [record(1), record(2)])
+        self.naming = articles.wikidata.WikidataError("maintenance page")
+        with self.assertRaises(StageError) as refused:
+            articles.run(self.context())
+        self.assertIn("Nothing was written", str(refused.exception))
+        self.assertEqual((self.fetched, self.dumped()), ([], []))
+
     def test_the_count_it_records_is_the_one_the_auditor_recomputes(self):
         """`audit_combined.py` refuses a row whose `articleChars` is not `len(text)`. A dumper counting in
         a different unit puts the auditor and the file it audits into permanent disagreement.
@@ -236,9 +304,10 @@ class Output(Staged):
         self.answers["AC/DC: Let There Be Rock"] = {
             "text": "Café AC/DC.", "revId": 900, "resolvedArticle": "AC/DC: Let There Be Rock",
             "sections": ["Plot"], "language": "en"}
+        self.named[("movie", 7)] = {"title": "AC/DC: Let There Be Rock", "year": 1980}
         articles.run(self.context())
-        golden = ('{"mediaType":"movie","tmdbId":7,"title":null,"year":null,'
-                  '"article":"AC\\/DC: Let There Be Rock","language":"en",'
+        golden = ('{"mediaType":"movie","tmdbId":7,"title":"AC\\/DC: Let There Be Rock","year":1980,'
+                  '"targetSource":"wikidata","article":"AC\\/DC: Let There Be Rock","language":"en",'
                   '"resolvedArticle":"AC\\/DC: Let There Be Rock","revId":900,"extractorArticleRevId":null,'
                   '"sections":["Plot"],"plotSections":["Plot"],"chars":12,"text":"Café AC\\/DC."}\n')
         with open(os.path.join(self.out, "articles.jsonl"), "rb") as fh:

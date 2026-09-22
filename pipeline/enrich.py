@@ -225,11 +225,12 @@ def reground(record, facts, cache, token):
     names no page, so its answer is taken as it comes.
     """
     facts = facts or {}
-    # Runtime and creators ride the same hop, so they fold in for EVERY title, plot or not. Wikidata's
-    # creators win over TMDB's `created_by`: this text reaches an embedder, and Wikidata is CC0. `overview`
-    # starts EMPTY — it holds a Wikipedia plot or nothing.
+    # Runtime and creators ride the same hop, so they fold in for EVERY title, plot or not. `createdBy` is
+    # Wikidata's P170 or nothing: it is composed into the embedding document, and a TMDB fallback here put
+    # TMDB's names into the shipped vectors of 3,353 titles. `overview` starts EMPTY — it holds a Wikipedia
+    # plot or nothing.
     record = dict(record, overview="", hasWikiPlot=False, plotSections=[],
-                  createdBy=facts.get("creators") or record["createdBy"],
+                  createdBy=facts.get("creators") or [],
                   runtimeMinutes=facts.get("runtimeMinutes"))
     candidates = [(facts[name], role) for name, role in (("article", "own"), ("sourceArticle", "source-work"))
                   if facts.get(name)]

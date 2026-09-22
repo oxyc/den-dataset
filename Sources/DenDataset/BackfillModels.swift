@@ -69,8 +69,8 @@ public struct EnrichedTitle: Sendable, Equatable {
     /// Credits (FP-2, `append_to_response=credits`) — feed the composed embedding doc, not the classifier.
     public let director: String?
     public let topCast: [String]
-    /// TV showrunners. Sourced from Wikidata (P170) where it has them and TMDB `created_by` otherwise —
-    /// kept separate from `director`, which TMDB leaves null for nearly all series, so this is the only
+    /// TV showrunners, from Wikidata (P170) alone. Batches enriched before the TMDB `created_by` fallback
+    /// was removed still carry TMDB names where Wikidata had none, until they are enriched again. Kept separate from `director`, which TMDB leaves null for nearly all series, so this is the only
     /// credit that links a series to its creator's other work.
     public let createdBy: [String]
     /// Runtime in minutes, from Wikidata (P2047) — ~93% of films carry it, and the enriched record has no
