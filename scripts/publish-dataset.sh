@@ -15,7 +15,7 @@
 # Requires `gh` authenticated with write access to the repo. The blobs are gitignored (large derived data),
 # so they live as release assets, never in git.
 #
-# Run it FROM THE REPO ROOT: the ownership guard resolves producer paths (`Sources/…`, `scripts/…`) and
+# Run it FROM THE REPO ROOT: the ownership guard resolves producer paths (`pipeline/…`, `scripts/…`) and
 # `git ls-files` against the working directory.
 set -euo pipefail
 

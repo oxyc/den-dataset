@@ -17,7 +17,7 @@ So what the stage contributes is the declaration below and the INVOCATION — wh
 a formality:
 
   * it runs from the REPO ROOT, whatever directory `den` was typed in. The ownership guard resolves
-    producer paths (`Sources/…`, `scripts/…`) and `git ls-files` against the working directory, so run
+    producer paths (`pipeline/…`, `scripts/…`) and `git ls-files` against the working directory, so run
     from anywhere else it looks for producers that are not there. That used to be a comment asking the
     operator to remember; it is now a property of running the stage.
   * the publish dir is therefore made ABSOLUTE first, or moving the working directory to the repo root
