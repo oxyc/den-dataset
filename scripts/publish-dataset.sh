@@ -292,6 +292,16 @@ python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
 # and the same one the quality gate below still runs under. What must not happen silently is the number
 # going UP, because the only thing that makes it worse is a re-ground, and #27 proposes running one daily.
 #
+# What it COUNTS is the borrowers: 336 of the 1,066 are the article's own subject and appear only because
+# someone took their page, and a title whose recorded provenance cannot clear it counts too. Every row in
+# the shipped generation predates that recording, so the count is unchanged at 1,066 until a re-enrich —
+# at which point the per-title provenance census, printed alongside, names the ~2,075 mis-grounded titles
+# directly instead of the 729 of them that happen to collide.
+#
+# `--facts` is deliberately NOT passed. It would enable the one-item exemption (31 titles are one Wikidata
+# item behind several TMDB ids, which is why this can never ratchet to zero) but it also scopes the census
+# to the shipped keys, which moves the baseline for a reason that has nothing to do with the grounding.
+#
 # `maxBatchId` is stamped just above, so the census is bounded to the batches this publish can actually see
 # rather than to a live directory that keeps growing.
 plot_guard=0

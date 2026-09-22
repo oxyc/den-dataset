@@ -75,7 +75,7 @@ jobs:
       # digests, and that its cases still cover a query, a non-Latin text, the corpus document shape and
       # a text past the token cap.
       - name: The publisher's guards
-        run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py scripts/test_prune_manifest.py scripts/v2/test_consolidate_corpus.py scripts/test_eval_taxonomy.py scripts/v2/test_embed_canary.py
+        run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py scripts/test_prune_manifest.py scripts/v2/test_consolidate_corpus.py scripts/test_eval_taxonomy.py scripts/v2/test_embed_canary.py scripts/test_check_plot_invariants.py
         env:
           DEN_SPEC_DIR: ${{ github.workspace }}/den-spec-checkout
       # The pipeline skeleton (oxyc/den-dataset#27): the stage contract, the artifact catalogue, the
