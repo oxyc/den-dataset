@@ -208,6 +208,10 @@ class Facts:
         # 2,680 of 3,019 references are unresolvable — so interning this dropped the franchise for
         # seven titles in eight, silently. A Q-id needs no table to be useful: two titles sharing one
         # are in the same series whether or not anything can name it.
+        #
+        # The facts stage writes every P179 target that is a series, most specific first
+        # (`lib/wikidata_facts.franchises`), and nothing else: a critics' list filed under P179 is not a
+        # franchise. The column holds one value, so it is the first — the one atlas's JSON reader took too.
         fr = facts.get("franchise")
         fr = fr[0] if isinstance(fr, list) and fr else fr
         fr_num = int(fr[1:]) if isinstance(fr, str) and fr.startswith("Q") and fr[1:].isdigit() else None

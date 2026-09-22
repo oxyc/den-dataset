@@ -36,7 +36,8 @@ class Wikidata:
         self.titles = {}        # (media, tmdbId) -> titles row
         self.names = {}         # qid -> entity details
         self.types = {}         # qid -> [P31 labels]
-        self.asked = {"facts": [], "titles": [], "names": [], "types": []}
+        self.members = {}       # qid -> P179 member count, for the targets that are a series
+        self.asked = {"facts": [], "titles": [], "names": [], "types": [], "series": []}
         self.failing = set()    # (media, tmdbId) whose batch raises
         self.languages = []     # (media, the languages the titles hop was told) per call
         self.live = False       # answered from the cache, so nothing is paced
@@ -63,6 +64,10 @@ class Wikidata:
         self.asked["types"].append(tuple(qids))
         return {q: self.types[q] for q in qids if q in self.types}
 
+    def series(self, qids, cache=None):
+        self.asked["series"].append(tuple(qids))
+        return {q: self.members[q] for q in qids if q in self.members}
+
 
 class Staged(unittest.TestCase):
     def setUp(self):
@@ -71,13 +76,14 @@ class Staged(unittest.TestCase):
         self.out = self.directory.name
         self.wd = Wikidata()
         for name, stub in (("fetch_facts", self.wd.fetch_facts), ("titles", self.wd.titles_of),
-                           ("entity_details", self.wd.entity_details), ("instance_of", self.wd.instance_of)):
+                           ("entity_details", self.wd.entity_details), ("instance_of", self.wd.instance_of),
+                           ("series", self.wd.series)):
             original = getattr(facts.wd, name)
             setattr(facts.wd, name, stub)
             self.addCleanup(setattr, facts.wd, name, original)
         self.wd.facts = {
             ("movie", 1): {"imdbId": "tt1", "directors": ["Q10"], "genres": ["Q20"], "basedOn": ["Q30"],
-                           "franchise": "Q40", "released": {"date": "1999", "precision": "year"}},
+                           "franchise": ["Q40"], "released": {"date": "1999", "precision": "year"}},
             ("tv", 1): {"imdbId": "tt9", "broadcaster": ["Q50"]},
             ("movie", 7): {"imdbId": "tt7"},
         }
@@ -88,6 +94,7 @@ class Staged(unittest.TestCase):
                          "Q40": {"name": "The Saga", "tmdbPersonId": None, "aliases": []},
                          "Q50": {"name": "HBO", "tmdbPersonId": None, "aliases": []}}
         self.wd.types = {"Q30": ["novel", "literary work"]}
+        self.wd.members = {"Q40": 3}
         with open(os.path.join(self.out, "labels-t02.json"), "w", encoding="utf-8") as fh:
             json.dump({"records": [{"mediaType": "movie", "tmdbId": 1}, {"mediaType": "tv", "tmdbId": 1}]}, fh)
         with open(os.path.join(self.out, "facts-delta-ids.txt"), "w", encoding="utf-8") as fh:
@@ -143,7 +150,7 @@ class Passes(Staged):
         self.assertEqual(record["titles"], {"aliases": ["Eins", "Uno"], "en": "One", "orig": "One"})
         self.assertEqual(record["basedOnKind"], ["book"])
         self.assertEqual(record["released"], {"date": "1999", "precision": "year"})
-        self.assertEqual(record["franchise"], "Q40")
+        self.assertEqual(record["franchise"], ["Q40"])
 
     def test_the_entity_map_as_it_ships(self):
         """A single-valued Q-id is resolved too — a harvest that walked only lists left all 3,019 franchises
@@ -204,6 +211,64 @@ class Passes(Staged):
                              '"genreMap":{"Q20":{"movie":18,"tv":18}},"records":[{"genres":["Q20"],'
                              '"hasVector":true,"imdbId":"tt1","mediaType":"movie",'
                              '"titles":{"en":"Amélie\\/2","orig":"Amélie\\/2"},"tmdbId":1}],"schema":1}')
+
+
+class Franchise(Staged):
+    """P179 also files a title into critics' and editors' lists. WALL-E's targets are "BBC's 100 Greatest
+    Films of the 21st Century" (Q26705935, a Wikimedia list article) and a real series; the list sorts
+    first, so the older scrape shipped it as the franchise and linked WALL-E to Amélie and Inception."""
+
+    LIST, SERIES, CATALOG = "Q26705935", "Q9000", "Q56070713"
+
+    def shipped(self):
+        return {(r["mediaType"], r["tmdbId"]): r for r in self.read(f"facts-{VERSION}.pre-merge.json")["records"]}
+
+    def rescrape(self, targets):
+        """The corpus pass from scratch, with movie:1 filed under `targets`."""
+        for name in ("facts-fields.json", "facts-entities.json"):
+            if os.path.exists(os.path.join(self.out, name)):
+                os.remove(os.path.join(self.out, name))
+        self.wd.facts[("movie", 1)]["franchise"] = targets
+        self.run_stage()
+
+    def test_a_list_is_not_a_franchise_whatever_order_the_targets_arrive_in(self):
+        self.wd.members = {self.SERIES: 4}
+        for targets in ([self.LIST, self.SERIES], [self.SERIES, self.LIST]):
+            with self.subTest(targets=targets):
+                self.rescrape(targets)
+                self.assertEqual(self.shipped()[("movie", 1)]["franchise"], [self.SERIES])
+                self.assertNotIn(self.LIST, self.read(f"facts-{VERSION}.pre-merge.json")["entities"])
+                self.assertEqual(sorted(self.read("facts-fields.json")["movie:1"]["franchise"]),
+                                 sorted(targets), "the checkpoint keeps every target")
+
+    def test_a_title_filed_only_under_a_list_has_no_franchise(self):
+        self.wd.facts[("movie", 1)]["franchise"] = [self.LIST]
+        self.run_stage()
+        self.assertNotIn("franchise", self.shipped()[("movie", 1)])
+
+    def test_the_most_specific_series_comes_first(self):
+        """A studio's canon is typed a film series too; the story's own series is the one two titles share
+        because they are one story. Fewest members first, whatever order the targets came in."""
+        self.wd.members = {self.SERIES: 4, self.CATALOG: 67}
+        for targets in ([self.CATALOG, self.SERIES, self.LIST], [self.LIST, self.SERIES, self.CATALOG]):
+            with self.subTest(targets=targets):
+                self.rescrape(targets)
+                self.assertEqual(self.shipped()[("movie", 1)]["franchise"], [self.SERIES, self.CATALOG])
+
+    def test_a_row_an_older_scrape_collapsed_is_asked_again(self):
+        """The older scrape kept only the least Q-id — the list — so the series was never checkpointed."""
+        self.wd.members = {self.SERIES: 4}
+        self.wd.facts[("movie", 1)]["franchise"] = [self.LIST, self.SERIES]
+        self.run_stage()
+        fields = self.read("facts-fields.json")
+        fields["movie:1"]["franchise"] = self.LIST
+        with open(os.path.join(self.out, "facts-fields.json"), "w", encoding="utf-8") as fh:
+            json.dump(fields, fh)
+        asked = len(self.wd.asked["facts"])
+        self.run_stage()
+        self.assertEqual(self.wd.asked["facts"][asked:], [("movie", (1,), "franchise")])
+        self.assertEqual(self.read("facts-fields.json")["movie:1"]["franchise"], [self.LIST, self.SERIES])
+        self.assertEqual(self.shipped()[("movie", 1)]["franchise"], [self.SERIES])
 
 
 class Resume(Staged):

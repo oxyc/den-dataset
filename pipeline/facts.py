@@ -185,10 +185,62 @@ def scrape_batches(fields, types, cache, pace, checkpointed):
     return skipped
 
 
+def refresh_collapsed_franchises(fields, cache, checkpointed):
+    """Re-ask P179 for the rows an older scrape checkpointed as ONE Q-id. That scrape kept the least Q-id of
+    several and dropped the rest, so the series behind a list target (WALL-E's was the BBC list) is not in
+    the checkpoint at all, and filtering what is there would lose it. The query text is unchanged, so a
+    batch asked before is answered from the cache."""
+    stale = by_type(key for key, row in fields.items() if isinstance(row.get("franchise"), str))
+    item = next(item for item in wd.SPECS if item.key == "franchise")
+    for kind, ids in stale.items():
+        media = "tv" if kind == "tv" else "movie"
+        for start in range(0, len(ids), BATCH):
+            batch = ids[start:start + BATCH]
+            try:
+                got, _ = wd.fetch_facts(batch, media, item, cache)
+            except (wikidata.WikidataError, http.HTTPError) as failure:
+                raise StageError(f"facts: re-asking P179 for {len(batch)} {kind} rows failed ({failure}). The "
+                                 f"rest is checkpointed; re-run.") from None
+            for tmdb_id in batch:
+                row = fields[f"{kind}:{tmdb_id}"]
+                if tmdb_id in got:
+                    row["franchise"] = got[tmdb_id]
+                else:
+                    row.pop("franchise", None)
+            checkpointed()
+    if stale:
+        say(f"franchise: re-asked P179 for {sum(len(ids) for ids in stale.values())} collapsed rows")
+
+
+def resolve_franchises(fields, cache):
+    """Keep a title's P179 targets only where they are a series (`wd.SERIES_CLASSES`), most specific first,
+    and drop the field where none is. Runs before the entities are named, so a rejected list is not named
+    either. Derived, like `basedOnKind`: the checkpoint keeps every target, so the rule can change without
+    a re-scrape."""
+    targets = set()
+    for row in fields.values():
+        if isinstance(row.get("franchise"), list):
+            targets.update(row["franchise"])
+    members = wd.series(sorted(targets), cache)
+    kept = dropped = 0
+    for row in fields.values():
+        if not isinstance(row.get("franchise"), list):
+            continue
+        found = wd.franchises(row["franchise"], members)
+        if found:
+            row["franchise"] = found
+            kept += 1
+        else:
+            del row["franchise"]
+            dropped += 1
+    say(f"franchise: {len(members)} of {len(targets)} P179 targets are a series; "
+        f"{kept} titles keep one, {dropped} had only lists and the like")
+
+
 def resolve_entities(fields, path):
     """Every Q-id a record names, resolved once and remembered: a resumed run that re-resolved all of them
-    spent its whole life here at 16,500 titles and never reached a new batch. `franchise` is a single
-    Q-id, not a list, and a harvest that walked only lists left all 3,019 of them unnamed."""
+    spent its whole life here at 16,500 titles and never reached a new batch. A single Q-id is walked too:
+    `franchise` was one, and a harvest that walked only lists left all 3,019 of them unnamed."""
     names = checkpoint(path)
     qids = set()
     for row in fields.values():
@@ -285,7 +337,9 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE):
         say(f"resuming from {len(fields)} checkpointed titles")
         types = {kind: [i for i in ids if f"{kind}:{i}" not in fields] for kind, ids in types.items()}
     skipped = scrape_batches(fields, types, cache, pace, lambda: save(fields_path, fields))
+    refresh_collapsed_franchises(fields, cache, lambda: save(fields_path, fields))
 
+    resolve_franchises(fields, cache)
     names = resolve_entities(fields, os.path.join(directory, "facts-entities.json"))
     resolve_sources(fields, os.path.join(directory, "facts-source-types.json"))
     entities = shipped_entities(names, fields)

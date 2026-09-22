@@ -236,7 +236,7 @@ class Wikidata:
         if items:
             rows = []
             for qid in re.findall(r"wd:(Q\d+)", items.group(1)):
-                rows += [dict(row, item=ENTITY + qid) for row in self.about_item(head, qid)]
+                rows += [dict(row, item=ENTITY + qid) for row in self.about_item(head, query, qid)]
         else:
             media = "movie" if "wdt:P4947 ?tmdb" in query else "tv" if "wdt:P4983 ?tmdb" in query else None
             ids = re.findall(r'"(\d+)"', re.search(r"VALUES \?tmdb \{([^}]*)\}", query).group(1))
@@ -292,7 +292,18 @@ class Wikidata:
             return [{"alias": alias} for alias in self.items[qid].get("aliases") or []]
         raise AssertionError(f"the fixture's Wikidata does not know this query:\n{query}")
 
-    def about_item(self, head, qid):
+    def about_item(self, head, query, qid):
+        if "?members" in head:
+            # `?item wdt:P31/wdt:P279* ?class`, walked over the fixture's own statements.
+            classes = set(re.findall(r"wd:(Q\d+)", re.search(r"VALUES \?class \{([^}]*)\}", query).group(1)))
+            seen, frontier = set(), list(self.claims(qid, "P31"))
+            while frontier:
+                kind = frontier.pop()
+                if kind not in seen:
+                    seen.add(kind)
+                    frontier += self.claims(kind, "P279")
+            members = sum(1 for item in self.items if qid in self.claims(item, "P179"))
+            return [{"members": str(members)}] if seen & classes and members else []
         if "?itemLabel ?pid" in head:
             return [{"itemLabel": self.label(qid), "pid": next(iter(self.claims(qid, "P4985")), None)}]
         if head == "SELECT ?item ?alias":
@@ -598,6 +609,15 @@ class DenRun(unittest.TestCase):
         self.assertEqual(meta["storeBytes"], os.path.getsize(store_path))
         for entry in meta["storeInputs"]:
             self.assertEqual(entry["sha256"], sha256(entry["path"]), f"storeInputs {entry['arg']}")
+
+    def test_a_critics_list_filed_under_p179_is_not_the_franchise(self):
+        """movie:900001 is filed under a Wikimedia list article (Q98000000, the least Q-id) and a film
+        trilogy. The series reaches the store; the list is named nowhere."""
+        record = next(r for r in self.facts()["records"] if r["mediaType"] == "movie" and r["tmdbId"] == 900001)
+        self.assertEqual(record["franchise"], ["Q98000001"])
+        self.assertNotIn("Q98000000", self.facts()["entities"])
+        store = Store(self.path(artifacts.STORE))
+        self.assertEqual(dict(zip(store.keys(), store.column("franchise", "I", 4)))["movie:900001"], 98000001)
 
     def test_every_shipped_title_has_a_vector_and_says_which(self):
         store = Store(self.path(artifacts.STORE))

@@ -6,7 +6,8 @@ which times out at WDQS on a 100-id batch.
 
 **Only the per-property queries are cached**, under the key the Swift scrape used (`sparql-facts` plus
 the query text, which includes the id batch): a scrape is re-run far more often than it succeeds outright,
-and a batch that died on its last property should not pay for all of them again. The titles hop and the
+and a batch that died on its last property should not pay for all of them again. The franchise class
+requests (`series`) are cached too, under their own path. The titles hop and the
 entity and source-work lookups were never cached; the scrape checkpoints what they return instead.
 
 Everything an entity is carried as is a Q-id; names live in a shared entity map, resolved once per build.
@@ -58,7 +59,7 @@ SPECS = (
     spec("composers", "P86", "entity"),                      # 71% on films
     spec("cinematographers", "P344", "entity"),              # 61% on films
     spec("runtimeMinutes", "P2047", "literal", single=True, numeric=True),
-    spec("franchise", "P179", "entity", single=True),        # sparse (41% top films, 5% tail) — tiebreak only
+    spec("franchise", "P179", "entity"),                     # sparse (41% top films, 5% tail); see SERIES_CLASSES
     spec("mainSubjects", "P921", "entity"),                  # 29%
     spec("basedOn", "P144", "entity"),                       # 18% — links adaptations of one source
     spec("narrativeLocations", "P840", "entity"),            # 47%
@@ -260,6 +261,69 @@ def fetch_facts(ids, media, item, cache=None):
     if key is not None:
         cache.write(key, payload)
     return parsed, True
+
+
+#: What a P179 ("part of the series") target must be an instance of, through P279*, to count as a
+#: franchise: a film series, a television series or a media franchise. P179 is also where editors file a
+#: title into critics' and editors' lists — WALL-E is part of "BBC's 100 Greatest Films of the 21st Century"
+#: (a Wikimedia list article) — and taken as a franchise, one list linked 97 unrelated films together.
+SERIES_CLASSES = ("Q24856", "Q5398426", "Q196600")
+#: The class requests' cache path — their own, beside the per-property ones.
+SERIES_CACHE_PATH = "sparql-series"
+
+
+def series_query(qids):
+    """Which of `qids` are a series, and how many items Wikidata files under each (its P179 members)."""
+    values = " ".join(f"wd:{q}" for q in sorted(set(qids)))
+    classes = " ".join(f"wd:{q}" for q in SERIES_CLASSES)
+    return ("SELECT ?item (COUNT(DISTINCT ?member) AS ?members) WHERE {\n"
+            f"  VALUES ?item {{ {values} }}\n"
+            f"  FILTER EXISTS {{ VALUES ?class {{ {classes} }} ?item wdt:P31/wdt:P279* ?class . }}\n"
+            "  ?member wdt:P179 ?item .\n"
+            "}\n"
+            "GROUP BY ?item")
+
+
+def parse_series(payload):
+    out = {}
+    for binding in bindings(payload):
+        uri, members = _value(binding, "item"), _int(_value(binding, "members"))
+        if uri is not None and members is not None:
+            out[_qid(uri)] = members
+    return out
+
+
+def series(qids, cache=None, batch=100):
+    """`Q-id -> member count` for the `qids` that are a series; a target that is not one is absent. Cached
+    per batch like the per-property requests."""
+    out = {}
+    ordered = sorted(set(qids))
+    for start in range(0, len(ordered), batch):
+        query = series_query(ordered[start:start + batch])
+        key = cache.key(SERIES_CACHE_PATH, {"q": query}) if cache is not None else None
+        hit = cache.read(key) if key is not None else None
+        if hit is not None:
+            try:
+                out.update(parse_series(hit))
+                continue
+            except WikidataError:
+                pass
+        payload = _sparql(query)
+        out.update(parse_series(payload))
+        if key is not None:
+            cache.write(key, payload)
+    return out
+
+
+def franchises(targets, members):
+    """A title's P179 targets that are a series, the most specific first: the fewest members, then the
+    lowest Q-id number. The store keeps only the first, so that one has to be the one two titles most
+    plausibly share BECAUSE they are one story — "Frozen" over "Walt Disney Animation Studios feature
+    films", which is typed an animated film series too and holds every film the studio made. Both keys are
+    facts about the target, not about the row or the corpus, so the choice is the same whatever the order
+    the values arrive in and whichever pass scraped the title."""
+    kept = {q for q in targets if q in members}
+    return sorted(kept, key=lambda q: (members[q], _int(q[1:]) or 0, q))
 
 
 def article_title(url):
