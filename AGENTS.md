@@ -11,19 +11,14 @@ prose somewhere that can go stale without anything failing.
 | What does a store section mean? | den-spec `wire/store-v1.md`, then the `store/` module named for its heading. |
 | What order are the store's sections written in? | `store/build.py`, and `PROVENANCE` declares the same order. |
 | Why was a publish refused? | `scripts/publish-dataset.sh` and the checks it runs under `scripts/`. `pipeline/publish.py` runs it and adds no guard of its own. |
-| How do I run it? | `./den run --dataset-version <ver> --out-dir out` — which ENDS IN A PUBLISH. `./den stage <name>` runs one step. |
+| How do I run it? | `docs/OPERATE.md`. `./den run --dataset-version <ver>` runs every stage; it skips the paid classify pass without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. |
 
 ## The part that is still being rebuilt
 
-`pipeline/` holds **eleven** stages today — the worklist, the enrichment drain, the article dump, the
-classify pass, the Wikidata doc facts, the embed pass, finalize, the facts scrape and merge, the corpus join, the
-store build and the publish. Every step `docs/OPERATE.md` walks through is one of them. What is left
-outside are the side passes nothing here runs but two stages read —
-the second classify pass and the premise tags under `scripts/v2/` — and each still answers for itself in
-`pipeline/artifacts.py` until it lands.
-
-That is the migration in oxyc/den-dataset#27, not a second generation: stages join `STAGES` one at a
-time, and the old tree is deleted in the commit that makes the new one authoritative.
+`pipeline/` holds **twelve** stages — `./den stages` lists them. What is left outside are the side passes
+no stage runs but the corpus join and the store read — the delta question pass (`scripts/v2/run_delta.py`) and the
+premise tags — and each still answers for itself in `pipeline/artifacts.py` until it lands. Emptying
+`scripts/` into the packages is oxyc/den-dataset#73.
 
 `lib/` is what a stage needs from OUTSIDE the machine — HTTP with one retry policy, the response cache,
 and the upstream clients. It is held to the same reachability rule, entered from the stages that import
