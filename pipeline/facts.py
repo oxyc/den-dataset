@@ -166,7 +166,9 @@ def scrape_batches(fields, types, cache, pace, checkpointed):
                         fields.setdefault(f"{kind}:{tmdb_id}", {})[item.key] = value
                     if live and pace:
                         time.sleep(pace)
-                for tmdb_id, found in wd.titles(batch, media).items():
+                # The languages were fetched above; the original title is chosen in one of them.
+                languages = {i: (fields.get(f"{kind}:{i}") or {}).get("languages") or [] for i in batch}
+                for tmdb_id, found in wd.titles(batch, media, languages).items():
                     strings = title_strings(found)
                     if strings:
                         fields.setdefault(f"{kind}:{tmdb_id}", {})["titles"] = strings

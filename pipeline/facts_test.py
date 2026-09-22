@@ -36,6 +36,7 @@ class Wikidata:
         self.types = {}         # qid -> [P31 labels]
         self.asked = {"facts": [], "titles": [], "names": [], "types": []}
         self.failing = set()    # (media, tmdbId) whose batch raises
+        self.languages = []     # (media, the languages the titles hop was told) per call
         self.live = False       # answered from the cache, so nothing is paced
 
     def fetch_facts(self, ids, media, item, cache=None):
@@ -47,8 +48,9 @@ class Wikidata:
                  if item.key in self.facts.get((media, i), {})}
         return found, self.live
 
-    def titles_of(self, ids, media):
+    def titles_of(self, ids, media, languages=None):
         self.asked["titles"].append((media, tuple(ids)))
+        self.languages.append((media, languages))
         return {i: self.titles[(media, i)] for i in ids if (media, i) in self.titles}
 
     def entity_details(self, qids):
@@ -180,6 +182,12 @@ class Passes(Staged):
         records = {(r["mediaType"], r["tmdbId"]): r for r in self.read(f"facts-{VERSION}.pre-merge.json")["records"]}
         self.assertEqual(records[("movie", 1)]["basedOnKind"], ["book"])
         self.assertNotIn("basedOnKind", records[("tv", 1)])
+
+    def test_the_titles_hop_is_told_each_titles_languages(self):
+        """The original title is chosen in the title's own language, which the property requests fetched."""
+        self.wd.facts[("tv", 1)]["languages"] = ["JA"]
+        self.run_stage()
+        self.assertIn(("tv", {1: ["JA"]}), self.wd.languages)
 
     def test_the_file_is_the_swift_encoders_bytes(self):
         """Keys sorted by code point, compact, `/` escaped, UTF-8 raw. Measured identical to the binary's

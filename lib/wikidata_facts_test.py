@@ -6,6 +6,7 @@ merge-base binary filled an empty cache with 1,600 per-property answers, and thi
 of every one of them — 1,600 of 1,600 — and replayed them without asking WDQS anything (oxyc/den-dataset#27).
 """
 import json
+import random
 import tempfile
 import unittest
 from unittest import mock
@@ -116,10 +117,56 @@ class Lookups(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def test_a_titles_first_label_is_kept(self):
-        self.answers = {"main": body({"tmdb": "1", "label": "Amelie"}, {"tmdb": "1", "label": "Amélie"}),
+    def test_the_title_strings_do_not_depend_on_row_order(self):
+        """WDQS returns the cross product of a title's articles, P1476 values and labels in no fixed order.
+        Every order of the same rows gives the same strings: an `en` label over a `mul` one, otherwise the
+        least value by code point."""
+        rows = [{"tmdb": "1", "article": "https://en.wikipedia.org/wiki/" + article, "orig": orig,
+                 "origLang": "ja", "label": label, "labelLang": lang}
+                for article in ("Tokyo_Revengers", "Tokyo_Revengers_(TV_series)")
+                for orig in ("東京卍リベンジャーズ", "東京リベンジャーズ")
+                for label, lang in (("Tokyo Revengers", "mul"), ("Tokyo Revengers (anime)", "en"))]
+        for seed in range(12):
+            shuffled = list(rows)
+            random.Random(seed).shuffle(shuffled)
+            with self.subTest(seed=seed):
+                self.answers = {"main": body(*shuffled), "alias": body()}
+                self.assertEqual(wd.titles([1], "movie", {1: ["JA"]})[1],
+                                 {"article": "Tokyo Revengers", "label": "Tokyo Revengers (anime)",
+                                  "original": "東京リベンジャーズ", "aliases": []})
+
+    def test_the_original_title_is_the_one_in_the_titles_own_language(self):
+        """P1476 also carries translations. Measured: a Swedish film whose P1476 holds the Swedish and a
+        German title, and a Ukrainian one with a Finnish — the least value alone picked the translation."""
+        rows = [{"tmdb": "1", "orig": "Miraklet i Gullspång", "origLang": "sv"},
+                {"tmdb": "1", "orig": "Das Gullspång Geheimnis", "origLang": "de"},
+                {"tmdb": "2", "orig": "Віддалений гавкіт собак", "origLang": "uk"},
+                {"tmdb": "2", "orig": "Koirien kaukainen haukkuminen", "origLang": "fi"}]
+        for seed in range(6):
+            shuffled = list(rows)
+            random.Random(seed).shuffle(shuffled)
+            with self.subTest(seed=seed):
+                self.answers = {"main": body(*shuffled), "alias": body()}
+                got = wd.titles([1, 2], "movie", {1: ["SV"], 2: ["UK"]})
+                self.assertEqual((got[1]["original"], got[2]["original"]),
+                                 ("Miraklet i Gullspång", "Віддалений гавкіт собак"))
+        self.answers = {"main": body(*rows), "alias": body()}
+        self.assertEqual(wd.titles([1], "movie")[1]["original"], "Das Gullspång Geheimnis",
+                         "with no language to go on, the least value — deterministic, and no better")
+
+    def test_a_mul_label_is_taken_when_there_is_no_en_one(self):
+        self.answers = {"main": body({"tmdb": "1", "label": "Parasite", "labelLang": "mul"},
+                                     {"tmdb": "1", "label": "Gisaengchung", "labelLang": "mul"}),
                         "alias": body()}
-        self.assertEqual(wd.titles([1], "movie")[1]["label"], "Amelie")
+        self.assertEqual(wd.titles([1], "movie")[1]["label"], "Gisaengchung")
+
+    def test_the_label_query_asks_for_its_language(self):
+        """Without it, `en` and `mul` rows cannot be told apart and the rule above has nothing to go on."""
+        asked = []
+        self.answers = {"main": body(), "alias": body()}
+        with mock.patch.object(wd, "_sparql", lambda query: asked.append(query) or body()):
+            wd.titles([1], "movie")
+        self.assertIn("(LANG(?label) AS ?labelLang) (LANG(?orig) AS ?origLang)", asked[0])
 
     def test_an_unresolved_entity_label_is_not_a_name(self):
         """The label service answers a miss with the item's own Q-id."""

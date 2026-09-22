@@ -276,15 +276,34 @@ def _run(select, body, ids, media):
     return bindings(_sparql(query))
 
 
-def titles(ids, media):
+def _language(tag):
+    """`zh-hant` → `zh`: the part of a language tag an ISO 639-1 code (P218) can match."""
+    return (tag or "").split("-")[0].lower()
+
+
+def titles(ids, media, languages=None):
     """`tmdbId -> {article, label, original, aliases}` — the enwiki article, `rdfs:label`, P1476 and every
     English alias. Search needs all of them: a title index holding only the original title misses
     "parasite" and "spirited away". Aliases are their own request because `skos:altLabel` is
-    multi-valued and multiplies every other row."""
+    multi-valued and multiplies every other row.
+
+    A title can have several of each — two P1476 values, an `en` label and a `mul` one, two items sharing
+    a TMDB id — and WDQS returns the rows in no fixed order. The Swift kept whichever came first, so one
+    title shipped a different original title from one run to the next (tv:105009: 東京リベンジャーズ, then
+    東京卍リベンジャーズ). Every candidate is collected and one is chosen by rule:
+
+      * the original title in one of the title's own languages (`languages`: tmdbId -> its P364 codes, as
+        the `languages` fact holds them). P1476 is where editors also put translations, so the least
+        value alone picks a Latin-script translation over the native title — over the facts oracle's
+        2,000 titles, 44 have several P1476 values, and code-point order alone ships a Finnish title for a
+        Ukrainian film (movie:502927) and a German one for a Swedish film (movie:1115105). Ties — a
+        co-production's two languages, a romanisation tagged like its original, a title with no P364 —
+        fall through to:
+      * the least value by code point, for every string; and an `en` label before a `mul` one."""
     if not ids:
         return {}
-    out = {}
-    for binding in _run("?article ?label ?orig",
+    found = {}
+    for binding in _run("?article ?label ?orig (LANG(?label) AS ?labelLang) (LANG(?orig) AS ?origLang)",
                         "  OPTIONAL { ?article schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/> . }\n"
                         "  OPTIONAL { ?film wdt:P1476 ?orig . }\n"
                         "  OPTIONAL { ?film rdfs:label ?label . FILTER(LANG(?label) IN ('en','mul')) }",
@@ -292,13 +311,22 @@ def titles(ids, media):
         tmdb_id = _int(_value(binding, "tmdb"))
         if tmdb_id is None:
             continue
-        row = out.setdefault(tmdb_id, {"article": None, "label": None, "original": None, "aliases": []})
-        if row["article"] is None and _value(binding, "article") is not None:
-            row["article"] = article_title(_value(binding, "article"))
-        if row["label"] is None:
-            row["label"] = _value(binding, "label")
-        if row["original"] is None:
-            row["original"] = _value(binding, "orig")
+        seen = found.setdefault(tmdb_id, {"article": set(), "label": set(), "original": set()})
+        if _value(binding, "article") is not None:
+            title = article_title(_value(binding, "article"))
+            if title is not None:
+                seen["article"].add(title)
+        if _value(binding, "label") is not None:
+            seen["label"].add((_value(binding, "labelLang") != "en", _value(binding, "label")))
+        if _value(binding, "orig") is not None:
+            seen["original"].add((_language(_value(binding, "origLang")), _value(binding, "orig")))
+    out = {}
+    for tmdb_id, seen in found.items():
+        own = {_language(code) for code in (languages or {}).get(tmdb_id) or ()}
+        original = min(seen["original"], key=lambda cand: (cand[0] not in own, cand[1]), default=(None, None))
+        out[tmdb_id] = {"article": min(seen["article"], default=None),
+                        "label": min(seen["label"], default=(None, None))[1],
+                        "original": original[1], "aliases": []}
     for binding in _run("?alias", "  ?film skos:altLabel ?alias . FILTER(LANG(?alias) IN ('en','mul'))",
                         ids, media):
         tmdb_id, alias = _int(_value(binding, "tmdb")), _value(binding, "alias")
