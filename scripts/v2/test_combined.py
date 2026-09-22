@@ -76,27 +76,68 @@ def record(text):
     }
 
 
-#: What the shipped pass recorded: `combined-v1-r2.jsonl.manifest.json`'s `taxonomySha256` and
-#: `globalQuestionsSha256`. The vocabulary moved out of `Sources/` in oxyc/den-dataset#27 with `git mv`,
-#: so both are pins on the move having changed nothing a question is built from.
+#: What the shipped pass recorded in `combined-v1-r2.jsonl.manifest.json`. `SHIPPED_TAXONOMY_SHA` is the
+#: digest of the vocabulary as Swift source; converting it to JSON (oxyc/den-dataset#27) necessarily
+#: changed that, so it is no longer the file's digest and is kept here as the superseded one the lineage
+#: has to name. The two question digests are what replaced it as the pin: they are what the pass actually
+#: bought answers to, and they did not move.
 SHIPPED_TAXONOMY_SHA = "dd048e59177955307d1bbff7bf88c79f4a66e8bec053c96a32769406d6172f49"
 SHIPPED_GLOBAL_QUESTIONS_SHA = "8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964"
+SHIPPED_LABEL_MAPPING_SHA = "06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577"
 
 
 class QuestionTests(unittest.TestCase):
-    def test_the_vocabulary_is_the_committed_data_file_and_its_bytes_are_the_shipped_ones(self):
-        """The vocabulary is data, not code: nothing compiles it, and it sits beside the other committed
-        inputs. What a manifest pins is its DIGEST, so the move is only safe while that digest holds."""
+    def test_the_vocabulary_is_the_committed_json_file(self):
+        """The vocabulary is data, not code: nothing compiled the Swift it used to be written in, and it
+        sits beside the other committed inputs under the name of what it holds."""
         self.assertEqual(os.path.relpath(combined_questions.TAXONOMY, combined_questions.ROOT),
-                         os.path.join("data", "taxonomy-t02.swift"))
-        self.assertEqual(run_combined.sha256_file(combined_questions.TAXONOMY), SHIPPED_TAXONOMY_SHA)
+                         os.path.join("data", "genres-moods-vocabulary.json"))
+        with open(combined_questions.TAXONOMY, encoding="utf-8") as fh:
+            document = json.load(fh)
+        self.assertEqual(document["version"], "t02")
 
     def test_the_questions_built_from_it_are_the_ones_the_paid_pass_asked(self):
-        """The $20.47 pass will not be run again, so the question set it bought answers to is the oracle:
-        a taxonomy edit that reached a question would show up here as a different digest."""
-        questions, _, _ = combined_questions.global_questions()
+        """The $20.47 pass will not be run again, so the question set it bought answers to is the oracle,
+        and it is the whole safety argument for rewriting the file the questions are built from: the
+        vocabulary is JSON now, and these two digests say the labels came through it unchanged. A label
+        added, dropped, renamed or reordered would show up here as a different digest."""
+        questions, mapping, _ = combined_questions.global_questions()
         self.assertEqual(run_combined.sha256_text(run_combined.canonical(questions)),
                          SHIPPED_GLOBAL_QUESTIONS_SHA)
+        self.assertEqual(run_combined.sha256_text(run_combined.canonical(mapping)),
+                         SHIPPED_LABEL_MAPPING_SHA)
+
+    def test_the_regional_labels_no_question_is_built_from_are_the_shipped_ones(self):
+        """The one family the question digests cannot speak for: regional labels describe origin, are
+        derived from metadata and are asked about nowhere, so they are held to their names directly."""
+        self.assertEqual(combined_questions.taxonomy()["regional"], [
+            "Nordic Noir", "K-Drama", "Korean Thriller", "British Crime", "French Cinema",
+            "Italian Cinema", "Spanish-language Thriller", "Latin American", "Turkish Drama",
+            "Bollywood/Hindi", "Scandinavian", "J-Horror", "German Cinema"])
+
+    def test_a_label_written_twice_is_refused(self):
+        """One spelling per label, across families as well as within one. Two families holding the same
+        name would ask the same question twice under different ids, or collide on one."""
+        document = json.load(open(combined_questions.TAXONOMY, encoding="utf-8"))
+        document["moods"] = document["moods"] + ["Heist"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "vocabulary.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(document, fh)
+            with self.assertRaisesRegex(ValueError, "written once"):
+                combined_questions.taxonomy(path)
+
+    def test_a_family_that_is_missing_or_empty_is_refused(self):
+        """A vocabulary that lost a family would build a question set missing every label in it, and the
+        run would buy answers to it. It stops at the read instead."""
+        for broken in ({"moods": []}, {"thematic": None}, {"version": ""}):
+            document = {**json.load(open(combined_questions.TAXONOMY, encoding="utf-8")), **broken}
+            with tempfile.TemporaryDirectory() as directory:
+                path = os.path.join(directory, "vocabulary.json")
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(document, fh)
+                with self.assertRaises(ValueError):
+                    combined_questions.taxonomy(path)
 
     def test_canonical_taxonomy_and_question_counts(self):
         questions, mapping, taxonomy = combined_questions.global_questions()
@@ -225,37 +266,43 @@ class RunnerTests(unittest.TestCase):
         identity rather than to a filename."""
         with tempfile.TemporaryDirectory() as directory:
             config = self.config_for(directory)
-        self.assertEqual(config["taxonomy"], os.path.join("data", "taxonomy-t02.swift"))
+        self.assertEqual(config["taxonomy"], os.path.join("data", "genres-moods-vocabulary.json"))
         self.assertFalse(os.path.isabs(config["taxonomy"]))
         self.assertTrue(os.path.isfile(os.path.join(combined_questions.ROOT, config["taxonomy"])))
-        self.assertEqual(config["taxonomySha256"], SHIPPED_TAXONOMY_SHA)
+        self.assertEqual(config["taxonomyVersion"], "t02")
+        self.assertEqual(config["globalQuestionsSha256"], SHIPPED_GLOBAL_QUESTIONS_SHA)
         self.assertEqual(config["plannerVersion"], run_combined.PLANNER_VERSION)
 
     def test_a_taxonomy_outside_the_repo_keeps_its_absolute_path(self):
         """`repo_relative` spells a path from the root only when it is under it. A `../..` walk out of the
         repo would be neither absolute nor repo-relative — it would depend on where the checkout sits,
         which is the property being removed."""
-        outside = os.path.join(os.path.dirname(combined_questions.ROOT), "elsewhere", "taxonomy.swift")
+        outside = os.path.join(os.path.dirname(combined_questions.ROOT), "elsewhere", "vocabulary.json")
         self.assertEqual(run_combined.repo_relative(outside), outside)
 
     def test_a_manifest_from_before_the_taxonomy_moved_is_refused_and_says_what_to_do(self):
         """The shards already bought. The planner bump makes their configuration a different one, so a
         resume stops — and the refusal has to distinguish this from a real change, because the rows are
-        fine: the vocabulary is the same bytes at a new path.
+        fine: the same labels, at a new path and in a new format.
+
+        The refusal claims that from the config in front of it rather than from history: the question
+        digests are in the same config and are not among the keys that differ, so what this run would ask
+        is what the manifest bought.
         """
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "manifest.json")
             config = self.config_for(directory)
             before = {**config, "plannerVersion": "whole-or-role-selected-v1",
-                      "taxonomy": "/somewhere/else/Sources/DenDataset/Taxonomy.swift"}
+                      "taxonomy": "/somewhere/else/Sources/DenDataset/Taxonomy.swift",
+                      "taxonomySha256": SHIPPED_TAXONOMY_SHA}
             created = run_combined.load_or_create_manifest(path, before)
             with self.assertRaises(SystemExit) as refused:
                 run_combined.load_or_create_manifest(path, config)
             message = str(refused.exception)
             self.assertIn("plannerVersion", message)
-            self.assertIn("taxonomy", message)
-            self.assertIn("data/taxonomy-t02.swift", message)
-            self.assertIn("vocabulary itself is unchanged", message)
+            self.assertIn("taxonomySha256", message)
+            self.assertIn("data/genres-moods-vocabulary.json", message)
+            self.assertIn("The questions are unchanged", message)
             self.assertIn("audit_combined_bundle.py", message)
             with open(path, encoding="utf-8") as fh:
                 on_disk = json.load(fh)
@@ -274,7 +321,23 @@ class RunnerTests(unittest.TestCase):
             message = str(refused.exception)
             self.assertIn("requestedModel", message)
             self.assertIn("jev-9.9.9", message)
-            self.assertNotIn("vocabulary itself is unchanged", message)
+            self.assertNotIn("The questions are unchanged", message)
+
+    def test_a_vocabulary_that_really_changed_is_not_called_a_reformatting(self):
+        """The claim is only made while the question digests agree. Edit a label and they do not, so the
+        key that says so is among the differences and the message stays silent about the vocabulary —
+        which is the whole reason it reads them off the config instead of off this commit's history."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "manifest.json")
+            config = self.config_for(directory)
+            run_combined.load_or_create_manifest(path, config)
+            changed = {**config, "taxonomy": os.path.join("data", "elsewhere.json"),
+                       "taxonomySha256": "0" * 64, "globalQuestionsSha256": "1" * 64}
+            with self.assertRaises(SystemExit) as refused:
+                run_combined.load_or_create_manifest(path, changed)
+            message = str(refused.exception)
+            self.assertIn("globalQuestionsSha256", message)
+            self.assertNotIn("The questions are unchanged", message)
 
     def test_plan_does_not_create_output_or_need_api_key(self):
         with tempfile.TemporaryDirectory() as directory:

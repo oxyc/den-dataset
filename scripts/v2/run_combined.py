@@ -27,7 +27,9 @@ from typesafe_client import TypeSafe, TypeSafeError
 SCHEMA_VERSION = "combined-jev-v1"
 #: Bumped when the shape of the recorded configuration changes rather than when the questions do. `-v2`
 #: records the taxonomy repo-relative (see `manifest_config`), so a manifest written before it cannot be
-#: resumed — `load_or_create_manifest` says so in those words.
+#: resumed — `load_or_create_manifest` says so in those words. Converting the vocabulary from Swift to
+#: JSON did NOT bump it: every key is still written the same way and still means the same thing, and the
+#: two values that moved with the file, `taxonomy` and `taxonomySha256`, are compared on their own.
 PLANNER_VERSION = "whole-or-role-selected-v2"
 DEFAULT_MAX_STATE_CHARS = 110_000
 
@@ -261,13 +263,21 @@ def brief(value):
     return text if len(text) <= 80 else text[:77] + "..."
 
 
-def taxonomy_moved(differences):
-    """Whether the only difference is this commit's: the planner bump and the taxonomy's new spelling.
+#: The config keys that say where the vocabulary is written down and in what format, rather than what is
+#: in it. `taxonomyVersion` is not one of them: a version bump IS a vocabulary change.
+VOCABULARY_SPELLING_KEYS = {"plannerVersion", "taxonomy", "taxonomySha256"}
 
-    `taxonomySha256` is in the same config, so an unchanged digest beside a changed path says the
-    vocabulary is byte-identical and only where it is written down moved.
+
+def vocabulary_only_rewritten(differences):
+    """Whether the difference is confined to where the vocabulary lives and how it is written.
+
+    It moved out of `Sources/` and was then converted from Swift source to JSON (oxyc/den-dataset#27),
+    which changed its digest without changing a label. That claim is checked rather than asserted:
+    `globalQuestionsSha256` and `labelQuestionMappingSha256` are in this same config, so their absence
+    from `differences` means the questions this run would ask are the ones the manifest recorded.
     """
-    return {key for key, _, _ in differences} == {"plannerVersion", "taxonomy"}
+    keys = {key for key, _, _ in differences}
+    return bool(keys) and keys <= VOCABULARY_SPELLING_KEYS and "taxonomy" in keys
 
 
 def load_or_create_manifest(path, config):
@@ -280,11 +290,15 @@ def load_or_create_manifest(path, config):
             lines = [f"{path} belongs to a different input/question/model/planner configuration:"]
             lines += [f"  {key}: manifest {brief(was)} != this run {brief(now)}"
                       for key, was, now in differences]
-            if taxonomy_moved(differences):
+            if vocabulary_only_rewritten(differences):
                 lines.append(
-                    "  The vocabulary itself is unchanged — taxonomySha256 is the same file, which moved "
-                    "from Sources/DenDataset/Taxonomy.swift to data/taxonomy-t02.swift "
-                    "(oxyc/den-dataset#27) and is now recorded repo-relative.")
+                    "  The questions are unchanged: globalQuestionsSha256 and labelQuestionMappingSha256 "
+                    "are not among the keys above, so this run asks exactly what the manifest bought. "
+                    "taxonomySha256 differs because the vocabulary moved out of "
+                    "Sources/DenDataset/Taxonomy.swift and was converted from Swift source to "
+                    "data/genres-moods-vocabulary.json (oxyc/den-dataset#27) — the same labels and the "
+                    "same version, in a format that hashes differently. Regional labels are the one part "
+                    "no question is built from, so they are the one part that equality does not cover.")
             lines.append(
                 "  The rows already in the output were bought under the manifest's configuration and "
                 "stay valid; re-stamping the manifest onto this one would erase what produced them. "

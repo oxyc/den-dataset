@@ -204,12 +204,26 @@ def short_ref(ref):
     return ref[:7] if re.fullmatch(r"[0-9a-f]{7,64}", ref) else ref
 
 
-def load_lineage(path=LINEAGE):
-    """The recorded exceptions, `{filename: [entry, …]}`. An absent file means no exception is allowed."""
+def _lineage_section(path, section):
     if not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8") as fh:
-        return json.load(fh).get("superseded", {})
+        return json.load(fh).get(section, {})
+
+
+def load_lineage(path=LINEAGE):
+    """The recorded exceptions, `{filename: [entry, …]}`. An absent file means no exception is allowed."""
+    return _lineage_section(path, "superseded")
+
+
+def load_input_lineage(path=LINEAGE):
+    """The recorded exceptions for the committed INPUTS, `{role: [entry, …]}` — `prompt`, `taxonomy`.
+
+    Kept apart from `load_lineage`: the four source files are what the pass IS, and the prompt and the
+    vocabulary are what it was handed. Filing a data file under a source file's name would say a source
+    file changed when none did, and would let a vocabulary edit borrow a reason written about code.
+    """
+    return _lineage_section(path, "supersededInputs")
 
 
 def validate_implementation(where, config, lineage=None):
@@ -263,6 +277,46 @@ def manifest_file(config, name):
     return fallback if fallback and os.path.isfile(fallback) else None
 
 
+def validate_inputs(where, config, lineage=None):
+    """The committed files the manifest pins by digest — the prompt and the vocabulary.
+
+    The digest is what decides it, which is why `manifest_file` can forgive a path that moved: a file
+    that still hashes to what the shard recorded is the file the shard was bought from, wherever it now
+    sits. A digest that differs is a real difference in the bytes, and there are two kinds. One changes
+    what the pass asked — a label added, a prompt reworded — and must refuse. The other changes only how
+    the same content is written down, which is what converting the vocabulary from Swift source to JSON
+    did (oxyc/den-dataset#27): the same labels, the same version, a digest that could not stay.
+
+    Nothing can tell those apart by hashing, so the second is written down in
+    `implementation-lineage.json` under `supersededInputs`, with the evidence that the questions built
+    from it are unchanged. An unrecorded difference is a refusal, and re-stamping the manifest is not an
+    option: it is the provenance of a run that was paid for once.
+
+    Returns the allowances it granted.
+    """
+    lineage = load_input_lineage() if lineage is None else lineage
+    allowed = []
+    for role, hash_name in (("prompt", "promptSha256"), ("taxonomy", "taxonomySha256")):
+        recorded = config.get(hash_name)
+        path = manifest_file(config, role)
+        if path is None:
+            fail(where, f"{role} artifact hash differs: the manifest names no file this checkout can find")
+        actual = sha256_file(path)
+        if actual == recorded:
+            continue
+        entry = next((e for e in lineage.get(role, []) if e.get("sha256") == recorded), None)
+        if entry is None:
+            fail(where, f"{role} artifact hash differs: the shard was bought from "
+                        f"{str(recorded)[:12]} and this tree holds {actual[:12]}. If the file was "
+                        f"rewritten without changing what the pass asked, record it under "
+                        f"supersededInputs in scripts/v2/implementation-lineage.json with the commit, "
+                        f"the reason and the evidence; do not re-stamp the manifest.")
+        allowed.append({"input": role, "sha256": recorded, **{
+            key: entry[key] for key in ("file", "commit", "supersededBy", "why", "evidence")
+            if key in entry}})
+    return allowed
+
+
 def validate_manifest(manifest, articles, enriched_sha):
     config = manifest.get("config")
     if not isinstance(config, dict) or manifest.get("configSha256") != sha256_text(canonical(config)):
@@ -273,10 +327,7 @@ def validate_manifest(manifest, articles, enriched_sha):
         fail("manifest", "article artifact hash differs")
     if config.get("enrichedEvidenceSha256") != enriched_sha:
         fail("manifest", "enriched evidence hash differs")
-    for path_name, hash_name in (("prompt", "promptSha256"), ("taxonomy", "taxonomySha256")):
-        path = manifest_file(config, path_name)
-        if path is None or sha256_file(path) != config.get(hash_name):
-            fail("manifest", f"{path_name} artifact hash differs")
+    validate_inputs("manifest", config)
     validate_implementation("manifest", config)
     if config.get("globalQuestionsSha256") != sha256_text(canonical(config.get("globalQuestions"))):
         fail("manifest", "global question hash differs")

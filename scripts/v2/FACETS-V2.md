@@ -161,7 +161,7 @@ weighted signals instead of treating the dominant `linear` value as equally info
 `run_combined.py` implements that contract separately from the deliberately Choice-only facet runner. Its
 default is the immutable `jev-1.13.0`; a mutable `*-latest` alias is rejected unless explicitly allowed. The
 sidecar manifest stores and hashes the exact global questions, section-question template, and label mapping;
-it also hashes the article artifact, enriched evidence, facet prompt, live Swift taxonomy, requested model,
+it also hashes the article artifact, enriched evidence, facet prompt, genres & moods vocabulary, requested model,
 state planner, and the runner/planner/question/client source files. Each result records the
 model returned by the provider and per-call state/question hashes and token usage. Resume refuses a changed
 manifest, malformed/duplicate rows, or output keys not present in the input.

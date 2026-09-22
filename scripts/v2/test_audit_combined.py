@@ -11,6 +11,10 @@ import audit_combined
 import combined_questions
 import run_combined
 
+#: The `taxonomySha256` every shard in `out-repass` records: the genres & moods vocabulary as the Swift
+#: source it was written in until oxyc/den-dataset#27 converted it to JSON.
+SUPERSEDED_TAXONOMY_SHA = "dd048e59177955307d1bbff7bf88c79f4a66e8bec053c96a32769406d6172f49"
+
 
 def answer_for(question):
     kind = question["type"]
@@ -153,7 +157,8 @@ class ManifestFileTests(unittest.TestCase):
             "schemaVersion": run_combined.SCHEMA_VERSION,
             "articlesSha256": "articles-sha", "enrichedEvidenceSha256": "enriched-sha",
             "prompt": combined_questions.PROMPT, "promptSha256": prompt_sha,
-            "taxonomy": os.path.join("data", "taxonomy-t02.swift"), "taxonomySha256": taxonomy_sha,
+            "taxonomy": os.path.join("data", "genres-moods-vocabulary.json"),
+            "taxonomySha256": taxonomy_sha,
             "globalQuestions": {}, "globalQuestionsSha256": audit_combined.sha256_text(
                 run_combined.canonical({})),
             "sectionQuestionTemplate": audit_combined.section_question("SECTION_ID"),
@@ -180,22 +185,39 @@ class ManifestFileTests(unittest.TestCase):
         """The recorded spelling since the move, and the reason a checkout elsewhere can audit a shard."""
         config = self.manifest_for()["config"]
         self.assertEqual(audit_combined.manifest_file(config, "taxonomy"),
-                         os.path.join(audit_combined.ROOT, "data", "taxonomy-t02.swift"))
+                         os.path.join(audit_combined.ROOT, "data", "genres-moods-vocabulary.json"))
         self.validate(self.manifest_for())
 
     def test_a_manifest_that_names_the_pre_move_path_is_still_auditable(self):
         """Every shard in `out-repass` names `<checkout>/Sources/DenDataset/Taxonomy.swift`, which is not
-        a file anywhere any more. The digest beside it is the shipped vocabulary's, so the file the pass
-        reads today answers for it — and those shards keep the readback they were bought with."""
+        a file anywhere any more, so the file the pass reads today answers for it."""
         pre_move = "/gone/Sources/DenDataset/Taxonomy.swift"
         self.assertEqual(audit_combined.manifest_file({"taxonomy": pre_move}, "taxonomy"),
                          combined_questions.TAXONOMY)
         self.validate(self.manifest_for(taxonomy=pre_move))
 
+    def test_a_shipped_shard_names_the_deleted_swift_path_and_its_digest_and_still_passes(self):
+        """What every manifest in `out-repass` actually holds: the pre-move absolute path AND the digest
+        of the vocabulary as Swift source, which converting it to JSON could not preserve. The path falls
+        back to the file the pass reads today; the digest is forgiven only because the conversion is
+        recorded under `supersededInputs`, with the question digests as the evidence."""
+        self.validate(self.manifest_for(taxonomy="/gone/Sources/DenDataset/Taxonomy.swift",
+                                        taxonomySha256=SUPERSEDED_TAXONOMY_SHA))
+
     def test_a_vocabulary_that_really_changed_is_still_refused(self):
-        """What the fallback must not become: a path nobody can resolve is forgiven, a digest is not."""
+        """What the allowance must not become: a path nobody can resolve is forgiven and a recorded
+        rewrite is forgiven, but a digest nobody wrote a reason for is not."""
         with self.assertRaisesRegex(ValueError, "taxonomy artifact hash differs"):
             self.validate(self.manifest_for(taxonomySha256="0" * 64))
+        with self.assertRaisesRegex(ValueError, "taxonomy artifact hash differs"):
+            self.validate(self.manifest_for(taxonomy="/gone/Sources/DenDataset/Taxonomy.swift",
+                                            taxonomySha256="0" * 64))
+
+    def test_a_prompt_digest_borrows_nothing_from_the_vocabularys_allowance(self):
+        """The allowances are per input. A prompt that changed is a change to what was asked, and the
+        entry recorded for the vocabulary says nothing about it."""
+        with self.assertRaisesRegex(ValueError, "prompt artifact hash differs"):
+            self.validate(self.manifest_for(promptSha256=SUPERSEDED_TAXONOMY_SHA))
 
     def test_a_manifest_that_names_no_taxonomy_at_all_is_refused(self):
         self.assertIsNone(audit_combined.manifest_file({}, "taxonomy"))
@@ -250,6 +272,59 @@ class ImplementationLineageTests(unittest.TestCase):
             current = run_combined.sha256_file(os.path.join(audit_combined.HERE, name))
             for entry in entries:
                 self.assertNotEqual(entry["sha256"], current, f"{name}: stale lineage entry")
+
+
+class InputLineageTests(unittest.TestCase):
+    """The same mechanism for the committed inputs, kept in its own section of the same file.
+
+    A data file's digest is not an implementation's. Recording the vocabulary's under a source file's
+    name would say `combined_questions.py` changed in a way it did not, and would let a future
+    vocabulary edit inherit a reason that was written about code.
+    """
+
+    ROLES = ("prompt", "taxonomy")
+
+    def test_the_vocabularys_superseded_digest_is_recorded_with_its_evidence(self):
+        entries = audit_combined.load_input_lineage()["taxonomy"]
+        entry = next(e for e in entries if e["sha256"] == SUPERSEDED_TAXONOMY_SHA)
+        self.assertIn("8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964",
+                      entry["evidence"])
+        self.assertIn("06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577",
+                      entry["evidence"])
+
+    def test_every_recorded_entry_names_a_commit_a_reason_and_its_evidence(self):
+        for role, entries in audit_combined.load_input_lineage().items():
+            self.assertIn(role, self.ROLES, "an input the manifest does not pin by digest")
+            for entry in entries:
+                self.assertRegex(entry.get("sha256", ""), r"^[0-9a-f]{64}$")
+                self.assertTrue(entry.get("commit"), f"{role}: no commit")
+                self.assertTrue(entry.get("supersededBy"), f"{role}: no superseding commit")
+                self.assertGreater(len(entry.get("why", "")), 40, f"{role}: no reason worth reading")
+                self.assertGreater(len(entry.get("evidence", "")), 40, f"{role}: no evidence")
+
+    def test_no_recorded_entry_names_the_input_as_it_stands(self):
+        """The same staleness check the source files get: a digest the tree already holds needs no
+        exception, and one left recorded for it would excuse the file after it changes again."""
+        for role, entries in audit_combined.load_input_lineage().items():
+            current = run_combined.sha256_file(audit_combined.CURRENT_FILE[role])
+            for entry in entries:
+                self.assertNotEqual(entry["sha256"], current, f"{role}: stale lineage entry")
+
+    def test_the_working_trees_inputs_need_no_exception(self):
+        config = {"prompt": combined_questions.PROMPT,
+                  "promptSha256": run_combined.sha256_file(combined_questions.PROMPT),
+                  "taxonomy": combined_questions.TAXONOMY,
+                  "taxonomySha256": run_combined.sha256_file(combined_questions.TAXONOMY)}
+        self.assertEqual(audit_combined.validate_inputs("here", config), [])
+
+    def test_an_allowance_says_which_input_it_forgave(self):
+        config = {"prompt": combined_questions.PROMPT,
+                  "promptSha256": run_combined.sha256_file(combined_questions.PROMPT),
+                  "taxonomy": "/gone/Sources/DenDataset/Taxonomy.swift",
+                  "taxonomySha256": SUPERSEDED_TAXONOMY_SHA}
+        granted = audit_combined.validate_inputs("here", config)
+        self.assertEqual([entry["input"] for entry in granted], ["taxonomy"])
+        self.assertEqual(granted[0]["file"], "data/taxonomy-t02.swift")
 
 
 if __name__ == "__main__":
