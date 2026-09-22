@@ -30,7 +30,16 @@ import json
 import math
 import operator
 import os
+import platform
 import sys
+
+# `math.sumprod` is 3.12's. A plain Python dot product in its place gives the same report — the fast score
+# only shortlists, the exact one decides — but measured over the corpus at k=50 it took 305 s against 68,
+# which at the timer's k=800 is an hour and more rather than ~15 minutes. So an older interpreter is refused
+# here, by name, before the imports below fail on it less legibly.
+if sys.version_info < (3, 12):
+    sys.exit(f"recluster.py needs Python 3.12 or newer (for math.sumprod); {sys.executable} is "
+             f"{platform.python_version()}. scripts/recluster-run.sh finds one on PATH, or set PYTHON to one.")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)

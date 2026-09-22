@@ -35,11 +35,27 @@ done
 [ -f "$labels" ] || { echo "error: no labels in $OUT_DIR" >&2; exit 1; }
 [ -n "$vectors" ] || { echo "error: no vectors blob in $OUT_DIR" >&2; exit 1; }
 
-python3 scripts/recluster.py --labels "$labels" --vectors "$vectors" \
-                             --k "$K" --iterations 5 --min-size "$MIN_SIZE" --out "$REPORT"
+# recluster.py needs Python 3.12 (math.sumprod — see the script). A machine's `python3` is often older (macOS
+# ships 3.9), so the first interpreter new enough runs it: $PYTHON if set, then the usual names on PATH.
+py=""
+for candidate in "${PYTHON:-python3}" python3 python3.14 python3.13 python3.12; do
+  if command -v "$candidate" >/dev/null 2>&1 &&
+     "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 12))' 2>/dev/null; then
+    py="$candidate"
+    break
+  fi
+done
+[ -n "$py" ] || {
+  echo "error: recluster.py needs Python 3.12 or newer (for math.sumprod), and none of ${PYTHON:+$PYTHON, }python3," \
+       "python3.14, python3.13 or python3.12 on PATH is one. Install one, or set PYTHON to its path." >&2
+  exit 1
+}
+
+"$py" scripts/recluster.py --labels "$labels" --vectors "$vectors" \
+                           --k "$K" --iterations 5 --min-size "$MIN_SIZE" --out "$REPORT"
 
 echo "== tightest candidates =="
-python3 - "$REPORT" <<'PY'
+"$py" - "$REPORT" <<'PY'
 import json, sys
 rows = json.load(open(sys.argv[1]))
 for r in rows[:10]:

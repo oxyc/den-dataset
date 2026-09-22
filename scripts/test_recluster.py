@@ -7,6 +7,7 @@ the real corpus at `scripts/recluster-run.sh`'s settings the two reports were by
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -108,6 +109,44 @@ class Candidates(unittest.TestCase):
         vectors = [[1.0, 0.0]] * 4
         found = recluster.candidates(records, vectors, [0] * 4, [[1.0, 0.0]], 1, 0.5, 0.0)
         self.assertEqual([(row["purity"], row["dominantLabel"]) for row in found], [(0.5, "Heist")])
+
+
+class Interpreter(unittest.TestCase):
+    """3.12's `math.sumprod` is what keeps the weekly run at ~15 minutes; an older interpreter is refused by
+    name, and the runner looks for one that is new enough rather than trusting `python3`."""
+
+    def test_an_older_interpreter_is_refused_by_name(self):
+        pretend = ("import runpy, sys; sys.version_info = (3, 11, 9); "
+                   "runpy.run_path(sys.argv[1], run_name='__main__')")
+        done = subprocess.run([sys.executable, "-c", pretend, os.path.join(HERE, "recluster.py")],
+                              capture_output=True, text=True)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("needs Python 3.12 or newer", done.stderr)
+
+    def run_runner(self, directory, env):
+        return subprocess.run(["bash", os.path.join(HERE, "recluster-run.sh"), directory],
+                              capture_output=True, text=True, env=env)
+
+    def test_the_runner_refuses_when_no_interpreter_on_path_is_new_enough(self):
+        with tempfile.TemporaryDirectory() as shims:
+            for name in ("python3", "python3.12", "python3.13", "python3.14"):
+                path = os.path.join(shims, name)
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write("#!/bin/sh\nexit 1\n")   # every version check fails, as 3.9's does
+                os.chmod(path, 0o755)
+            labels, _ = fixture(shims)
+            env = dict(os.environ, PATH=f"{shims}:/usr/bin:/bin")
+            env.pop("PYTHON", None)
+            done = self.run_runner(shims, env)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("needs Python 3.12 or newer", done.stderr)
+
+    def test_the_runner_uses_the_interpreter_it_is_given(self):
+        with tempfile.TemporaryDirectory() as out:
+            fixture(out)
+            done = self.run_runner(out, dict(os.environ, PYTHON=sys.executable, K="6", MIN_SIZE="3"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("candidate(s)", done.stdout)
 
 
 class Arithmetic(unittest.TestCase):

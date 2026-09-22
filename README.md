@@ -145,7 +145,10 @@ the other 421 would be dropped by the ToS rule regardless.
   taxonomy as data. `scripts/v2/combined_questions.py` parses it as the classify pass's vocabulary and
   hashes it into that pass's manifest, so it stays where that hash says it is.
 - `scripts/` — the operator's drivers, the publisher and its guards. The weekly re-cluster is
-  `scripts/recluster.py`, driven by `scripts/recluster-run.sh`: it is in no build order.
+  `scripts/recluster.py`, driven by `scripts/recluster-run.sh`: it is in no build order. It takes ~15
+  minutes over the corpus at k=800 (the Swift took ~2) and needs Python 3.12, whose `math.sumprod` is what
+  keeps it there — a plain Python dot product gives the same bytes 4.5x slower. The stages need 3.11, the
+  oldest their suites have been run on; `./den` refuses anything older.
 
 ## Build / test
 

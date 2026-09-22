@@ -55,6 +55,15 @@ class Listing(unittest.TestCase):
 
 
 class Dispatch(unittest.TestCase):
+    def test_an_interpreter_older_than_the_floor_is_refused_by_name(self):
+        """macOS's `python3` is 3.9, where the stages die importing a `int | None` annotation."""
+        pretend = ("import runpy, sys; sys.version_info = (3, 10, 14); sys.argv = sys.argv[1:]; "
+                   "runpy.run_path(sys.argv[0], run_name='__main__')")
+        result = subprocess.run([sys.executable, "-c", pretend, DEN, "stages"], capture_output=True, text=True,
+                                cwd=HERE)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("needs Python 3.11 or newer", result.stderr)
+
     def test_a_stage_that_is_not_in_the_order_is_refused_with_the_order(self):
         # A name no stage has and none is likely to take. It used to be "worklist", which stopped testing
         # anything the day that stage landed — a refusal test has to name something that stays unknown.

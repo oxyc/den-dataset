@@ -31,7 +31,14 @@ inputs and outputs. Anything this file grows beyond argument parsing belongs the
 """
 import argparse
 import os
+import platform
 import sys
+
+# 3.11 is the oldest interpreter the suites have been run on; `int | None` in pipeline/contract.py alone needs
+# 3.10. Refused here by name, because on macOS's 3.9 the import below dies in a TypeError about `|`.
+if sys.version_info < (3, 11):
+    sys.exit(f"den needs Python 3.11 or newer; {sys.executable} is {platform.python_version()}. "
+             f"Run it with a newer one (python3.12 ./den …), or put one first on PATH.")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
