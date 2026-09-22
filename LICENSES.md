@@ -45,25 +45,29 @@ can weigh it, and so that the CC BY-SA text itself — which is unambiguous — 
 
 ## TMDB
 
-The store is a **public** release asset on a public repo, so "redistribute" is literal here. What it
-carries that came from TMDB, named column by column:
+The store is a **public** release asset on a public repo, so "redistribute" is literal here. **It carries
+no TMDB-sourced column.** The only TMDB thing in it is the key's `tmdbId`, an identifier, which stays.
 
-| column | rows | source | |
-|---|---|---|---|
-| the key's `tmdbId` | 47,618 | TMDB | an identifier; stays |
-| `card_title` | 47,618 | TMDB, with a Wikidata label as fallback | goes (oxyc/den#118) |
-| `card_year` | 47,618 | TMDB | goes |
-| `votes` | 47,547 | TMDB (`vote_count`) | goes |
-| `card_poster` | 47,534 | TMDB (a poster path) | **removed from the writer; still in the live store** |
+The four that used to be there went in oxyc/den#118, and the live `data-latest` store is that rebuild — its
+manifest records `storeRebuild: "oxyc/den#118 — card_poster and votes removed, card_title/card_year from
+Wikidata"`:
 
-`card_poster` is the state to read carefully: `build_store.py` no longer emits it, but `data-latest` still
-carries the store built before that change, so the published artifact has it until the next publish. That
-publish cannot happen until den-atlas stops requiring the section — `cards_from_store` fetches it with `?`
-before it builds a single card, so a poster-less store costs the whole card map, not just the art.
+| column | was | now |
+|---|---|---|
+| `card_title` | TMDB, with a Wikidata label as fallback | Wikidata (`facts.titles`) |
+| `card_year` | TMDB | Wikidata (`facts.released`) |
+| `votes` | TMDB `vote_count` | gone; den-atlas orders by IMDb's public ratings dump, joined at run time and never stored |
+| `card_poster` | a TMDB poster path | gone; posters are not fetched from TMDB at all |
 
-Nothing else is TMDB-sourced, and `build_store.py` is where that is enforced rather than asserted:
-`PROVENANCE` names the source of every section, `VENDOR_ALLOWED` is the list above, and a build whose
-sections are not exactly the declared set refuses to write. `genres` are Wikidata Q-ids mapped into TMDB's
+`build_store.py` is where that is enforced rather than asserted: `PROVENANCE` names the source of every
+section, `VENDOR_ALLOWED` — the TMDB-sourced sections a build may still emit — is **empty**, and a build
+whose sections are not exactly the declared set refuses to write.
+
+**The store is the only artifact that check covers.** The pipeline's intermediate files still hold TMDB
+fields: the enriched batches are TMDB detail records by construction, and the article dump and the Jev pass
+copy a TMDB `title` and `year` onto every row. Those are local working files and must not be published. Two
+releases that published them by hand — `articles-2026-09-19` and `raw-2026-09-20` — were deleted on
+2026-09-22 for exactly that reason; nothing in code produced or checked them, so no guard saw them. `genres` are Wikidata Q-ids mapped into TMDB's
 genre *id space* — the values are CC0 and the vocabulary is TMDB's. No TMDB prose is redistributed at all:
 no overview, no tagline, no review.
 Enrichment prose is sourced from Wikipedia specifically so that holds, and
@@ -72,8 +76,8 @@ See `data/README.md`.
 
 A rating *score* is never published, and a durable artifact is the reason: den-atlas draws the same line
 at `src/recommend.rs`, which scrubs vote fields out of replay files because they belong in a live request
-or a bounded cache, not in something kept. `votes` is the one column on the wrong side of that line, and
-oxyc/den#118 is where it is being settled.
+or a bounded cache, not in something kept. `votes` was the one column on the wrong side of that line until
+oxyc/den#118 removed it.
 
 ## The derived signals
 

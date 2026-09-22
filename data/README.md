@@ -36,9 +36,12 @@ sidecar keeps every field anything actually reads, at 3.5 MB, and carries no cop
 
 The file is untracked rather than purged from history. Rewriting a public repo's history breaks every
 clone and every SHA quoted in a doc or an issue, and GitHub keeps the old objects reachable regardless — so
-a rewrite would cost a great deal and remove nothing. It is now published, on its own tag: release
-[`articles-2026-09-19`](https://github.com/oxyc/den-dataset/releases/tag/articles-2026-09-19), 47,529
-articles under CC BY-SA 4.0, every row carrying the `revId` the licence's attribution needs. See
+a rewrite would cost a great deal and remove nothing.
+
+It was briefly published on its own tag, `articles-2026-09-19` — 47,529 articles under CC BY-SA 4.0, every
+row carrying the `revId` the licence's attribution needs — and **that release was deleted on 2026-09-22**:
+alongside the Wikipedia text, every row carried the TMDB `title` its enriched record held, on a public repo.
+The file is kept locally. A republication would have to drop the TMDB fields first. See
 [`LICENSES.md`](../LICENSES.md).
 
 Plot lengths are wildly skewed: median 2,515 chars, p90 4,329, max **53,299**. The long tail is mostly
