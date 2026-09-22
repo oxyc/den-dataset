@@ -48,7 +48,7 @@ from lib import http, wikidata, wikipedia
 NAME = "articles"
 
 PRODUCER = "pipeline/articles.py"
-HOW = "./den stage articles --out-dir <dir> --dataset-version <ver>"
+HOW = "./den stage articles --out-dir <dir>"
 #: Appends to a file in the out-dir. A repeat costs only the titles that are not in it yet.
 PUBLISHES = False
 #: Wikipedia's public API, unbilled — and mostly answered from the cache the plot pass already filled.

@@ -162,11 +162,11 @@ cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterpr
 python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popularity-sorted)
 #    THIS IS THE RE-EMBED'S UNIVERSE — the ids we already ship, reordered. It is not the same universe as
 #    the worklist stage, which is where new titles come from:
-#      ./den stage worklist --mode export --out-dir out --dataset-version <ver>
+#      ./den stage worklist --mode export --out-dir out
 #        every id in TMDB's daily dump (put movie_ids.json / tv_series_ids.json in the out-dir first —
 #        `fetch_export` above leaves them gzipped, so gunzip them). The stage refuses a run that did not
 #        name a mode, and one whose dump lost lines to the parse.
-#      ./den stage worklist --mode delta --since YYYY-MM-DD --out-dir out --dataset-version <ver> \
+#      ./den stage worklist --mode delta --since YYYY-MM-DD --out-dir out \
 #          --set universe_movie=out/delta/universe-movie.json --set universe_tv=out/delta/universe-tv.json
 #        what `scripts/delta-run.sh` builds daily — new titles only, skipping out/labels-t02.json. The two
 #        --set flags are why it keeps its lists in delta/: a delta written over the full one does not
@@ -177,13 +177,12 @@ python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popu
 #    batch prints wikiPlot vs tagsOnly. Per batch the stage reads den.env if TMDB_API_KEY is not already
 #    set, and mints a fresh 24h Enterprise bearer if none is held (scripts/lib/den-env.sh). Resumable via
 #    the enrich checkpoint.
-#    `./den stage fetch --out-dir out --dataset-version <ver>` runs the whole drain — both worklists, batch
-#    after batch, until nothing remains, with three stopping rules: an aborted batch is retried, a batch
-#    that finishes having moved `remaining` not at all is a stall, and a batch where every title fell below
-#    the vote floor says so instead of blaming the upstream. `--media movie|tv` does one; `--vote-floor 0`
-#    re-includes the low-vote tail. To drain the RE-EMBED universe above rather than the stage's own, point
-#    it there:
-./den stage fetch --out-dir out --dataset-version <ver> \
+#    `./den stage fetch --out-dir out` runs the whole drain — both worklists, batch after batch, until
+#    nothing remains, with three stopping rules: an aborted batch is retried, a batch that finishes having
+#    moved `remaining` not at all is a stall, and a batch where every title fell below the vote floor says
+#    so instead of blaming the upstream. `--media movie|tv` does one; `--vote-floor 0` re-includes the
+#    low-vote tail. To drain the RE-EMBED universe above rather than the stage's own, point it there:
+./den stage fetch --out-dir out \
     --set universe_movie=out/worklist-movie.json --set universe_tv=out/worklist-tv.json
 #    One batch by hand (credentials already in the environment):
 python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --limit 150
@@ -193,8 +192,8 @@ python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --li
 #     the dumped article, into the `combined-v1-r2*.jsonl` shards the corpus join reads. It is the only step
 #     here that costs money ($20.47 for 47,529 titles), so run it with --plan first; it resumes, so a repeat
 #     buys only what is missing. The questions, the planner and the audit are in `scripts/v2/FACETS-V2.md`.
-./den stage articles --out-dir out --dataset-version <ver>            # the whole article per grounded title
-./den stage classify --out-dir out --dataset-version <ver> --plan     # then again without --plan
+./den stage articles --out-dir out            # the whole article per grounded title
+./den stage classify --out-dir out --plan     # then again without --plan
 
 # 4. Embed — compose(genres + creators + already-decided tags + Wikipedia plot) -> den-embed -> int8[1024];
 #     append to the index store. Reads labels-t02.json, so run it after a classification pass that wrote
@@ -209,10 +208,10 @@ python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --li
 #     space as out/index/embedding-space.json. It resumes, repairs a store torn by a kill, and takes
 #     `--pause-ms` and `--limit` for a long run (`scripts/embed-corpus-run.sh` segments one).
 #     `doc-facts.json` is two of the document's clauses and is required: `./den stage docfacts --out-dir
-#     out --dataset-version <ver>` (~770 SPARQL requests, resumable), or `scripts/v2/derive_doc_facts.py
+#     out` (~770 SPARQL requests, resumable), or `scripts/v2/derive_doc_facts.py
 #     --facts out/facts-<ver>.json --out out/doc-facts.json` when a facts sidecar already exists.
 export DEN_EMBED_URL=http://127.0.0.1:8791     # default; set if the service is elsewhere
-./den stage embed --out-dir out --dataset-version <ver>
+./den stage embed --out-dir out
 #     `--dump-docs <path>` writes the composed documents and embeds NOTHING, for embedding elsewhere — the
 #     documents travel to the serving box rather than the vectors coming back. It needs no embedder: gating
 #     it on one would mean standing up a service purely to write text.
@@ -239,8 +238,8 @@ python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels ou
 # 6. Finalize — index store -> labels-t02.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
 #    Refuses a torn store, vectors of two lengths or of any length but 1024, and an identity record that
 #    disagrees with the vectors or will not parse. `datasetVersion` is derived from the two artifacts'
-#    hashes, so this is where the version the later stages take is decided.
-./den stage finalize --out-dir out --dataset-version <ver>
+#    hashes, so this is where the version the later stages take is decided — the <ver> below is that value.
+./den stage finalize --out-dir out
 
 # 6a. The FACTS the store ranks on — both Wikidata scrape passes, merged. The scrape runs TWICE and cannot
 #     run once: the corpus pass covers the ids in labels-t02.json and is stamped hasVector, the delta pass
@@ -250,12 +249,14 @@ python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels ou
 #     comma-separated. Nothing in this repo derives it, and the stage refuses to run without it — a merge
 #     missing the delta pass is short by every title only it covers, which is how a rebuild once dropped 137
 #     of them and nothing but /recommend noticed.
-./den stage facts --out-dir out --dataset-version <ver>
-#     Each pass writes straight to the name the merge reads (facts-<ver>.pre-merge.json and
-#     facts-<ver>.delta.json), keeps its own checkpoint (the corpus pass in the out-dir, where the Swift
-#     scrape left one; the delta pass under facts-delta/), and resumes from it. A batch WDQS fails is dropped
-#     whole and the stage refuses to merge a pass that skipped one; `scripts/facts-run.sh out <ver>` loops
-#     until nothing is skipped. The merge is scripts/merge-facts.py, run with --version.
+./den stage facts --out-dir out
+#     The version is read from out/dataset.meta.json, so no flag is needed; a --dataset-version that
+#     disagrees with it is refused. Each pass writes straight to the name the merge reads
+#     (facts-<ver>.pre-merge.json and facts-<ver>.delta.json), keeps its own checkpoint (the corpus pass in
+#     the out-dir, where the Swift scrape left one; the delta pass under facts-delta/), and resumes from it. A
+#     batch WDQS fails is dropped whole and the stage refuses to merge a pass that skipped one;
+#     `scripts/facts-run.sh out` loops until nothing is skipped. The merge is scripts/merge-facts.py, run
+#     with --version.
 
 # 7. (retired) There used to be a poster sidecar here — `metadata-<ver>.json`, title/poster/year per
 #    shipped id, fetched from TMDB. The release stopped carrying it when the store took the card fields
@@ -293,7 +294,7 @@ python3 scripts/v2/build_store.py \
 
 # 8. Publish — the moving `data-latest` GitHub release den-atlas fetches. It uploads the store and the
 #    manifest, and prunes every retired blob's keys out of that manifest first.
-./den stage publish --out-dir out --dataset-version <ver>
+./den stage publish --out-dir out
 #     The stage runs `scripts/publish-dataset.sh out`, which is still the rule and still runnable by
 #     hand — but BY HAND it must be run FROM THE REPO ROOT, because the ownership guard resolves producer
 #     paths and `git ls-files` against the working directory. The stage runs it there whatever directory

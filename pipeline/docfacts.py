@@ -36,7 +36,7 @@ from lib import http, wikidata
 NAME = "docfacts"
 
 PRODUCER = "pipeline/docfacts.py"
-HOW = "./den stage docfacts --out-dir <dir> --dataset-version <ver>"
+HOW = "./den stage docfacts --out-dir <dir>"
 #: Writes one file into the out-dir.
 PUBLISHES = False
 #: Wikidata's public query service, unbilled.

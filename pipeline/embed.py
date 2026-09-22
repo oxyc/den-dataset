@@ -50,7 +50,7 @@ from lib import denembed, http
 
 NAME = "embed"
 PRODUCER = "pipeline/embed.py"
-HOW = "./den stage embed --out-dir <dir> --dataset-version <ver>"
+HOW = "./den stage embed --out-dir <dir>"
 #: Writes into the out-dir and nowhere else. Expensive to repeat — a full corpus is ~12 hours — but
 #: repeatable and resumable, which is a different thing from irreversible.
 PUBLISHES = False

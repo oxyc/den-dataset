@@ -158,17 +158,19 @@ over each suite it names, and `bash scripts/publish-dataset.test.sh` — on Pyth
 ## The tool — phases
 
 ```
-./den stage worklist  --mode discover|export|delta --out-dir <dir> --dataset-version <ver>
-./den stage fetch     --out-dir <dir> --dataset-version <ver> [--media movie|tv]
-./den stage articles  --out-dir <dir> --dataset-version <ver>
-./den stage classify  --out-dir <dir> --dataset-version <ver> [--plan]
-./den stage docfacts  --out-dir <dir> --dataset-version <ver>
-./den stage embed     --out-dir <dir> --dataset-version <ver> [--limit N] [--dump-docs PATH]
-./den stage finalize  --out-dir <dir> --dataset-version <ver>
-./den stage facts     --out-dir <dir> --dataset-version <ver>     # needs <dir>/facts-delta-ids.txt
+./den stage worklist  --mode discover|export|delta --out-dir <dir>
+./den stage fetch     --out-dir <dir> [--media movie|tv]
+./den stage articles  --out-dir <dir>
+./den stage classify  --out-dir <dir> [--plan]
+./den stage docfacts  --out-dir <dir>
+./den stage embed     --out-dir <dir> [--limit N] [--dump-docs PATH]
+./den stage finalize  --out-dir <dir>
+./den stage facts     --out-dir <dir>     # needs <dir>/facts-delta-ids.txt
 ```
 
-Or `./den run`, which is the whole order — see `./den stages`.
+Or `./den run --dataset-version <ver>`, which is the whole order — see `./den stages`. The version is the
+`datasetVersion` finalize writes into the manifest: `corpus` and `store` name their files by it, and `facts`
+reads it from the manifest and refuses a flag that says otherwise. No other stage takes it.
 
 The worklist builds BOTH media in one call and writes one list per media rather than taking a `--media`.
 It and the drain hit TMDB and need `TMDB_API_KEY`; one drain batch is `python3 -m pipeline.enrich`. The per-title

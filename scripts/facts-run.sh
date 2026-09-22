@@ -6,15 +6,15 @@
 # whole and the stage then refuses to merge, because a pass that skipped batches is not finished. So the
 # loop is what finishes it: each attempt sweeps up what the last one skipped, for the cost of those batches.
 #
-#   scripts/facts-run.sh <out-dir> <dataset-version> [max-attempts]
+#   scripts/facts-run.sh <out-dir> [max-attempts]
 #
-# The out-dir must hold labels-t02.json and facts-delta-ids.txt (docs/OPERATE.md step 6a); set LABELS to
-# point at labels elsewhere.
+# The out-dir must hold labels-t02.json, dataset.meta.json and facts-delta-ids.txt (docs/OPERATE.md step 6a);
+# set LABELS to point at labels elsewhere. The dataset version is the manifest's — the stage reads it there.
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
-DIR="${1:?out-dir}"; VERSION="${2:?dataset version}"; MAX="${3:-40}"
+DIR="${1:?out-dir}"; MAX="${2:-40}"
 for attempt in $(seq 1 "$MAX"); do
-  if ./den stage facts --out-dir "$DIR" --dataset-version "$VERSION" \
+  if ./den stage facts --out-dir "$DIR" \
        ${LABELS:+--set "vector_labels=$LABELS"} >>"$DIR/facts.log" 2>&1; then
     echo "facts: complete on attempt $attempt"
     exit 0

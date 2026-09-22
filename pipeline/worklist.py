@@ -43,7 +43,7 @@ NAME = "worklist"
 
 #: The rule this stage runs. It is this file now, so the producer registry names what actually executes.
 PRODUCER = "pipeline/worklist.py"
-HOW = "./den stage worklist --mode export --out-dir <dir> --dataset-version <ver>"
+HOW = "./den stage worklist --mode export --out-dir <dir>"
 #: Writes two files into the out-dir. Cheap to repeat — the cost is downstream, at `enrich`.
 PUBLISHES = False
 #: TMDB's own API and its public daily dumps, neither of them billed. What this stage DECIDES is expensive

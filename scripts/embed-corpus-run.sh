@@ -140,8 +140,8 @@ for attempt in $(seq 1 200); do
   fi
   # One segment: embed up to SEGMENT new titles, then exit so den-embed can be recycled. The inputs are
   # pointed at with --set because they live beside LABELS, not in OUT_DIR; the stores and their records
-  # are written into OUT_DIR. `--dataset-version` is required by `den` and names no file this stage writes.
-  out=$(./den stage embed --out-dir "$OUT_DIR" --dataset-version unused --limit "$SEGMENT" \
+  # are written into OUT_DIR.
+  out=$(./den stage embed --out-dir "$OUT_DIR" --limit "$SEGMENT" \
         --set "vector_labels=$LABELS" --set "enriched=$ENRICHED_DIR" --set "doc_facts=$DOC_FACTS" \
         2>>"$ERR_LOG") || {
     # Not every failure is a dead container. A refusal from the stage itself — a mixed embedder, a service
@@ -167,9 +167,7 @@ for attempt in $(seq 1 200); do
   if [ "$written" -eq 0 ]; then
     echo "=== all titles embedded → finalizing ==="
     stop_embed
-    # `--dataset-version` is required by `den` and unused by finalize: none of its filenames carries one,
-    # and the version it stamps is derived from what it writes.
-    ./den stage finalize --out-dir "$OUT_DIR" --dataset-version unused \
+    ./den stage finalize --out-dir "$OUT_DIR" \
       || { echo "finalize failed — nothing published"; exit 1; }
     exit 0
   fi

@@ -78,6 +78,18 @@ class Dispatch(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("consolidate_corpus.py", result.stderr)
 
+    def test_the_version_is_asked_only_of_what_names_a_file_by_it(self):
+        """finalize names none of its files by it, so it is not asked for one; the store does, and without
+        one it is refused naming the flag, not written as `den-.store`. A run always reaches the store."""
+        with tempfile.TemporaryDirectory() as out:
+            unversioned = den("stage", "finalize", "--out-dir", out)
+            self.assertNotIn("--dataset-version", unversioned.stderr)
+            self.assertIn("embed_labels", unversioned.stderr, "it got as far as its own inputs")
+            versioned = den("stage", "store", "--out-dir", out)
+            self.assertEqual(versioned.returncode, 1)
+            self.assertIn("pass --dataset-version", versioned.stderr)
+            self.assertEqual(den("run", "--out-dir", out).returncode, 2, "argparse: the flag is required")
+
     def test_run_stops_before_publishing_unless_asked(self):
         """`den run` is the exploratory command; publishing is the one step that leaves this machine.
 

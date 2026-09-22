@@ -23,8 +23,16 @@ that landed before the timeout would read as finished to the resume and ship sho
 pass goes on. The stage then REFUSES rather than merging: a pass that skipped batches is not a finished
 scrape, and publishing it is the short-merge failure again. Re-running sweeps the skipped ids up.
 
-`--version` is passed to the merge rather than inherited, so the merged file names the generation it is.
+**The version is the manifest's, not the operator's.** Every file this stage writes is named by the dataset
+version, and that version is the one `finalize` derived from the labels and vectors these facts describe —
+`dataset.meta.json`'s `datasetVersion`, which the Swift read too. Taken from a flag it could be anything: the
+shipped `facts-5b1c3213b6a1.json` says `c85c707b0b18` inside, a file renamed by hand to the generation it
+was not built for. So `--dataset-version` may be left off, and one that disagrees with the manifest is
+refused rather than obeyed: the corpus join and the store look the facts up by the flag, and a facts file
+under the manifest's name would be missing to them. It is passed to the merge too, so the name on the file
+and the version inside it are one value.
 """
+import dataclasses
 import json
 import os
 import re
@@ -33,7 +41,7 @@ import sys
 import time
 
 from . import artifacts, jsonbytes
-from .contract import REPO, StageError, bind
+from .contract import REPO, StageError, bind, how_to_build
 from lib import cache as caching
 from lib import http, wikidata
 from lib import wikidata_facts as wd
@@ -43,7 +51,7 @@ NAME = "facts"
 #: The scrape is this module; the merge it ends with is `SCRIPT`, which `facts_test.py` holds this stage's
 #: merged file to byte for byte.
 PRODUCER = "pipeline/facts.py"
-HOW = "./den stage facts --out-dir <dir> --dataset-version <ver>"
+HOW = "./den stage facts --out-dir <dir>"
 #: Writes into the out-dir and nowhere else.
 PUBLISHES = False
 #: Wikidata's public query service, unbilled.
@@ -62,8 +70,9 @@ BATCH = 25
 #: answer asks nothing, so it waits for nothing.
 PACE = 0.3
 
-#: `labels-t02.json` is `--labels` here, as it is to the doc-facts scrape and the corpus join.
-INPUTS = (artifacts.VECTOR_LABELS.called("labels"), artifacts.DELTA_IDS)
+#: `labels-t02.json` is `--labels` here, as it is to the doc-facts scrape and the corpus join. The manifest
+#: is read for the dataset version, which names every file this stage writes.
+INPUTS = (artifacts.VECTOR_LABELS.called("labels"), artifacts.DELTA_IDS, artifacts.MANIFEST)
 #: The two passes, in the order the merge takes them — which is not cosmetic: the FIRST file wins a
 #: collision, and swapped, every overlapping title would publish as vectorless.
 OUTPUTS = (artifacts.CORPUS_FACTS, artifacts.DELTA_FACTS, artifacts.FACTS)
@@ -307,8 +316,27 @@ def merge(ctx):
     return out
 
 
+def manifest_version(ctx):
+    """`datasetVersion` from the manifest finalize wrote — refusing a `--dataset-version` that disagrees."""
+    path = ctx.require(artifacts.MANIFEST)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            version = json.load(handle).get("datasetVersion")
+    except (OSError, ValueError, AttributeError) as broken:
+        raise StageError(f"facts: {path} is not a readable manifest ({broken}), so the dataset version these "
+                         f"facts belong to is unknown.") from None
+    if not isinstance(version, str) or not version:
+        raise StageError(f"facts: {path} names no datasetVersion. Re-run: {how_to_build(artifacts.MANIFEST)}")
+    if ctx.dataset_version and ctx.dataset_version != version:
+        raise StageError(f"facts: --dataset-version {ctx.dataset_version} is not this out-dir's generation — "
+                         f"{path} says {version}, and the facts are named after the labels and vectors they "
+                         f"describe. Pass --dataset-version {version}, or leave it off.")
+    return version
+
+
 def run(ctx, cache=None):
     """Scrape both passes, then merge them into the file that ships. Returns its path."""
+    ctx = dataclasses.replace(ctx, dataset_version=manifest_version(ctx))
     labels = ctx.require(BOUND[artifacts.VECTOR_LABELS.name].artifact)
     delta = ctx.require(artifacts.DELTA_IDS)
     cache = wikidata.cache_for() if cache is None else cache

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Classify every grounded title's facets with a System One model, one call per title.
 
-  ./den stage articles --out-dir out-repass --dataset-version <ver>
+  ./den stage articles --out-dir out-repass
   scripts/v2/run_facets.py --articles out-repass/articles.jsonl --out out-repass/facets.jsonl [--limit N]
 
 ## Why this exists at all, and why it is not `llm_phase.py`

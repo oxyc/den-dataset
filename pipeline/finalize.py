@@ -48,7 +48,7 @@ import vector_blob  # noqa: E402  — the DENVEC02 layout, one definition shared
 
 NAME = "finalize"
 PRODUCER = "pipeline/finalize.py"
-HOW = "./den stage finalize --out-dir <dir> --dataset-version <ver>"
+HOW = "./den stage finalize --out-dir <dir>"
 #: Writes into the out-dir; a repeat over the same stores writes the same bytes, bar two timestamps.
 PUBLISHES = False
 #: Local files in, local files out.

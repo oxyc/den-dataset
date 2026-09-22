@@ -88,12 +88,14 @@ class Staged(unittest.TestCase):
             json.dump({"records": [{"mediaType": "movie", "tmdbId": 1}, {"mediaType": "tv", "tmdbId": 1}]}, fh)
         with open(os.path.join(self.out, "facts-delta-ids.txt"), "w", encoding="utf-8") as fh:
             fh.write("movie:7\nmovie:1\n")
+        with open(os.path.join(self.out, "dataset.meta.json"), "w", encoding="utf-8") as fh:
+            json.dump({"datasetVersion": VERSION, "labelsFile": "labels-t02.json"}, fh)
 
-    def context(self):
-        return Context(out_dir=self.out, dataset_version=VERSION)
+    def context(self, version=VERSION):
+        return Context(out_dir=self.out, dataset_version=version)
 
-    def run_stage(self):
-        return facts.run(self.context(), cache=object())
+    def run_stage(self, version=VERSION):
+        return facts.run(self.context(version), cache=object())
 
     def read(self, name):
         with open(os.path.join(self.out, name), encoding="utf-8") as fh:
@@ -264,6 +266,31 @@ class Merge(Staged):
         with self.assertRaises(StageError) as refused:
             self.run_stage()
         self.assertIn("docs/OPERATE.md", str(refused.exception))
+
+
+class Version(Staged):
+    def test_the_version_is_the_manifests(self):
+        """Left off, it is read from the manifest finalize wrote, and names every file and the merged file's
+        own `datasetVersion` alike."""
+        made = self.run_stage(version="")
+        self.assertEqual(os.path.basename(made), f"facts-{VERSION}.json")
+        self.assertEqual(self.read(os.path.basename(made))["datasetVersion"], VERSION)
+        self.assertEqual(self.read(f"facts-{VERSION}.pre-merge.json")["datasetVersion"], VERSION)
+
+    def test_a_version_that_disagrees_with_the_manifest_is_refused_before_anything_is_written(self):
+        """Obeyed, it would write facts-<flag>.json for a generation it does not describe — the shipped file
+        renamed by hand, again."""
+        with self.assertRaises(StageError) as refused:
+            self.run_stage(version="c85c707b0b18")
+        self.assertIn(f"Pass --dataset-version {VERSION}", str(refused.exception))
+        self.assertEqual(self.wd.asked["facts"], [])
+        self.assertFalse([name for name in os.listdir(self.out) if name.startswith("facts-c85c")])
+
+    def test_no_manifest_is_refused_naming_what_writes_it(self):
+        os.remove(os.path.join(self.out, "dataset.meta.json"))
+        with self.assertRaises(StageError) as refused:
+            self.run_stage(version="")
+        self.assertIn("./den stage finalize", str(refused.exception))
 
 
 class Topology(unittest.TestCase):

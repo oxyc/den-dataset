@@ -9,7 +9,9 @@
 Options (both run forms):
 
     --out-dir DIR                  where artifacts are read and written  (default: out)
-    --dataset-version VER          the version the filenames carry       (required)
+    --dataset-version VER          the version the filenames carry — required by `run`, and by a stage
+                                   that names a file with it (corpus, store); facts reads it from the
+                                   manifest and refuses one that disagrees
     --stamp-meta PATH              the manifest to declare the outputs in
     --mode MODE                    which universe the worklist builds: export, discover or delta
     --since YYYY-MM-DD             the window a delta worklist collects titles from
@@ -106,9 +108,11 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("stages", help="list the pipeline")
 
-    def with_options(sub):
+    def with_options(sub, version_required):
         sub.add_argument("--out-dir", default="out")
-        sub.add_argument("--dataset-version", required=True)
+        # A run always reaches corpus and store, whose files are named by it. One stage needs it only if
+        # it resolves such a name, and `Context` refuses that without one — most stages never do.
+        sub.add_argument("--dataset-version", required=version_required, default="")
         sub.add_argument("--stamp-meta")
         sub.add_argument("--mode", help="which universe the worklist builds: export, discover or delta")
         sub.add_argument("--since", help="the window a delta worklist collects titles from, YYYY-MM-DD")
@@ -133,12 +137,12 @@ def main(argv=None):
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
         return sub
 
-    run = with_options(commands.add_parser("run", help="run every stage, in order"))
+    run = with_options(commands.add_parser("run", help="run every stage, in order"), version_required=True)
     run.add_argument("--publish", action="store_true",
                      help="also run the publishing stage, which CLOBBERS the moving data-latest release")
     run.add_argument("--spend", action="store_true",
                      help="also run the stages that BUY from a paid provider (the classify pass is ~$20)")
-    with_options(commands.add_parser("stage", help="run one stage")).add_argument("name")
+    with_options(commands.add_parser("stage", help="run one stage"), version_required=False).add_argument("name")
 
     genres_moods_enrich.register(commands)
 
