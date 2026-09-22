@@ -15,6 +15,8 @@ Options (both run forms):
     --expect N                     the title count the corpus join is held to
     --pause-ms N                   milliseconds the embed pass idles between requests
     --limit N                      stop the embed pass after N new titles
+    --media movie|tv               enrich only this media type (default: both)
+    --vote-floor N                 the TMDB vote count the enrichment keeps a title above
     --plan                         the classify pass validates and reports, and buys nothing
     --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
                                    NAME to name every shard of a set
@@ -71,6 +73,7 @@ def context(args):
                             overrides=overrides, stamp_meta=args.stamp_meta or "",
                             mode=args.mode or "", since=args.since or "",
                             expect=args.expect, pause_ms=args.pause_ms, limit=args.limit,
+                            media=args.media or "", vote_floor=args.vote_floor,
                             plan=args.plan)
 
 
@@ -96,6 +99,10 @@ def main(argv=None):
         sub.add_argument("--pause-ms", type=int, default=0,
                          help="milliseconds the embed pass idles between requests")
         sub.add_argument("--limit", type=int, help="stop the embed pass after N new titles")
+        sub.add_argument("--media", choices=("movie", "tv"),
+                         help="enrich only this media type; without it both worklists are drained")
+        sub.add_argument("--vote-floor", type=int,
+                         help="the TMDB vote count the enrichment keeps a title above (default 50)")
         sub.add_argument("--plan", action="store_true",
                          help="the classify pass validates and reports its call plan, and buys nothing")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")

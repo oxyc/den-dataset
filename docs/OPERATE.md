@@ -177,6 +177,12 @@ python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popu
 #    The Wikipedia plot REPLACES the TMDB overview where found (re-grounding); each batch prints wikiPlot vs
 #    tagsOnly. The wrapper logs into Enterprise (if creds present) for a fresh 24h token, then runs ONE batch.
 #    Resumable via the enrich checkpoint — loop until "remaining":0.
+#    `./den stage fetch --out-dir out --dataset-version <ver>` runs the whole drain — both worklists, batch
+#    after batch, until nothing remains — which is what `scripts/enrich-all.sh` did per media. The loop is
+#    the stage's now, with the same three stopping rules: an aborted batch is retried, a batch that exits
+#    clean having moved `remaining` not at all is a stall, and a batch where every title fell below the vote
+#    floor says so instead of blaming the upstream. `--media movie|tv` does one; `--vote-floor 0` re-includes
+#    the low-vote tail. One batch by hand is still scripts/enrich-run.sh:
 scripts/enrich-run.sh movie 150          # next 150 un-enriched movies; repeat. Then: scripts/enrich-run.sh tv 150
 #    (Observed on the popular tier: ~96% wikiPlot hit; the misses are recent/obscure titles with no enwiki article.)
 

@@ -33,16 +33,18 @@ class Listing(unittest.TestCase):
         result = den("stages")
         self.assertEqual(result.returncode, 0, result.stderr)
         # The order, and that it is the real one: the universe is built before anything is drawn from it,
-        # the articles are classified before the vectors are embedded, the vectors before the facts passes
-        # are merged over their ids, the merged facts before the corpus that joins them, the corpus before
-        # the store built from it, and the publish that uploads the store is last.
-        expected = ("worklist", "classify", "embed", "facts", "corpus", "store", "publish")
+        # the titles are enriched before anything reads their plots, the articles are classified before the
+        # vectors are embedded, the vectors before the facts passes are merged over their ids, the merged
+        # facts before the corpus that joins them, the corpus before the store built from it, and the
+        # publish that uploads the store is last.
+        expected = ("worklist", "fetch", "classify", "embed", "facts", "corpus", "store", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
         self.assertEqual(order, sorted(order), "den stages printed them out of order")
-        for line in ("premise_labels", "scripts/v2/build_store.py", "scripts/v2/consolidate_corpus.py",
-                     "scripts/v2/run_combined.py", "scripts/publish-dataset.sh"):
+        for line in ("premise_labels", "universe-movie.json", "scripts/v2/build_store.py",
+                     "scripts/v2/consolidate_corpus.py", "scripts/v2/run_combined.py",
+                     "scripts/publish-dataset.sh"):
             self.assertIn(line, result.stdout)
         # The optional input is marked as such: "the writer needs this" and "the writer can do without
         # it" are different answers to the same question. So is a flag that takes a set of shards.
@@ -114,30 +116,47 @@ class Dispatch(unittest.TestCase):
     def test_den_run_leaves_out_the_stage_that_buys(self):
         """`den run` must not reach the paid pass unless asked for it by name.
 
-        The first stage has to SUCCEED for this to say anything. An out-dir holding nothing refuses at
-        stage one, and then classify is unreached whether or not the gate works — the assertion passes
-        while testing nothing, which is the shape the publish gate's own test has to live with because
-        publish is last. So the worklist is stubbed past, and the two runs are compared at the stage
-        after it.
+        EVERY unpaid stage before it has to SUCCEED for this to say anything. An out-dir holding nothing
+        refuses at stage one, and then classify is unreached whether or not the gate works — the assertion
+        passes while testing nothing, which is the shape the publish gate's own test has to live with
+        because publish is last. So one stub answers for both stages that run first, and the two runs are
+        compared at the stage after them.
+
+        The stub is `taxonomy-backfill` for the worklist AND for the drain, because both wrap the same
+        binary: it writes a universe of one id, then reports that universe already drained. The
+        credentials are in the environment so the drain does not go through `scripts/lib/den-env.sh` for
+        a `den.env` this checkout has no reason to own — nothing here reaches TMDB to use them.
         """
         with tempfile.TemporaryDirectory() as out:
             stub = os.path.join(out, "stub")
             with open(stub, "w", encoding="utf-8") as fh:
                 fh.write("#!/usr/bin/env python3\n"
-                         "import json, sys\n"
+                         "import json, os, sys\n"
                          "argv = sys.argv[1:]\n"
-                         "json.dump([{'tmdbId': 1, 'mediaType': 'movie'}],\n"
-                         "          open(argv[argv.index('--out') + 1], 'w'))\n")
+                         "if argv[0] == 'enrich':\n"
+                         "    where = argv[argv.index('--out-dir') + 1]\n"
+                         "    os.makedirs(os.path.join(where, 'enriched'), exist_ok=True)\n"
+                         "    with open(os.path.join(where, 'enrich-checkpoint.json'), 'w') as fh:\n"
+                         "        json.dump({'processed': [], 'nextBatch': 1}, fh)\n"
+                         "    print(json.dumps({'remaining': 0, 'count': 0}))\n"
+                         "else:\n"
+                         "    json.dump([{'tmdbId': 1, 'mediaType': 'movie'}],\n"
+                         "              open(argv[argv.index('--out') + 1], 'w'))\n")
             os.chmod(stub, 0o755)
-            previous = os.environ.get("DEN_BACKFILL_BIN")
-            os.environ["DEN_BACKFILL_BIN"] = stub
-            self.addCleanup(os.environ.__setitem__, "DEN_BACKFILL_BIN", previous or "")
+            for name, value in (("DEN_BACKFILL_BIN", stub),
+                                ("TMDB_API_KEY", "stub-key-nothing-here-calls-tmdb"),
+                                ("WIKIMEDIA_ENTERPRISE_TOKEN", "stub-bearer")):
+                previous = os.environ.get(name)
+                os.environ[name] = value
+                self.addCleanup(os.environ.__setitem__, name, previous or "")
             # `discover` because it is the one mode that reads no input file — this test is about which
             # stages run, not about feeding the first one a TMDB dump.
             run = ("run", "--dataset-version", "test", "--out-dir", out, "--mode", "discover")
 
             gated = den(*run)
             self.assertIn("==> worklist", gated.stderr, "the stub did not get the run past stage one")
+            self.assertIn("==> fetch: ", gated.stderr, "the drain did not finish, so classify is "
+                                                       "unreached for a reason that is not the gate")
             self.assertNotIn("==> classify", gated.stderr)
 
             asked = den(*run, "--spend")
