@@ -308,6 +308,28 @@ def recovered(out_dir, batch_id, survivors):
             for r in survivors if key(r["mediaType"], r["tmdbId"]) in seen]
 
 
+def unrecorded(out_dir, next_batch):
+    """Keys in batches numbered `next_batch` or later: written, and never recorded by the checkpoint.
+
+    The batch is written before the checkpoint, and a run killed between the two left its batch on disk
+    with the checkpoint still naming it as next — so the next run took the same ids again and wrote them
+    into the batch after it, 300 keys twice. Those keys ARE enriched; treating them as processed makes that
+    death harmless. What the lost checkpoint would have added to `totals` stays lost: they are counters.
+    """
+    found = set()
+    directory = os.path.join(out_dir, "enriched")
+    for number, name in batches(directory):
+        if number < next_batch:
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding="utf-8") as handle:
+                found.update(key(row["mediaType"], row["tmdbId"]) for row in json.load(handle))
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise StageError(f"enrich: {name} is on disk and not in the checkpoint, and it cannot be read "
+                             f"({error}) — so nothing says which titles it holds. Restore or remove it.")
+    return found
+
+
 def read_worklist(path):
     """`[(media, tmdbId)]`, in the worklist's order."""
     try:
@@ -344,6 +366,7 @@ def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anim
         enterprise.gate.headroom()
     worklist = read_worklist(worklist_path)
     ck_path = checkpoint_path(out_dir)
+    present = os.path.exists(ck_path)
     checkpoint = read_checkpoint(ck_path)
     # An ABSENT checkpoint is not proof of a first run. `out-t02` had 153 batches and none, so a delta into
     # it numbered from 1 and overwrote batch-1 and batch-2 — 640 records replaced by 235. The directory is
@@ -351,6 +374,8 @@ def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anim
     on_disk = max((number for number, _name in batches(os.path.join(out_dir, "enriched"))), default=0)
     batch_id = max(checkpoint["nextBatch"], on_disk + 1)
     processed = checkpoint["processed"]
+    if present:
+        processed |= unrecorded(out_dir, checkpoint["nextBatch"])
     pending = [entry for entry in worklist if key(*entry) not in processed][:limit]
     if not pending:
         return {"remaining": 0, "count": 0}
@@ -427,6 +452,12 @@ def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anim
         print(f"  warning: {len(again)} key(s) here already exist in earlier batches — the newest wins on "
               f"read, but the older records remain. {sample}", file=sys.stderr)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not present:
+        # With no checkpoint there is nothing for `unrecorded` to measure a batch against, so the number is
+        # reserved first: a death between the batch and the checkpoint below then leaves a checkpoint that
+        # says this batch was never recorded.
+        reserved = {"nextBatch": batch_id, "processed": sorted(checkpoint["processed"]), "totals": {}}
+        caching.write_atomically(ck_path, compact(reserved).encode("utf-8"))
     caching.write_atomically(path, swift_json(survivors).encode("utf-8"))
 
     # Every pending id EXCEPT those still owed another look: transient failures and below-floor verdicts.

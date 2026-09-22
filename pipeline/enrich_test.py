@@ -67,6 +67,10 @@ def detail(tmdb_id, votes=500, overview="x" * 60, **extra):
     return body
 
 
+class Killed(BaseException):
+    """A process death: nothing below `run` may catch it."""
+
+
 def tmdb_record(tmdb_id, **extra):
     """A record as `lib/tmdb.title_record` builds it, plus whatever `extra` says it carries."""
     return dict(enrich.tmdb_api.title_record(detail(tmdb_id), tmdb_id, "movie"), **extra)
@@ -398,6 +402,66 @@ class Batch(unittest.TestCase):
         report = self.run_batch({"/movie/1": detail(1)}, [("movie", 1)])
         self.assertEqual(report["batchId"], 154)
         self.assertEqual(self.checkpoint()["nextBatch"], 155)
+
+    def killed_at_the_checkpoint(self, when=lambda: True):
+        """`write_atomically` that dies at the checkpoint while `when()` holds — a SIGKILL between the batch
+        write and the checkpoint write, as close as a test can put one."""
+        real = enrich.caching.write_atomically
+
+        def dying(path, body):
+            if path == enrich.checkpoint_path(self.out) and when():
+                raise Killed()
+            real(path, body)
+        return mock.patch.object(enrich.caching, "write_atomically", dying)
+
+    def keys_by_batch(self):
+        found = {}
+        for number, name in enrich.batches(os.path.join(self.out, "enriched")):
+            found[name] = sorted(self.rows(number))
+        return found
+
+    def test_a_death_between_the_batch_and_the_checkpoint_writes_no_key_twice(self):
+        """Killed there, the checkpoint still named the batch as next, and the resumed run wrote the same 300
+        keys again into the batch after it."""
+        bodies = {f"/movie/{i}": detail(i) for i in range(1, 5)}
+        entries = [("movie", i) for i in range(1, 5)]
+        self.run_batch(bodies, entries, limit=2)
+        with self.killed_at_the_checkpoint(), self.assertRaises(Killed):
+            self.run_batch(bodies, entries, limit=2)
+        self.assertEqual(sorted(self.keys_by_batch()), ["batch-1.json", "batch-2.json"])
+        report = self.run_batch(bodies, entries, limit=2)
+        self.assertEqual(report, {"remaining": 0, "count": 0})
+        self.assertEqual(self.keys_by_batch(), {"batch-1.json": ["movie:1", "movie:2"],
+                                                "batch-2.json": ["movie:3", "movie:4"]})
+
+    def test_the_first_batch_is_covered_too(self):
+        """With no checkpoint yet there is nothing to measure batch-1 against, so its number is reserved in a
+        checkpoint before it is written."""
+        bodies = {f"/movie/{i}": detail(i) for i in range(1, 3)}
+        batch = enrich.batch_path(self.out, 1)
+        with self.killed_at_the_checkpoint(when=lambda: os.path.exists(batch)), self.assertRaises(Killed):
+            self.run_batch(bodies, [("movie", 1), ("movie", 2)])
+        self.assertEqual(self.checkpoint()["nextBatch"], 1, "reserved, not advanced")
+        self.assertEqual(self.run_batch(bodies, [("movie", 1), ("movie", 2)]), {"remaining": 0, "count": 0})
+        self.assertEqual(list(self.keys_by_batch()), ["batch-1.json"])
+
+    def test_a_checkpoint_killed_mid_write_leaves_the_previous_one_whole(self):
+        """Written in place, a kill mid-write leaves a truncated checkpoint, which the next run refuses — the
+        whole drain stops. Through a temp file and a rename it leaves the previous one."""
+        bodies = {f"/movie/{i}": detail(i) for i in range(1, 5)}
+        self.run_batch(bodies, [("movie", i) for i in range(1, 5)], limit=2)
+        with open(enrich.checkpoint_path(self.out), "rb") as fh:
+            before = fh.read()
+        real = os.replace
+
+        def dying(source, destination):
+            if destination == enrich.checkpoint_path(self.out):
+                raise Killed()
+            real(source, destination)
+        with mock.patch.object(enrich.caching.os, "replace", dying), self.assertRaises(Killed):
+            self.run_batch(bodies, [("movie", i) for i in range(1, 5)], limit=2)
+        with open(enrich.checkpoint_path(self.out), "rb") as fh:
+            self.assertEqual(fh.read(), before)
 
     def test_an_existing_batch_is_never_overwritten(self):
         os.makedirs(os.path.join(self.out, "enriched"))
