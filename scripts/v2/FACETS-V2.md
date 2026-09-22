@@ -55,7 +55,7 @@ The stage runs `run_combined.py` with the files its declaration names. The same 
 `pipeline/classify_test.py` holds the stage to:
 
 ```sh
-python3 scripts/v2/run_combined.py \
+python3 pipeline/run_combined.py \
   --articles out-repass/articles.jsonl \
   --enriched-dir out-repass/enriched \
   --out out-repass/combined-v1.jsonl \

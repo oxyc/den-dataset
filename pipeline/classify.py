@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The CLASSIFY pass, behind the stage contract.
 
-The rule lives in `scripts/v2/run_combined.py`: the validator that refuses all three System One response
+The rule lives in `pipeline/run_combined.py`: the validator that refuses all three System One response
 shapes when they are malformed, the planner that never asks about a section it did not send, the shared
 circuit breaker that stops every worker after one systemic provider failure, the kernel lock that stops a
 second agent buying the same calls, and the sidecar manifest that hashes the input, the questions, the
@@ -35,8 +35,8 @@ NAME = "classify"
 
 #: The rule this stage runs, repo-relative — the one spelling. `registry()` registers the outputs below
 #: against it, so what the pipeline says classified the corpus is what the pipeline executes.
-PRODUCER = "scripts/v2/run_combined.py"
-HOW = "scripts/v2/run_combined.py"
+PRODUCER = "pipeline/run_combined.py"
+HOW = "pipeline/run_combined.py"
 #: Writes into the out-dir and nowhere else. A repeat run costs nothing it already has — see the resume
 #: above — which is a different thing from costing nothing.
 PUBLISHES = False

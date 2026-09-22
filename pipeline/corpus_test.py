@@ -73,7 +73,7 @@ FACTS_KEYS = PASS_KEYS + ("movie:77",)
 #: under, and which the stage's audit reads back. Spelled here rather than imported so a fixture manifest is
 #: built the way the pass builds one.
 IMPLEMENTATION = {
-    "run_combined.py": os.path.join(V2, "run_combined.py"),
+    "run_combined.py": os.path.join(REPO, "pipeline", "run_combined.py"),
     "article_sections.py": os.path.join(REPO, "pipeline", "article_sections.py"),
     "combined_questions.py": os.path.join(REPO, "pipeline", "combined_questions.py"),
     "typesafe_client.py": os.path.join(REPO, "lib", "typesafe_client.py"),

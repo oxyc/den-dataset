@@ -18,7 +18,7 @@
         "sha256": "c722cd65084b6fc9f027a228cd32be02d70828b59c146e83a85ee7d5032555b0",
         "commit": "a42042a",
         "supersededBy": "the commits that moved the pass out of scripts/ (oxyc/den-dataset#73)",
-        "why": "#73 moved the pass's modules into pipeline/ and lib/, one file per commit. What changed here is where things are found, not what is done: the import lines and the sys.path entries that find the other three modules, and `implementationSha256` hashing each of the four at its module's own path (`IMPLEMENTATION`) instead of all four in this file's directory — the keys are still the four file names, so a manifest reads the same. The state, the questions, the planner, the validator and the row are untouched."
+        "why": "#73 moved the pass's modules into pipeline/ and lib/, one file per commit, this one into pipeline/. What changed here is where things are found, not what is done: the import lines, a file run by path making the repo its import root instead of adding directories to sys.path, and `implementationSha256` hashing each of the four at its module's own path (`IMPLEMENTATION`) instead of all four in this file's directory — the keys are still the four file names, so a manifest reads the same. The state, the questions, the planner, the validator and the row are untouched."
       }
     ],
     "combined_questions.py": [

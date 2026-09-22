@@ -18,8 +18,9 @@ import sys
 import threading
 import uuid
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+if not __package__:
+    # Run as a file, which is how the classify stage runs it: the repo, not pipeline/, is the import root.
+    sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from lib import typesafe_client
 from lib.typesafe_client import TypeSafe, TypeSafeError
 from pipeline import article_sections, combined_questions

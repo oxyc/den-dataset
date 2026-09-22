@@ -16,11 +16,11 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import run_combined as rc  # noqa: E402
 import run_delta  # noqa: E402
 from delta_questions import delta_questions  # noqa: E402
 from pipeline import article_sections, combined_questions  # noqa: E402
-from test_combined import FakeClient, answer_for  # noqa: E402
+from pipeline import run_combined as rc  # noqa: E402
+from pipeline.run_combined_test import FakeClient, answer_for  # noqa: E402
 
 TEXT = "Lead paragraph.\n\n== Plot ==\n" + "A story happens. " * 40 + "\n\n== Reception ==\nIt was reviewed.\n"
 # Too long to send whole under LONG_MAX, so the corpus pass sent it as role-selected sections.

@@ -18,8 +18,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from pipeline.combined_questions import PROMPT, ROOT, TAXONOMY, section_question
 from pipeline.article_sections import (encoded_chars, is_oversized, public_section, select_global_sections,
                                        sha256_text, state_for)
-from run_combined import (IMPLEMENTATION as SOURCES, SCHEMA_VERSION, article_key, attach_enriched_evidence,
-                          canonical, load_articles, sections_for_record, sha256_file, validate_answers)
+from pipeline.run_combined import (IMPLEMENTATION as SOURCES, SCHEMA_VERSION, article_key,
+                                   attach_enriched_evidence, canonical, load_articles, sections_for_record,
+                                   sha256_file, validate_answers)
 from lib.typesafe_client import TypeSafe
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The classify stage — that it is a wrapper, and that the two things this port added still hold.
 
-The pass itself is tested where it lives, in `scripts/v2/test_combined.py`: the typed-answer validator, the
+The pass itself is tested where it lives, in `pipeline/run_combined_test.py`: the typed-answer validator, the
 oversized planner, the circuit breaker, the output lock and the manifest's refusal of a changed
 configuration. None of them is reimplemented here. What is tested here is the stage around them, which had
 to answer two questions the corpus and store stages did not:
@@ -19,9 +19,8 @@ to answer two questions the corpus and store stages did not:
     configuration that differs by any of them — so the stage handing over anything else is a refusal, not a
     quietly different pass.
 
-The article fixture is `scripts/v2/test_combined.py`'s, reused rather than rebuilt.
+The article fixture is `pipeline/run_combined_test.py`'s, reused rather than rebuilt.
 """
-import importlib.util
 import json
 import os
 import subprocess
@@ -33,23 +32,11 @@ import pipeline
 
 from . import artifacts, classify, corpus, embed, fetch
 from . import combined_questions as questions
+from . import run_combined as script
+from . import run_combined_test as fixture
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-V2 = os.path.join(REPO, "scripts", "v2")
-
-sys.path.insert(0, V2)
-
-
-def load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-script = load("run_combined", os.path.join(V2, "run_combined.py"))
-fixture = load("test_combined", os.path.join(V2, "test_combined.py"))
 
 VERSION = "testver"
 
@@ -57,7 +44,7 @@ VERSION = "testver"
 SHARD = "combined-v1-r2.jsonl"
 
 #: One ordinary title — a lead, a plot section and a reception section — which the pass plans as a single
-#: call. The oversized path is `test_combined.py`'s; nothing about it is the stage's.
+#: call. The oversized path is `run_combined_test.py`'s; nothing about it is the stage's.
 ARTICLE = "Lead.\n\n== Plot ==\nA happens.\n\n== Reception ==\nCritics liked it."
 
 
