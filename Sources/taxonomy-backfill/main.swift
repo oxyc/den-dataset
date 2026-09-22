@@ -471,7 +471,8 @@ enum Commands {
                 let doc: String
                 if let docFacts {
                     // CC0 shape: Wikidata's director + genre, our own tags, the Wikipedia plot. `createdBy` is
-                    // already Wikidata (P170) on the enrichment, so nothing here is TMDB-sourced.
+                    // Wikidata (P170) on a batch the current enrichment wrote; an older batch can still carry
+                    // TMDB `created_by` names where Wikidata had none, until it is enriched again.
                     let f = docFacts["\(dto.mediaType):\(dto.tmdbId)"]
                     doc = ComposedDoc.buildLean(directors: dropDirector ? [] : (f?.directors ?? []),
                                                 creators: title.createdBy,

@@ -175,6 +175,20 @@ class Batch(unittest.TestCase):
         self.assertEqual((rows["movie:2"]["overview"], rows["movie:2"]["hasWikiPlot"]), ("", False))
         self.assertEqual(rows["movie:2"]["overviewChars"], 54, "the length survives, trimmed")
 
+    def test_creators_are_wikidatas_or_none_never_tmdbs(self):
+        """`createdBy` is composed into the embedding document. With no Wikidata P170 it is EMPTY — TMDB's
+        `created_by` (or a crew "Creator" credit) is not a fallback."""
+        self.mapping[("tv", 1)] = {"article": "One", "creators": ["Wikidata Creator"]}
+        self.mapping[("tv", 2)] = {"article": "Two"}
+        self.plots[("One", "en")] = found("W" * 200)
+        tmdb_creators = {"created_by": [{"name": "TMDB Creator"}],
+                         "credits": {"crew": [{"name": "TMDB Crew", "job": "Creator"}]}}
+        self.run_batch({"/tv/1": detail(1, **tmdb_creators), "/tv/2": detail(2, **tmdb_creators)},
+                       [("tv", 1), ("tv", 2)])
+        rows = self.rows()
+        self.assertEqual((rows["tv:1"]["createdBy"], rows["tv:2"]["createdBy"]), (["Wikidata Creator"], []))
+        self.assertNotIn("TMDB C", json.dumps(rows))
+
     # -- candidate selection --------------------------------------------------------------------------
 
     def test_an_own_premise_beats_a_longer_source_work(self):
