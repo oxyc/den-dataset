@@ -392,7 +392,9 @@ code"* is closed.
 
 Both are split DEV/TEST by `scripts/v2/split.py`, a pure hash of the key so a title lands in the same half
 in either ruler. **TEST is for gate runs only.** Sweep on DEV, pre-register the setting in a commit, then
-read TEST once. `score_triplets.py` announces a TEST run and `sweep_arm_fusion.py` refuses one.
+read TEST once. Every scorer that can read it — `score_triplets.py`, `score_reco.py`, `paired_triplets.py`
+— announces a TEST run on stderr before it prints a number. The sweeps that used to refuse one outright are
+retired, so nothing mechanically stops a second read: the seal is the pre-registration commit.
 
 DT-G's rule still stands and is now enforced in code rather than in prose: *a tie fails too, because
 replacing a working system carries its own risk.* Two independent accuracies cannot decide that — use
