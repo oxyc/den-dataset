@@ -1120,10 +1120,17 @@ enum Commands {
         //
         // Composition must not be reimplemented anywhere else — it is 87% plot, capped, in the exact shape
         // recorded in composition.json — but the embedding must happen on whichever den-embed answers live
-        // queries. Those pull apart when the machine holding the plots is not the machine that serves: arm64
-        // and x86_64 den-embed return different int8 vectors for identical input (525 of 1024 dims, measured
-        // — oxyc/den-dataset#21). Dumping lets the DOCUMENTS travel instead of the vectors, so composition
-        // stays here, embedding happens there, nothing is reimplemented and no service is exposed.
+        // queries, because a vector only means anything within one embedding space.
+        //
+        // oxyc/den-dataset#21 measured two den-embeds disagreeing on 525 of 1024 dims for identical input
+        // and read it as an ISA difference. It is not: the two hosts ran different MAX_TOKENS, which
+        // truncates different documents. Matched, arm64 and x86_64 return BYTE-IDENTICAL int8 vectors —
+        // 24/24 across Intel AVX2 and AMD AVX-512. So the thing that must match is the service's
+        // configuration, not its CPU, and `data/embed-canary.json` is what checks it.
+        //
+        // Dumping still earns its place: it lets the DOCUMENTS travel instead of the vectors, so composition
+        // stays here, embedding happens on the serving space, nothing is reimplemented and no service is
+        // exposed.
         let dumpPath = args["--dump-docs"]
         let dumpHandle = try dumpPath.map { try FileIO.appender($0) }
         defer { try? dumpHandle?.close() }
@@ -2754,8 +2761,9 @@ enum Spec {
                        "idle between requests so a long run can share a busy machine. At --chunk 15 each "
                        + "1000ms costs ~45min over a full corpus"),
                 .value("--dump-docs", "<path>",
-                       "write the composed documents and embed NOTHING, for embedding on another machine — "
-                       + "arm64 and x86_64 den-embed return different int8 vectors for identical input"),
+                       "write the composed documents and embed NOTHING, so they can be embedded on the "
+                       + "den-embed that will SERVE them. What must match is that service's configuration "
+                       + "(MAX_TOKENS above all), not its CPU — the canary is what checks it"),
             ],
             run: { try await Commands.embedCorpus($0) }),
         Subcommand(
