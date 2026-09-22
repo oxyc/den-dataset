@@ -21,6 +21,10 @@ from . import artifacts, embed, fetch
 from .contract import Context, StageError, bind
 from lib.denembed_test import Service, canary_for, vector
 
+#: den-embed's per-request budget: it accepts a request while `sum(min(actual_tokens, max_tokens))` is
+#: within this, and answers 413 otherwise.
+TOKEN_BUDGET = 8192
+
 LABEL = {"primaryGenre": "Drama", "source": "llm", "animated": False,
          "subgenres": [{"label": "Heist", "confidence": 0.9}], "moods": []}
 
@@ -110,8 +114,8 @@ class Writing(Staged):
         self.run_stage()
         self.assertTrue(self.posts())
         self.assertLessEqual(max(len(body["texts"]) for body in self.posts()), embed.CHUNK)
-        self.assertLessEqual(embed.CHUNK * embed.MAX_TOKENS, embed.TOKEN_BUDGET)
-        self.assertGreater(15 * embed.MAX_TOKENS, embed.TOKEN_BUDGET)
+        self.assertLessEqual(embed.CHUNK * embed.MAX_TOKENS, TOKEN_BUDGET)
+        self.assertGreater(15 * embed.MAX_TOKENS, TOKEN_BUDGET)
 
     def test_the_records_that_name_the_space_are_written(self):
         self.run_stage()
@@ -221,6 +225,13 @@ class Gates(Staged):
         self.assertEqual(self.store(), [])
         self.assertFalse(os.path.exists(os.path.join(self.out, "index", "embedding-space.json")))
 
+    def test_a_torn_canary_file_is_reported_as_the_file(self):
+        with open(os.environ["DEN_EMBED_CANARY"], "w", encoding="utf-8") as fh:
+            fh.write("{torn")
+        refusal = self.refused()
+        self.assertIn("not a readable embedding canary", refusal)
+        self.assertNotIn("could not be asked", refusal)
+
     def test_a_different_embedder_is_refused_before_anything_is_appended(self):
         self.run_stage(limit=1)
         self.service.health = dict(self.service.health, vector_epoch=2)
@@ -316,7 +327,7 @@ class Gates(Staged):
         """The stage used to check for the space record after the binary ran, because a binary built
         before the gate embedded without one. The writer takes the verdict as an argument now."""
         with self.assertRaises(StageError):
-            embed.embed_into((io.StringIO(), io.StringIO()), self.service.url, None, embed.CHUNK, 0, [[]])
+            embed.embed_into((io.StringIO(), io.StringIO()), self.service.url, None, 0, [[]])
 
 
 class Inputs(Staged):

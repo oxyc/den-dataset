@@ -80,13 +80,11 @@ OUTPUTS = (
 #: intersecting them gives [3479..3534]. 3500 is the round number in that window.
 SHIPPED_COMPOSITION = {"docShape": "lean", "dropDirector": True, "plotCap": 3500}
 
-#: den-embed's per-request budget: it accepts a request while `sum(min(actual_tokens, max_tokens))` is
-#: within this, and answers 413 otherwise.
-TOKEN_BUDGET = 8192
 #: What the serving box runs, permanently, and what the canary's answers were recorded at.
 MAX_TOKENS = 1024
-#: Documents per request. 8192/1024 is 8; 7 leaves the margin. At 15 — the Swift's own default — every
-#: request is a 413 once the cap is 1024, and a 413 is not retried, so the run dies on its first flush.
+#: Documents per request. den-embed accepts a request while `sum(min(actual_tokens, max_tokens))` is within
+#: 8,192 and answers 413 otherwise, so at this cap a request holds 8; 7 leaves the margin. At 15 — the
+#: Swift's own default — every request is a 413, and a 413 is not retried, so the run dies on its first flush.
 CHUNK = 7
 #: The composed document's non-plot half, in characters, for the fit check.
 FACTS_AND_TAGS = 500
@@ -251,7 +249,7 @@ def inputs(ctx):
     return labels, enriched, doc_facts
 
 
-def embed_into(stores, url, stamp, chunk, pause_ms, flushes):
+def embed_into(stores, url, stamp, pause_ms, flushes):
     """The writer. It takes the verified space as an argument, so no code path reaches a vector without
     the canary having passed in this process."""
     if not stamp or not stamp.get("spaceId"):
@@ -331,7 +329,7 @@ def run(ctx):
         os.makedirs(os.path.dirname(os.path.abspath(labels_store)), exist_ok=True)
         with open(labels_store, "a", encoding="utf-8") as lh, open(vectors_store, "a", encoding="utf-8") as vh:
             try:
-                written = embed_into((lh, vh), url, stamp, CHUNK, ctx.pause_ms, groups)
+                written = embed_into((lh, vh), url, stamp, ctx.pause_ms, groups)
             except http.HTTPError as refused:
                 raise StageError(f"embed: den-embed refused a request ({refused}). Everything before it is "
                                  f"in the stores; re-run to continue from there.") from None

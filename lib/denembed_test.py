@@ -174,6 +174,33 @@ class Canary(Served):
                 denembed.verify(self.canary, self.service.url, lambda line: None)
             self.assertIn(expected, str(refused.exception))
 
+    def test_a_file_that_is_not_a_canary_says_so(self):
+        """Not "den-embed could not be asked": the service was never reached, and the fix is the file."""
+        doc = canary_for(self.service, self.canary)
+        for body in ("{torn", json.dumps(dict(doc, cases=None)), json.dumps({k: v for k, v in doc.items() if k != "dims"}),
+                     json.dumps(dict(doc, cases=[{k: v for k, v in doc["cases"][0].items() if k != "why"}]))):
+            with self.subTest(body=body[:40]):
+                with open(self.canary, "w", encoding="utf-8") as fh:
+                    fh.write(body)
+                with self.assertRaises(denembed.CanaryFailure) as refused:
+                    denembed.verify(self.canary, self.service.url, lambda line: None)
+                self.assertIn("not a readable embedding canary", str(refused.exception))
+        self.assertEqual(self.service.requests, [])
+
+    def test_a_vector_whose_base64_does_not_decode_strictly_is_refused(self):
+        """`b64decode` without `validate` skips the stray `!` and decodes the rest into the right vector —
+        which the Swift refused, and which a hand-mangled file should not get past."""
+        rows = [{"id": "a", "why": "w", "text": "first text",
+                 "v": base64.b64encode(bytes(x & 0xFF for x in vector("first text"))).decode()}]
+        rows[0]["v"] = rows[0]["v"][:4] + "!" + rows[0]["v"][4:]
+        doc = {"canarySet": "test-v1", "dims": 8, "cases": rows, "textsSha256": denembed.texts_sha256(rows),
+               "spaceId": denembed.space_id("test-v1", rows)}
+        with open(self.canary, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        with self.assertRaises(denembed.CanaryFailure) as refused:
+            denembed.verify(self.canary, self.service.url, lambda line: None)
+        self.assertIn("case a has an unreadable base64 vector", str(refused.exception))
+
     def test_a_missing_canary_refuses(self):
         with self.assertRaises(denembed.CanaryFailure):
             denembed.verify(os.path.join(self.directory.name, "absent.json"), self.service.url, print)

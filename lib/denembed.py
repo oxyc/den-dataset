@@ -22,6 +22,7 @@ a different cap the long cases embed a different text and their bytes cannot mea
 failure that reads as a mystery rather than as a setting.
 """
 import base64
+import binascii
 import hashlib
 import json
 import math
@@ -95,6 +96,15 @@ def embed_many(url, texts):
     return [[max(-128, min(127, int(x))) for x in vector] for vector in vectors]
 
 
+def vector_bytes(case):
+    """A case's int8 row as bytes, or None when its base64 does not decode. Strict, as the Swift's
+    `Data(base64Encoded:)` was: `b64decode` on its own skips a stray character and decodes what is left."""
+    try:
+        return base64.b64decode(case["v"], validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
 def texts_sha256(cases):
     digest = hashlib.sha256()
     for case in cases:
@@ -107,7 +117,8 @@ def space_id(canary_set, cases):
     are the instrument, not the answer, so they are not in it."""
     digest = hashlib.sha256(canary_set.encode("utf-8") + b"\n")
     for case in cases:
-        digest.update(case["id"].encode("utf-8") + b"\0" + base64.b64decode(case["v"]) + b"\n")
+        # An undecodable vector digests as nothing, as the Swift's did; `verify` refuses it by name.
+        digest.update(case["id"].encode("utf-8") + b"\0" + (vector_bytes(case) or b"") + b"\n")
     return f"{canary_set}:{digest.hexdigest()}"
 
 
@@ -123,14 +134,36 @@ def compare(expected, actual):
     return differing, (dot / norms if norms else 0.0), delta
 
 
+def read_canary(path):
+    """The canary file, or a refusal that says it is not one. The fields are the ones the Swift decoded;
+    anything else in the file (`note`, `vectorEncoding`, `embedder`) is the generator's and optional."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            canary = json.load(handle)
+        cases = canary["cases"]
+        well_formed = (all(isinstance(canary[key], str) for key in ("canarySet", "spaceId", "textsSha256"))
+                       and isinstance(canary["dims"], int) and isinstance(cases, list)
+                       and all(isinstance(case, dict) and all(isinstance(case.get(key), str)
+                                                              for key in ("id", "why", "text", "v"))
+                               for case in cases))
+    except (OSError, ValueError, KeyError, TypeError) as broken:
+        well_formed, why = False, f"{type(broken).__name__}: {broken}"
+    else:
+        why = "a field is missing or of the wrong type"
+    if not well_formed:
+        raise CanaryFailure(f"{path} is not a readable embedding canary ({why}). Restore it from git, or "
+                            f"regenerate it with scripts/v2/embed_canary.py --regenerate against a known-good "
+                            f"embedder.")
+    return canary
+
+
 def verify(path, url, log):
     """Embed every case and refuse unless all come back byte-identical. Returns the stamp a verified run
     records beside its vectors, which finalize puts in the manifest as `embeddingSpace`."""
     if not os.path.exists(path):
         raise CanaryFailure(f"no embedding canary at {path}, so nothing can say which space this service "
                             f"embeds into. Point DEN_EMBED_CANARY at data/embed-canary.json.")
-    with open(path, encoding="utf-8") as handle:
-        canary = json.load(handle)
+    canary = read_canary(path)
     cases = canary["cases"]
     log(f"embed canary: {canary['canarySet']} — {len(cases)} cases from {path}")
     if texts_sha256(cases) != canary["textsSha256"]:
@@ -141,7 +174,8 @@ def verify(path, url, log):
         raise CanaryFailure(f"{path}: its spaceId does not match the vectors it carries — the file was "
                             f"hand-edited. Regenerate it rather than correcting the digest.")
     service = identity(url)
-    cap = (canary.get("embedder") or {}).get("max_tokens")
+    embedder = canary.get("embedder")
+    cap = embedder.get("max_tokens") if isinstance(embedder, dict) else None
     if isinstance(cap, int) and not isinstance(cap, bool) and cap != service["maxTokens"]:
         raise CanaryFailure(f"the service truncates at {service['maxTokens']} tokens and these answers were "
                             f"recorded at {cap}. Every case longer than the smaller cap embeds a different "
@@ -149,7 +183,10 @@ def verify(path, url, log):
                             f"canary at the new cap as part of a full re-embed.")
     failures = []
     for case in cases:
-        expected = [b - 256 if b > 127 else b for b in base64.b64decode(case["v"])]
+        raw = vector_bytes(case)
+        if raw is None:
+            raise CanaryFailure(f"{path}: case {case['id']} has an unreadable base64 vector")
+        expected = [b - 256 if b > 127 else b for b in raw]
         got = embed_many(url, [case["text"]])
         differing, cosine, delta = compare(expected, got[0] if got else [])
         ok = differing == 0
