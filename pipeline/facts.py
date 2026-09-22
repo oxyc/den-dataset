@@ -244,7 +244,12 @@ def resolve_sources(fields, path):
 
 def shipped_entities(names, fields):
     """The entity map as it ships. A genre's name loses its medium ("drama television series" is a poor
-    display string and defeats the TMDB match) — genres only: a person named "... film" is not rewritten."""
+    display string and defeats the TMDB match) — genres only: a person named "... film" is not rewritten.
+
+    Only the name. The Swift replaced the whole entry, so a genre shipped without its aliases (414 of the
+    858 genres in the shipped facts had some) — and a Q-id that is a genre in one record is a type, a
+    subject or a composer in another (108 of them, named by 11,855 records), where losing the aliases
+    loses the search strings too."""
     entities = dict(names)
     genres = set()
     for row in fields.values():
@@ -255,7 +260,7 @@ def shipped_entities(names, fields):
         if name:
             stripped = wikidata.stripped_genre(name)
             if stripped:
-                entities[qid] = {"en": stripped}
+                entities[qid] = {**entities[qid], "en": stripped}
     return entities
 
 

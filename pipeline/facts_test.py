@@ -144,15 +144,25 @@ class Passes(Staged):
     def test_the_entity_map_as_it_ships(self):
         """A single-valued Q-id is resolved too — a harvest that walked only lists left all 3,019 franchises
         unnamed. Aliases are a list at the boundary: a joined string made a 27 MB file unparseable for
-        atlas. A genre loses its medium, and with it everything but its name."""
+        atlas. A genre loses its medium from its name, and nothing else."""
         self.run_stage()
         shipped = self.read(f"facts-{VERSION}.pre-merge.json")
         self.assertEqual(shipped["entities"]["Q10"], {"aliases": ["A. D.", "Ada"], "en": "Ada Director",
                                                       "tmdbPersonId": "55"})
-        self.assertEqual(shipped["entities"]["Q20"], {"en": "science fiction"})
+        self.assertEqual(shipped["entities"]["Q20"], {"aliases": ["sf"], "en": "science fiction"})
         self.assertEqual(shipped["entities"]["Q40"], {"en": "The Saga"})
         self.assertEqual(shipped["genreMap"], {"Q20": {"movie": 878, "tv": 10765}})
         self.assertEqual(self.read("facts-entities.json")["Q10"]["aliases"], "A. D.\x1fAda")
+
+    def test_a_genre_that_is_also_a_person_keeps_what_the_person_needs(self):
+        """One Q-id, one entry: a composer credit on one title and a genre on another share it, so the genre
+        rename must not take the composer's person id and aliases with it."""
+        self.wd.facts[("movie", 1)]["genres"] = ["Q20", "Q60"]
+        self.wd.facts[("tv", 1)]["composers"] = ["Q60"]
+        self.wd.names["Q60"] = {"name": "drama film", "tmdbPersonId": "99", "aliases": ["drama movie"]}
+        self.run_stage()
+        self.assertEqual(self.read(f"facts-{VERSION}.pre-merge.json")["entities"]["Q60"],
+                         {"aliases": ["drama movie"], "en": "drama", "tmdbPersonId": "99"})
 
     def test_an_unknown_source_work_is_remembered_so_it_is_not_asked_again(self):
         del self.wd.types["Q30"]
