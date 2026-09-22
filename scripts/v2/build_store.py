@@ -141,6 +141,9 @@ PROVENANCE = {
     "ent_alias_v": "wikidata", "ent_alias_o": "wikidata",
     "maker_ent": "wikidata",
     "maker_rows_v": "ours", "maker_rows_o": "ours",
+    # `data/iconic-studios.json`: which studios, their names and their items are a judgement kept by hand.
+    "studio_qid": "ours", "studio_name": "ours",
+    "studio_ent_v": "ours", "studio_ent_o": "ours",
     # Embeddings of the article's plot text, and of the premise tags a model wrote from it.
     "vec_plot": "wikipedia",
     "vec_premise": "llm",
