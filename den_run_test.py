@@ -16,18 +16,24 @@ invented: there is no TMDB text in them (no overview, no tagline — TMDB's term
 (CC BY-SA), no real IMDb counts (a non-transferable licence), and no credential. `TMDB_API_KEY` is set to a
 string that is not one, because the fetch stage refuses to start without some value.
 
-**What is seeded, and why.** Three kinds of input are copied into the out-dir before the run, each in its
+**What is seeded, and why.** Two kinds of input are copied into the out-dir before the run, each in its
 own directory under `seeds/` so the kind is visible from the path:
 
   * `seeds/unproduced/` — the six inputs NO stage produces (`UNPRODUCED`). The audit in #27 found that
     `./den run` cannot run unattended because of exactly these. `UnproducedSeeds` fails the moment a stage
     starts producing one, so the seed is deleted rather than left to shadow the real producer.
-  * `seeds/cycle/labels-t02.json` — `docfacts` and `embed` read the labels file `finalize` writes AFTER
-    them, so a fresh out-dir has to start from a previous finalize's. `pipeline/__init__.py` names that
-    loop; `TheLabelsLoop` fails once it is broken.
   * `seeds/unbought/` — the classify pass's shard. Its stage exists but buys from a paid provider, and
     `den run` leaves it out without `--spend`; CI can never buy. `TheClassifyPassStillBuys` fails if that
-    stops being true.
+    stops being true. The genres & moods stage's answer shard is the same kind of input — what its ask
+    would buy — and the test WRITES it (`write_genres_moods_answer`), because one answer is 78 questions'
+    worth of probabilities and would not review.
+
+Nothing else is seeded: no stage reads what a later one writes (`NoStageReadsWhatALaterOneWrites`), so the
+out-dir starts empty of every other artifact. The genres & moods stage reads two committed files instead of
+an out-dir, and the test stands in for both, as it does for den-embed: `fixture-corpus/genres-moods-curated.json`
+for `data/genres-moods-curated.json`, whose 47,539 real titles no fixture upstream could answer for, and a
+passing quality gate, which needs ten golden titles per label to score anything and has its own suite
+(`pipeline/genres_moods_test.py`).
 
 **What `den run` does.** Every stage but the two that buy or publish, unattended, in one command: the
 fetch drain over a universe holding a title below every floor, and the stages from `facts` on under the
@@ -48,6 +54,7 @@ import re
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -61,7 +68,7 @@ sys.path.insert(0, HERE)
 
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
-from pipeline import artifacts  # noqa: E402
+from pipeline import artifacts, genres_moods  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 
 V2 = os.path.join(HERE, "scripts", "v2")
@@ -89,6 +96,12 @@ UNPRODUCED = {
 GIVEN_VERSION = "fixture"
 DIMS = 1024
 BELOW_FLOOR = "movie:900004"
+CURATED = os.path.join(FIXTURE, "genres-moods-curated.json")
+#: The title whose genres & moods come from a Jev answer rather than the curated file, and that answer's
+#: strong labels: everything else it is asked is answered 0.05, under every threshold in the rule.
+DERIVED = "tv:900005"
+DERIVED_PRIMARY = "Mystery"
+DERIVED_STRONG = {"Whodunit/Murder Mystery": 0.95, "Tense/Edge-of-seat": 0.9}
 
 
 #: The sidecars of the two seeded Jev shards, which the corpus stage audits before it joins.
@@ -370,6 +383,36 @@ def keys_of(records):
     return {f"{r['mediaType']}:{r['tmdbId']}" for r in records}
 
 
+def write_genres_moods_answer(out, key):
+    """The answer shard the genres & moods ask would buy for `key`, beside its manifest, in the shape
+    `run_combined` writes: one Choice per pick, one Noul per label."""
+    questions, mapping, _ = genres_moods.questions()
+    answers = {}
+    for qid, question in questions.items():
+        if question["type"] == "noul":
+            answers[qid] = {"type": "noul", "noul": DERIVED_STRONG.get(mapping[qid]["label"], 0.05)}
+            continue
+        choice = DERIVED_PRIMARY if qid == "gm__primary_genre" else "none-fits"
+        rest = 0.1 / (len(question["criteria"]) - 1)
+        answers[qid] = {"type": "choice", "choice": choice, "confidence": 0.9,
+                        "probabilities": {c: 0.9 if c == choice else rest for c in question["criteria"]}}
+    run = {"runId": "den-run-fixture", "configSha256": "den-run-fixture"}
+    media, tmdb_id = key.split(":")
+    shard = os.path.join(out, artifacts.GENRES_MOODS_ANSWERS.filename.replace("*", "-fixture"))
+    with open(shard, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({**run, "mediaType": media, "tmdbId": int(tmdb_id), "answers": answers}) + "\n")
+    config = {"labelQuestionMapping": mapping, "requestedModel": genres_moods.PINNED_MODEL,
+              "globalQuestionsSha256": genres_moods.rc.sha256_text(genres_moods.rc.canonical(questions)),
+              "taxonomyVersion": genres_moods.gm.vocabulary()["version"]}
+    with open(shard + ".manifest.json", "w", encoding="utf-8") as fh:
+        json.dump({**run, "config": config}, fh)
+
+
+def gate_passes(candidate, golden, floors, flag):
+    """The quality gate's stand-in: the verdict `scripts/eval-taxonomy.py --gate` gives a pass."""
+    return subprocess.CompletedProcess([candidate, golden, floors, flag], 0, "", "")
+
+
 class DenRun(unittest.TestCase):
     """One run of the whole pipeline over the fixture, and what its published-shape outputs must agree on."""
 
@@ -379,11 +422,12 @@ class DenRun(unittest.TestCase):
         cls.out = os.path.join(cls.tmp, "out")
         cls.meta = os.path.join(cls.out, artifacts.MANIFEST.filename)
         os.makedirs(cls.out)
-        for kind in ("unproduced", "cycle", "unbought"):
+        for kind in ("unproduced", "unbought"):
             for name in os.listdir(os.path.join(SEEDS, kind)):
                 shutil.copy(os.path.join(SEEDS, kind, name), cls.out)
         for name in SEEDED_MANIFESTS:
             stamp_implementation(os.path.join(cls.out, name))
+        write_genres_moods_answer(cls.out, DERIVED)
         spec = read_json(os.path.join(cls.out, "vectors-premise.json"))
         os.unlink(os.path.join(cls.out, "vectors-premise.json"))
         vector_blob.write(os.path.join(cls.out, artifacts.PREMISE_VECTORS.filename), spec["keys"],
@@ -401,7 +445,9 @@ class DenRun(unittest.TestCase):
         cls.transcript = []
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(http, "request", cls.upstreams.request), \
-                mock.patch.object(socket.socket, "connect", offline_connect(socket.socket.connect)):
+                mock.patch.object(socket.socket, "connect", offline_connect(socket.socket.connect)), \
+                mock.patch.object(genres_moods, "CURATED", CURATED), \
+                mock.patch.object(genres_moods.gmm, "run_eval", gate_passes):
             cls.drive(den)
 
     @classmethod
@@ -444,6 +490,7 @@ class DenRun(unittest.TestCase):
         code, said = self.facts_refusal
         self.assertEqual(code, 1)
         self.assertIn(f"--dataset-version {GIVEN_VERSION} is not this out-dir's generation", said)
+        self.assertTrue(os.path.exists(self.path(artifacts.STORE)), "the stages after it ran on the derived one")
 
     def test_den_run_drains_fetch_over_a_title_below_the_floor(self):
         """`enrich` once left a below-floor title pending for good, so `remaining` never reached 0 and the
@@ -502,14 +549,42 @@ class DenRun(unittest.TestCase):
         with open(os.path.join(self.out, artifacts.DELTA_IDS.filename), encoding="utf-8") as fh:
             self.assertEqual(without, set(fh.read().split()), "the delta pass covers exactly the delta ids")
 
+    def genres_moods(self):
+        return read_json(self.path(artifacts.GENRES_MOODS))["titles"]
+
     def test_the_corpus_is_the_facts_joined_with_the_passes(self):
         facts, corpus = keys_of(self.facts()["records"]), self.corpus()
         self.assertEqual({row["key"] for row in corpus}, facts)
-        self.assertTrue(os.path.exists(self.path(artifacts.STORE)), "the stages after it ran on the derived one")
         self.assertEqual(len(corpus), len(facts), "one row per title")
+        self.assertEqual({r["key"]: r["labels"] for r in corpus if r["labels"]}, self.genres_moods())
+        self.assertEqual(set(self.genres_moods()), self.labels(), "every title with genres & moods was embedded")
+        self.assertFalse([r["key"] for r in corpus if "premiseLabels" in r], "the premise copy is not joined")
+
+    def test_the_genres_and_moods_jev_derived_reach_every_reader(self):
+        """The reason for the switch: a title the curated file lacks gets its genres & moods from the
+        genres & moods stage, and every stage after it reads them there — the embedded document, the
+        labels `finalize` ships beside the vectors, the corpus and the store."""
+        self.assertNotIn(DERIVED, read_json(CURATED)["titles"], "the fixture must not curate it")
+        derived = self.genres_moods()[DERIVED]
+        self.assertEqual((derived["source"], derived["primaryGenre"]), ("jev-v3", DERIVED_PRIMARY))
+        self.assertEqual([s["label"] for s in derived["subgenres"]], ["Whodunit/Murder Mystery"])
+        self.assertEqual([m["label"] for m in derived["moods"]], ["Tense/Edge-of-seat"])
+        shipped = {f"{r['mediaType']}:{r['tmdbId']}": r
+                   for r in read_json(self.path(artifacts.VECTOR_LABELS))["records"]}
+        self.assertEqual({k: shipped[DERIVED][k] for k in ("primaryGenre", "subgenres", "moods")},
+                         {k: derived[k] for k in ("primaryGenre", "subgenres", "moods")})
+        with open(self.path(artifacts.EMBED_LABELS), encoding="utf-8") as fh:
+            embedded = [json.loads(line) for line in fh if f'"tmdbId":{DERIVED.split(":")[1]}' in line]
+        self.assertEqual([r["primaryGenre"] for r in embedded if r["mediaType"] == "tv"], [DERIVED_PRIMARY])
+        row = next(r for r in self.corpus() if r["key"] == DERIVED)
+        self.assertEqual(row["labels"], derived)
+
+    def test_a_title_only_the_premise_labels_named_has_no_genres_and_moods(self):
+        """tv:900006's genres & moods were only ever the premise pass's copy, which is no longer a source."""
         premise = keys_of(read_json(self.path(artifacts.PREMISE_LABELS))["records"])
-        self.assertEqual({r["key"] for r in corpus if r["labels"]}, self.labels())
-        self.assertEqual({r["key"] for r in corpus if r["premiseLabels"]}, premise)
+        self.assertIn("tv:900006", premise)
+        self.assertNotIn("tv:900006", self.genres_moods())
+        self.assertIsNone(next(r for r in self.corpus() if r["key"] == "tv:900006")["labels"])
 
     def test_the_store_is_the_corpus_and_the_manifest_names_it(self):
         store_path = self.path(artifacts.STORE)
@@ -576,7 +651,7 @@ class DenRun(unittest.TestCase):
         # The disambiguator comes off the display title; the non-Latin original title survives.
         self.assertEqual(facts["movie:900003"]["titles"]["en"], "Quiet Harbour")
         self.assertEqual(facts["tv:900005"]["titles"]["orig"], "東京ナイトリレー")
-        # Labelled by the premise pass alone, and a vectorless facts record.
+        # A premise vector and no plot vector, so a vectorless facts record.
         self.assertEqual(facts["tv:900006"]["hasVector"], False)
         self.assertIn("tv:900006", store_keys)
 
@@ -630,17 +705,20 @@ class SeededManifests(unittest.TestCase):
                 audit_combined.validate_implementation(name, read_json(path)["config"])
 
 
-class TheLabelsLoop(unittest.TestCase):
-    def test_a_stage_still_reads_the_labels_before_finalize_writes_them(self):
-        """`seeds/cycle/labels-t02.json` exists only because of this ordering. Once no stage reads the
-        labels ahead of `finalize`, delete the seed."""
-        order = [module.NAME for module in pipeline.stages()]
-        readers = [module.NAME for module in pipeline.stages()
-                   if artifacts.VECTOR_LABELS.name in {bind(e).artifact.name for e in module.INPUTS}
-                   and module.NAME != "worklist"]
-        self.assertLess(order.index(readers[0]), order.index("finalize"),
-                        "no stage reads labels-t02.json before finalize writes it any more: delete "
-                        "pipeline/fixture-corpus/seeds/cycle/labels-t02.json (oxyc/den-dataset#27)")
+class NoStageReadsWhatALaterOneWrites(unittest.TestCase):
+    def test_a_fresh_out_dir_can_start(self):
+        """`docfacts` and `embed` read `labels-t02.json`, which `finalize` writes after them, so a fresh
+        out-dir could only start from a previous run's copy — the fixture seeded one. The one read of a
+        later stage's output left is by design: a delta skips what the previous run's genres & moods name,
+        because a delta extends an out-dir rather than starting one, and an export universe reads nothing."""
+        stages = pipeline.stages()
+        for i, module in enumerate(stages):
+            later = {bind(e).artifact.name: m.NAME for m in stages[i + 1:] for e in m.OUTPUTS}
+            reads = {bind(e).artifact.name for e in module.INPUTS} & set(later)
+            if module.NAME == "worklist":
+                reads -= {artifacts.GENRES_MOODS.name}
+            self.assertEqual({name: later[name] for name in reads}, {},
+                             f"{module.NAME} reads what a later stage writes")
 
 
 class TheClassifyPassStillBuys(unittest.TestCase):

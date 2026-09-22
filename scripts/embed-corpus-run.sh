@@ -10,7 +10,7 @@
 #   4. WATCHDOG: a segment that dies (OOM/hang) is retried after a fresh restart.
 # Idempotent — safe to Ctrl-C and re-run.
 #
-#   scripts/embed-corpus-run.sh out-t02/labels-t02.json
+#   scripts/embed-corpus-run.sh out-t02/genres-moods.json
 #
 # RUNS THE PUBLISHED CONTAINER, not a local checkout. den-embed was rewritten in Rust at 5cf9e72 and its
 # server.py / run.sh / .venv are gone; this script still booted `uvicorn server:app`, so the whole
@@ -42,16 +42,16 @@ cd "$(dirname "$0")/.." || exit 1
 # shellcheck source=scripts/lib/den-env.sh
 . scripts/lib/den-env.sh
 
-LABELS="${1:?usage: embed-corpus-run.sh <existing labels-t02.json>}"
+GENRES_MOODS="${1:?usage: embed-corpus-run.sh <existing genres-moods.json>}"
 # NO default out-dir. It used to be `out-vecnow`, which is an abandoned partial store from the July OOM —
 # a bare re-run resumed into it and failed confusingly. Naming the destination is one word and removes a
 # whole class of "why did it write nothing".
 OUT_DIR="${OUT_DIR:?set OUT_DIR — a FRESH directory, e.g. OUT_DIR=out-t02-rebuild. Never out-t02: the stage
 skips titles already in the target store BEFORE recomposing, so pointing it at the live corpus reports
 \"written: 0\" and finalizes, discarding the entire point of the run.}"
-# Derived from the labels file's own directory rather than defaulted to `out/enriched`, which is a t01-era
-# directory that has not been the live enrichment data for two taxonomy generations.
-ENRICHED_DIR="${ENRICHED_DIR:-$(dirname "$LABELS")/enriched}"
+# Derived from the genres & moods file's own directory rather than defaulted to `out/enriched`, which is a
+# t01-era directory that has not been the live enrichment data for two taxonomy generations.
+ENRICHED_DIR="${ENRICHED_DIR:-$(dirname "$GENRES_MOODS")/enriched}"
 # There is deliberately NO MAX_BATCH passed to den-embed here. It reads like a server-side micro-batch and is not one
 # — den-embed's embed_many maps embed_one SERIALLY, so it bounds no memory whatsoever; it is purely a
 # rejection threshold, returning 413 when a request carries more texts than it allows. Setting it to 8 while
@@ -73,7 +73,7 @@ ERR_LOG="${ERR_LOG:-$OUT_DIR/embed.err}"
 
 export DEN_EMBED_URL="http://127.0.0.1:$PORT"
 
-[ -f "$LABELS" ] || { echo "missing labels file: $LABELS"; exit 1; }
+[ -f "$GENRES_MOODS" ] || { echo "missing genres & moods file: $GENRES_MOODS"; exit 1; }
 [ -d "$ENRICHED_DIR" ] || { echo "no enriched dir at $ENRICHED_DIR — set ENRICHED_DIR"; exit 1; }
 # Up front, like the others: a missing doc-facts is a refusal inside the retry loop below, which would boot
 # the 555 MB model once per attempt to reach the same answer.
@@ -139,10 +139,10 @@ for attempt in $(seq 1 200); do
     continue
   fi
   # One segment: embed up to SEGMENT new titles, then exit so den-embed can be recycled. The inputs are
-  # pointed at with --set because they live beside LABELS, not in OUT_DIR; the stores and their records
-  # are written into OUT_DIR.
+  # pointed at with --set because they live beside GENRES_MOODS, not in OUT_DIR; the stores and their
+  # records are written into OUT_DIR.
   out=$(./den stage embed --out-dir "$OUT_DIR" --limit "$SEGMENT" \
-        --set "vector_labels=$LABELS" --set "enriched=$ENRICHED_DIR" --set "doc_facts=$DOC_FACTS" \
+        --set "genres_moods=$GENRES_MOODS" --set "enriched=$ENRICHED_DIR" --set "doc_facts=$DOC_FACTS" \
         2>>"$ERR_LOG") || {
     # Not every failure is a dead container. A refusal from the stage itself — a mixed embedder, a service
     # that would truncate, a canary it does not reproduce — is DETERMINISTIC, and retrying it 200 times boots
@@ -167,7 +167,7 @@ for attempt in $(seq 1 200); do
   if [ "$written" -eq 0 ]; then
     echo "=== all titles embedded → finalizing ==="
     stop_embed
-    ./den stage finalize --out-dir "$OUT_DIR" \
+    ./den stage finalize --out-dir "$OUT_DIR" --set "genres_moods=$GENRES_MOODS" \
       || { echo "finalize failed — nothing published"; exit 1; }
     exit 0
   fi

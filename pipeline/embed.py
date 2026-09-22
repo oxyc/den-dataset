@@ -64,7 +64,7 @@ import os
 import sys
 import time
 
-from . import artifacts, compose, finalize, jsonbytes
+from . import artifacts, compose, finalize, genres_moods, jsonbytes
 from .contract import REPO, StageError, bind
 from lib import cache as caching
 from lib import denembed, http
@@ -78,10 +78,9 @@ PUBLISHES = False
 #: den-embed is self-hosted, so a re-embed costs hours and no money.
 SPENDS = False
 
-#: `labels-t02.json` is `--labels` here and `--vector-labels` to the store writer; it supplies each
-#: title's tags. The file keeps one name and each reader keeps its own word for it.
+#: Each title's tags are its genres & moods, as this run's `genres_moods` stage wrote them.
 INPUTS = (
-    artifacts.VECTOR_LABELS.called("labels"),
+    artifacts.GENRES_MOODS,
     artifacts.ENRICHED.called("enriched_dir"),
     artifacts.DOC_FACTS,
 )
@@ -329,14 +328,8 @@ def counted(groups, stored, tally):
 
 
 def inputs(ctx):
-    """The labels per key, the doc facts, and the enriched dir — every input, required."""
-    labels_path = ctx.require(BOUND[artifacts.VECTOR_LABELS.name].artifact)
-    with open(labels_path, encoding="utf-8") as handle:
-        records = json.load(handle).get("records") or []
-    labels = {}
-    for n, raw in enumerate(records):
-        record = finalize.parse_record(raw, f"{labels_path} record {n}")
-        labels[f"{record['mediaType']}:{record['tmdbId']}"] = record
+    """The genres & moods per key, the doc facts, and the enriched dir — every input, required."""
+    labels = genres_moods.read(ctx.require(artifacts.GENRES_MOODS))
     enriched = ctx.require(BOUND[artifacts.ENRICHED.name].artifact)
     # Without doc facts the document is not the CC0 shape at all, so the file is required, not optional.
     with open(ctx.require(artifacts.DOC_FACTS), encoding="utf-8") as handle:
@@ -392,7 +385,7 @@ def run(ctx):
     listed = listed_keys(ctx.reembed_keys) if ctx.reembed_keys else set()
     unlabelled = listed - labels.keys()
     if unlabelled:
-        say(f"{len(unlabelled)} listed title(s) have no label in the labels file and cannot be composed, "
+        say(f"{len(unlabelled)} listed title(s) have no genres & moods and cannot be composed, "
             f"e.g. {sorted(unlabelled)[:3]}")
     url = denembed.base_url()
     stamp = identity = None

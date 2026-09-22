@@ -1,0 +1,6 @@
+{"_": "The fixture's stand-in for data/genres-moods-curated.json: hand-written genres & moods for four of the fixture's titles. tv:900005's come from a Jev answer den_run_test.py writes, and tv:900006 has none.", "count": 4, "sources": {"fixture": "Hand-written for the end-to-end fixture."}, "taxonomyVersion": "t02","titles":{
+"movie:900001":{"animated": false, "moods": [{"confidence": 0.74, "label": "Brooding"}], "primaryGenre": "Mystery", "primaryGenreSource": "fixture", "source": "fixture", "subgenres": [{"confidence": 0.82, "label": "Supernatural Mystery"}]},
+"movie:900002":{"animated": false, "moods": [{"confidence": 0.7, "label": "Gentle"}], "primaryGenre": "Drama", "primaryGenreSource": "fixture", "source": "fixture", "subgenres": [{"confidence": 0.66, "label": "Coming of Age"}]},
+"movie:900003":{"animated": false, "moods": [{"confidence": 0.51, "label": "Quiet"}], "primaryGenre": "Drama", "primaryGenreSource": "fixture", "source": "fixture", "subgenres": []},
+"tv:900001":{"animated": false, "moods": [{"confidence": 0.69, "label": "Eerie"}], "primaryGenre": "Science Fiction", "primaryGenreSource": "fixture", "source": "fixture", "subgenres": [{"confidence": 0.77, "label": "Post-Apocalyptic"}]}
+}}

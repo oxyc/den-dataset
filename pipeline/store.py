@@ -30,7 +30,11 @@ HOW = "scripts/v2/build_store.py --stamp-meta"
 PUBLISHES = False
 SPENDS = False
 
-#: In the writer's own argument order, which `store_test.py` holds against `build_store.INPUT_ARGS`.
+#: In the writer's own argument order, which `store_test.py` holds against `build_store.INPUT_ARGS`. The
+#: genres & moods reach the store through the corpus, which joined them from `genres-moods.json`. The two
+#: labels files are read for their keys: the record each vector blob is checked against, and — for the
+#: plot one, which `finalize` wrote from the same `genres-moods.json` — the count of titles that must
+#: carry genres & moods. The writer's argument list is den-spec's fixture generator's too.
 INPUTS = (
     artifacts.CORPUS,
     artifacts.ENTITIES,

@@ -8,12 +8,11 @@
       --delta out-repass/delta-v2.jsonl \
       --delta out-repass/delta-v2-rest.jsonl \
       --facts out-repass/facts-5b1c3213b6a1.json \
-      --labels out-repass/labels-t02.json \
-      --premise-labels out-repass/labels-premise.json \
+      --labels out-repass/genres-moods.json \
       --expect 47618 \
       --out out-repass/corpus-<version>.jsonl
 
-`./den stage corpus --out-dir out-repass --dataset-version <version> --expect 47618` runs the same join
+`./den stage corpus --out-dir out-repass --expect 47618` runs the same join
 with the same arguments, built from `pipeline/corpus.py`'s declaration rather than retyped — the shard
 paths come from the declared glob, so the set cannot be short by one.
 
@@ -263,11 +262,11 @@ def prefixed(answers, prefix):
 def by_key(path, label):
     """A labels artifact keyed by `media:tmdbId`.
 
-    The wrapper key is NOT guessed. `labels-t02.json` nests under `records`, and an earlier version of
-    this function tried `labels`/`tags` and then fell through to the wrapper dict itself — which is a
-    dict, so it was returned as if it were the rows. Every lookup then missed and every corpus row was
-    written with `labels: null`, silently, for all 47,529 titles. Name the shapes, and fail on anything
-    else rather than returning something dict-like.
+    The wrapper key is NOT guessed. `labels-t02.json` nests under `records` and `genres-moods.json` under
+    `titles`, and an earlier version of this function tried `labels`/`tags` and then fell through to the
+    wrapper dict itself — which is a dict, so it was returned as if it were the rows. Every lookup then
+    missed and every corpus row was written with `labels: null`, silently, for all 47,529 titles. Name the
+    shapes, and fail on anything else rather than returning something dict-like.
     """
     if not path:
         return {}
@@ -275,7 +274,7 @@ def by_key(path, label):
         blob = json.load(fh)
     rows = None
     if isinstance(blob, dict):
-        for key in ("records", "labels", "tags"):
+        for key in ("records", "titles", "labels", "tags"):
             if isinstance(blob.get(key), (list, dict)):
                 rows = blob[key]
                 break
@@ -297,7 +296,7 @@ def by_key(path, label):
 #: The inputs this join reads, in the order the parser below declares them. `pipeline/corpus.py` builds
 #: the command line out of its own declaration and `pipeline/corpus_test.py` holds the two lists
 #: together, so an input can only be added or dropped in one place without something going red.
-INPUT_ARGS = ("combined", "delta", "facts", "labels", "premise_labels", "withdrawn")
+INPUT_ARGS = ("combined", "delta", "facts", "labels", "withdrawn")
 
 
 def build_parser():
@@ -307,8 +306,7 @@ def build_parser():
     ap.add_argument("--combined", required=True, action="append", help="a shard of the corpus pass")
     ap.add_argument("--delta", required=True, action="append", help="a shard of the delta pass")
     ap.add_argument("--facts", required=True, help="the FULL facts file, not facts-slim")
-    ap.add_argument("--labels", required=True)
-    ap.add_argument("--premise-labels")
+    ap.add_argument("--labels", required=True, help="genres-moods.json: each title's genres & moods")
     ap.add_argument("--withdrawn", help="tombstones: titles whose older pass rows no longer stand")
     ap.add_argument("--expect", type=int, default=None, help="required title count")
     ap.add_argument("--out", required=True, help="written gzipped when it ends .gz")
@@ -333,9 +331,8 @@ def main():
     entities = facts_blob.get("entities") or {}
     facts = {key_of(r): r for r in facts_blob["records"]}
 
-    print("reading labels …", file=sys.stderr)
+    print("reading genres & moods …", file=sys.stderr)
     labels = by_key(args.labels, "labels")
-    premise = by_key(args.premise_labels, "labels")
 
     print("reading the passes …", file=sys.stderr)
     combined_rows, combined_report, combined_withdrawn = latest(args.combined, "combined", withdrawals,
@@ -351,7 +348,7 @@ def main():
     print("joining …", file=sys.stderr)
     out_path = args.out
     opener = gzip.open if out_path.endswith(".gz") else open
-    written, with_delta, with_facts, with_labels, with_premise = 0, 0, 0, 0, 0
+    written, with_delta, with_facts, with_labels = 0, 0, 0, 0
     # mtime=0 so an unchanged corpus produces byte-identical output and the publish step does not
     # re-upload an asset that did not change.
     handle = (gzip.GzipFile(filename="", mode="wb", fileobj=open(out_path, "wb"), compresslevel=9, mtime=0)
@@ -386,7 +383,6 @@ def main():
                 # mainSubjects included, all of which facts-slim dropped.
                 "facts": {k: v for k, v in (fact or {}).items() if k not in ("mediaType", "tmdbId")},
                 "labels": labels.get(key),
-                "premiseLabels": premise.get(key),
                 "applicability": typed(answers, APPLICABILITY),
                 "facets": typed(answers, FACET_AXES),
                 "scores": prefixed(answers, "score__"),
@@ -402,7 +398,6 @@ def main():
             with_delta += 1 if d else 0
             with_facts += 1 if fact else 0
             with_labels += 1 if row["labels"] else 0
-            with_premise += 1 if row["premiseLabels"] else 0
     finally:
         handle.close()
 
@@ -419,14 +414,11 @@ def main():
     #
     # Checked the way the facts are checked above — every record in the artifact must reach the corpus —
     # rather than against a fraction of the rows written. A floor of half the corpus cannot see the case
-    # worth seeing: the premise pass covers 44,531 of 47,618 rows, so it could lose twenty thousand
-    # records and still clear `written * 0.5` with room to spare. The artifact's own count is the only
-    # number that knows how many there were meant to be.
-    for name, hits, source, artifact in (("labels", with_labels, args.labels, labels),
-                                         ("premiseLabels", with_premise, args.premise_labels, premise)):
-        if source and hits != len(artifact):
-            sys.exit(f"{name}: {len(artifact) - hits} of {len(artifact)} records in {source} did not "
-                     f"reach the corpus — the join is wrong, not the data")
+    # worth seeing: a join that loses twenty thousand records still clears `written * 0.5` with room to
+    # spare. The artifact's own count is the only number that knows how many there were meant to be.
+    if with_labels != len(labels):
+        sys.exit(f"labels: {len(labels) - with_labels} of {len(labels)} records in {args.labels} did not "
+                 f"reach the corpus — the join is wrong, not the data")
 
     # The entity names the Q-ids refer to, beside the corpus rather than repeated 47,529 times in it.
     ents_path = out_path.replace(".jsonl", "-entities.json").replace(".gz", "") + (
@@ -437,7 +429,7 @@ def main():
         eh.write(blob.encode("utf-8") if ents_path.endswith(".gz") else blob)
 
     print(json.dumps({"titles": written, "withFacts": with_facts, "withLabels": with_labels,
-                      "withPremiseLabels": with_premise, "withDelta": with_delta,
+                      "withDelta": with_delta,
                       "withPass": len(combined_rows), "factsOnly": written - len(answered),
                       "entities": len(entities), "out": out_path, "entitiesOut": ents_path,
                       "tombstones": len(withdrawals), "combined": combined_report, "delta": delta_report},

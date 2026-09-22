@@ -43,13 +43,11 @@ SINCE="$(date -u -v-"${DAYS_BACK}"d +%Y-%m-%d 2>/dev/null || date -u -d "${DAYS_
 
 den_load_env
 
-# The published labels blob, found rather than hardcoded — its name carries the taxonomy version, and a
-# taxonomy bump would otherwise silently point `--known` at a file that no longer exists.
-LABELS=""
-for f in "$OUT_DIR"/labels-t*.json; do [ -f "$f" ] && LABELS="$f"; done
-[ -n "$LABELS" ] || { echo "error: no labels-t*.json in $OUT_DIR — run the full backfill first" >&2; exit 1; }
+# The titles that already have genres & moods: what a delta skips.
+KNOWN="$OUT_DIR/genres-moods.json"
+[ -f "$KNOWN" ] || { echo "error: no $KNOWN — run the full backfill first" >&2; exit 1; }
 
-echo "== DT-F delta: titles since $SINCE (vote floor $VOTE_FLOOR, limit $LIMIT/media, known $LABELS) =="
+echo "== DT-F delta: titles since $SINCE (vote floor $VOTE_FLOOR, limit $LIMIT/media, known $KNOWN) =="
 mkdir -p "$OUT_DIR/delta"
 
 total=0
@@ -61,7 +59,7 @@ left=0
 # worklists under the same names.
 ./den stage worklist --mode delta --since "$SINCE" \
      --out-dir "$OUT_DIR" \
-     --set "vector_labels=$LABELS" \
+     --set "genres_moods=$KNOWN" \
      --set "universe_movie=$OUT_DIR/delta/universe-movie.json" \
      --set "universe_tv=$OUT_DIR/delta/universe-tv.json"
 
@@ -121,6 +119,6 @@ Next, by hand — the classify stage BUYS, so it is not run unattended. In \`./d
        ./den stage store --out-dir $OUT_DIR --stamp-meta $OUT_DIR/dataset.meta.json
        ./den stage publish --out-dir $OUT_DIR
 
-(\`docfacts\` and \`embed\` read the shipped labels blob, so a new id is only scraped and embedded
-once the classify pass's rows have reached it — see docs/OPERATE.md for the order.)
+(\`docfacts\` and \`embed\` read the \`genres-moods.json\` step 3 writes, so a new title is scraped and
+embedded in the same pass that labels it.)
 EOF

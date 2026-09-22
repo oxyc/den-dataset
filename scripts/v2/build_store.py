@@ -236,19 +236,15 @@ def build_parser():
                     help="facts-<ver>.json — for genreMap, and to assert the row count")
     ap.add_argument("--vectors", required=True, help="vectors-bge-m3.bin (DENVEC02: it names its own rows)")
     ap.add_argument("--vector-labels", required=True,
-                    help="labels-t02.json — the PLOT pass's key set. No longer the vectors' row order: "
-                         "the blob carries its own keys, and this is what that key column is checked "
-                         "against. Still a build input, for the two cross-checks only an independent "
-                         "record of the pass can make — that the blob covers exactly the titles the pass "
-                         "labelled, and that the corpus's `labels` field covers them too.")
+                    help="labels-t02.json — the PLOT vectors' key set, which finalize writes with each "
+                         "title's genres & moods from genres-moods.json. No longer the vectors' row "
+                         "order: the blob carries its own keys, and this is what that key column is "
+                         "checked against. Also what the label sections are counted against: the corpus "
+                         "`labels` field, joined from genres-moods.json, must cover exactly these titles.")
     ap.add_argument("--premise-vectors", help="vectors-premise.bin (DENVEC02)")
     ap.add_argument("--premise-labels", required=True,
-                    help="labels-premise.json — the PREMISE pass's key set, checked the same way. The "
-                         "premise LABELS themselves come from the corpus `premiseLabels` field, which "
-                         "consolidate_corpus.py joined from this same file. REQUIRED since the label "
-                         "sections became the union of both passes: the corpus supplies the premise "
-                         "labels either way, so without this the count assert compares a union against "
-                         "the plot artifact alone and fails naming the wrong file.")
+                    help="labels-premise.json — the PREMISE vectors' key set, checked the same way. Its "
+                         "genres & moods are a copy of the plot labels and are not read.")
     ap.add_argument("--dataset-version", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--stamp-meta",

@@ -46,17 +46,16 @@ def run(args, inputs, prose_check, provenance_check):
     # sentinels looks perfect from the outside, so the guard below counts names against the corpus.
     namable = sum(1 for r in rows.values() if (r.get("facts") or {}).get("titles"))
 
-    # Which titles each PASS labelled. Not the vector row order — the blobs carry their own keys — but the
-    # independent record the corpus's `labels` / `premiseLabels` fields are counted against below.
+    # Which titles each vector blob must cover, from the two labels files — not the vector row order, the
+    # blobs carry their own keys, but the independent record each key column is checked against. The plot
+    # one is also the count the label sections are asserted against below: it is the titles with a plot
+    # vector, each with its genres & moods, and a complete run embeds every title that has genres & moods.
+    # Counting the corpus field would be asserting the corpus against itself.
     print("reading the label artifacts …", file=sys.stderr)
     labels_source = labels_by_key(args.vector_labels, "vector labels")
     premise_labels_source = {}
     if args.premise_labels:
         premise_labels_source = labels_by_key(args.premise_labels, "premise labels")
-    # The titles SOME pass labelled, from the two artifacts rather than from the corpus — the count the
-    # store's label sections are asserted against below. Counting the corpus field would be asserting the
-    # corpus against itself.
-    labelled_keys = set(labels_source) | set(premise_labels_source)
 
     # ONE dictionary. Splitting a controlled vocabulary out to keep u16 ids saved 1.84 MB of 123 MB
     # and bought two bare integer id spaces with nothing in the format telling them apart: a reader
@@ -125,12 +124,8 @@ def run(args, inputs, prose_check, provenance_check):
     # 23,000 rows, and "more than half worked" is not a standard anything here should meet.
     for what, got, want, source in (
         ("rows", n, facts_records, args.facts),
-        ("plot labels", label_columns.with_plot_labels, len(labels_source), args.vector_labels),
-        # The union, against the union of the two artifacts' keys: a title EITHER pass labelled must carry
-        # labels in the store. Checking only the plot side is how the premise-only titles went missing —
-        # the plot count matched its artifact exactly while three titles held no labels at all.
-        ("labelled titles", label_columns.with_labels, len(labelled_keys),
-         " ∪ ".join(p for p in (args.vector_labels, args.premise_labels) if p)),
+        # Every title with a plot vector carries genres & moods in the store, and no other title does.
+        ("labelled titles", label_columns.with_labels, len(labels_source), args.vector_labels),
         # Names against the corpus, not against a sidecar: the count is taken from `rows`
         # before the writing loop, so it proves the naming happened rather than agreeing with
         # itself. A title whose `facts.titles` holds only blanks fails here.
@@ -142,16 +137,6 @@ def run(args, inputs, prose_check, provenance_check):
     ):
         if got != want:
             sys.exit(f"{what}: {got} in the store, {want} in {source} — they must agree exactly")
-    # Where both passes labelled a title, `title_labels` takes the plot record whole. That is safe only
-    # while the passes agree, which they do today for all 44,528 such titles. If a repass makes them
-    # diverge, which labelling ships is a decision, and the `or` in `title_labels` would make it silently
-    # by preferring whichever came first. Refuse instead, and name the titles.
-    divergent = label_columns.divergent
-    if divergent:
-        shown = ", ".join(f"{k} ({'/'.join(f)})" for k, f in divergent[:5])
-        sys.exit(f"the two labelling passes disagree on {len(divergent)} titles: {shown}"
-                 f"{' …' if len(divergent) > 5 else ''} — `title_labels` would silently ship the plot "
-                 f"record. Decide which pass wins for these and say so in the writer.")
     # Unresolved references, named and counted. A reference the entity table cannot resolve is dropped —
     # that is unavoidable when the table is short — but dropping it WITHOUT SAYING SO is how 2,680
     # franchise links disappeared into a section that looked perfectly well formed.
@@ -165,8 +150,6 @@ def run(args, inputs, prose_check, provenance_check):
     gate_report = facet_columns.report()
 
     print(json.dumps({"titles": n, "withLabels": label_columns.with_labels,
-                      "withPlotLabels": label_columns.with_plot_labels,
-                      "withPremiseLabels": label_columns.with_premise,
                       "withNames": card_columns.named, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
                       "entities": len(entity_index.qids), "strings": len(ordered_strings),

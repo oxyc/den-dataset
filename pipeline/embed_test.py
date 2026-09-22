@@ -63,8 +63,13 @@ class Staged(unittest.TestCase):
             json.dump({"movie:1": {"directors": ["D"], "genres": ["drama"]}}, fh)
 
     def write_labels(self, records):
-        with open(os.path.join(self.out, "labels-t02.json"), "w", encoding="utf-8") as fh:
-            json.dump({"taxonomyVersion": "t02", "count": len(records), "records": records}, fh)
+        """`genres-moods.json` holding `records`, keyed the way the genres & moods stage writes it; every
+        other field rides on the entry, as the file's own `source` fields do."""
+        self.records = records
+        titles = {f"{r['mediaType']}:{r['tmdbId']}": {k: v for k, v in r.items() if k not in ("mediaType", "tmdbId")}
+                  for r in records}
+        with open(os.path.join(self.out, "genres-moods.json"), "w", encoding="utf-8") as fh:
+            json.dump({"taxonomyVersion": "t02", "count": len(titles), "titles": titles}, fh)
 
     def batch(self, number, rows):
         with open(os.path.join(self.out, "enriched", f"batch-{number}.json"), "w", encoding="utf-8") as fh:
@@ -340,13 +345,10 @@ class Reembed(Staged):
         return path
 
     def relabel(self, tmdb_id, tag, media="movie"):
-        """The labels file gives one title a different tag, so its document changes."""
-        with open(os.path.join(self.out, "labels-t02.json"), encoding="utf-8") as fh:
-            records = json.load(fh)["records"]
-        for rec in records:
-            if (rec["tmdbId"], rec["mediaType"]) == (tmdb_id, media):
-                rec["subgenres"] = [{"label": tag, "confidence": 0.9}]
-        self.write_labels(records)
+        """The genres & moods give one title a different tag, so its document changes."""
+        self.write_labels([dict(rec, subgenres=[{"label": tag, "confidence": 0.9}])
+                           if (rec["tmdbId"], rec["mediaType"]) == (tmdb_id, media) else rec
+                           for rec in self.records])
 
     def strip_hashes(self):
         """The store as a run before `docSha256` existed left it."""
@@ -436,8 +438,7 @@ class Reembed(Staged):
         self.run_stage()
         self.relabel(1, "Noir")
         self.relabel(2, "Noir")
-        with open(os.path.join(self.out, "labels-t02.json"), encoding="utf-8") as fh:
-            self.write_labels(json.load(fh)["records"] + [record(9)])
+        self.write_labels(self.records + [record(9)])
         before = self.bytes_of_store()
         self.service.close()
         os.environ["DEN_EMBED_URL"] = "http://127.0.0.1:9"
@@ -504,9 +505,12 @@ class Topology(unittest.TestCase):
     def test_the_composition_is_the_shipped_stores(self):
         self.assertEqual(embed.SHIPPED_COMPOSITION, {"docShape": "lean", "dropDirector": True, "plotCap": 3500})
 
-    def test_the_labels_keep_one_name_and_are_read_under_their_own(self):
-        bound = {bind(e).name: bind(e) for e in embed.INPUTS}["vector_labels"]
-        self.assertEqual(bound.flag(), "--labels")
+    def test_the_tags_are_this_runs_genres_and_moods(self):
+        """Not `labels-t02.json`, which `finalize` writes after this stage: reading it composed from the
+        previous run's labels, and a fresh out-dir could not start."""
+        self.assertIn(artifacts.GENRES_MOODS, [bind(e).artifact for e in embed.INPUTS])
+        self.assertNotIn(artifacts.VECTOR_LABELS, [bind(e).artifact for e in embed.INPUTS])
+        self.assertLess(list(pipeline.STAGES).index("genres_moods"), list(pipeline.STAGES).index("embed"))
 
     def test_it_runs_after_the_doc_facts_and_before_finalize(self):
         order = list(pipeline.STAGES)

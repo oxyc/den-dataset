@@ -70,8 +70,8 @@ BATCH = 25
 #: answer asks nothing, so it waits for nothing.
 PACE = 0.3
 
-#: `labels-t02.json` is `--labels` here, as it is to the doc-facts scrape and the corpus join. The manifest
-#: is read for the dataset version, which names every file this stage writes.
+#: `labels-t02.json` is `--labels` here: the plot vectors' titles, which `finalize` wrote just before this
+#: stage. The manifest is read for the dataset version, which names every file this stage writes.
 INPUTS = (artifacts.VECTOR_LABELS.called("labels"), artifacts.DELTA_IDS, artifacts.MANIFEST)
 #: The two passes, in the order the merge takes them — which is not cosmetic: the FIRST file wins a
 #: collision, and swapped, every overlapping title would publish as vectorless.

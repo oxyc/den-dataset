@@ -106,7 +106,13 @@ GENRES_MOODS_ANSWERS_MANIFEST = Artifact(
 )
 
 #: Genres & moods per title: the curated file's entries plus those derived from the answers above under
-#: `data/genres-moods-rule.json`. Rebuilt on every run and never read back into its own production.
+#: `data/genres-moods-rule.json`. Rebuilt on every run and never read back into its own production. Every
+#: stage after it that needs a title's genres & moods reads them here; `genres_moods.read` is the one
+#: conversion to the per-title record the embed stores carry.
+#:
+#: `worklist --known` reads it too, in a delta only: the titles already labelled are the ones a delta skips.
+#: That is the previous run's file, which is what "already published" means; an export or discover
+#: universe reads nothing, so a fresh out-dir starts.
 GENRES_MOODS = Artifact(
     name="genres_moods",
     filename="genres-moods.json",
@@ -183,7 +189,8 @@ ENTITIES = Artifact(
 
 #: The embed pass's two append-only stores, written line by line and resumed from. The finalize stage turns
 #: them into `labels-t02.json` and `vectors-bge-m3.bin`; until then they are the corpus's vectors. Paired by
-#: position, which is why a kill between the two lines is repaired before anything appends to them.
+#: position, which is why a kill between the two lines is repaired before anything appends to them. A label
+#: line records the genres & moods its vector was composed from, which is what `--reembed-changed` compares.
 EMBED_LABELS = Artifact(
     name="embed_labels",
     filename="index/labels.jsonl",
@@ -267,8 +274,11 @@ VECTORS = Artifact(
     manifest_key="vectorsFile",
 )
 
-#: The plot pass's key set. Not the vectors' row order any more — the blob names its own rows — but the
-#: independent record that column is checked against.
+#: The plot vectors' titles, each with this run's genres & moods from `genres-moods.json`. Not the vectors'
+#: row order any more — the blob names its own rows — but the independent record that column is checked
+#: against, the ids the facts stage scrapes as `hasVector`, half of `datasetVersion`, and what the
+#: publisher's quality gate scores. Written by `finalize` and read only after it, so no run starts from a
+#: previous run's copy.
 VECTOR_LABELS = Artifact(
     name="vector_labels",
     filename="labels-t02.json",
@@ -292,6 +302,9 @@ PREMISE_VECTORS = Artifact(
     required=False,
 )
 
+#: The premise vectors' titles, in the premise blob's row order — the record the store checks that blob's
+#: key column against. Its genres & moods are a copy of the plot labels (44,528 of 44,531 identical,
+#: oxyc/den-dataset#56), so nothing reads them: a title's genres & moods come from `genres-moods.json` alone.
 PREMISE_LABELS = Artifact(
     name="premise_labels",
     filename="labels-premise.json",

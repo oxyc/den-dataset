@@ -104,17 +104,19 @@ ssh root@pve 'incus exec den -- podman run --rm --network den \
     -v /tmp/embed-canary.json:/canary.json:ro -v /tmp/box:/w:z \
     docker.io/library/python:3.12-slim python /embed_docs.py \
         --docs /w/docs.jsonl --out-dir /w/out --url http://den-embed:8080 --canary /canary.json'
-python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels out/labels-t02.json \
+python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels out/genres-moods.json \
     --out-dir out/index --embed-space box/embedding-space.json \
     --embedder-health '{"model":"bge-m3","dims":1024,"vector_epoch":1,"runtime":"…","max_tokens":1024}'
 
-# 6. Finalize — the labels file, the vector blob and dataset.meta.json. This decides <ver>.
+# 6. Finalize — labels-t02.json (each vector title with this run's genres & moods), the vector blob and
+#    dataset.meta.json. This decides <ver>.
 ./den stage finalize --out-dir out
 ```
 
-**Step 5, what to watch for.** The embed stage composes from the previous finalize's `labels-t02.json` (the
-genres & moods labels, under their historical file name), so a title with no label record there is skipped
-as `missingLabel`. The first run in an out-dir records the service's identity and the document shape
+**Step 5, what to watch for.** The embed stage composes from the `genres-moods.json` step 3b wrote, so a
+title with no genres & moods is skipped as `missingLabel`. A title whose genres & moods changed keeps its old
+vector until `--reembed-changed` re-embeds it; `finalize` ships the new genres & moods either way, and
+refuses a vector whose title has none. The first run in an out-dir records the service's identity and the document shape
 (`index/embedder.json`, `index/composition.json`); later runs refuse a service or shape that differs, and a
 store with rows but no identity record refuses too. The plot cap is 3,500 characters and keeps the head
 only, so a truncated plot embeds no ending — while the facets prompt keeps a tail, because `ending` needs it.
@@ -145,7 +147,7 @@ its vector and belongs here. On `out-repass` on 2026-09-22 this was 79 ids. A ba
 whole and the merge refuses a pass that skipped one; `scripts/facts-run.sh out` loops until nothing is
 skipped.
 
-**7. The corpus** — the pass shards, facts and both label sets joined into one JSONL, the source of truth.
+**7. The corpus** — the pass shards, facts and genres & moods joined into one JSONL, the source of truth.
 
 ```sh
 ./den stage corpus --out-dir out --expect <titles>

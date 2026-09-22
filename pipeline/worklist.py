@@ -9,8 +9,8 @@ Which ids exist, in which order, and which of them are already published. The ru
   * `export` — TMDB's daily id dump, parsed. Every id that exists: the full run's universe. Offline, and
     the only mode that is deterministic end to end.
   * `discover` — `/discover` sorted `vote_count.desc`, the highest-vote titles first. The pilot seed.
-  * `delta` — titles released since `--since` that clear the discovery floor and are NOT in the published
-    labels. The daily freshness pass `scripts/delta-run.sh` drives.
+  * `delta` — titles released since `--since` that clear the discovery floor and have no genres & moods
+    yet. The daily freshness pass `scripts/delta-run.sh` drives.
 
 **The mode is not defaulted.** For a full run the cheapest-looking answer means enriching the 500
 highest-vote titles and calling that the catalogue; for a delta it means re-enriching everything already
@@ -31,7 +31,7 @@ title by the count on its worklist row rather than asking TMDB for the same numb
 
 **A delta writes the same two filenames as a full run**, which is why `scripts/delta-run.sh` keeps its
 lists in `$OUT_DIR/delta/`. Point the two outputs there with `--set` rather than moving the whole out-dir,
-so the labels a delta must skip are still found beside everything else: forty delta rows written over a
+so the genres & moods a delta must skip are still found beside everything else: forty delta rows written over a
 47k-title one do not corrupt anything — they end the full run, quietly, as a batch that reports nothing
 remaining.
 """
@@ -39,8 +39,8 @@ import json
 import os
 import sys
 
-from . import artifacts, floors as floor_rules
-from .contract import StageError, bind, how_to_build
+from . import artifacts, floors as floor_rules, genres_moods
+from .contract import StageError, bind
 from lib import cache as caching
 from lib import tmdb as tmdb_api
 
@@ -82,12 +82,13 @@ MEDIA = {
     "tv": (artifacts.EXPORT_TV, artifacts.UNIVERSE_TV),
 }
 
-#: `labels-t02.json` is `--known` here, `--labels` to the corpus join and `--vector-labels` to the store
-#: writer. The file keeps one pipeline-wide name; the word on the command line belongs to whoever reads it.
+#: `genres-moods.json` is `--known` here: the titles already labelled, which a delta skips. Only a delta
+#: reads it, and it is the previous run's — a delta extends an out-dir, while an export or discover universe
+#: reads nothing, so a fresh out-dir starts.
 INPUTS = (
     artifacts.EXPORT_MOVIE.called("file"),
     artifacts.EXPORT_TV.called("file"),
-    artifacts.VECTOR_LABELS.called("known"),
+    artifacts.GENRES_MOODS.called("known"),
 )
 
 OUTPUTS = (artifacts.UNIVERSE_MOVIE, artifacts.UNIVERSE_TV)
@@ -145,21 +146,19 @@ def parse_export(path, media):
 
 
 def known_ids(path, media):
-    """The tmdbIds of this media already in the published labels — the titles a delta must skip.
+    """The tmdbIds of this media that already have genres & moods — the titles a delta must skip.
 
     Without them the pass re-enriches the whole published catalogue, at the per-title price the vote floor
-    exists to bound, and nothing in its output says that is what happened.
+    exists to bound, and nothing in its output says that is what happened. A file with no titles is not
+    "nothing published" — it is the wrong file, and read as an empty set it skips nothing, so `read`
+    refuses it.
     """
-    with open(path, encoding="utf-8") as handle:
-        labels = json.load(handle)
-    # A file with no records is not "nothing published" — it is the wrong file, and read as an empty set
-    # it skips nothing, so the delta bills the whole catalogue again. `docfacts` refuses the same shape.
-    records = labels.get("records") if isinstance(labels, dict) else None
-    if not records:
-        raise StageError(f"worklist: {path} names no records, so there is nothing to tell a delta what is "
-                         f"already published. Point vector_labels at the published labels; build them "
-                         f"with: {how_to_build(artifacts.VECTOR_LABELS)}")
-    return {record["tmdbId"] for record in records if record.get("mediaType") == media}
+    try:
+        records = genres_moods.read(path)
+    except StageError as refusal:
+        raise StageError(f"worklist: {refusal}. A delta skips the titles it names, so it cannot run "
+                         f"without them.") from None
+    return {record["tmdbId"] for record in records.values() if record["mediaType"] == media}
 
 
 def collect(client, media, params, limit=None):
@@ -221,7 +220,7 @@ def universe(ctx, media, client=None):
     # of them are below the floor. A dated `vote_count.desc` slice selects the same titles in a few paged
     # calls. The trade: a re-release or a late metadata fix on an OLD title is not picked up — acceptable,
     # because a periodic full pass covers drift and paying per id daily does not scale.
-    known = known_ids(ctx.require(BOUND[artifacts.VECTOR_LABELS.name].artifact), media)
+    known = known_ids(ctx.require(BOUND[artifacts.GENRES_MOODS.name].artifact), media)
     params = tmdb_api.discover_params(media, vote_count_gte=VOTE_FLOOR, release_date_gte=ctx.since,
                                       sort_by=SORT_BY)
     return [row for row in collect(client, media, params) if row["tmdbId"] not in known]

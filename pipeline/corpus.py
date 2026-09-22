@@ -57,20 +57,19 @@ SPENDS = False
 SCRIPT = os.path.join(REPO, PRODUCER)
 
 #: In the join's own argument order, which `corpus_test.py` holds against `consolidate_corpus.INPUT_ARGS`.
-#: `labels-t02.json` is `--vector-labels` to the store writer and `--labels` here; the file keeps one
-#: name and each reader keeps its own word for it.
+#: `genres-moods.json` is `--labels` here: each title's genres & moods. The premise labels are not read —
+#: they were a copy of the same genres & moods, and a second source is a second answer.
 INPUTS = (
     artifacts.COMBINED,
     artifacts.DELTA,
     artifacts.FACTS,
-    artifacts.VECTOR_LABELS.called("labels"),
-    artifacts.PREMISE_LABELS,
+    artifacts.GENRES_MOODS.called("labels"),
     artifacts.WITHDRAWN,
 )
 
 OUTPUTS = (artifacts.CORPUS, artifacts.ENTITIES)
 
-#: The inputs that are PAID Jev passes, each shard carrying a sidecar manifest. The other three inputs are
+#: The inputs that are PAID Jev passes, each shard carrying a sidecar manifest. The other inputs are
 #: derived locally and carry no such record, so there is nothing here to check them against.
 AUDITED = (artifacts.COMBINED, artifacts.DELTA)
 
@@ -136,7 +135,7 @@ def argv(ctx):
 
 
 def run(ctx):
-    """Join the passes, facts and labels into the corpus. Returns its path."""
+    """Join the passes, facts and genres & moods into the corpus. Returns its path."""
     out = ctx.path(artifacts.CORPUS)
     entities = ctx.path(artifacts.ENTITIES)
     audit_bundles(ctx)
