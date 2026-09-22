@@ -111,8 +111,17 @@ DELTA = Artifact(
 ENRICHED = Artifact(
     name="enriched",
     filename="enriched",
-    producer="scripts/enrich-run.sh",
-    how="scripts/enrich-run.sh movie 150",
+    dedicated=False,
+)
+
+#: What a resumed enrichment resumes FROM: the ids already processed, and the next batch number. Declared
+#: rather than left as a file the command happens to keep, because it is the only thing that separates a
+#: second drain from a second full scrape — and because an absent one is not proof of a first run (an
+#: out-dir with 153 batches and no checkpoint restarted at batch 1 and overwrote two of them).
+ENRICH_CHECKPOINT = Artifact(
+    name="enrich_checkpoint",
+    filename="enrich-checkpoint.json",
+    dedicated=False,
 )
 
 #: Wikidata's director (P57) and genre (P136) per title: the two clauses of the lean document that used to
@@ -281,6 +290,7 @@ RELEASE = Artifact(
 )
 
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
-             COMBINED_MANIFEST, DELTA, ENRICHED, DOC_FACTS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
-             EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_FACTS, FACTS,
-             VECTORS, VECTOR_LABELS, PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)
+             COMBINED_MANIFEST, DELTA, ENRICHED, ENRICH_CHECKPOINT, DOC_FACTS, EMBED_LABELS,
+             EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
+             DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, PREMISE_VECTORS, PREMISE_LABELS, STORE,
+             MANIFEST, RELEASE)

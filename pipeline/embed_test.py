@@ -28,7 +28,7 @@ import unittest
 
 import pipeline
 
-from . import artifacts, corpus, embed, store
+from . import artifacts, corpus, embed, fetch, store
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -192,7 +192,7 @@ class CommandLine(Staged):
         os.rmdir(os.path.join(self.out, "enriched"))
         with self.assertRaises(StageError) as refused:
             embed.argv(context(self.out))
-        self.assertIn("enrich-run.sh", str(refused.exception))
+        self.assertIn(fetch.HOW, str(refused.exception))
 
     def test_the_pause_and_the_limit_are_only_passed_when_they_are_named(self):
         """Neither has a safe default to pass unasked: a pause nobody chose costs hours over a corpus, and
@@ -282,11 +282,13 @@ class Topology(unittest.TestCase):
         self.assertLess(pipeline.STAGES.index("corpus"), pipeline.STAGES.index("store"))
 
     def test_an_input_no_stage_produces_still_names_its_own_producer(self):
-        """The seam: the enrichment and the Wikidata scrape are stages that are not ported, so they answer
-        for themselves until they land."""
+        """The seam: the Wikidata scrape is a stage that is not ported, so it answers for itself until it
+        lands. The enrichment no longer does — the fetch stage writes it, so the registry names that stage's
+        rule, which is what an operator handed a missing `out/enriched` is sent to run."""
         self.assertEqual(pipeline.producers()["doc_facts"],
                          (artifacts.DOC_FACTS.producer, artifacts.DOC_FACTS.how, False))
-        self.assertEqual(pipeline.producers()["enriched"][0], artifacts.ENRICHED.producer)
+        self.assertEqual(artifacts.ENRICHED.producer, "")
+        self.assertEqual(pipeline.producers()["enriched"], (fetch.PRODUCER, fetch.HOW, False))
         self.assertIn(artifacts.VECTOR_LABELS, [bind(e).artifact for e in corpus.INPUTS])
 
 
