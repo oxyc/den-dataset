@@ -41,6 +41,12 @@
         "commit": "b9e02ad",
         "supersededBy": "7e7da380eeeef6bad0894615a435fb24d1ac9209",
         "why": "#63 widened the retry to connection failures that arrive without an HTTP status and made the client obey a Retry-After. It touches when a request is repeated, not what is sent or how the answer is parsed, so a row bought through the old transport is the same row."
+      },
+      {
+        "sha256": "79d363a3cd2daba9103d9712ae5780f46afb1aa397cb8a89589d952bdd31b9ae",
+        "commit": "7e7da38",
+        "supersededBy": "the commit that moved typesafe_client.py into lib/ (oxyc/den-dataset#73)",
+        "why": "#73 moved the client from scripts/v2/ to lib/, beside the other upstream clients. One line changed: `api_key` finds `den.env` at the repo root one directory up from the file instead of two, which is the same file from the new place. The endpoint, the request, the retry and the parsing are byte for byte the same, so a row bought through the old path is the same row."
       }
     ]
   },

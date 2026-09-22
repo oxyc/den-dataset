@@ -76,7 +76,7 @@ IMPLEMENTATION = {
     "run_combined.py": os.path.join(V2, "run_combined.py"),
     "article_sections.py": os.path.join(REPO, "pipeline", "article_sections.py"),
     "combined_questions.py": os.path.join(V2, "combined_questions.py"),
-    "typesafe_client.py": os.path.join(V2, "typesafe_client.py"),
+    "typesafe_client.py": os.path.join(REPO, "lib", "typesafe_client.py"),
 }
 
 

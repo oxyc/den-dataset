@@ -52,6 +52,15 @@ def pipeline_reach(tools=True):
     return reachable.reached_from(REPO, PIPELINE, base, ["den", CI] + scripts)
 
 
+def lib_reach(tools=True):
+    """What runs reaches under `lib/`: what the reached pipeline modules import, and what `den`, the scripts
+    under `scripts/` and the operator tools that live here import or name."""
+    scripts, _ = reachable.script_files(os.path.join(REPO, "scripts"))
+    stages = [f"pipeline/{name}.py" for name in sorted(pipeline_reach())]
+    base = operator_tools_in(LIB) if tools else []
+    return reachable.reached_from(REPO, LIB, base, ["den"] + stages + scripts)
+
+
 def script_roots():
     """Everything that runs and can name a script: `den`, CI, the stages and what they reach."""
     return (["den", CI]
@@ -250,10 +259,10 @@ class ThisRepo(unittest.TestCase):
 
     def test_nothing_under_lib_is_unreachable(self):
         """`lib/` is entered by import, from whichever stages leave the machine — so its roots are those
-        stages' own import blocks, over the stages `STAGES` actually reaches. A stage that drops an
-        upstream, or leaves the order entirely, strands the client only it talked to in the same commit."""
-        entries = [os.path.join(PIPELINE, f"{name}.py") for name in sorted(pipeline_reach())]
-        stranded = reachable.unreachable(LIB, reachable.roots(LIB, *entries) + operator_tools_in(LIB))
+        stages' own import blocks, over the stages `STAGES` actually reaches, and those of the scripts still
+        under `scripts/`. A stage that drops an upstream, or leaves the order entirely, strands the client
+        only it talked to in the same commit."""
+        stranded = sorted(set(reachable.modules(LIB)) - lib_reach())
         self.assertEqual(stranded, [], f"unreachable from the pipeline: "
                                        f"{[f'lib/{name}.py' for name in stranded]}. `lib/` holds what a "
                                        f"stage needs from outside the machine — delete it, or import it "
@@ -276,6 +285,7 @@ class ThisRepo(unittest.TestCase):
         code, _ = reachable.script_files(os.path.join(REPO, "scripts"))
         run = reachable.reached_scripts(REPO, script_roots(), code)
         run |= {f"pipeline/{name}.py" for name in pipeline_reach(tools=False)}
+        run |= {f"lib/{name}.py" for name in lib_reach(tools=False)}
         for path, reason in reachable.operator_tools().items():
             self.assertTrue(path in code or (path.startswith(("pipeline/", "lib/"))
                                              and os.path.isfile(os.path.join(REPO, path))),

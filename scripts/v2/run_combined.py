@@ -21,12 +21,12 @@ import uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import combined_questions
-import typesafe_client
 from combined_questions import (PINNED_MODEL, PROMPT, ROOT, TAXONOMY, global_questions, section_question)
+from lib import typesafe_client
+from lib.typesafe_client import TypeSafe, TypeSafeError
 from pipeline import article_sections
 from pipeline.article_sections import (encoded_chars, is_oversized, parse_sections, public_section,
                                        section_groups, select_global_sections, sha256_text, state_for)
-from typesafe_client import TypeSafe, TypeSafeError
 
 SCHEMA_VERSION = "combined-jev-v1"
 #: Bumped when the shape of the recorded configuration changes rather than when the questions do. `-v2`

@@ -20,7 +20,7 @@ from pipeline.article_sections import (encoded_chars, is_oversized, public_secti
                                        sha256_text, state_for)
 from run_combined import (IMPLEMENTATION as SOURCES, SCHEMA_VERSION, article_key, attach_enriched_evidence,
                           canonical, load_articles, sections_for_record, sha256_file, validate_answers)
-from typesafe_client import TypeSafe
+from lib.typesafe_client import TypeSafe
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))

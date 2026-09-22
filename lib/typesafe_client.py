@@ -50,8 +50,7 @@ def api_key(env_path=None):
     """
     if key := os.environ.get(KEY_VAR):
         return key
-    path = env_path or os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "den.env")
+    path = env_path or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "den.env")
     try:
         with open(path, encoding="utf-8") as fh:
             for line in fh:
