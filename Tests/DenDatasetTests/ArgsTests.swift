@@ -48,25 +48,25 @@ final class ArgsTests: XCTestCase {
     }
 
     func testMissingRequiredFlagIsRefused() throws {
-        let result = run(["enrich", "--limit", "5"])
+        let result = run(["embed-corpus", "--out-dir", "out"])
         XCTAssertNotEqual(result.status, 0)
-        XCTAssert(result.stderr.contains("missing required --worklist"), result.stderr)
+        XCTAssert(result.stderr.contains("missing required --labels"), result.stderr)
     }
 
     func testABareFlagAndAValueFlagBothStillParse() throws {
         // A bare flag sitting BETWEEN a value flag and a required one is where the two shapes can go wrong
-        // without saying so. If `--exclude-anime` consumed the next token the way a value flag does, it
-        // would swallow `--worklist` and the run would die on a missing required flag; if `--limit` did not
-        // take its 5, the 5 would be refused as an unknown flag. Reaching the worklist FILE is what proves
-        // neither happened.
-        let result = run(["enrich", "--out-dir", "/nonexistent", "--limit", "5",
-                          "--exclude-anime", "--worklist", "/nonexistent/worklist.json"])
+        // without saying so. If `--doc-drop-director` consumed the next token the way a value flag does, it
+        // would swallow `--labels` and the run would die on a missing required flag; if `--chunk` did not
+        // take its 5, the 5 would be refused as an unknown flag. Reaching the labels FILE — which is read
+        // before any service is asked — is what proves neither happened.
+        let result = run(["embed-corpus", "--out-dir", "/nonexistent", "--chunk", "5",
+                          "--doc-drop-director", "--labels", "/nonexistent/labels.json"])
         XCTAssertNotEqual(result.status, 0)
         XCTAssertFalse(result.stderr.contains("missing required"),
                        "the bare flag consumed its neighbour: \(result.stderr)")
         XCTAssertFalse(result.stderr.contains("unknown flag"),
                        "the value flag did not take its value: \(result.stderr)")
-        XCTAssert(result.stderr.contains("worklist.json"),
+        XCTAssert(result.stderr.contains("labels.json"),
                   "both flags reached the command body: \(result.stderr)")
     }
 
@@ -85,10 +85,10 @@ final class ArgsTests: XCTestCase {
         let result = run([])
         XCTAssertNotEqual(result.status, 0, "naming no command is a usage error")
         // Every command that survives: the vote-pass generation went with the Jev pass, the three
-        // deterministic ones are Python stages now, and `metadata` went with the poster sidecar. Naming all
-        // five rather than a sample, so a command
+        // deterministic ones and `enrich` are Python now, and `metadata` went with the poster sidecar. Naming
+        // all four rather than a sample, so a command
         // that disappears from the overview fails here rather than in an operator's terminal.
-        for command in ["enrich", "embed-corpus", "facts", "finalize", "recluster"] {
+        for command in ["embed-corpus", "facts", "finalize", "recluster"] {
             XCTAssert(result.stderr.contains(command), "\(command) is missing from the overview")
         }
     }

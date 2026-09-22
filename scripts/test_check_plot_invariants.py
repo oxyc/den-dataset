@@ -330,7 +330,7 @@ class Ratchet(unittest.TestCase):
             _, out, err = run(["--enriched-dir", e, "--labels", labels, "--shared-plot-baseline", "1"])
             self.assertIn("'Wuthering Heights'", out, "the shared article is named")
             self.assertIn("movie:1", out, "and so are the titles on it")
-            self.assertIn("regroundOnWikipedia", err, "and the mechanism that caused it")
+            self.assertIn("`reground` (pipeline/enrich.py)", err, "and the code that holds the mechanism")
 
 
 class Stamping(unittest.TestCase):

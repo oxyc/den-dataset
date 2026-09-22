@@ -24,8 +24,13 @@ class Cache:
         self.directory = directory
 
     def sparql(self, name, rows):
+        """A body under a name no batch re-derives — a query from another corpus or an older text."""
         body = {"results": {"bindings": rows}}
         self._write(hashlib.sha256(name.encode()).hexdigest(), body)
+
+    def answered(self, media, ids, rows):
+        """A body filed under the enrich pass's own mapping query for `ids` asked as `media`."""
+        self._write(backfill.mapping_digest(ids, media), {"results": {"bindings": rows}})
 
     def parse(self, article, language, landed_on):
         query = dict(backfill.PARSE_QUERY, page=article)
@@ -153,13 +158,68 @@ class BackfillTests(unittest.TestCase):
         _, rows = self.run_backfill([title(9, None, grounded=False)])
         self.assertNotIn("plotArticleRole", rows[0])
 
-    def test_one_id_is_matched_against_every_batch_that_mentions_it(self):
-        """A movie id and a series id can be the same integer, and a cached body does not say which it
-        answered — only the hashed query did. So every mapping for the id is tried."""
+    def test_every_body_that_mentions_an_id_is_tried_and_the_recorded_article_decides(self):
+        """Neither body's query can be re-derived from the batch, so neither says which media it answered;
+        the corpus holds only a film with this id, so the match is used and counted as unconfirmed."""
         self.cache.sparql("first", [binding(10, article="A Film")])
-        self.cache.sparql("second", [binding(10, article="A Series")])
-        _, rows = self.run_backfill([title(10, "A Series")])
+        self.cache.sparql("second", [binding(10, article="Another Film")])
+        counts, rows = self.run_backfill([title(10, "Another Film")])
         self.assertEqual(rows[0]["plotArticleRole"], backfill.OWN)
+        self.assertEqual(counts["own (media unconfirmed)"], 1)
+
+    def test_a_body_the_batches_attribute_to_a_media_is_confirmed(self):
+        self.cache.answered("movie", [15], [binding(15, article="Heat (1995 film)")])
+        counts, rows = self.run_backfill([title(15, "Heat (1995 film)")])
+        self.assertEqual((rows[0]["plotArticleRole"], counts["own"]), (backfill.OWN, 1))
+
+    def test_a_body_that_answered_the_other_media_never_decides_a_row(self):
+        """Movie 95 is Armageddon and series 95 is Buffy. Keyed by bare id, the series' body explained a film
+        row that recorded Buffy's article — the Young Wallander mistake, confirmed as `own`."""
+        rows = [title(95, "Buffy the Vampire Slayer"),
+                title(95, "Buffy the Vampire Slayer", mediaType="tv")]
+        self.cache.answered("tv", [95], [binding(95, article="Buffy the Vampire Slayer")])
+        self.cache.answered("movie", [95], [binding(95, article="Armageddon (1998 film)")])
+        counts, rows = self.run_backfill(rows)
+        self.assertNotIn("plotArticleRole", rows[0], "the film's own body names Armageddon")
+        self.assertEqual(rows[1]["plotArticleRole"], backfill.OWN)
+        self.assertEqual((counts["unrecoverable"], counts["own"]), (1, 1))
+
+    def test_a_mixed_batch_asked_as_one_media_is_attributed_to_that_media(self):
+        """Before a mixed batch was refused, the whole batch was asked as its first title's media: series
+        91545, Young Wallander, came back as the film with that id and was grounded on "Sunday Drive (film)".
+        That body is the MOVIE query's, so it cannot confirm the series row that recorded its article."""
+        self.cache.answered("movie", [1, 91545], [binding(1, article="Heat (1995 film)"),
+                                                  binding(91545, article="Sunday Drive (film)")])
+        counts, rows = self.run_backfill([title(1, "Heat (1995 film)"),
+                                          title(91545, "Sunday Drive (film)", mediaType="tv")])
+        self.assertEqual(rows[0]["plotArticleRole"], backfill.OWN)
+        self.assertNotIn("plotArticleRole", rows[1])
+        self.assertEqual((counts["own"], counts["unrecoverable"]), (1, 1))
+
+    def test_an_unattributed_body_is_ambiguous_when_the_corpus_holds_both_titles(self):
+        """Its query cannot be re-derived, so it may be the series' answer as easily as the film's."""
+        self.cache.sparql("older query text", [binding(95, article="Buffy the Vampire Slayer")])
+        counts, rows = self.run_backfill([title(95, "Buffy the Vampire Slayer"),
+                                          title(95, "Something Else", mediaType="tv")])
+        self.assertNotIn("plotArticleRole", rows[0])
+        self.assertEqual(counts["ambiguous media"], 1)
+
+    def test_an_unattributed_match_the_other_titles_own_body_rules_out_is_used(self):
+        """The series' attributed body says what series 95's candidates are, and the film's article is not
+        one of them — so the unattributed match cannot be the series answering."""
+        self.cache.sparql("older query text", [binding(95, article="Armageddon (1998 film)")])
+        self.cache.answered("tv", [95], [binding(95, article="Buffy the Vampire Slayer")])
+        counts, rows = self.run_backfill([title(95, "Armageddon (1998 film)"),
+                                          title(95, "Buffy the Vampire Slayer", mediaType="tv")])
+        self.assertEqual(rows[0]["plotArticleRole"], backfill.OWN)
+        self.assertEqual((counts["own (media unconfirmed)"], counts["own"]), (1, 1))
+
+    def test_an_unattributed_body_is_ambiguous_when_a_body_answered_the_id_as_the_other_media(self):
+        self.cache.sparql("older query text", [binding(95, article="Buffy the Vampire Slayer")])
+        self.cache.answered("tv", [95, 96], [binding(95, article="Buffy the Vampire Slayer")])
+        counts, rows = self.run_backfill([title(95, "Buffy the Vampire Slayer"), title(96, None, grounded=False)])
+        self.assertNotIn("plotArticleRole", rows[0])
+        self.assertEqual(counts["ambiguous media"], 1)
 
     def test_rewriting_in_place_keeps_every_row(self):
         self.cache.sparql("q", [binding(11, article="Heat (1995 film)")])

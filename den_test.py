@@ -127,9 +127,10 @@ class Dispatch(unittest.TestCase):
         Three stages run first and they need different things. `worklist` and `articles` are Python and
         read files, so they are given files: a one-row TMDB dump apiece, and an enriched batch naming a
         grounded title plus an `articles.jsonl` row for it, because a row already in the dump's output is
-        a row it resumes past rather than fetches. `fetch` still wraps the binary, so it gets a stub that
-        reports the universe already drained, with credentials in the environment so the drain does not go
-        hunting for a `den.env` this checkout has no reason to own. Nothing here reaches TMDB.
+        a row it resumes past rather than fetches. `fetch` drains in-process, so it gets a checkpoint that
+        already holds both universes, with credentials in the environment so the drain does not go hunting
+        for a `den.env` this checkout has no reason to own. Nothing here reaches TMDB. `DEN_BACKFILL_BIN`
+        is a stub for the stages that still run the binary.
         """
         with tempfile.TemporaryDirectory() as out:
             stub = os.path.join(out, "stub")
@@ -160,6 +161,10 @@ class Dispatch(unittest.TestCase):
                             "hasWikiPlot": True, "plotArticle": "Star Wars (film)"}], fh)
             with open(os.path.join(out, "articles.jsonl"), "w", encoding="utf-8") as fh:
                 fh.write('{"mediaType":"movie","tmdbId":11,"text":"prose"}\n')
+            # Both universes already drained, so the in-process drain returns before it builds a TMDB
+            # client. Without it the drain asked TMDB about id 11 with the stub key.
+            with open(os.path.join(out, "enrich-checkpoint.json"), "w", encoding="utf-8") as fh:
+                json.dump({"processed": ["movie:11", "tv:11"], "nextBatch": 2}, fh)
             run = ("run", "--dataset-version", "test", "--out-dir", out, "--mode", "export")
 
             gated = den(*run)

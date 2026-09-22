@@ -37,20 +37,17 @@ public struct PlotProvenance: Sendable, Equatable, Codable {
     /// title, so it cannot say. Unknown, never assumed false.
     public let redirected: Bool?
 
-    /// `resolved` is the article the fetch actually read, nil when the source could not report one.
-    public init(role: PlotArticleRole, requested: String, resolved: String?) {
-        self.role = role
-        self.redirected = resolved.map { $0 != requested }
-    }
-
     public init(role: PlotArticleRole, redirected: Bool?) {
         self.role = role
         self.redirected = redirected
     }
+}
 
-    /// True when the recorded decision says the text describes a different work. The one question every
-    /// consumer of this field asks, answered here so each one does not re-spell it.
-    public var groundedOnAnotherWork: Bool { role == .sourceWork || redirected == true }
+/// One TMDB keyword (grounding signal).
+public struct Keyword: Hashable, Codable, Sendable {
+    public let id: Int
+    public let name: String
+    public init(id: Int, name: String) { self.id = id; self.name = name }
 }
 
 /// The single-request enrichment (`append_to_response=keywords`) feeding the classifier. Held only in
@@ -144,51 +141,6 @@ public struct EnrichedTitle: Sendable, Equatable {
         self.plotSections = plotSections
         self.plotLanguage = plotLanguage
         self.plotProvenance = plotProvenance
-    }
-
-    /// Return a copy with the Wikipedia plot grounded in (`overview` ← plot, `hasWikiPlot` = true).
-    public func groundedOnWikiPlot(_ plot: String, article: String? = nil, revId: Int? = nil,
-                                   sections: [String] = [], language: String? = nil,
-                                   provenance: PlotProvenance? = nil) -> EnrichedTitle {
-        EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: plot,
-                      genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
-                      originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
-                      director: director, topCast: topCast, createdBy: createdBy,
-                      runtimeMinutes: runtimeMinutes, hasWikiPlot: true,
-                      plotArticle: article, plotRevId: revId, overviewChars: overviewChars,
-                      noPlotReason: nil, plotSections: sections, plotLanguage: language,
-                      plotProvenance: provenance)
-    }
-
-    /// Return a copy recording WHY no plot was found, so a later pass can re-run only the subset a given
-    /// fix reaches rather than the whole corpus.
-    public func notingNoPlot(_ reason: String) -> EnrichedTitle {
-        EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: overview,
-                      genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
-                      originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
-                      director: director, topCast: topCast, createdBy: createdBy,
-                      runtimeMinutes: runtimeMinutes, hasWikiPlot: false,
-                      plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
-                      noPlotReason: reason, plotSections: plotSections, plotLanguage: plotLanguage,
-                      plotProvenance: plotProvenance)
-    }
-
-    /// Fold in the facts that ride along on the Wikidata hop.
-    ///
-    /// Wikidata's creators WIN over TMDB's `created_by` where it has them. That is the same rule the plot
-    /// already follows and for the same reason: this text is fed to an embedder, and TMDB's terms (§1.C)
-    /// speak directly to using their content with a machine-learning application, while Wikidata is CC0.
-    /// TMDB stays as the fallback for the ~63% of series Wikidata has no creator for.
-    public func mergingWikidata(runtimeMinutes wikiRuntime: Int?, creators: [String]) -> EnrichedTitle {
-        EnrichedTitle(tmdbId: tmdbId, mediaType: mediaType, title: title, year: year, overview: overview,
-                      genreIDs: genreIDs, genreNames: genreNames, keywords: keywords,
-                      originCountry: originCountry, originalLanguage: originalLanguage, voteCount: voteCount,
-                      director: director, topCast: topCast,
-                      createdBy: creators.isEmpty ? createdBy : creators,
-                      runtimeMinutes: wikiRuntime ?? runtimeMinutes, hasWikiPlot: hasWikiPlot,
-                      plotArticle: plotArticle, plotRevId: plotRevId, overviewChars: overviewChars,
-                      noPlotReason: noPlotReason, plotSections: plotSections,
-                      plotLanguage: plotLanguage, plotProvenance: plotProvenance)
     }
 }
 

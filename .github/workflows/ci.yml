@@ -97,19 +97,18 @@ jobs:
       # from the documented command's arguments, which a run the stage launches must accept unchanged —
       # plus the `--plan` dry run, which IS deterministic and is compared byte for byte.
       #
-      # The fetch stage's oracle needs the Swift binary, so it SKIPS here and runs where one is built: it
-      # drains a finished worklist through the real `enrich`, which parses the stage's argument list and
-      # returns before it builds a TMDB client. Byte comparison is unavailable for that pass at all — it
-      # fetches from TMDB and live Wikipedia, and even its batch report's key order is per-process. What
-      # runs here is the loop that replaced `scripts/enrich-all.sh`, against a stub: the retried abort, the
-      # stall, and the below-floor worklist that no amount of waiting will drain.
+      # The enrichment is Python (`pipeline/enrich.py`, `lib/plot.py`). Its equivalence with the Swift pass
+      # was a one-off replay — the merge-base binary and the port over out-repass worklists, on a scratch
+      # copy of the response cache with the network denied — and cannot run here: CI has no cache. What
+      # runs here is each rule on its own against stubbed upstreams, the batch file's bytes against the
+      # Swift encoder's captured output, and the drain loop's three stopping rules.
       #
       # `guards/reachable_test.py` is the one that matters over time. `scripts/v2/` exists because
       # "delete what nothing runs" was a habit, and a habit loses to a branch someone might come back
       # to; this fails the build on a module under `pipeline/` that no stage reaches, and on one under
       # `store/` that the writer the store stage runs does not reach.
       - name: The pipeline
-        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/docfacts_test.py pipeline/embed_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py guards/reachable_test.py den_test.py
+        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/enrich_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/docfacts_test.py pipeline/embed_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/plot_test.py lib/enterprise_test.py guards/reachable_test.py den_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The
       # guards above are the pieces; this is whether the script wires them up — that it refuses a wrong
       # hash, a missing blob, a dropped key, a shrunk count and a blob from a dead generation, and that

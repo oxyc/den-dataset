@@ -97,42 +97,11 @@ public struct ResponseCache: Sendable {
     }
 }
 
-/// Which TMDB paths are worth keeping, and for how long.
-public enum TMDBCachePolicy {
-    public static let namespace = "tmdb"
-    /// 180 days. TMDB's terms allow caching their responses for a limited period, not indefinitely, so this
-    /// one is a COMPLIANCE boundary rather than a staleness estimate — do not raise it without checking them.
-    /// It is also why the cached body may hold TMDB prose while the datasets built from it may not.
-    ///
-    /// Staleness is not the constraint: almost nothing in a detail record changes, and `voteCount` — the one
-    /// field that drifts and gates the vote floor — self-corrects now that below-floor titles are re-judged
-    /// each run rather than checkpointed away.
-    public static let defaultTTLDays: Double = 180
-
-    public static func cache(_ env: [String: String] = ProcessInfo.processInfo.environment)
-        -> ResponseCache? {
-        ResponseCache.configured(namespace: namespace, defaultTTLDays: defaultTTLDays, env: env)
-    }
-
-    /// True for the per-title detail endpoints. `/discover` is deliberately excluded: its whole job is to
-    /// surface titles that are new or have newly crossed the vote floor, so serving it from disk would hide
-    /// exactly what it is asked for.
-    public static func isCacheable(path: String) -> Bool {
-        let parts = path.split(separator: "/", omittingEmptySubsequences: true)
-        // "/movie/278" and "/tv/1396" — exactly two segments, the second an id. A longer path (…/credits) or
-        // a non-numeric second segment (/movie/popular) is a different kind of endpoint.
-        guard parts.count == 2, parts[0] == "movie" || parts[0] == "tv", Int(parts[1]) != nil else {
-            return false
-        }
-        return true
-    }
-}
-
 /// Which Wikipedia/Wikidata responses are worth keeping, and for how long.
 public enum WikiCachePolicy {
     public static let namespace = "wiki"
-    /// 180 days, deliberately — not a staleness estimate. Matched to TMDB's window so both caches age out
-    /// together and there is one number to reason about.
+    /// 180 days, deliberately — not a staleness estimate. Matched to TMDB's window (`lib/cache.py`) so both
+    /// caches age out together and there is one number to reason about.
     ///
     /// A short expiry looks prudent and is not: it re-fetches EVERYTHING on a schedule nobody chose, to catch
     /// the few percent that moved. Measured over ten weeks, 38% of plots differed in some way but only ~4%

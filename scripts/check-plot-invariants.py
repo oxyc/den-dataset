@@ -27,13 +27,9 @@ Scared` 1-5 are a single item; `Carlos` is in TMDB as a movie and a series), so 
 reach zero with them in it. The identity is `imdbId` (P345), which lives in the facts file, so the
 exemption needs `--facts`.
 
-The cause is the source-work fallback in `taxonomy-backfill`. `regroundOnWikipedia` tries the title's own
-article, then the Wikidata P144 source work, and keeps the LONGEST:
-
-    let candidates = [facts?.article, facts?.sourceArticle].compactMap { $0 }
-    …
-    if plot.text.count > (found?.plot.text.count ?? 0) { found = (candidate, plot) }
-    if plot.text.count >= ownArticleSufficient { break }          // ownArticleSufficient = 1000
+The cause is the source-work fallback in the enrich pass — `reground` in `pipeline/enrich.py`, which ported
+the Swift `regroundOnWikipedia` that grounded the shipped generation. It tries the title's own article, then
+the Wikidata P144 source work, and keeps the LONGEST, stopping once one reaches `OWN_ARTICLE_SUFFICIENT`.
 
 That is right when ONE adaptation maps to one source work — it is what stops Silo falling back to 189
 characters of its own article instead of the novel's 12,415. It fails when MANY adaptations map to the same
@@ -381,7 +377,7 @@ def main():
         print("       A title grounded on another work's article is described by that work: its labels, "
               "its facets and its\n       premise all come from a story it does not tell (oxyc/den-dataset#16).",
               file=sys.stderr)
-        print("       The cause is the source-work fallback in `taxonomy-backfill`'s regroundOnWikipedia — "
+        print("       The cause is the source-work fallback in `reground` (pipeline/enrich.py) — "
               "longest-wins over\n       [own article, P144 source work], so one novel beats every "
               "adaptation's own article and all of them\n       inherit it. The named clusters above say "
               "which articles to look at.", file=sys.stderr)

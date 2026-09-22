@@ -18,7 +18,9 @@ The query TEXT is part of the cache key, so it is reproduced byte for byte from 
 shipped corpus. Reformatting it is a re-scrape of ~770 requests.
 """
 import json
+import math
 import re
+import urllib.parse
 
 from . import cache as caching
 from . import http
@@ -159,6 +161,188 @@ def doc_facts(ids, media, cache=None):
             continue
         out[tmdb_id] = {"directors": names, "genres": genres}
     return out
+
+
+#: The enrichment's mapping query, line for line as the Swift pass sent it — comments included, because
+#: they are part of the text and the text is the cache key. The comments are SPARQL comments; they say why
+#: the query has the shape it has, and they reach WDQS with it.
+_MAPPING = (
+    "SELECT ?tmdb ?article ?sourceArticle ?imdb ?runtime ?creatorLabel ?anyArticle ?anySite WHERE {",
+    "  VALUES ?tmdb { {values} }",
+    "  ?film wdt:{property} ?tmdb .",
+    "  OPTIONAL { ?film wdt:P345 ?imdb . }",
+    "  OPTIONAL { ?film wdt:P2047 ?runtime . }",
+    "  OPTIONAL { ?film wdt:P170 ?creator . }",
+    "  OPTIONAL { ?article schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/> . }",
+    "  # SOURCE-WORK FALLBACK. An adaptation's own article is often production-and-episodes with no plot:",
+    "  # \"Attack on Titan (TV series)\" is Series overview / Season 1-4 / Cast, while the STORY lives on the",
+    "  # article for the work it adapts. P144 (based on) names that work, and it tells the same story, so",
+    "  # its plot describes this title: 13 Reasons Why reads its plot off the novel, The Pacific off the",
+    "  # memoir, Shooter off Point of Impact.",
+    "  #",
+    "  # P179 (part of the series) was tried here too and REMOVED. A franchise sibling is not the same",
+    "  # story, so it produced confidently wrong plots — Angel grounded on Buffy, Torchwood on Doctor Who,",
+    "  # Xena on Hercules, Bates Motel on Psycho. Measured over the titles this fallback newly grounded:",
+    "  # 322 came from a P144 source work, against 66 reachable only through P179. Dropping those 66 costs",
+    "  # 0.16% of the grounded corpus and removes every such attribution.",
+    "  OPTIONAL { ?film wdt:P144 ?basedOn .",
+    "             ?sourceArticle schema:about ?basedOn ; schema:isPartOf <https://en.wikipedia.org/> . }",
+    "  # OTHER-LANGUAGE ARTICLES. Two thirds of the films with no plot have no English article at all, so",
+    "  # no heading rule can reach them — but half of those have one in another language, and bge-m3",
+    "  # embeds that prose directly. Restricted to the wikis we have plot-heading lists for; an",
+    "  # unrestricted sitelink query returns a row per language and multiplies the whole result set.",
+    "  OPTIONAL { ?anyArticle schema:about ?film ; schema:isPartOf ?anySite .",
+    "             VALUES ?anySite { {wikis} } }",
+    "  SERVICE wikibase:label { bd:serviceParam wikibase:language \"en,mul\". }",
+    "}",
+    "ORDER BY ?tmdb ?article",
+)
+
+#: `+123` and `0123` are integers to Swift's `Int(_:)`, and a SPARQL literal is read the way the pass read it.
+_INTEGER = re.compile(r"[+-]?[0-9]+")
+_BAD_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+
+
+def mapping_query(ids, media, languages):
+    """The SPARQL that maps one batch of TMDB ids to their articles, and the facts that ride along.
+
+    `languages` are the other Wikipedias a plot may be read from. They are the query's business too: an
+    unrestricted sitelink returns a row per language and multiplies the result set.
+    """
+    values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
+    wikis = " ".join(f"<https://{code}.wikipedia.org/>" for code in sorted(languages))
+    return "\n".join(_MAPPING).replace("{values}", values).replace(
+        "{property}", ID_PROPERTY[media]).replace("{wikis}", wikis)
+
+
+def article_title(url):
+    """`https://en.wikipedia.org/wiki/The_Matrix` → `The Matrix`, percent-decoded.
+
+    A malformed escape leaves the whole name undecoded rather than half-decoded, as Foundation's
+    `removingPercentEncoding` does — the stored name is looked up again later, and a partly-decoded one
+    names a page that does not exist.
+    """
+    if "/wiki/" not in url:
+        return None
+    raw = url.split("/wiki/", 1)[1]
+    decoded = raw
+    if not _BAD_ESCAPE.search(raw):
+        try:
+            decoded = urllib.parse.unquote(raw, errors="strict")
+        except UnicodeDecodeError:
+            decoded = raw
+    return decoded.replace("_", " ") or None
+
+
+def language_code(site):
+    """`https://de.wikipedia.org/` → `de`. English is carried separately, as the own article."""
+    host = urllib.parse.urlparse(site).hostname or ""
+    if not host.endswith(".wikipedia.org"):
+        return None
+    code = host.replace(".wikipedia.org", "")
+    return None if code in ("", "en") else code
+
+
+def _cell(binding, name):
+    cell = binding.get(name)
+    if cell is None:
+        return None
+    if not isinstance(cell, dict) or not isinstance(cell.get("value"), str):
+        raise WikidataError(f"a `{name}` cell with no string value: {cell!r}"[:200])
+    return cell["value"]
+
+
+def _minutes(value):
+    """Wikidata stores runtime as a decimal ("96" / "96.0"), rounded half away from zero."""
+    try:
+        minutes = float(value)
+    except ValueError:
+        return None
+    if math.isnan(minutes) or math.isinf(minutes):
+        return None
+    return int(math.floor(abs(minutes) + 0.5)) * (1 if minutes >= 0 else -1)
+
+
+def parse_mapping(payload):
+    """`tmdbId -> mapping` for one SPARQL body. RAISES on a body that is not a SPARQL result.
+
+    An absent id in a successful result is an answer — the title has no article — and the enrichment
+    records it and moves on. A WDQS maintenance page decoded as "no bindings" would make every title in the
+    batch plotless and checkpointed, never to be re-grounded, so the two must not look alike.
+    """
+    try:
+        bindings = json.loads(payload.decode("utf-8"))["results"]["bindings"]
+        if not isinstance(bindings, list):
+            raise TypeError(bindings)
+    except (ValueError, KeyError, TypeError):
+        raise WikidataError(f"not a SPARQL result: {payload[:200]!r}") from None
+    out = {}
+    for binding in bindings:
+        raw = _cell(binding, "tmdb")
+        if raw is None or not _INTEGER.fullmatch(raw):
+            continue
+        tmdb_id = int(raw)
+        entry = out.setdefault(tmdb_id, {"article": None, "sourceArticle": None, "imdb": None,
+                                         "runtimeMinutes": None, "creators": [], "articlesByLang": {}})
+        # A title binds once per creator, per runtime and per language, so these ACCUMULATE across rows —
+        # first-wins would silently drop the second Duffer brother. The single-valued ones are first-wins.
+        article = _cell(binding, "article")
+        if entry["article"] is None and article is not None:
+            entry["article"] = article_title(article)
+        # The work this ADAPTS (P144) — its plot is this story. A franchise sibling's is not.
+        source = _cell(binding, "sourceArticle")
+        if entry["sourceArticle"] is None and source is not None:
+            entry["sourceArticle"] = article_title(source)
+        if entry["imdb"] is None:
+            entry["imdb"] = _cell(binding, "imdb")
+        runtime = _cell(binding, "runtime")
+        minutes = _minutes(runtime) if runtime is not None else None
+        # A series may carry several runtimes (a 50- and a 70-minute cut). The SMALLEST answers "have I
+        # got time for this".
+        if minutes is not None and (entry["runtimeMinutes"] is None or minutes < entry["runtimeMinutes"]):
+            entry["runtimeMinutes"] = minutes
+        site, any_article = _cell(binding, "anySite"), _cell(binding, "anyArticle")
+        if site is not None and any_article is not None:
+            code, title = language_code(site), article_title(any_article)
+            if code and title:
+                entry["articlesByLang"][code] = title
+        creator = _cell(binding, "creatorLabel")
+        if creator and creator not in entry["creators"]:
+            entry["creators"].append(creator)
+            entry["creators"].sort()
+    return out
+
+
+def mapping(ids, media, languages, cache=None):
+    """`tmdbId -> mapping` for one batch of one media type, from disk where the same batch was asked before.
+
+    ONE media per call. TMDB's movie and series id spaces overlap — movie 95 is Armageddon, series 95 is
+    Buffy — so a lookup shared across a batch holding both once grounded series 91545 (Young Wallander) on
+    "Sunday Drive (film)": a confident, completely wrong plot with nothing in the output to mark it.
+
+    This is the most valuable entry in the cache. WDQS is the pipeline's flakiest dependency — it throttled
+    to one request a minute during the work that added the cache — and a mapping is stable, so a cached one
+    lets a re-run proceed through a WDQS outage entirely.
+    """
+    if not ids:
+        return {}
+    query = mapping_query(ids, media, languages)
+    key = None
+    if cache is not None:
+        key = cache.key("sparql", {"q": query})
+        hit = cache.read(key)
+        if hit is not None:
+            try:
+                return parse_mapping(hit)
+            except WikidataError:
+                pass
+    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
+                           headers={"Content-Type": "application/sparql-query",
+                                    "Accept": "application/sparql-results+json"})
+    parsed = parse_mapping(payload)
+    if key is not None:
+        cache.write(key, payload)
+    return parsed
 
 
 def cache_for(env=None):

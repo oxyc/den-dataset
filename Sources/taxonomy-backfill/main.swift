@@ -7,14 +7,11 @@ import Foundation
 // produces the labels and facets the corpus join reads, so this tool gathers the inputs that pass needs and
 // turns already-decided labels into the shipped artifacts.
 //
-//   enrich        — next N un-enriched ids → ONE TMDB call each (append_to_response=keywords), drop below the
-//                   vote floor / anime / fetch failures (logged) → out/enriched/batch-<id>.json (+ checkpoint).
-//                   The enriched batch is SCRATCH (holds raw TMDB text) and is never shipped.
 //   embed-corpus  — compose(facts + already-decided tags + plot) → den-embed → append to the index store.
 //   finalize      — index store → labels-<taxonomy>.json + vectors-<embed>.bin + report.json +
 //                   dataset.meta.json (DERIVED only). Folds in the former import-dataset.mjs job.
 //
-// Env: TMDB_API_KEY (enrichment only). No LLM key — this tool does not classify.
+// The enrichment that feeds them is `pipeline/enrich.py`. No LLM key — this tool does not classify.
 
 @main
 struct TaxonomyBackfill {
@@ -45,396 +42,6 @@ struct ToolError: Error { let message: String }
 // MARK: - Commands
 
 enum Commands {
-    // enrich — next `limit` un-enriched worklist ids → one TMDB call each (append_to_response=keywords),
-    // bounded concurrency. Drops below the vote floor / anime / fetch failures (each logged + counted).
-    // Writes one scratch batch file the article dump and the embed pass read + advances the resumable
-    // checkpoint.
-    static func enrich(_ args: Args) async throws {
-        let worklistPath = try args.require("--worklist")
-        let outDir = try args.require("--out-dir")
-        let floor = args.int("--vote-floor") ?? 50
-        let limit = args.int("--limit") ?? 150
-
-        let worklist: [WLEntry] = try JSON.read(worklistPath)
-        // Distinguish "absent (first run)" from "present but corrupt (resume state)": a bare `try?` would
-        // silently reset a truncated checkpoint to empty and re-enrich the whole universe. Fail loudly instead.
-        let ckPath = Layout.enrichCheckpoint(outDir)
-        var checkpoint: EnrichCheckpoint
-        if FileManager.default.fileExists(atPath: ckPath) {
-            do { checkpoint = try JSON.read(ckPath) } catch {
-                throw ToolError(message: "enrich checkpoint at \(ckPath) is unreadable (\(error)); refusing to "
-                    + "reset progress — restore it, or delete it to intentionally start fresh")
-            }
-        } else {
-            checkpoint = EnrichCheckpoint()
-        }
-        // An ABSENT checkpoint is not proof of a first run. `out-t02` has 153 enriched batches and no enrich
-        // checkpoint, so a delta into it started numbering at 1 and overwrote batch-1 and batch-2 — 640
-        // records replaced by 235, with the old votes/batch-1-pass1.json still on disk, which would have
-        // labelled the new titles with the OLD titles' votes. Trust the directory over the missing file.
-        let onDisk = EnrichedBatches.highestID(inDirectory: Layout.enrichedDir(outDir))
-        if checkpoint.nextBatch <= onDisk { checkpoint.nextBatch = onDisk + 1 }
-        let pending = worklist.filter { !checkpoint.processed.contains(EnrichCheckpoint.key($0.media, $0.tmdbId)) }.prefix(limit)
-        guard !pending.isEmpty else {
-            print(JSON.line(["remaining": 0, "count": 0])); return
-        }
-        // A BATCH HOLDS ONE MEDIA TYPE. Enrichment itself handles both (its Wikidata mapping is keyed by
-        // MediaKey), but the corpus holds 1,756 ids that exist as BOTH a movie and a series, and any reader
-        // that keys a batch row by a bare TMDB id would hand Armageddon and Buffy the same record with
-        // nothing in the output to show it. Worklists are written per media, so this only fires on a
-        // hand-assembled one — where failing is far better than mislabelling silently.
-        let mediaTypes = Set(pending.map(\.media))
-        guard mediaTypes.count == 1 else {
-            throw ToolError(message: "worklist mixes \(mediaTypes.map(\.rawValue).sorted().joined(separator: " + ")) "
-                + "in one batch. The vote files written from it carry no media type, so a TMDB id present as "
-                + "both a movie and a series would be labelled once and applied to both. Split the worklist "
-                + "by media and enrich each separately.")
-        }
-
-        let tmdb = try TMDB.client()
-        let batchId = checkpoint.nextBatch
-        var titles: [EnrichedTitle] = []
-        // Opt-IN now, not opt-out: excluding anime silently cost the corpus 1,498 titles including the entire
-        // Ghibli catalogue, and a default that loses well-known titles should have to be asked for.
-        let excludeAnime = args.has("--exclude-anime")
-        var belowFloor = 0, anime = 0, failures = 0, noOverview = 0
-        // Ids whose failure was TRANSIENT (429/5xx/timeout, retries already exhausted in transport). These are
-        // NOT checkpointed, so the next run retries them — rather than permanently dropping a title on a blip.
-        var deferred = Set<MediaKey>()
-        // Nor are titles rejected for being BELOW THE VOTE FLOOR. A vote count is the one input here that
-        // moves on its own, and it only ever moves up — so "below the floor" is a verdict about today, not
-        // about the title. Checkpointing it made the rejection permanent: a title at 40 votes when it was
-        // first seen would never be reconsidered at 62, and a detail response served from cache (up to its
-        // TTL old) widened that window to weeks. They stay pending and are re-judged next run, which the
-        // response cache makes nearly free.
-        var belowFloorKeys = Set<MediaKey>()
-
-        try await withThrowingTaskGroup(of: EnrichOutcome.self) { group in
-            for entry in pending {
-                group.addTask {
-                    do {
-                        let key = MediaKey(entry.media, entry.tmdbId)
-                        let title = try await tmdb.classificationRecord(MediaIdentifier(entry.tmdbId, entry.media))
-                        if title.voteCount < floor { return .belowFloor(key) }
-                        if excludeAnime, isAnime(title) { return .anime(key) }
-                        // Can't classify a stub — drop titles with no / very-short overview (DT-C region-aware
-                        // floor). Judged on the LENGTH of TMDB's overview, the only part of it that crosses
-                        // the client boundary; `title.overview` is empty until a Wikipedia plot fills it.
-                        if title.overviewChars < 20 { return .noOverview(key) }
-                        return .ok(title)
-                    } catch {
-                        // Transient → defer (retry next run); definitive (404/decoding) → a real dead id, drop.
-                        let key = MediaKey(entry.media, entry.tmdbId)
-                        return Transport.isRetryable(error)
-                            ? .transientFailure(key, "\(error)")
-                            : .failure(key, "\(error)")
-                    }
-                }
-            }
-            for try await outcome in group {
-                switch outcome {
-                case .ok(let title): titles.append(title)
-                case .belowFloor(let key):
-                    belowFloor += 1
-                    belowFloorKeys.insert(key)
-                case .anime: anime += 1
-                case .noOverview: noOverview += 1
-                case .failure(let key, let reason):
-                    failures += 1
-                    Log.append(Layout.enrichLog(outDir), "fetch-failure id=\(key.logLabel) \(reason)")
-                case .transientFailure(let key, let reason):
-                    deferred.insert(key)
-                    Log.append(Layout.enrichLog(outDir), "fetch-deferred id=\(key.logLabel) (transient: \(reason))")
-                }
-            }
-        }
-
-        // FP-2 — re-ground on Wikipedia: ONE Wikidata SPARQL maps the surviving ids to their enwiki articles,
-        // then each title's plot is fetched live. Where a plot exists it REPLACES the TMDB overview (ToS-clean
-        // grounding for the labelling pass); titles keep the TMDB overview only where Wikipedia has no plot.
-        // ONE query PER MEDIA TYPE, and the result keyed by both. TMDB's movie and series id spaces overlap
-        // (movie 95 is Armageddon, series 95 is Buffy), so a batch holding both cannot share a lookup: taking
-        // the whole batch's media from its first entry looked series 91545 up as a MOVIE and grounded Young
-        // Wallander on the plot of "Sunday Drive (film)" — a confident, completely wrong plot, with nothing in
-        // the output to mark it as such. Worklists are normally per-media, which is why this stayed hidden.
-        let mapping: [MediaKey: WikipediaSource.Mapping]
-        do {
-            var merged: [MediaKey: WikipediaSource.Mapping] = [:]
-            for media in Set(titles.map(\.mediaType)) {
-                let ids = titles.filter { $0.mediaType == media }.map(\.tmdbId)
-                for (id, value) in try await WikipediaSource().wikidata(forTMDBIds: ids, mediaType: media) {
-                    merged[MediaKey(media, id)] = value
-                }
-            }
-            mapping = merged
-        } catch {
-            throw ToolError(message: "Wikidata mapping failed for batch \(batchId) after retries (\(error)); "
-                + "nothing written — re-run to retry this batch")
-        }
-
-        var withPlot = 0
-        var grounded: [EnrichedTitle] = []
-        for outcome in try await regroundOnWikipedia(titles, mapping: mapping, log: Layout.enrichLog(outDir)) {
-            switch outcome {
-            case .grounded(let title): grounded.append(title); withPlot += 1
-            // The reason rides along on the record. A later pass re-runs the subset a fix reaches —
-            // `noSection` for a heading rule, `noArticle` for a non-English sitelink — instead of the corpus.
-            case .noPlot(let title, let reason): grounded.append(title.notingNoPlot(reason.rawValue))
-            case .deferred(let id): deferred.insert(id)   // transient plot fetch — retry next run, don't checkpoint
-            }
-        }
-        var survivors = grounded.map(EnrichedDTO.init)
-
-        survivors.sort { $0.tmdbId < $1.tmdbId }
-        // Never write over an existing batch: the plots already dumped from it belong to the titles it USED
-        // to hold, so a clobbered batch strands them silently rather than failing.
-        let batchPath = Layout.enrichedBatch(outDir, batchId)
-        guard !FileManager.default.fileExists(atPath: batchPath) else {
-            throw ToolError(message: "refusing to overwrite \(batchPath): it already holds an enriched batch, "
-                + "and anything derived from batch \(batchId) belongs to those titles. The enrich "
-                + "checkpoint's nextBatch is out of step with the batches on disk — fix it rather than "
-                + "clobbering.")
-        }
-        // And never let a NEW batch silently re-cover a key an existing batch already holds. The guard above
-        // protects the batch FILE; nothing protected the keys inside it, so 1,855 of 59,218 keys ended up in
-        // more than one batch and 505 of those disagree with themselves about `hasWikiPlot`. Which record
-        // wins then depends on the reader's traversal order — the defect `EnrichedBatches.orderedNames`
-        // exists to make deterministic, and better not to create at all.
-        //
-        // A warning rather than a refusal: re-covering is legitimate when a title is deliberately
-        // re-enriched, and failing here would block exactly the pass that fixes a stale record. But silence
-        // is how 505 of them accumulated.
-        var seen: [String: Int] = [:]
-        let enrichedDir = Layout.enrichedDir(outDir)
-        for name in EnrichedBatches.orderedNames(inDirectory: enrichedDir) {
-            guard let id = Int(name.dropFirst("batch-".count).dropLast(".json".count)), id != batchId,
-                  let existing: [EnrichedDTO] = try? JSON.read(
-                      (enrichedDir as NSString).appendingPathComponent(name)) else { continue }
-            for dto in existing { seen["\(dto.mediaType):\(dto.tmdbId)"] = id }
-        }
-        let recovered = survivors.compactMap { dto -> String? in
-            seen["\(dto.mediaType):\(dto.tmdbId)"].map { "\(dto.mediaType):\(dto.tmdbId) (batch \($0))" }
-        }
-        if !recovered.isEmpty {
-            let sample: String = recovered.prefix(5).joined(separator: ", ")
-                + (recovered.count > 5 ? " …" : "")
-            Log.append(Layout.enrichLog(outDir),
-                       "re-covered \(recovered.count) key(s) already in earlier batches: \(sample)")
-            let warning = "  warning: \(recovered.count) key(s) here already exist in earlier batches — "
-                + "the newest wins on read, but the older records remain. \(sample)\n"
-            FileHandle.standardError.write(Data(warning.utf8))
-        }
-        try JSON.writePretty(survivors, to: batchPath)
-        // Checkpoint every pending id EXCEPT those still owed another look: transient failures (a blip must
-        // not drop a title) and below-floor rejections (a vote count only climbs, so today's verdict is not
-        // the title's).
-        for entry in pending {
-            let key = MediaKey(entry.media, entry.tmdbId)
-            guard !deferred.contains(key), !belowFloorKeys.contains(key) else { continue }
-            checkpoint.processed.insert(EnrichCheckpoint.key(entry.media, entry.tmdbId))
-        }
-        checkpoint.nextBatch += 1
-        checkpoint.totals.merge(belowFloor: belowFloor, anime: anime, failures: failures, noOverview: noOverview)
-        try JSON.write(checkpoint, to: Layout.enrichCheckpoint(outDir))
-
-        // Per-media remaining (the shared checkpoint also holds the other media's keys).
-        let remaining = worklist.filter { !checkpoint.processed.contains(EnrichCheckpoint.key($0.media, $0.tmdbId)) }.count
-        print(JSON.line([
-            "batchId": batchId, "count": survivors.count, "belowFloor": belowFloor,
-            "anime": anime, "noOverview": noOverview, "failures": failures, "deferred": deferred.count,
-            "remaining": remaining, "wikiPlot": withPlot, "tagsOnly": survivors.count - withPlot,
-            "batch": Layout.enrichedBatch(outDir, batchId),
-        ]))
-    }
-
-    /// The per-title result of the Wikipedia plot hop: grounded on a real plot, a definitive no-plot (kept on
-    /// the TMDB overview), or deferred because the fetch failed transiently (retry next run — don't checkpoint).
-    enum PlotOutcome {
-        case grounded(EnrichedTitle)
-        case noPlot(EnrichedTitle, NoPlotReason)
-        /// MediaKey, not a bare id: deferring "95" would hold back a movie and a series together.
-        case deferred(MediaKey)
-    }
-
-    /// WHY a title has no plot — recorded per title, because `hasWikiPlot: false` on its own is the thing
-    /// that forces a full re-scrape every time anything improves.
-    ///
-    /// The four causes want four different fixes and are not interchangeable: `noArticle` needs a
-    /// non-English sitelink or nothing at all, `noSection` is who a heading-rule change or a lead fallback
-    /// would reach, `belowFloor` is a threshold decision, and `fetchFailed` is simply worth retrying. Folded
-    /// into one boolean, the only safe answer to "who should I re-run?" is "all 19,542", which is how this
-    /// corpus came to be re-scraped repeatedly.
-    enum NoPlotReason: String {
-        /// No English Wikipedia article to read — the Wikidata item has no enwiki sitelink.
-        case noArticle
-        /// The article exists and carries no section `plotRank` recognises.
-        case noSection
-        /// A plot section exists but its prose is under `wikiPlotFloor`.
-        case belowFloor
-        /// A definitive fetch failure, e.g. a 404 on a stale sitelink. Transient failures defer instead.
-        case fetchFailed
-    }
-
-    /// Minimum plot length to re-ground on (chars).
-    ///
-    /// Was 200, justified as "a bare one-line logline adds little grounding over the TMDB overview it would
-    /// replace". That comparison no longer exists: `overview` holds a Wikipedia plot or NOTHING — TMDB's
-    /// text was removed from the record entirely on ToS grounds — so the trade is not "this versus the
-    /// overview" but "this versus nothing", and 200 was rejecting real premises:
-    ///
-    ///   165  Would You Marry Me?  a romantic comedy about a 90-day fake marriage between a man and a woman
-    ///                             trying to win the grand prize of a luxury home for newlyweds
-    ///   179  Disclaimer           Catherine Ravenscroft, a documentary-journalist, discovers she is a
-    ///                             character in a novel that purports to reveal a secret she has hidden
-    ///   189  Silo                 a dystopian future where a community exists in a giant silo extending
-    ///                             144 levels underground
-    ///
-    /// Each names genre, premise and stakes, which is what the vector wants. 120 admits those and still
-    /// rejects the actual loglines: "The film explores the life and career of John le Carré" (55) and its
-    /// 93- and 101-character neighbours.
-    static let wikiPlotFloor = 120
-
-    /// Long enough that a title's OWN article is clearly its best source, so the P144 source work is not
-    /// worth a second fetch.
-    ///
-    /// The floor cannot also do this job. It used to be both the accept threshold AND the fall-through
-    /// trigger — first candidate over the line wins — so lowering it would have stopped Silo, Dark Matter
-    /// and Defending Jacob falling through to the novels that carry their real plots, trading 12,415
-    /// characters for 189. Separating them means a thin own-article still tries the source work, and the
-    /// longer answer wins.
-    static let ownArticleSufficient = 1000
-
-    /// Fetch each title's live Wikipedia plot (bounded concurrency) and classify the outcome. A missing mapping
-    /// or a plot section that is absent / below the floor is a definitive `noPlot`; a transient fetch failure
-    /// (429/5xx/timeout, retries exhausted) is `deferred` so the id is retried on the next run.
-    static func regroundOnWikipedia(_ titles: [EnrichedTitle], mapping: [MediaKey: WikipediaSource.Mapping],
-                                    log: String) async throws -> [PlotOutcome] {
-        let wiki = WikipediaSource()
-        let gate = 4   // gentle on the public Wikipedia API
-        var out: [PlotOutcome] = []
-        var index = 0
-        while index < titles.count {
-            let slice = Array(titles[index..<min(index + gate, titles.count)])
-            let outcomes = try await withThrowingTaskGroup(of: PlotOutcome.self) { group -> [PlotOutcome] in
-                for title in slice {
-                    group.addTask {
-                        // Runtime + creators come from the SAME hop that resolved the article, so they are
-                        // folded in for EVERY title — including the ones with no plot, which keep no other
-                        // trace of this call.
-                        let facts = mapping[MediaKey(title.mediaType, title.tmdbId)]
-                        let title = title.mergingWikidata(runtimeMinutes: facts?.runtimeMinutes,
-                                                          creators: facts?.creators ?? [])
-                        // The title's OWN article first; the source work only if that yields no plot. An
-                        // adaptation's article is often production-and-episodes with no story in it at all —
-                        // "Attack on Titan (TV series)" is Series overview / Seasons / Cast, while the plot
-                        // lives on the franchise page. Measured: this recovers 87% of plotless anime series,
-                        // 21% of general TV, 5% of films.
-                        //
-                        // The source article describes the BOOK or franchise, not this adaptation, so it can
-                        // cover unadapted material or diverge. Accepted for premise and thematic similarity,
-                        // where the story engine is what matters; it would be wrong for anything claiming to
-                        // describe this cut specifically.
-                        //
-                        // Each candidate carries its ROLE, so the winner still knows which of the two it
-                        // was. Reading it off the position afterwards would be wrong for the 4% of titles
-                        // with no English article, where the source work is the only candidate and sits at
-                        // index 0.
-                        var candidates: [(article: String, role: PlotArticleRole)] = []
-                        if let own = facts?.article { candidates.append((own, .own)) }
-                        if let source = facts?.sourceArticle { candidates.append((source, .sourceWork)) }
-                        guard !candidates.isEmpty else { return .noPlot(title, .noArticle) }
-                        do {
-                            var found: (article: String, role: PlotArticleRole,
-                                        plot: WikipediaSource.PlotFetch)?
-                            // Whether ANY candidate had a plot-ranked section at all, even a short one. That
-                            // is the difference between "a heading rule would reach this" and "the floor
-                            // rejected it", and without it both look the same afterwards.
-                            var sawSection = false
-                            for candidate in candidates {
-                                guard let plot = try await wiki.plot(articleTitle: candidate.article)
-                                else { continue }
-                                sawSection = true
-                                // Keep the LONGEST, rather than the first over the line. The own article is
-                                // tried first, so a thin one no longer blocks the source work: Silo's own
-                                // article gives 189 characters of premise and the novel gives 12,415.
-                                if plot.text.count > (found?.plot.text.count ?? 0) {
-                                    found = (candidate.article, candidate.role, plot)
-                                }
-                                // …but stop once the title's own article is clearly enough, so a well
-                                // covered adaptation does not pay for a second fetch it cannot use.
-                                if plot.text.count >= ownArticleSufficient { break }
-                            }
-                            // NO ENGLISH ARTICLE, or a thin one. Two thirds of the films with no plot have
-                            // no enwiki article at all, and half of THOSE have one in another language —
-                            // 12 of 30 sampled carried a real plot under the local heading. bge-m3 is
-                            // multilingual, so the prose embeds directly with no translation step.
-                            //
-                            // The title's own language first, as the likeliest to have it, then the rest.
-                            // Measured, that first guess is right 8 times in 15 — good but not sufficient,
-                            // and the misses are the interesting half: four were ENGLISH-language films
-                            // with no English article, covered by the German or Italian Wikipedia instead.
-                            if (found?.plot.text.count ?? 0) < ownArticleSufficient,
-                               let byLang = facts?.articlesByLang, !byLang.isEmpty {
-                                let preferred = [title.originalLanguage].compactMap { $0 }
-                                let order = preferred + byLang.keys.sorted().filter { !preferred.contains($0) }
-                                for lang in order {
-                                    guard let article = byLang[lang],
-                                          let plot = try await wiki.plot(articleTitle: article,
-                                                                         language: lang) else { continue }
-                                    sawSection = true
-                                    if plot.text.count > (found?.plot.text.count ?? 0) {
-                                        // Still this title's OWN article, just on another Wikipedia —
-                                        // `articlesByLang` is built from its sitelinks, never the source
-                                        // work's.
-                                        found = (article, .ownOtherLanguage, plot)
-                                    }
-                                    if plot.text.count >= ownArticleSufficient { break }
-                                }
-                            }
-                            guard let hit = found, hit.plot.text.count >= wikiPlotFloor else {
-                                return .noPlot(title, sawSection ? .belowFloor : .noSection)
-                            }
-                            // Which article won and at which revision — recorded so a refresh can ask for
-                            // current revids in bulk and re-read only the articles that moved.
-                            // The RESOLVED article, not the one asked for: a redirect returns the target's
-                            // content and revid, so storing the redirect's name would make the refresh
-                            // compare revisions of two different pages.
-                            //
-                            // …and WHICH candidate that was, plus whether a redirect moved it. Both are
-                            // known only here, and the article name alone recovers neither: a novel's page
-                            // and an adaptation's are both just names, and a redirect leaves no trace at
-                            // all. Discarded, every later census has to replay this decision out of the
-                            // Wikidata cache to ask "is this text about this title?".
-                            return .grounded(title.groundedOnWikiPlot(
-                                hit.plot.text,
-                                article: hit.plot.resolvedArticle ?? hit.article,
-                                revId: hit.plot.revId,
-                                sections: hit.plot.sections,
-                                language: hit.plot.language,
-                                provenance: PlotProvenance(role: hit.role, requested: hit.article,
-                                                           resolved: hit.plot.resolvedArticle)))
-                        } catch {
-                            let key = MediaKey(title.mediaType, title.tmdbId)
-                            if Transport.isRetryable(error) {
-                                Log.append(log, "plot-deferred id=\(key.logLabel) (transient: \(error))")
-                                return .deferred(key)
-                            }
-                            // Definitive (e.g. 404 on a stale sitelink) — keep the title on its TMDB overview.
-                            Log.append(log, "plot-miss id=\(key.logLabel) (\(error))")
-                            return .noPlot(title, .fetchFailed)
-                        }
-                    }
-                }
-                var acc: [PlotOutcome] = []
-                for try await outcome in group { acc.append(outcome) }
-                return acc
-            }
-            out.append(contentsOf: outcomes)
-            index += gate
-        }
-        return out
-    }
-
     // facts — the CC0 facts sidecar den-atlas /recommend ranks on. Takes an explicit id list (the DELTA: the
     // titles atlas has never seen) or the shipped labels. Needs no plot, no classification and no embedding,
     // which is what lets it cover brand-new releases the >=50-vote worklist floor cannot reach.
@@ -1283,12 +890,6 @@ enum Commands {
         print("primary-genre dist: \(report.byPrimaryGenre.sorted { $0.value > $1.value }.map { "\($0.key):\($0.value)" }.joined(separator: " "))")
     }
 
-    /// Below this share of a batch's ids coming back, the run is a failure rather than a thin result.
-    /// Real coverage is ~99%, so anything near zero is auth or rate-limiting. `enrich-ids` applies it to
-    /// TRANSIENT failures only: a 404 is an answer and a 429 is not, and on a five-id targeted re-pass
-    /// one dead id is 20% — under the floor, and no amount of re-running fixes a deleted TMDB record.
-    static let coverageFloor = 0.90
-
     // MARK: - recluster (DT-F weekly)
 
     /// Cluster the shipped vectors and report groups the existing vocabulary does NOT explain — candidate
@@ -1429,25 +1030,6 @@ enum Commands {
 
 }
 
-// MARK: - Anime filter (single authority; both worklist modes funnel through enrich)
-
-/// TMDB keyword 210024 = "anime"; Japanese-language Animation is the catch-all. DT-taxonomy.md: **no anime**.
-/// Anime, by TMDB's `anime` keyword or by "animated AND originally Japanese".
-///
-/// `enrich` used to DROP everything this matched, which is why the corpus held 595 Japanese films and 2,469
-/// animated titles and precisely ZERO in the intersection — Spirited Away, Totoro, Akira and 1,495 others were
-/// never fetched at all. Nothing recorded why. The likely reason is that t02's subgenres are built for Western
-/// film and TV and fit anime badly, which is true but is an argument for better labels, not for the titles
-/// being absent from search, similarity, facets and facts as well.
-///
-/// The predicate is kept because the flag is still worth carrying: `enrich --exclude-anime` restores the old
-/// behaviour, and a caller that wants an anime-only pass can invert it.
-func isAnime(_ title: EnrichedTitle) -> Bool {
-    if title.keywords.contains(where: { $0.id == 210024 }) { return true }
-    if title.genreIDs.contains(16) && title.originalLanguage == "ja" { return true }
-    return false
-}
-
 func confidenceBucket(_ confidence: Double) -> String {
     let low = (confidence * 10).rounded(.down) / 10
     return String(format: "%.1f-%.1f", low, low + 0.1)
@@ -1495,32 +1077,7 @@ enum Shell {
 
 // MARK: - DTOs
 
-/// A row of the universe `pipeline/worklist.py` writes, as `enrich` reads it back.
-struct WLEntry: Codable {
-    let tmdbId: Int
-    let mediaType: String
-    var media: MediaType { mediaType == "tv" ? .tv : .movie }
-    init(tmdbId: Int, mediaType: String) { self.tmdbId = tmdbId; self.mediaType = mediaType }
-}
-
-/// A TMDB id together with its media type — the only safe key for anything holding both. The two id spaces
-/// overlap, so a bare `Int` silently conflates movie 95 (Armageddon) with series 95 (Buffy).
-struct MediaKey: Hashable {
-    let mediaType: MediaType
-    let tmdbId: Int
-
-    init(_ mediaType: MediaType, _ tmdbId: Int) {
-        self.mediaType = mediaType
-        self.tmdbId = tmdbId
-    }
-
-    /// `"movie:95"` — log lines printed a bare id, which is ambiguous in exactly the way this type exists to
-    /// prevent: "id=95" could be Armageddon or Buffy.
-    var logLabel: String { "\(mediaType.rawValue):\(tmdbId)" }
-}
-
-/// The scratch enriched record (holds raw TMDB text → never shipped; gitignored). Captures the full
-/// EnrichedTitle so the article dump and the embed pass can rebuild it for grounding.
+/// The enriched record `pipeline/enrich.py` writes, as the embed pass reads it back.
 struct EnrichedDTO: Codable {
     let tmdbId: Int
     let mediaType: String
@@ -1566,21 +1123,6 @@ struct EnrichedDTO: Codable {
     let plotArticleRedirected: Bool?
     /// The LENGTH of TMDB's overview, never its text — the stub check's only input. See `EnrichedTitle`.
     let overviewChars: Int
-
-    init(_ t: EnrichedTitle) {
-        tmdbId = t.tmdbId; mediaType = t.mediaType.rawValue; title = t.title; year = t.year
-        overview = t.overview; genreIDs = t.genreIDs; genres = t.genreNames
-        keywordIDs = t.keywords.map(\.id); keywords = t.keywords.map(\.name)
-        originCountry = t.originCountry; originalLanguage = t.originalLanguage; voteCount = t.voteCount
-        director = t.director; topCast = t.topCast; createdBy = t.createdBy
-        runtimeMinutes = t.runtimeMinutes
-        hasWikiPlot = t.hasWikiPlot
-        plotArticle = t.plotArticle; plotRevId = t.plotRevId; noPlotReason = t.noPlotReason
-        plotSections = t.plotSections; plotLanguage = t.plotLanguage
-        plotArticleRole = t.plotProvenance?.role.rawValue
-        plotArticleRedirected = t.plotProvenance?.redirected
-        overviewChars = t.overviewChars
-    }
 
     // Tolerant decode: a scratch batch written before FP-2's fields existed (or a hand-authored fixture)
     // must still load — decodeIfPresent + default keeps the new credit/plot fields optional.
@@ -1638,17 +1180,7 @@ struct EnrichedDTO: Codable {
     }
 }
 
-/// Ids here are `MediaKey`, never a bare Int: a batch can hold both media types, and TMDB's id spaces
-/// overlap, so deferring "95" would otherwise defer a movie and a series together.
-enum EnrichOutcome {
-    case ok(EnrichedTitle)
-    case belowFloor(MediaKey)
-    case anime(MediaKey)
-    case noOverview(MediaKey)
-    case failure(MediaKey, String)          // definitive (404/decoding) — a dead id, checkpointed
-    case transientFailure(MediaKey, String) // 429/5xx/timeout after retries — deferred, NOT checkpointed
-}
-
+/// The checkpoint `pipeline/enrich.py` writes, read here only for the run report's totals.
 struct EnrichCheckpoint: Codable {
     // Keyed "movie:12345" / "tv:12345": TMDB movie and TV id namespaces OVERLAP (both start low), so a bare
     // Set<Int> shared across a movie run then a tv run would skip every TV title whose id matches a processed
@@ -1657,9 +1189,6 @@ struct EnrichCheckpoint: Codable {
     var nextBatch: Int = 1
     var totals = Totals()
 
-    static func key(_ media: MediaType, _ id: Int) -> String { "\(media.rawValue):\(id)" }
-
-    init() {}
     // Tolerant decode: a legacy checkpoint stored `processed` as bare [Int] (the movie-only pilot) — migrate
     // those to movie-qualified keys so a resume across this change doesn't reset progress. Malformed/truncated
     // JSON still throws here (the container decode fails), which the caller surfaces loudly.
@@ -1688,10 +1217,6 @@ struct EnrichCheckpoint: Codable {
             failures = try c.decodeIfPresent(Int.self, forKey: .failures) ?? 0
             noOverview = try c.decodeIfPresent(Int.self, forKey: .noOverview) ?? 0
         }
-        mutating func merge(belowFloor: Int, anime: Int, failures: Int, noOverview: Int) {
-            self.belowFloor += belowFloor; self.anime += anime; self.failures += failures
-            self.noOverview += noOverview
-        }
     }
 }
 
@@ -1706,9 +1231,7 @@ struct ReportExtras: Codable {
 enum Layout {
     static func enrichCheckpoint(_ dir: String) -> String { join(dir, "enrich-checkpoint.json") }
     static func classifyCheckpoint(_ dir: String) -> String { join(dir, "classify-checkpoint.json") }
-    static func enrichLog(_ dir: String) -> String { join(dir, "enrich-log.txt") }
     static func enrichedDir(_ dir: String) -> String { join(dir, "enriched") }
-    static func enrichedBatch(_ dir: String, _ id: Int) -> String { join(dir, "enriched/batch-\(id).json") }
     static func embedderIdentity(_ dir: String) -> String { join(dir, "index/embedder.json") }
     static func embeddingSpace(_ dir: String) -> String { join(dir, "index/embedding-space.json") }
     static func compositionIdentity(_ dir: String) -> String { join(dir, "index/composition.json") }
@@ -1719,19 +1242,6 @@ enum Layout {
     static func datasetMeta(_ dir: String) -> String { join(dir, "dataset.meta.json") }
     static func report(_ dir: String) -> String { join(dir, "report.json") }
     static func join(_ dir: String, _ rel: String) -> String { (dir as NSString).appendingPathComponent(rel) }
-}
-
-// MARK: - TMDB
-
-enum TMDB {
-    static func client() throws -> TMDBClient {
-        guard let key = ProcessInfo.processInfo.environment["TMDB_API_KEY"], !key.isEmpty else {
-            throw ToolError(message: "set TMDB_API_KEY (enrichment requires it)")
-        }
-        // Detail responses are served from disk when already fetched (DEN_CACHE=0 or TMDB_CACHE=0
-        // disables, DEN_CACHE_DIR / TMDB_CACHE_TTL_DAYS tune it).
-        return TMDBClient(apiKey: key, maxConcurrent: 8, cache: TMDBCachePolicy.cache())
-    }
 }
 
 // MARK: - JSON / file IO
@@ -1818,28 +1328,6 @@ final class LineAppender {
     func close() throws { try handle.close() }
 }
 
-enum Log {
-    /// Serialises writes. `metadata` logs from inside a 200-task group, and this opens its own handle and
-    /// seeks to the end with no lock — concurrent first-writers took the `data.write(to:)` fallback below,
-    /// which TRUNCATES, so the diagnostics the logging exists to produce were partly lost.
-    private static let lock = NSLock()
-
-    static func append(_ path: String, _ message: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        try? FileIO.ensureParent(path)
-        // Redacted HERE, at the sink, not at each of the dozen call sites that interpolate an error —
-        // TMDB's api_key rides in the query string and `URLError`'s description carries the failing URL.
-        if let data = (Redact.secrets(message) + "\n").data(using: .utf8) {
-            if let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: path)) {
-                handle.seekToEndOfFile(); handle.write(data); try? handle.close()
-            } else {
-                try? data.write(to: URL(fileURLWithPath: path))
-            }
-        }
-    }
-}
-
 // MARK: - Flag declarations
 
 /// One command-line flag, declared once.
@@ -1894,19 +1382,6 @@ struct Subcommand {
 enum Spec {
     /// Every subcommand, in pipeline order — which is also the order `--help` lists them in.
     static let commands: [Subcommand] = [
-        Subcommand(
-            name: "enrich",
-            summary: "Next N un-enriched worklist ids → one TMDB call each → a scratch batch.",
-            flags: [
-                .value("--worklist", "<path>", "the worklist JSON to draw ids from", required: true),
-                .value("--out-dir", "<dir>", "the run directory (enriched batches + the resumable checkpoint)",
-                       required: true),
-                .value("--vote-floor", "<n>", "minimum TMDB vote count (default 50); below it a title stays pending"),
-                .value("--limit", "<n>", "how many un-enriched ids to take this run (default 150)"),
-                .bare("--exclude-anime",
-                      "drop anime. Opt-IN: excluding it by default silently cost the corpus 1,498 titles"),
-            ],
-            run: { try await Commands.enrich($0) }),
         Subcommand(
             name: "embed-corpus",
             summary: "Embed ALREADY-DECIDED labels: compose the document, embed, append to the index store.",

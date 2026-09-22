@@ -1,6 +1,6 @@
 import Foundation
 
-/// Bounded retry with exponential backoff for the producer's outbound HTTP (TMDB, Wikidata, Wikipedia).
+/// Bounded retry with exponential backoff for the producer's outbound HTTP (Wikidata, den-embed).
 /// A multi-hour/day batch run WILL hit transient 429/5xx/timeouts from these public APIs; without retry a
 /// single blip silently drops a title (or a whole batch's grounding). Only *transient* failures retry —
 /// a 404/400/decoding error throws straight through so the caller can treat it as a definitive miss.
@@ -10,16 +10,11 @@ public enum Transport {
         status == 408 || status == 429 || (500...599).contains(status)
     }
 
-    /// Whether an error is worth retrying: a transient HTTP status from either client, a TMDB transport error,
-    /// or a URLSession connectivity/timeout error. Everything else (404, 400, decoding) is definitive.
+    /// Whether an error is worth retrying: a transient HTTP status from either client, or a URLSession
+    /// connectivity/timeout error. Everything else (404, 400, decoding) is definitive.
     public static func isRetryable(_ error: Error) -> Bool {
         if let e = error as? WikipediaError, case .http(let s) = e { return isTransient(status: s) }
         if let e = error as? DenEmbedError, case .http(let s) = e { return isTransient(status: s) }
-        if let e = error as? TMDBError {
-            if case .http(let s) = e { return isTransient(status: s) }
-            if case .transport = e { return true }
-            return false
-        }
         if let e = error as? URLError {
             return [.timedOut, .networkConnectionLost, .notConnectedToInternet,
                     .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed].contains(e.code)

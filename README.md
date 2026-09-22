@@ -137,11 +137,11 @@ the other 421 would be dropped by the ToS rule regardless.
 - `pipeline/` — the pipeline, in order (`pipeline/__init__.py`). One module per stage, each declaring what
   it reads and writes; `./den stages` prints it.
 - `lib/` — what a stage needs from outside the machine: HTTP with retry, the response cache, and the
-  upstream clients.
+  upstream clients (TMDB, Wikidata, Wikipedia — the whole article in `wikipedia.py`, the plot in `plot.py`).
 - `Sources/DenDataset/` — the library the remaining Swift phases still need: the `t02` `Taxonomy`, the
-  `HashingEmbedder` + `Quantizer`, the format + producer model types, and a thin `TMDBClient`.
-- `Sources/taxonomy-backfill/` — the CLI that drives the phases not ported yet (`enrich`, `embed-corpus`,
-  `facts`, `finalize`, `recluster`).
+  `HashingEmbedder` + `Quantizer`, and the format + producer model types.
+- `Sources/taxonomy-backfill/` — the CLI that drives the phases not ported yet (`embed-corpus`, `facts`,
+  `finalize`, `recluster`).
 - `Tests/DenDatasetTests/` — golden (embedder/quantizer determinism), conformance (artifact format), and a
   fixture-based end-to-end smoke test (no TMDB, no network).
 
@@ -166,8 +166,8 @@ taxonomy-backfill finalize      --out-dir <dir>
 
 Or `./den run`, which is the whole order — see `./den stages`.
 
-The worklist builds BOTH media in one call: `enrich` refuses a list that mixes them, so it writes one per
-media rather than taking a `--media`. It and the drain hit TMDB and need `TMDB_API_KEY`. The per-title
+The worklist builds BOTH media in one call and writes one list per media rather than taking a `--media`.
+It and the drain hit TMDB and need `TMDB_API_KEY`; one drain batch is `python3 -m pipeline.enrich`. The per-title
 labels and facets come from the `classify` stage — the decision-only pass in `scripts/v2/run_combined.py`,
 which reads the dumped articles and writes the `combined-v1-r2*.jsonl` shards the corpus join consumes.
 `embed-corpus` composes and embeds those already-decided labels; `finalize` writes the shipped artifacts.

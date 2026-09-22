@@ -78,67 +78,12 @@ final class ResponseCacheTests: XCTestCase {
 
     // MARK: - Policies
 
-    /// `/discover` is how the pipeline finds titles that are new or have newly crossed the vote floor.
-    /// Serving it from disk would hide precisely what it is asked to surface.
-    func testOnlyTMDBDetailEndpointsAreCacheable() {
-        XCTAssertTrue(TMDBCachePolicy.isCacheable(path: "/movie/278"))
-        XCTAssertTrue(TMDBCachePolicy.isCacheable(path: "/tv/1396"))
-        XCTAssertFalse(TMDBCachePolicy.isCacheable(path: "/discover/movie"))
-        XCTAssertFalse(TMDBCachePolicy.isCacheable(path: "/movie/popular"))
-        XCTAssertFalse(TMDBCachePolicy.isCacheable(path: "/movie/278/credits"))
-    }
-
     func testEnvironmentSwitchesCachingOff() {
-        XCTAssertNil(TMDBCachePolicy.cache(["DEN_CACHE": "0"]), "the global switch")
-        XCTAssertNil(TMDBCachePolicy.cache(["TMDB_CACHE": "off"]), "the per-source switch")
+        XCTAssertNil(WikiCachePolicy.cache(["DEN_CACHE": "0"]), "the global switch")
+        XCTAssertNil(WikiCachePolicy.cache(["WIKI_CACHE": "off"]), "the per-source switch")
         XCTAssertNotNil(WikiCachePolicy.cache(["TMDB_CACHE": "0"]), "one source off leaves the other on")
-        XCTAssertNotNil(TMDBCachePolicy.cache([:]))
-        XCTAssertEqual(TMDBCachePolicy.cache(["TMDB_CACHE_TTL_DAYS": "2"])?.ttl, 2 * 24 * 60 * 60)
+        XCTAssertEqual(WikiCachePolicy.cache(["WIKI_CACHE_TTL_DAYS": "2"])?.ttl, 2 * 24 * 60 * 60)
         // "0 days" reads as "off", not as a write-only cache that never returns a hit.
-        XCTAssertNil(TMDBCachePolicy.cache(["TMDB_CACHE_TTL_DAYS": "0"]))
-    }
-
-    /// Decoding proves nothing — every ClassificationWire field is Optional, so `{}` and TMDB's own error
-    /// envelope both decode cleanly and would then be served for the whole TTL.
-    func testOnlyRealTitleRecordsAreWorthCaching() {
-        func ok(_ s: String, appended: Bool = false) -> Bool {
-            TMDBClient.isCacheableBody(Data(s.utf8), expectingAppendedResources: appended)
-        }
-        XCTAssertFalse(ok("{}"))
-        XCTAssertFalse(ok(#"{"success":false,"status_code":34,"status_message":"Not found."}"#))
-        XCTAssertFalse(ok(#"{"id":278,"title":"   "}"#), "a blank name is not a record")
-        XCTAssertFalse(ok("not json at all"))
-        XCTAssertTrue(ok(#"{"id":278,"title":"The Shawshank Redemption"}"#))
-        XCTAssertTrue(ok(#"{"id":1396,"name":"Breaking Bad"}"#), "series carry `name`, not `title`")
-
-        // A 200 that silently dropped the appended sub-resources yields a title with no keywords, no
-        // director and no cast — indistinguishable downstream from a title that genuinely has none.
-        XCTAssertFalse(ok(#"{"id":278,"title":"X"}"#, appended: true))
-        XCTAssertTrue(ok(#"{"id":278,"title":"X","keywords":{},"credits":{}}"#, appended: true))
-    }
-
-    /// The action API reports a missing page as HTTP 200 with an `error` object, so caching on status alone
-    /// would pin "missingtitle" for the whole TTL.
-    func testOnlySuccessfulWikiParsesAreWorthCaching() {
-        func ok(_ s: String) -> Bool { WikipediaSource.isCacheableBody(Data(s.utf8)) }
-        XCTAssertFalse(ok(#"{"error":{"code":"missingtitle","info":"The page you specified doesn't exist."}}"#))
-        XCTAssertFalse(ok("<html>maintenance</html>"))
-        XCTAssertFalse(ok("{}"), "no parse result is not an answer")
-        XCTAssertTrue(ok(#"{"parse":{"title":"Face/Off","revid":1,"sections":[]}}"#))
-    }
-
-    /// TMDB's overview must not reach the embedder (their §1.C). The client boundary drops the text and
-    /// keeps only its length, so no downstream path can leak it by forgetting a flag.
-    func testTMDBOverviewNeverLeavesTheClient() throws {
-        let body = #"{"id":278,"title":"X","overview":"A banker is sentenced to life in Shawshank.","vote_count":9,"keywords":{},"credits":{}}"#
-        let title = try TMDBClient.enrichedTitleForTesting(Data(body.utf8), id: 278, mediaType: .movie)
-        XCTAssertEqual(title.overview, "", "the TMDB overview is dropped, not carried")
-        XCTAssertEqual(title.overviewChars, 43, "its LENGTH survives, for the stub check")
-        XCTAssertFalse(title.overview.contains("Shawshank"))
-
-        // `overview` carries a Wikipedia plot or nothing — grounding is the only thing that fills it.
-        let grounded = title.groundedOnWikiPlot("Andy Dufresne is convicted of murder.")
-        XCTAssertEqual(grounded.overview, "Andy Dufresne is convicted of murder.")
-        XCTAssertEqual(grounded.overviewChars, 43, "the stub verdict is preserved across grounding")
+        XCTAssertNil(WikiCachePolicy.cache(["WIKI_CACHE_TTL_DAYS": "0"]))
     }
 }
