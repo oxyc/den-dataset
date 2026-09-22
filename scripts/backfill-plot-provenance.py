@@ -20,6 +20,12 @@ WHAT THIS WILL NOT DO. It never writes a role it did not derive from a cached bo
 one the pass itself recorded. A row the cache cannot explain keeps both fields ABSENT, which every reader
 treats as unknown — guessing `own` would report a title as correctly grounded on the strength of a replay
 that failed, which is worse than the gap it fills.
+
+WHICH MEDIA A BODY ANSWERED. Movie 95 and series 95 are different titles, and a SPARQL body does not say
+which one it was asked about — only the query text does, and that is hashed into the file name. So the name
+is re-derived from the batches on disk (`mapping_media`). A body whose query cannot be re-derived is used
+only where its match cannot be the other title's (`other_may_have_answered`), and what it decides is
+counted apart ("media unconfirmed"). Otherwise the row is left unrecorded and counted as "ambiguous media".
 """
 import argparse
 import collections
@@ -29,8 +35,14 @@ import os
 import sys
 import urllib.parse
 
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from lib import cache as caching, plot, wikidata  # noqa: E402
+
 #: The three candidates the enrich pass chooses between, in the order it tries them.
 OWN, OWN_OTHER_LANGUAGE, SOURCE_WORK = "own", "own-other-language", "source-work"
+
+MEDIA = ("movie", "tv")
 
 #: `ResponseCache.key`: SHA256 of "<namespace>\x01<host><path>?<query, sorted by key>", filed under the
 #: first two characters of the digest. The HOST is part of it deliberately — every Wikipedia serves
@@ -72,12 +84,41 @@ def parse_landing(cache_dir, article, language):
         return None
 
 
-def candidates_by_id(cache_dir):
-    """tmdb id -> every candidate set any cached SPARQL body returned for it.
+def batch_names(enriched_dir):
+    return sorted(name for name in os.listdir(enriched_dir) if name.startswith("batch-") and name.endswith(".json"))
 
-    A LIST per id, not one entry. The body does not say which media type the query asked about — only the
-    query text does, and that is hashed into the filename — and a movie id and a series id can be the same
-    integer. Each is tried, and the recorded article is what decides between them.
+
+def mapping_digest(ids, media):
+    """The cache file name of the enrich pass's mapping query for `ids` asked as `media`."""
+    query = wikidata.mapping_query(ids, media, plot.HEADINGS_BY_LANGUAGE)
+    return caching.ResponseCache(NAMESPACE, "", 0).key("sparql", {"q": query})
+
+
+def mapping_media(enriched_dir):
+    """cache file name -> media, for every mapping query a batch on disk re-derives.
+
+    Per batch: each media's ids asked as that media, which is what the pass sends; and the whole batch asked
+    as each media, which is what it sent before a mixed batch was refused (series 91545 was looked up as a
+    movie that way). The digest is exact — a name that matches is that query. A body no batch re-derives
+    came from a query this corpus cannot reconstruct (another out-dir, a re-run over a different id set, an
+    older query text) and is left unattributed rather than assigned a media.
+    """
+    media_of = {}
+    for name in batch_names(enriched_dir):
+        with open(os.path.join(enriched_dir, name), encoding="utf-8") as handle:
+            rows = json.load(handle)
+        groups = [[r["tmdbId"] for r in rows if r.get("mediaType") == media] for media in MEDIA]
+        for ids in [group for group in groups if group] + [[r["tmdbId"] for r in rows]]:
+            for media in MEDIA:
+                media_of[mapping_digest(ids, media)] = media
+    return media_of
+
+
+def candidates_by_key(cache_dir, media_of):
+    """(media, tmdb id) -> every candidate set a cached SPARQL body returned for it.
+
+    `media` is None for a body `mapping_media` could not attribute. A LIST per key, not one entry: the same
+    title can be in several bodies, and the recorded article is what decides between them.
     """
     mapping = collections.defaultdict(list)
     for sub in sorted(os.listdir(cache_dir)):
@@ -88,8 +129,9 @@ def candidates_by_id(cache_dir):
             body = _sparql_body(os.path.join(directory, name))
             if body is None:
                 continue
+            media = media_of.get(name[:-len(".json")])
             for tmdb, found in _candidates(body).items():
-                mapping[tmdb].append(found)
+                mapping[(media, tmdb)].append(found)
     return mapping
 
 
@@ -133,7 +175,22 @@ def _candidates(bindings):
 
 
 def provenance(record, mapping, cache_dir):
-    """(role, redirected) for one grounded row, or (None, None) when the cache cannot say.
+    """(role, redirected, confirmed) for one grounded row, or (None, None, None) when the cache cannot say.
+
+    The bodies attributed to the row's own media are asked first; `confirmed` is False when the answer came
+    from a body whose media could not be re-derived. A body attributed to the OTHER media is never asked:
+    it describes a different title that happens to share the id.
+    """
+    tmdb = str(record["tmdbId"])
+    for media, confirmed in ((record["mediaType"], True), (None, False)):
+        role, redirected = _match(record, mapping.get((media, tmdb), ()), cache_dir)
+        if role is not None:
+            return role, redirected, confirmed
+    return None, None, None
+
+
+def _match(record, entries, cache_dir):
+    """(role, redirected) from one set of candidate entries, or (None, None).
 
     An EXACT match wins over a redirect match wherever both are available: the recorded `plotArticle` is the
     article the fetch resolved to, so a candidate that equals it was reached without moving, and a candidate
@@ -144,7 +201,7 @@ def provenance(record, mapping, cache_dir):
     if not article:
         return None, None
     landed = None
-    for entry in mapping.get(str(record["tmdbId"]), ()):
+    for entry in entries:
         # `article` and `source` are enwiki names; `by_language` holds every other Wikipedia. A non-English
         # plot can only have come from that language's sitelink — the source work is fetched in English.
         if language == "en":
@@ -161,6 +218,21 @@ def provenance(record, mapping, cache_dir):
     return landed or (None, None)
 
 
+def other_may_have_answered(record, mapping, held, cache_dir):
+    """Whether an unattributed body's match could be the OTHER title with this id answering.
+
+    Where bodies ARE attributed to the other media, they say what that title's candidates are: if none of
+    them is or lands on the recorded article, the match was not that title's. Where there are none, the
+    corpus holding both titles is enough to leave it open.
+    """
+    tmdb = str(record["tmdbId"])
+    other = "tv" if record["mediaType"] == "movie" else "movie"
+    entries = mapping.get((other, tmdb))
+    if entries:
+        return _match(record, entries, cache_dir)[0] is not None
+    return len(held[tmdb]) > 1
+
+
 def recorded(record):
     """Whether the enrich pass already recorded a role, which this never overwrites."""
     return record.get("plotArticleRole") in (OWN, OWN_OTHER_LANGUAGE, SOURCE_WORK)
@@ -168,27 +240,34 @@ def recorded(record):
 
 def backfill(enriched_dir, out_dir, cache_dir):
     """Fill the two fields in every batch, and return what was written."""
-    mapping = candidates_by_id(cache_dir)
+    mapping = candidates_by_key(cache_dir, mapping_media(enriched_dir))
+    batches = {}
+    held = collections.defaultdict(set)
+    for name in batch_names(enriched_dir):
+        with open(os.path.join(enriched_dir, name), encoding="utf-8") as handle:
+            batches[name] = json.load(handle)
+        for record in batches[name]:
+            held[str(record["tmdbId"])].add(record["mediaType"])
     os.makedirs(out_dir, exist_ok=True)
     counts = collections.Counter()
-    for name in sorted(os.listdir(enriched_dir)):
-        if not (name.startswith("batch-") and name.endswith(".json")):
-            continue
-        with open(os.path.join(enriched_dir, name), encoding="utf-8") as handle:
-            rows = json.load(handle)
+    for name, rows in batches.items():
         for record in rows:
             if not record.get("hasWikiPlot"):
                 continue
             if recorded(record):
                 counts["already recorded"] += 1
                 continue
-            role, redirected = provenance(record, mapping, cache_dir)
+            role, redirected, confirmed = provenance(record, mapping, cache_dir)
             if role is None:
                 counts["unrecoverable"] += 1
                 continue
+            if not confirmed and other_may_have_answered(record, mapping, held, cache_dir):
+                counts["ambiguous media"] += 1
+                continue
             record["plotArticleRole"] = role
             record["plotArticleRedirected"] = redirected
-            counts[role + (" +redirect" if redirected else "")] += 1
+            label = role + (" +redirect" if redirected else "")
+            counts[label if confirmed else f"{label} (media unconfirmed)"] += 1
         with open(os.path.join(out_dir, name), "w", encoding="utf-8") as handle:
             json.dump(rows, handle)
     return counts
@@ -219,6 +298,10 @@ def main(argv=None):
         print(f"\n{counts['unrecoverable']} rows keep both fields absent: the cache names no candidate that "
               f"is, or lands on, the article they recorded.\nThat is UNKNOWN — the census counts them as "
               f"neither grounded nor mis-grounded.")
+    if counts["ambiguous media"]:
+        print(f"\n{counts['ambiguous media']} rows keep both fields absent because the only body that explains "
+              f"them has a query this corpus cannot re-derive, and the title of the other media with the "
+              f"same id may be the one it answered.")
     return 0
 
 
