@@ -33,9 +33,10 @@ class Listing(unittest.TestCase):
         result = den("stages")
         self.assertEqual(result.returncode, 0, result.stderr)
         # The order, and that it is the real one: the universe is built before anything is drawn from it,
-        # the articles are classified before the vectors are embedded, the vectors before the corpus is
-        # joined, the corpus before the store is built from it, and the publish that uploads it is last.
-        expected = ("worklist", "classify", "embed", "corpus", "store", "publish")
+        # the articles are classified before the vectors are embedded, the vectors before the facts passes
+        # are merged over their ids, the merged facts before the corpus that joins them, the corpus before
+        # the store built from it, and the publish that uploads the store is last.
+        expected = ("worklist", "classify", "embed", "facts", "corpus", "store", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]

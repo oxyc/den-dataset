@@ -57,8 +57,8 @@ def main():
     # DEV hypothesis on the sealed half needs the TEST triplets' titles tagged too, and a
     # tagging run reads no verdicts and computes no metric: the batch files carry titles and
     # plots, the same records that were always going to be tagged in Phase 2. What must stay
-    # sealed is the scoring, and that is enforced where the scoring lives — score_triplets
-    # announces a TEST run and sweep_arm_fusion refuses one outright.
+    # sealed is the scoring, and that is guarded where the scoring lives — score_triplets,
+    # score_reco and paired_triplets each announce a TEST run before they report anything.
     ap.add_argument('--half', choices=['dev', 'test'], default='dev')
     ap.add_argument('--out-dir', default=os.path.join(V2, 'bakeoff'))
     args = ap.parse_args()
