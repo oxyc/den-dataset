@@ -16,7 +16,7 @@ prose somewhere that can go stale without anything failing.
 ## The part that is still being rebuilt
 
 `pipeline/` holds **twelve** stages — `./den stages` lists them. What is left outside are the side passes
-no stage runs but the corpus join and the store read — the delta question pass (`scripts/v2/run_delta.py`) and the
+no stage runs but the corpus join and the store read — the delta question pass (`pipeline/run_delta.py`) and the
 premise tags — and each still answers for itself in `pipeline/artifacts.py` until it lands. Emptying
 `scripts/` into the packages is oxyc/den-dataset#73.
 

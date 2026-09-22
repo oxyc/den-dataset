@@ -291,7 +291,7 @@ class Topology(unittest.TestCase):
         """`delta` is a second pass over a second article dump, run by a second script. This stage writes
         `combined` and nothing else, so the delta stays an input that answers for itself rather than being
         swept into a registration that would name the wrong file."""
-        self.assertEqual(artifacts.DELTA.producer, "scripts/v2/run_delta.py")
+        self.assertEqual(artifacts.DELTA.producer, "pipeline/run_delta.py")
         self.assertNotIn(artifacts.DELTA, [bind(e).artifact for e in classify.OUTPUTS])
 
     def test_the_titles_are_classified_before_the_corpus_joins_them(self):

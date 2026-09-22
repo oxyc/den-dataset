@@ -127,8 +127,8 @@ GENRES_MOODS = Artifact(
 DELTA = Artifact(
     name="delta",
     filename="delta-v2*.jsonl",
-    producer="scripts/v2/run_delta.py",
-    how="scripts/v2/run_delta.py --spend",
+    producer="pipeline/run_delta.py",
+    how="pipeline/run_delta.py --spend",
     shards=True,
 )
 
