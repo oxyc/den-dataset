@@ -202,12 +202,31 @@ class Dispatch(unittest.TestCase):
         args = argparse.Namespace(set=[], out_dir="out", dataset_version="v", stamp_meta=None, mode=None,
                                   since=None, expect=None, pause_ms=0, limit=None, media=None, vote_floor=40,
                                   regional_vote_floor=10, imdb_floor=1500, regional_imdb_floor=300, plan=False,
-                                  spend=False, dump_docs=None)
+                                  spend=False, dump_docs=None, reembed_keys=None, reembed_changed=False)
         ctx = module.context(args)
         self.assertEqual((ctx.vote_floor, ctx.regional_vote_floor, ctx.imdb_floor, ctx.regional_imdb_floor),
                          (40, 10, 1500, 300))
         listed = den("stage", "fetch", "--help").stdout
         for flag in ("--vote-floor", "--regional-vote-floor", "--imdb-floor", "--regional-imdb-floor"):
+            self.assertIn(flag, listed)
+
+    def test_the_reembed_selection_reaches_the_run(self):
+        """A re-embed list the parser accepts and `Context` drops is a run that leaves every listed title on
+        its old vector and reports success."""
+        import importlib.machinery
+        loader = importlib.machinery.SourceFileLoader("den_entry", DEN)
+        module = importlib.util.module_from_spec(importlib.util.spec_from_loader("den_entry", loader))
+        loader.exec_module(module)
+        import argparse
+        args = argparse.Namespace(set=[], out_dir="out", dataset_version="",stamp_meta=None, mode=None,
+                                  since=None, expect=None, pause_ms=0, limit=None, media=None, vote_floor=None,
+                                  regional_vote_floor=None, imdb_floor=None, regional_imdb_floor=None,
+                                  plan=True, spend=False, dump_docs=None, reembed_keys="keys.txt",
+                                  reembed_changed=True)
+        ctx = module.context(args)
+        self.assertEqual((ctx.reembed_keys, ctx.reembed_changed, ctx.plan), ("keys.txt", True, True))
+        listed = den("stage", "embed", "--help").stdout
+        for flag in ("--reembed-keys", "--reembed-changed"):
             self.assertIn(flag, listed)
 
 

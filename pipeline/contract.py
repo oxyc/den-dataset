@@ -183,6 +183,12 @@ class Context:
     #: embedded on the den-embed that will serve them. Empty embeds as usual. A path rather than a switch:
     #: the documents travel, so the operator names where they go.
     dump_docs: str = ""
+    #: A file of `mediaType:tmdbId` keys the embed pass re-embeds although the stores hold a vector for them.
+    #: Resume skips every stored key, so without this a title whose document changed keeps its old vector.
+    reembed_keys: str = ""
+    #: The embed pass re-embeds every stored title whose document differs from the one its vector was made
+    #: from. See `pipeline/embed.py`.
+    reembed_changed: bool = False
 
     def _filename(self, artifact):
         """The declared filename with the dataset version in it, or a refusal when it needs one and the run

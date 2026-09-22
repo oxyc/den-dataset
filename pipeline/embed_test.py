@@ -330,6 +330,146 @@ class Gates(Staged):
             embed.embed_into((io.StringIO(), io.StringIO()), self.service.url, None, 0, [[]])
 
 
+class Reembed(Staged):
+    """A title whose document changed is re-embedded on request, by a row appended after its old one."""
+
+    def keys_file(self, *keys):
+        path = os.path.join(self.out, "reembed.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("".join(key + "\n" for key in keys))
+        return path
+
+    def relabel(self, tmdb_id, tag, media="movie"):
+        """The labels file gives one title a different tag, so its document changes."""
+        with open(os.path.join(self.out, "labels-t02.json"), encoding="utf-8") as fh:
+            records = json.load(fh)["records"]
+        for rec in records:
+            if (rec["tmdbId"], rec["mediaType"]) == (tmdb_id, media):
+                rec["subgenres"] = [{"label": tag, "confidence": 0.9}]
+        self.write_labels(records)
+
+    def strip_hashes(self):
+        """The store as a run before `docSha256` existed left it."""
+        path = os.path.join(self.out, "index", "vectors.jsonl")
+        rows = lines(path)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("".join(json.dumps({"tmdbId": r["tmdbId"], "v": r["v"]}) + "\n" for r in rows))
+
+    def bytes_of_store(self):
+        index, found = os.path.join(self.out, "index"), {}
+        for name in sorted(os.listdir(index)):
+            with open(os.path.join(index, name), "rb") as fh:
+                found[name] = fh.read()
+        return found
+
+    def test_every_row_records_the_document_it_was_embedded_from(self):
+        self.run_stage()
+        sent = [text for body in self.posts() for text in body["texts"]
+                if text not in ("first text", "second text")]
+        self.assertEqual([row["docSha256"] for row in self.store("vectors.jsonl")],
+                         [embed.doc_sha(text) for text in sent])
+
+    def test_a_listed_title_is_re_embedded_and_finalize_ships_the_new_vector(self):
+        self.run_stage()
+        self.relabel(1, "Noir")
+        _, summary = self.run_stage(reembed_keys=self.keys_file("movie:1"))
+        self.assertEqual((summary["written"], summary["superseded"], summary["skipped"]), (1, 1, 2))
+        self.assertEqual([(r["mediaType"], r["tmdbId"]) for r in self.store()],
+                         [("movie", 1), ("movie", 2), ("tv", 3), ("movie", 1)])
+        new_doc = "Genres: drama. Themes: Noir. Plot: Plot 1."
+        self.assertEqual(self.posts()[-1]["texts"], [new_doc])
+        # The contract the append relies on: finalize keeps the LAST row per key, with that row's vector.
+        records, vectors = embed.finalize.read_store(os.path.join(self.out, "index", "labels.jsonl"),
+                                                     os.path.join(self.out, "index", "vectors.jsonl"))
+        shipped = {(r["mediaType"], r["tmdbId"]): (r["subgenres"][0]["label"], v) for r, v in zip(records, vectors)}
+        self.assertEqual(shipped[("movie", 1)], ("Noir", vector(new_doc)))
+        self.assertEqual(len(records), 3)
+
+    def test_a_listed_title_from_before_the_hash_is_re_embedded_even_if_its_tags_match(self):
+        """The list is the operator's word: with no record of the embedded document, it is not second-guessed."""
+        self.run_stage()
+        self.strip_hashes()
+        _, summary = self.run_stage(reembed_keys=self.keys_file("movie:2"))
+        self.assertEqual((summary["written"], summary["superseded"]), (1, 1))
+
+    def test_a_killed_list_run_resumes_rather_than_starting_over(self):
+        """A title whose last row already records today's document was re-embedded by the killed run."""
+        self.run_stage()
+        self.strip_hashes()
+        keys = self.keys_file("movie:1", "movie:2", "tv:3")
+        _, first = self.run_stage(reembed_keys=keys, limit=1)
+        _, second = self.run_stage(reembed_keys=keys)
+        _, third = self.run_stage(reembed_keys=keys)
+        self.assertEqual((first["written"], second["written"], third["written"]), (1, 2, 0))
+        self.assertEqual(len(self.store()), 6)
+
+    def test_changed_re_embeds_exactly_the_titles_whose_document_changed(self):
+        self.run_stage()
+        self.relabel(2, "Noir")
+        self.batch(2, [{"tmdbId": 3, "mediaType": "tv", "overview": "A new plot.", "hasWikiPlot": True}])
+        _, summary = self.run_stage(reembed_changed=True)
+        self.assertEqual((summary["written"], summary["superseded"]), (2, 2))
+        self.assertEqual(sorted((r["mediaType"], r["tmdbId"]) for r in self.store()[3:]),
+                         [("movie", 2), ("tv", 3)])
+        _, again = self.run_stage(reembed_changed=True)
+        self.assertEqual(again["written"], 0)
+
+    def test_changed_compares_a_row_from_before_the_hash_by_its_stored_tags(self):
+        """Such a row's label line still says which tags were embedded, so a tag change is seen. A plot
+        change is not: nothing on the row records the plot."""
+        self.run_stage()
+        self.strip_hashes()
+        self.relabel(2, "Noir")
+        self.batch(2, [{"tmdbId": 3, "mediaType": "tv", "overview": "A new plot.", "hasWikiPlot": True}])
+        _, summary = self.run_stage(reembed_changed=True)
+        self.assertEqual([(r["mediaType"], r["tmdbId"]) for r in self.store()[3:]], [("movie", 2)])
+        self.assertEqual(summary["superseded"], 1)
+
+    def test_without_a_selection_a_changed_title_keeps_its_vector(self):
+        """Resume is still by key: re-embedding is asked for, never inferred."""
+        self.run_stage()
+        self.relabel(2, "Noir")
+        _, summary = self.run_stage()
+        self.assertEqual(summary["written"], 0)
+
+    def test_the_plan_counts_and_prices_and_touches_nothing(self):
+        self.run_stage()
+        self.relabel(1, "Noir")
+        self.relabel(2, "Noir")
+        with open(os.path.join(self.out, "labels-t02.json"), encoding="utf-8") as fh:
+            self.write_labels(json.load(fh)["records"] + [record(9)])
+        before = self.bytes_of_store()
+        self.service.close()
+        os.environ["DEN_EMBED_URL"] = "http://127.0.0.1:9"
+        _, plan = self.run_stage(plan=True, reembed_changed=True)
+        self.assertEqual((plan["wouldEmbed"], plan["new"], plan["reembed"]), (3, 1, 2))
+        self.assertEqual(plan["estimatedSeconds"], round(3 * embed.SECONDS_PER_TITLE))
+        self.assertEqual(self.bytes_of_store(), before)
+
+    def test_the_plan_does_not_repair_a_torn_store(self):
+        self.run_stage(limit=2)
+        with open(os.path.join(self.out, "index", "labels.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record(3, "tv")) + "\n")
+        before = self.bytes_of_store()
+        self.run_stage(plan=True)
+        self.assertEqual(self.bytes_of_store(), before)
+
+    def test_a_list_that_is_not_keys_is_refused_before_the_service_is_asked(self):
+        self.run_stage()
+        before, asked = self.bytes_of_store(), len(self.service.requests)
+        self.assertIn("reembed.txt:2 is not a mediaType:tmdbId key", self.refused(
+            reembed_keys=self.keys_file("movie:1", "tt0111161")))
+        self.assertEqual((self.bytes_of_store(), len(self.service.requests)), (before, asked))
+
+    def test_a_different_embedder_refuses_a_re_embed_before_anything_is_appended(self):
+        self.run_stage()
+        self.relabel(2, "Noir")
+        before = self.bytes_of_store()
+        self.service.health = dict(self.service.health, vector_epoch=2)
+        self.assertIn("mix two embedders", self.refused(reembed_changed=True))
+        self.assertEqual(self.bytes_of_store(), before)
+
+
 class Inputs(Staged):
     def test_a_missing_doc_facts_stops_the_stage(self):
         """Without them the document is not the CC0 shape at all."""

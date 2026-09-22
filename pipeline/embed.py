@@ -37,7 +37,28 @@ have torn: past that it is a corrupt store, and truncating it would destroy hour
 
 `--dump-docs PATH` composes and embeds nothing, so the documents can travel to the den-embed that serves
 live queries rather than the vectors coming back from a different one. It needs no service.
+
+**A re-embed appends a superseding row; it never rewrites one.** Resume skips every key the stores hold,
+so a title whose document changed (new genres & moods, a new plot) keeps its old vector unless it is asked
+for: `--reembed-keys FILE` (one `mediaType:tmdbId` per line) or `--reembed-changed` (every title whose
+document differs from the one its vector was made from). The new row goes at the end of both stores and
+`finalize` ships the LAST row per key (`finalize_test`'s `test_the_newest_record_per_title_ships_with_its_
+own_vector` pins that). Appending keeps every crash property the stores already have: a kill tears at most
+the tail, which `reconcile` repairs, and every earlier row, including the superseded one, is untouched,
+so an interrupted re-embed leaves a store that finalizes to a mix of old and new vectors, each one valid.
+Rewriting in place would mean rewriting 170 MB of vectors atomically, either per chunk or once at the end
+with hours of vectors held in memory. The cost is a larger store, which finalize compacts on the way out.
+
+Each vector row records `docSha256`, the hash of the document it was embedded from, so "changed" is a
+comparison rather than a guess. A row written before that field existed has no hash. For such a row the
+embedded document is rebuilt from the tags on its own label row with today's plot and facts, so a changed
+tag is seen and a changed plot is not. A listed key is re-embedded unless its last row already records
+today's document, which is what lets a killed `--reembed-keys` run resume instead of starting over.
+
+`--plan` embeds nothing, asks no service and writes nothing. It reports how many titles a run would embed,
+how many of them are re-embeds, and the time at the box's measured rate.
 """
+import hashlib
 import json
 import os
 import sys
@@ -90,6 +111,9 @@ CHUNK = 7
 FACTS_AND_TAGS = 500
 #: A tear loses at most the in-flight chunk. Anything larger is a corrupt store, not an interrupted write.
 MAX_TEAR_REPAIR = 1000
+#: Wall-clock seconds per title on the box's den-embed, measured over the corpus run. What `--plan` prices
+#: a run at.
+SECONDS_PER_TITLE = 0.9
 
 BOUND = {bind(entry).name: bind(entry) for entry in INPUTS}
 
@@ -233,6 +257,77 @@ def stored_keys(path):
     return keys
 
 
+def doc_sha(document):
+    return hashlib.sha256(document.encode("utf-8")).hexdigest()
+
+
+def listed_keys(path):
+    """The `mediaType:tmdbId` keys a `--reembed-keys` file names, one per line. A line that is not a key
+    refuses the run: it would otherwise be a title silently left on its old vector."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as unreadable:
+        raise StageError(f"embed: the re-embed list {path} could not be read ({unreadable})") from None
+    keys = set()
+    for n, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line:
+            continue
+        media, _, ident = line.partition(":")
+        if media not in ("movie", "tv") or not (ident.isascii() and ident.isdigit()):
+            raise StageError(f"embed: {path}:{n} is not a mediaType:tmdbId key: {line[:80]!r}")
+        keys.add(f"{media}:{int(ident)}")
+    return keys
+
+
+def last_rows(labels_path, vectors_path):
+    """Per key, the record on its LAST row and the `docSha256` that row's vector carries, or None when the
+    row predates the field. The last row is the one finalize ships. A pair that does not parse or name one
+    title is skipped: a real run reads this after `reconcile`, and a dry run must not repair."""
+    found = {}
+    if not (os.path.exists(labels_path) and os.path.exists(vectors_path)):
+        return found
+    for label_line, vector_line in zip(finalize.lines(labels_path), finalize.lines(vectors_path)):
+        try:
+            rec = finalize.parse_record(json.loads(label_line), "")
+            row = json.loads(vector_line)
+        except (ValueError, StageError):
+            continue
+        if not isinstance(row, dict) or row.get("tmdbId") != rec["tmdbId"]:
+            continue
+        sha = row.get("docSha256")
+        found[f"{rec['mediaType']}:{rec['tmdbId']}"] = (rec, sha if isinstance(sha, str) else None)
+    return found
+
+
+def embedded_docs(rows, keys, rebuild, enriched, doc_facts):
+    """For each of `keys` in the store, the hash of the document its vector was made from, where known: the
+    recorded `docSha256`, or, for a row without one and when `rebuild` holds, the document rebuilt from the
+    tags on that row with today's plot and facts."""
+    known, hashless = {}, {}
+    for key in keys:
+        if key not in rows:
+            continue
+        record, sha = rows[key]
+        if sha is not None:
+            known[key] = sha
+        elif rebuild:
+            hashless[key] = record
+    if hashless:
+        for key, _, document in compose.documents(enriched, hashless, doc_facts, set(),
+                                                  SHIPPED_COMPOSITION["plotCap"], {}):
+            known[key] = doc_sha(document)
+    return known
+
+
+def counted(groups, stored, tally):
+    """`groups` unchanged, tallying how many of the titles they carry supersede a row already stored."""
+    for buffer in groups:
+        tally["superseded"] = tally.get("superseded", 0) + sum(key in stored for key, _, _ in buffer)
+        yield buffer
+
+
 def inputs(ctx):
     """The labels per key, the doc facts, and the enriched dir — every input, required."""
     labels_path = ctx.require(BOUND[artifacts.VECTOR_LABELS.name].artifact)
@@ -261,11 +356,12 @@ def embed_into(stores, url, stamp, pause_ms, flushes):
         vectors = denembed.embed_many(url, [doc for _, _, doc in buffer])
         if len(vectors) != len(buffer):
             raise StageError(f"embed: den-embed returned {len(vectors)} vectors for {len(buffer)} documents")
-        for (_, record, _), vector in zip(buffer, vectors):
+        for (_, record, document), vector in zip(buffer, vectors):
             # Label then vector, per title: a kill between the two is the tear `reconcile` repairs.
             labels_handle.write(jsonbytes.compact(record) + "\n")
             labels_handle.flush()
-            vectors_handle.write(jsonbytes.compact({"tmdbId": record["tmdbId"], "v": vector}) + "\n")
+            row = {"docSha256": doc_sha(document), "tmdbId": record["tmdbId"], "v": vector}
+            vectors_handle.write(jsonbytes.compact(row) + "\n")
             vectors_handle.flush()
             written += 1
         if pause_ms:
@@ -289,13 +385,18 @@ def chunks(items, size, limit):
 
 
 def run(ctx):
-    """Embed what the stores do not hold yet. Returns the vectors store — or, with `--dump-docs`, the
-    documents file."""
+    """Embed what the stores do not hold yet, and re-embed what the run was asked to. Returns the vectors
+    store — or, with `--dump-docs`, the documents file."""
     os.makedirs(os.path.abspath(ctx.out_dir), exist_ok=True)
     labels, enriched, doc_facts = inputs(ctx)
+    listed = listed_keys(ctx.reembed_keys) if ctx.reembed_keys else set()
+    unlabelled = listed - labels.keys()
+    if unlabelled:
+        say(f"{len(unlabelled)} listed title(s) have no label in the labels file and cannot be composed, "
+            f"e.g. {sorted(unlabelled)[:3]}")
     url = denembed.base_url()
     stamp = identity = None
-    if not ctx.dump_docs:
+    if not (ctx.dump_docs or ctx.plan):
         try:
             stamp, identity = gate_embedder(ctx, url)
         except (http.HTTPError, ValueError, KeyError) as unreachable:
@@ -303,20 +404,43 @@ def run(ctx):
     first_composition = gate_composition(ctx)
     say(f"composition: {SHIPPED_COMPOSITION}")
 
-    # Every gate has decided. Only now is anything written — a record, a repair, a row.
-    if stamp is not None:
-        write_pretty(ctx.path(artifacts.EMBEDDING_SPACE), stamp)
-    if identity is not None:
-        write_pretty(ctx.path(artifacts.EMBEDDER), identity)
-    if first_composition:
-        write_pretty(ctx.path(artifacts.COMPOSITION), SHIPPED_COMPOSITION)
-
+    # Every gate has decided. Only now is anything written — a record, a repair, a row. A dry run writes
+    # nothing at all, the repair included.
     labels_store, vectors_store = ctx.path(artifacts.EMBED_LABELS), ctx.path(artifacts.EMBED_VECTORS)
-    reconcile(labels_store, vectors_store)
+    if not ctx.plan:
+        if stamp is not None:
+            write_pretty(ctx.path(artifacts.EMBEDDING_SPACE), stamp)
+        if identity is not None:
+            write_pretty(ctx.path(artifacts.EMBEDDER), identity)
+        if first_composition:
+            write_pretty(ctx.path(artifacts.COMPOSITION), SHIPPED_COMPOSITION)
+        reconcile(labels_store, vectors_store)
     done = stored_keys(labels_store)
+    candidates = done if ctx.reembed_changed else listed & done
+    embedded = {}
+    if candidates:
+        rows = last_rows(labels_store, vectors_store)
+        # A listed key is forced: only a recorded hash, never a rebuilt one, lets it be skipped.
+        embedded = embedded_docs(rows, candidates - listed, True, enriched, doc_facts)
+        embedded.update(embedded_docs(rows, candidates & listed, False, enriched, doc_facts))
     tally = {}
-    docs = compose.documents(enriched, labels, doc_facts, done, SHIPPED_COMPOSITION["plotCap"], tally)
-    groups = chunks(docs, CHUNK, ctx.limit)
+    docs = compose.documents(enriched, labels, doc_facts, done - candidates, SHIPPED_COMPOSITION["plotCap"],
+                             tally)
+    docs = (item for item in docs if item[0] not in candidates or embedded.get(item[0]) != doc_sha(item[2]))
+    groups = counted(chunks(docs, CHUNK, ctx.limit), done, tally)
+    if ctx.plan:
+        titles = flushes = 0
+        for buffer in groups:
+            titles += len(buffer)
+            flushes += 1
+        seconds = titles * SECONDS_PER_TITLE + flushes * ctx.pause_ms / 1000
+        superseded = tally.get("superseded", 0)
+        say(f"would embed {titles} title(s): {titles - superseded} new, {superseded} re-embedded; "
+            f"~{seconds / 3600:.1f} h at {SECONDS_PER_TITLE} s a title on the box")
+        print(json.dumps({"plan": True, "wouldEmbed": titles, "new": titles - superseded,
+                          "reembed": superseded, "estimatedSeconds": round(seconds),
+                          "missingLabel": tally.get("missing", 0), "store": labels_store}))
+        return vectors_store
     if ctx.dump_docs:
         written = 0
         os.makedirs(os.path.dirname(os.path.abspath(ctx.dump_docs)), exist_ok=True)
@@ -336,6 +460,7 @@ def run(ctx):
         made = vectors_store
     # One JSON line on stdout, which `scripts/embed-corpus-run.sh` reads `written` from to know when the
     # corpus is done.
-    print(json.dumps({"written": written, "skipped": len(done), "missingLabel": tally.get("missing", 0),
-                      "store": labels_store}))
+    superseded = tally.get("superseded", 0)
+    print(json.dumps({"written": written, "skipped": len(done) - superseded, "superseded": superseded,
+                      "missingLabel": tally.get("missing", 0), "store": labels_store}))
     return made
