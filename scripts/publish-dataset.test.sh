@@ -121,9 +121,10 @@ with open(path, "wb") as fh:
     fh.write(head)
 MKSTORE
   store_sha="$(shasum -a 256 "$DIR/den-$version.store" | cut -d' ' -f1)"
-  python3 - "$DIR/dataset.meta.json" "$version" "$labels_sha" "$store_sha" "$labels_records" "$extra" <<'PY'
-import json, sys
-path, version, labels_sha, store_sha, records, extra = sys.argv[1:7]
+  python3 - "$DIR/dataset.meta.json" "$version" "$labels_sha" "$store_sha" "$labels_records" "$extra" \
+    "$HERE/../data/alias-decisions.json" <<'PY'
+import hashlib, json, sys
+path, version, labels_sha, store_sha, records, extra, decisions = sys.argv[1:8]
 meta = {
     "datasetVersion": version,
     "taxonomyVersion": "t02",
@@ -135,6 +136,9 @@ meta = {
     "storeFile": f"den-{version}.store",
     "storeSha256": store_sha,
     "storeRecords": int(records),
+    # What the store build stamps: the committed decisions applied, and no collision left undecided.
+    "aliasDecisions": {"sha256": hashlib.sha256(open(decisions, "rb").read()).hexdigest(),
+                       "dropped": 0, "undecided": 0},
 }
 if extra:
     meta.update(json.loads(extra))
@@ -186,6 +190,9 @@ if run_publish; then
   grep -q '"microF1"' "$WORK/out.log" \
     && ok "the labels were scored against the golden set and passed the quality baseline" \
     || bad "the happy path published without scoring the labels"
+  grep -q "alias gate: the store applied" "$WORK/out.log" \
+    && ok "the store's alias decisions were checked" \
+    || bad "the happy path published without the alias gate"
 else
   bad "the happy path failed: $(tail -3 "$WORK/err.log")"
 fi
@@ -652,6 +659,71 @@ if run_publish; then
     || bad "it published with no word about the skipped census"
 else
   bad "a missing enriched tree was treated as a refusal: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
+# --- aliases: a collision nobody decided -----------------------------------------------------------------
+#
+# An alias that is another title's name puts its title at the top of a search for that name (Taxi Driver
+# carried "Alien"). The store build records how many it ships; any at all is a refusal that says how to
+# decide them.
+
+# `$1` replaces the stamped aliasDecisions record; `null` removes it.
+set_alias_record() {
+  python3 - "$DIR/dataset.meta.json" "$1" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+record = json.loads(sys.argv[2])
+if record is None:
+    meta.pop("aliasDecisions")
+else:
+    meta["aliasDecisions"].update(record)
+json.dump(meta, open(sys.argv[1], "w"))
+PY
+}
+
+setup
+write_meta
+publish_baseline
+set_alias_record '{"undecided": 3}'
+if run_publish; then
+  bad "a store shipping undecided alias collisions published anyway"
+else
+  grep -q "ships 3 alias(es) that are another title's name" "$WORK/err.log" \
+    && ok "a store shipping an undecided alias collision is refused" \
+    || bad "refused, but not for the aliases: $(tail -3 "$WORK/err.log")"
+  grep -q "check-alias-collisions.py .* --review" "$WORK/err.log" && grep -q '"keep" or "drop"' "$WORK/err.log" \
+    && ok "and the refusal says how to list and decide them" \
+    || bad "the alias refusal offered no way forward"
+fi
+[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
+teardown
+
+# A drop decided after the store was built is not in the store. The record names the decisions it applied.
+setup
+write_meta
+publish_baseline
+set_alias_record "{\"sha256\": \"$(printf '%064d' 0)\"}"
+if run_publish; then
+  bad "a store built from other alias decisions published anyway"
+else
+  grep -q "the store applied a different" "$WORK/err.log" \
+    && ok "a store built from alias decisions other than the committed ones is refused" \
+    || bad "refused, but not for the decisions: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
+# A store from a writer that never applied the decisions has no record at all — today's shipped store.
+setup
+write_meta
+publish_baseline
+set_alias_record null
+if run_publish; then
+  bad "a store with no alias record published anyway"
+else
+  grep -q "records no aliasDecisions" "$WORK/err.log" \
+    && ok "a store that does not say it applied the alias decisions is refused" \
+    || bad "refused, but not for the missing record: $(tail -3 "$WORK/err.log")"
 fi
 teardown
 

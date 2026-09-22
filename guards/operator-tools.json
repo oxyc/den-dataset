@@ -3,7 +3,6 @@
   "scripts/embed-corpus-run.sh": "a whole-corpus embed in segments, restarting den-embed between them so ONNX Runtime's arena cannot OOM the host",
   "scripts/facts-run.sh": "reruns the facts stage until no WDQS batch was skipped, which one attempt at the full corpus never manages",
   "scripts/recluster-run.sh": "the re-cluster report a person reads before a taxonomy bump; no timer runs it, so it is run by hand",
-  "scripts/check-alias-collisions.py": "the alias gate data/alias-decisions.json is enforced by; nothing runs it yet, so a bad alias ships until it is wired into the publish",
   "scripts/v2/derive_doc_facts.py": "doc-facts.json from an existing facts sidecar instead of ~770 SPARQL requests",
   "scripts/v2/embed_docs.py": "embeds `den stage embed --dump-docs` output on the serving box, behind the canary",
   "scripts/v2/import_box_vectors.py": "joins embed_docs.py's box output back into an index store finalize reads",

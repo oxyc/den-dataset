@@ -390,6 +390,14 @@ if [ -n "$inconsistent" ]; then
   exit 1
 fi
 
+# ALIAS GATE. An alias is a Wikidata altLabel, and one that is really another title's name puts this title
+# at the top of a search for that name — Taxi Driver carried "Alien" and ranked second for it. No rule tells
+# a wrong one from a real release title, so a person decides each collision in data/alias-decisions.json and
+# the store build applies them. This refuses a store that ships a collision nobody decided, or that applied
+# decisions other than the committed ones; the refusal lists the steps to decide one.
+python3 "$(dirname "$0")/check-alias-collisions.py" --gate "$meta" \
+  || { echo "       Nothing uploaded." >&2; exit 1; }
+
 # SHAPE GUARD. A producer can exist, be committed, be run correctly — and still emit a shape its consumer
 # cannot read. One entity carrying `"aliases": "Adrian Anthony Lester"` where atlas types Vec<String> made a
 # 27 MB facts file unparseable at its first entity; atlas does not partially load one, so it dropped the
