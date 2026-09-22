@@ -223,10 +223,21 @@ def reground(record, facts, cache, token):
     # titles had a sitelink on a wiki it reads.
     if not candidates and not by_language:
         return "noPlot", dict(record, noPlotReason="noArticle"), None
-    best, saw_section = None, False
+    best, saw_section, saw_article = None, False, False
+
+    def read(article, language):
+        """The plot, or None — and a page the wiki does not have is not an article that was read."""
+        nonlocal saw_article
+        try:
+            found = plot.plot(article, language, cache, token)
+        except plot.NoPage:
+            return None
+        saw_article = True
+        return found
+
     try:
         for article, role in candidates:
-            found = plot.plot(article, "en", cache, token)
+            found = read(article, "en")
             if found is None:
                 continue
             saw_section = True
@@ -241,7 +252,7 @@ def reground(record, facts, cache, token):
             preferred = [record["originalLanguage"]] if record["originalLanguage"] is not None else []
             for language in preferred + sorted(code for code in by_language if code not in preferred):
                 article = by_language.get(language)
-                found = plot.plot(article, language, cache, token) if article else None
+                found = read(article, language) if article else None
                 if found is None:
                     continue
                 saw_section = True
@@ -254,12 +265,17 @@ def reground(record, facts, cache, token):
     except http.HTTPError as error:
         if is_transient(error):
             return "deferred", None, error
-        # Definitive — a 404 on a stale sitelink. Kept, plotless, and worth nothing more than a record.
+        # Definitive — a 4xx that is not a throttle, and not the action API's "no such page" (a 200, read
+        # above). Kept, plotless, and worth nothing more than a record.
         return "missed", dict(record, noPlotReason="fetchFailed"), error
     if best is None or len(best[0]["text"]) < WIKI_PLOT_FLOOR:
         # Whether ANY candidate had a describing section is the difference between "a heading rule would
-        # reach this" and "the floor rejected it"; each wants a different re-run.
-        return "noPlot", dict(record, noPlotReason="belowFloor" if saw_section else "noSection"), None
+        # reach this" and "the floor rejected it", and whether any candidate EXISTED is the difference
+        # between those and "no article": every sitelink stale. Each wants a different re-run — a heading
+        # rule, a threshold, a fresh Wikidata mapping — and a retry fixes none of them, so a missing page is
+        # never `fetchFailed`.
+        return "noPlot", dict(record, noPlotReason="belowFloor" if saw_section else "noSection" if saw_article
+                              else "noArticle"), None
     found, article, role = best
     return "grounded", grounded(record, found, article, role), found.get("source")
 

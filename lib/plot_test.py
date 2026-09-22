@@ -190,6 +190,38 @@ class Fetching(unittest.TestCase):
         self.assertNotIn("acclaimed", text)
 
 
+#: The action API's answer to `action=parse&page=<a page that does not exist>&formatversion=2`: a 200.
+MISSING = {"error": {"code": "missingtitle", "info": "The page you specified doesn't exist.",
+                     "docref": "See https://en.wikipedia.org/w/api.php for API usage. Subscribe to the "
+                               "mediawiki-api-announce mailing list at &lt;https://lists.wikimedia.org/"
+                               "postorius/lists/mediawiki-api-announce.lists.wikimedia.org/&gt; for notice of "
+                               "API deprecations and breaking changes."},
+           "servedby": "mw-api-ext.eqiad.main-5f8c6d9b7-x2k4q"}
+INVALID = {"error": {"code": "invalidtitle", "info": "Bad title \"Film [1999]\".",
+                     "docref": MISSING["error"]["docref"]}, "servedby": MISSING["servedby"]}
+
+
+class MissingPages(unittest.TestCase):
+    def test_a_page_the_wiki_does_not_have_is_said_so_and_not_cached(self):
+        """A stale sitelink arrives as a 200 carrying `missingtitle`, which parsed to "no plot section"."""
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        cache = caching.ResponseCache("wiki", directory.name, 3600)
+        for body, language in ((MISSING, "en"), (MISSING, "de"), (INVALID, "en")):
+            with self.subTest(code=body["error"]["code"], language=language), \
+                    mock.patch.object(http, "request", return_value=json.dumps(body).encode()) as sent:
+                with self.assertRaises(plot.NoPage):
+                    plot.plot("Film", language, cache)
+                with self.assertRaises(plot.NoPage):
+                    plot.plot("Film", language, cache)
+                self.assertEqual(sent.call_count, 2, "an error envelope is never cached")
+
+    def test_any_other_error_envelope_is_still_no_plot(self):
+        body = {"error": {"code": "badvalue", "info": "Unrecognized value."}}
+        with mock.patch.object(http, "request", return_value=json.dumps(body).encode()):
+            self.assertIsNone(plot.plot("Film", "en"))
+
+
 class OtherLanguages(unittest.TestCase):
     def test_a_language_with_no_heading_list_is_not_guessed_at(self):
         """Welsh appears more often than Italian in the sample — the signature of bot stubs, not coverage."""

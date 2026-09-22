@@ -203,8 +203,21 @@ def describing_prose(wikitext):
     return "\n\n".join(prose for _name, prose in kept), [name for name, _prose in kept]
 
 
+class NoPage(Exception):
+    """The wiki has no page by that name: `missingtitle`, or `invalidtitle` for a name that cannot be one.
+
+    The action API says so with a 200 carrying an error envelope, never a 404, so this is how a stale
+    sitelink arrives. It is an ANSWER — asking again gets it again — and it is about the article's existence,
+    not its sections, so it must not read as "no plot section" the way an envelope parsed to nothing did.
+    """
+
+
+#: The error codes that mean the page does not exist, rather than that the request went wrong.
+NO_PAGE = ("missingtitle", "invalidtitle")
+
+
 def _parsed(article, language, cache):
-    """The action-API `parse` object, or None where the page has no wikitext to read.
+    """The action-API `parse` object, or None where the page has no wikitext to read. Raises `NoPage`.
 
     A body that is not JSON is no plot rather than an error: the Swift pass decoded it to nothing, and a
     non-JSON 200 is not something a retry fixes.
@@ -213,6 +226,9 @@ def _parsed(article, language, cache):
         body = wikipedia.fetch_parse(article, language, cache)
     except ValueError:
         return None
+    error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(error, dict) and error.get("code") in NO_PAGE:
+        raise NoPage(f"{language}.wikipedia.org has no page {article!r} ({error['code']})")
     parsed = body.get("parse") if isinstance(body, dict) else None
     if not isinstance(parsed, dict) or not isinstance(parsed.get("wikitext"), str):
         return None
@@ -367,7 +383,8 @@ def enterprise_plot(article, token):
 
 
 def plot(article, language="en", cache=None, token=None):
-    """A plot for one article on one Wikipedia, or None when it has no describing section."""
+    """A plot for one article on one Wikipedia, or None when it has no describing section. Raises `NoPage`
+    when the wiki has no such page."""
     if language != "en":
         return other_language_plot(article, language, cache)
     if token:

@@ -286,6 +286,24 @@ class Batch(unittest.TestCase):
                          ["noArticle", "noSection", "belowFloor", "fetchFailed", None])
         self.assertTrue(rows["movie:5"]["hasWikiPlot"])
 
+    def test_a_page_the_wiki_does_not_have_is_no_article_not_a_failed_fetch(self):
+        """`missingtitle`: the sitelink names a page that is gone. A retry gets the same answer and no heading
+        rule reaches a page that does not exist, so it is `noArticle` — whose re-run is a fresh Wikidata
+        mapping — unless another candidate existed, which then decides the reason as always."""
+        gone = enrich.plot.NoPage("en.wikipedia.org has no page 'Gone' (missingtitle)")
+        self.mapping.update({("movie", 1): {"article": "Gone"},
+                             ("movie", 2): {"article": "Gone", "articlesByLang": {"de": "Leer"}},
+                             ("movie", 3): {"article": "Gone", "articlesByLang": {"de": "Dünn"}},
+                             ("movie", 4): {"article": "Gone", "articlesByLang": {"de": "Weg"}}})
+        self.plots.update({("Gone", "en"): gone, ("Weg", "de"): gone,
+                           ("Dünn", "de"): found("d" * 50, language="de")})
+        self.run_batch({f"/movie/{i}": detail(i) for i in range(1, 5)}, [("movie", i) for i in range(1, 5)])
+        rows = self.rows()
+        self.assertEqual([rows[f"movie:{i}"]["noPlotReason"] for i in range(1, 5)],
+                         ["noArticle", "noSection", "belowFloor", "noArticle"])
+        self.assertEqual(sorted(self.checkpoint()["processed"]), [f"movie:{i}" for i in range(1, 5)],
+                         "an answer, so checkpointed like any other")
+
     def test_the_stored_article_is_the_resolved_one_and_unknown_stays_unknown(self):
         """A redirect's content and revid are the target's; storing the requested name beside them makes a
         revision refresh compare two different pages. The Enterprise path names no page, and absent is
