@@ -8,25 +8,22 @@ derived from sources with their own terms. A single repository licence would mis
 | everything in `pipeline/`, `lib/`, `store/`, `guards/`, `scripts/` | MIT | ours |
 | `data/genres-moods-vocabulary.json` — the genres & moods vocabulary | MIT | ours; a controlled vocabulary we wrote |
 | the rest of `data/*.json` — premise tags, eval rulers, corpus ids, alias decisions | MIT — but read the note below on the premise tags | LLM output and our own derivations over text we do not redistribute |
+| `data/eval/reco-cases.json` | **MovieLens terms** — research, non-commercial, redistributable only under the same conditions; cite Harper & Konstan 2015, https://doi.org/10.1145/2827872 | a transformation of ml-32m (GroupLens); eval data, never in a release |
 | `data/plots-sidecar-v1.json` | MIT | hashes and lengths; carries no source text |
-| release `articles-<date>` — Wikipedia article text | **CC BY-SA 4.0** | it IS Wikipedia text |
-| release `data-latest` — labels, vectors, facts, the store | MIT for the derivations; see below | derived signals, not redistributed source text |
+| release `data-latest` — the store and its manifest | MIT for the derivations; see below | derived signals, not redistributed source text |
 | release `corpus-<ver>` | MIT | same |
-| release `raw-<date>` — the paid model passes | MIT | our model output |
+| Wikipedia article text | **CC BY-SA 4.0** | not currently published; see below |
 
 ## The Wikipedia text
 
-`articles-<date>` is verbatim Wikipedia prose. CC BY-SA 4.0 permits redistribution and requires
-**attribution** and **ShareAlike**: a work derived from that file must carry the same licence.
+The article dump is verbatim Wikipedia prose. CC BY-SA 4.0 permits redistribution and requires
+**attribution** and **ShareAlike**: a work derived from it must carry the same licence. Every row names its
+source revision (`article`, `resolvedArticle`, `revId`), so the citation for any row is
+`https://en.wikipedia.org/w/index.php?oldid=<revId>`.
 
-Every row names its source revision (`article`, `resolvedArticle`, `revId`), so the citation for any row is
-`https://en.wikipedia.org/w/index.php?oldid=<revId>` — the exact revision, and through its history, its
-authors.
-
-This is why the prose is not in git. `data/wikipedia-plots-v1.jsonl.gz` used to hold 38,460 plot summaries
-here, in a public repository whose only licence file says MIT — which is not a licence Wikipedia text can
-be offered under. It is now published on its own tag, under its own terms, with the attribution fields the
-licence asks for.
+This is why the prose is not in git: a repository whose licence is MIT cannot offer Wikipedia text. It is
+also not published today — the one release that carried it was deleted (below), and a republication has
+to drop the TMDB fields first.
 
 ## The premise tags, and why MIT is a judgement rather than a fact
 
@@ -79,6 +76,16 @@ A rating *score* is never published, and a durable artifact is the reason: den-a
 at `src/recommend.rs`, which scrubs vote fields out of replay files because they belong in a live request
 or a bounded cache, not in something kept. `votes` was the one column on the wrong side of that line until
 oxyc/den#118 removed it.
+
+## IMDb, and popularity
+
+IMDb grants a *"non-transferable, non-sublicenseable license to access and make personal and non-commercial
+use"*, so its data cannot live in a public artifact either. What the store ships is the **IMDb id**
+(99.96% of rows) — an identifier, and a join key. For personal, non-commercial use, join IMDb's own daily
+`title.ratings.tsv.gz` (`tconst  averageRating  numVotes`, ~8.6 MB) on the store's `imdb` column: it
+matched 47,562 of 47,618 rows on 2026-09-21. You hold your own copy under your own use, and nothing licensed
+passes through this repo. den-atlas does the same join at run time. Read
+[IMDb's terms](https://www.imdb.com/conditions) before relying on it.
 
 ## The derived signals
 

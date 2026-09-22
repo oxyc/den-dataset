@@ -1,101 +1,79 @@
-# `data/` — the source material, committed
+# `data/` — the committed inputs
 
-Everything here is **expensive to regenerate and impossible to reconstruct from the published blobs**. The
-release assets on `data-latest` are *derived*; these are the inputs they were derived from.
+What is here is expensive or impossible to regenerate, and cannot be reconstructed from the published
+store. An artifact whose source is not committed gets described wrongly: the premise index was twice called
+stale or TMDB-derived by someone reading file sizes, because its tags and prompt lived in a gitignored
+directory.
 
-This directory exists because the provenance kept living in people's heads. Twice in one session the premise
-index was described wrongly — "built by a stale embedder", "possibly from TMDB overviews" — because the only
-record of how it was made was a spec file in a working directory that was never committed. A vector space
-whose source text is unpublished cannot be debugged, audited, or trusted.
+Nothing here carries TMDB content beyond ids. Plot-derived files are LLM output over Wikipedia text; facts
+are Wikidata. Licences per file are in [`LICENSES.md`](../LICENSES.md).
 
-**The TMDB rule applies to every file here: no TMDB Content except posters, ids and titles.** Fields that
-came from TMDB (`genres`, `voteCount`, `originalLanguage`) are stripped on the way in. Plot text is
-Wikipedia; premise tags are LLM output over Wikipedia text; facts are Wikidata.
-
-| file | what it is | cost to rebuild |
+| file | what it is | to rebuild it |
 |---|---|---|
-| `plots-sidecar-v1.json` | 38,460 plot IDENTITIES — `plotSHA`, length, shipped — and no prose | ~38k live article fetches |
-| `premise-tags-v1.json` | 37,533 titles × 4–12 structural premise tags | a full LLM pass over every plot |
-| `premise-tags-v1.SPEC.md` | the prompt that produced them | — |
-| `genres-moods-curated.json` | 47,539 titles' genres & moods, from the Claude labellers and the hand enrichment | not rebuildable: the labellers were Claude Code subagents |
-| `genres-moods-definitions.json` | what every label in the taxonomy means — what the labeller is asked | — |
-| `genres-moods-rule.json` | the per-label thresholds the `genres_moods` stage derives with, fitted on golden half A | ~$0.31 of Jev, plus the fitting |
-| `eval/reco-cases.json` | 6,000 co-rating cases (nPMI), the recommendation ruler | a full co-rating derivation |
-| `eval/triplets-*.json` | LLM-judged similarity triplets at 1/2/3 blind passes | several blind LLM judging passes |
+| `genres-moods-vocabulary.json` | the genres & moods label names, per family | ours; hashed into every classify shard's manifest as `taxonomySha256` |
+| `genres-moods-definitions.json` | what each of those labels means — what a labeller is asked | — |
+| `genres-moods-curated.json` | genres & moods for 47,539 titles, with each title's source | not rebuildable ([#56](https://github.com/oxyc/den-dataset/issues/56)); extended by `./den genres-moods` (`AGENTS.md`) |
+| `genres-moods-rule.json` | the per-label thresholds the `genres_moods` stage derives with, fitted on golden half A | ~$0.31 of Jev plus the fitting |
+| `premise-tags-v1.json` | 37,533 titles × 8–12 structural premise tags, the first generation | a full LLM pass |
+| `premise-tags-v2.json` | 44,531 titles — every title the premise index covers | a full LLM pass |
+| `premise-tags-v1.SPEC.md`, `-v2.SPEC.md` | the prompts those tags were generated under; the tag files' `derivedFrom` cites them | — |
+| `plots-sidecar-v1.json` | 38,460 plot identities (`plotSHA`, length, shipped) and no prose | ~38k article fetches |
+| `embed-canary.json` | fixed texts and the exact int8 vectors den-embed must return for them | only when the space is meant to move (`docs/OPERATE.md`) |
+| `alias-decisions.json` | keep/drop judgements on alternate titles that collide with another title's name | by hand |
+| `classify-queue.json` | titles whose labels were not read from the plot the corpus now holds | derived |
+| `eval/golden-large.json` | 2,568 hand-labelled titles, the genres & moods quality ruler | by hand |
+| `eval/quality-floors.json` | the scores a publish is held to (`scripts/eval-taxonomy.py`) | recorded, not rebuilt |
+| `eval/reco-cases.json` | 6,000 MovieLens co-rating cases (nPMI), the recommendation ruler | the co-rating derivation |
+| `eval/triplets-*.json` | blind-judged premise-similarity triplets at 1, 2 and 3 judging passes | several blind LLM passes |
 
-## `plots-sidecar-v1.json`
+## Premise tags
 
-One row per title: `key` (`mediaType:tmdbId`), `plotChars`, `plotSHA`, `shipped`.
+Short kebab-case tags per title, most defining first — `heist-gone-wrong`, `messages-to-the-dead` — naming the story's
+structure. The prompts forbade proper nouns and genre or mood words. That is why the premise index cannot
+serve character search, and why it beats the plot index at "more like this" (+11.3 pp on the sealed test
+half, below).
 
-`plotSHA` is the part that was ever useful beyond archival — it identifies the exact plot text a vector was
-built from, so a corpus can be checked for drift without refetching. `shipped` records whether the title
-made the published index.
+- **v2 is the one to embed from.** It is complete for the index; before 2026-09-19, 999 of its strings
+  lived only in a gitignored directory and a rebuild came up short ([#13](https://github.com/oxyc/den-dataset/issues/13)).
+- **v1 is kept as its generation's record.** Its `vectorsPublished` / `vectorsMissingFor` fields describe
+  the July blob, not today's.
+- **A premise vector blob aligns to the `labels-premise.json` built beside it**, never to a tags file. The
+  live one has 44,531 rows.
+- Keys are `mediaType:tmdbId`, never a bare id: movie 95 is *Armageddon*, tv 95 is *Buffy*.
 
-**The prose itself is no longer in git.** `wikipedia-plots-v1.jsonl.gz` held 38,460 verbatim Wikipedia plot
-summaries, 39 MB, in a PUBLIC repository carrying no licence. Wikipedia text is CC BY-SA 4.0: it may be
-redistributed, but only with attribution and ShareAlike, which an unlicensed repo does not provide. The
-sidecar keeps every field anything actually reads, at 3.5 MB, and carries no copyrightable text at all.
+## Plots
 
-The file is untracked rather than purged from history. Rewriting a public repo's history breaks every
-clone and every SHA quoted in a doc or an issue, and GitHub keeps the old objects reachable regardless — so
-a rewrite would cost a great deal and remove nothing.
+The prose is not in git: Wikipedia text is CC BY-SA 4.0, and this repo's licence is MIT. The sidecar keeps
+what anything reads — `plotSHA` identifies the exact text a vector was built from, so drift can be checked
+without refetching. The old file is untracked rather than purged from history, because rewriting a public
+repo's history breaks every clone and quoted SHA while GitHub keeps the objects anyway.
 
-It was briefly published on its own tag, `articles-2026-09-19` — 47,529 articles under CC BY-SA 4.0, every
-row carrying the `revId` the licence's attribution needs — and **that release was deleted on 2026-09-22**:
-alongside the Wikipedia text, every row carried the TMDB `title` its enriched record held, on a public repo.
-The file is kept locally. A republication would have to drop the TMDB fields first. See
-[`LICENSES.md`](../LICENSES.md).
+Plot lengths are heavily skewed: median ~2,500 characters, max 86,443 after the September re-ground. The
+tail is long-running series whose plot is a season-by-season recap, so the first 3,500 characters of such
+an article is season one.
 
-Plot lengths are wildly skewed: median 2,515 chars, p90 4,329, max **53,299**. The long tail is mostly
-long-running series whose Wikipedia "plot" is a season-by-season recap. Anything that truncates should know
-that the first 3,500 characters of such an article is season one.
+## `eval/` — the rulers
 
-## `premise-tags-v1.json`
+**Co-rating** (`reco-cases.json`): MovieLens ml-32m nPMI pairs, covering 86.5% of shipped movies and no
+series (ml-32m has no TV). Eval-only under MovieLens's research licence; never bundled into a release.
 
-The strings behind `vectors-premise.bin`. Keyed `mediaType:tmdbId` — never a bare id, because this corpus
-contains ids that are both a film and a series (movie 95 is *Armageddon*, tv 95 is *Buffy*).
+**Premise triplets** (`triplets-*.json`): an anchor, a positive and a hard negative. Two titles share a
+premise when a viewer would say the same "it's the one where ___" for both — the story engine, not the
+genre, tone or setting. A judge sees plots only (no tags, labels or popularity) and answers six yes/no
+axes: situation, engine, goal, relationship, obstacle, device. A positive is a **twin** (4+ axes, one of
+them situation or device); a hard negative is **unrelated** (0–1) yet confusable (same genre, era or
+subject). An anchor with no twin yields no triplet. The axis count is **not** a difficulty gradient —
+premise accuracy was flat across 4, 5 and 6 — so never weight by it.
 
-The spec forbade **proper nouns and genre/mood words**, which explains both measured properties of this
-index: it cannot serve character search, and it beats the plot index at similarity by **+11.3 pp on a sealed
-test half** (χ² = 4.00, p < 0.05 under two-judge unanimity).
+Both rulers split DEV/TEST by `scripts/v2/split.py`, a hash of the key, so a title is in the same half in
+both. **TEST has been read once**, for the premise-vs-plot result; sweep on DEV, commit the setting, then
+read TEST. Compare two arms with `paired_triplets.py` (McNemar on the discordant cases): at ~150 triplets
+one flipped case moves accuracy 0.66 pp, and a tie fails, because replacing a working system has its own
+risk.
 
-`coverageFilled` names 219 titles (166 films, 53 series, *The Dark Knight* among them) whose tags came from
-the later v2 tagger rather than the v1 spec. Only `premise` and `subject` kinds were taken from those —
-v2 also emits `tone-setting`, which is exactly the mood vocabulary v1 bans.
+What the judging established:
 
-**This file has 37,533 entries. `vectors-premise.bin` has 37,314 vectors.** Those same 219 titles have tags
-here and **no vector in the published index**: the DT-N merge has never actually been run, and their vectors
-sit unmerged in `out-t02/v2/vectors/vectors-coverage-fill.bin`. The file records this as `vectorsPublished`
-and `vectorsMissingFor` so it cannot be missed. Anything joining these tags to that blob by position, or
-assuming the two counts match, will be wrong.
-
-Two related traps, both of which have already caught someone:
-
-- **Do not trust `premise-tags-wip/missing.json`** — it is stale DT-H-era state. Derive the real gap with
-  `build_tag_batches.py --scope uncovered`, which must select 0 after a genuine merge.
-- An earlier note claimed the premise index had been "merged to 37,533 rows". That was an in-memory merge
-  done for verification only; nothing on disk changed. `vectors-premise.bin` is still dated 29 July.
-
-## `eval/`
-
-The ruler the premise-vs-plot result was measured on, and the judged triplets behind it. Keep these: the
-**TEST half has been spent once**, so the count of independent reads is a resource, and rebuilding the ruler
-means re-running blind LLM judging.
-
-Two things the judging established, both worth knowing before trusting a number from it:
-
-- **Blind judges disagreed on 25.2% of triplets**, and that rate *grew* with every sample — 17.5% at n=40,
-  20.0% at n=120, 25.2% at n=445. Treat 25% as a floor, not a settled value.
-- The premise advantage **grew as the bar rose** (+9.0 pp on the proposer's own labels, +11.4 pp under
-  two-judge unanimity). That is the signature of confirmation removing noise rather than signal.
-
-## What is deliberately NOT here
-
-- **`out-t02/enriched/`** — the TMDB enrichment. It is TMDB Content (overviews, cast, genres, vote counts)
-  and must not be published. It is also cheaply refetched with a key.
-- **The vectors and labels themselves** — those are the published release assets on `data-latest`, fetched
-  by `scripts/fetch-dataset.sh` (den-atlas) and by the box's `deploy/atlas-dataset-sync.sh` (oxyc/den). The
-  app reads them through den-atlas and carries no copy. Committing them would duplicate ~100 MB that
-  already has a distribution channel.
-- **`premise-tags-wip/`** — 624 unmerged batch files, now consolidated into `premise-tags-v1.json` by
-  `scripts/build-premise-tags.py`.
+- **Blind judges disagree on at least 25% of triplets**, and the rate rose with every sample (17.5% at
+  n=40, 25.2% at n=445).
+- **The premise advantage grew as the bar rose**: +9.0 pp on the proposer's labels, +11.4 pp under two-judge
+  unanimity (χ² = 4.00, p < 0.05), +11.3 pp on TEST. That is confirmation removing noise, not signal.

@@ -6,9 +6,8 @@ If a better version of an input exists, the artifact is built from it. Do not pr
 known-worse input to make a measurement cleaner — shipping a worse index to isolate a variable is the wrong
 trade, every time. Measure the change some other way, or measure it after.
 
-Concretely, as of 2026-09: `out-repass/` holds the **re-ground** Wikipedia plots (38,532 titles, 199
-enriched batches). The live corpus was built from the older `out-t02/enriched` plots. Any plot re-embed uses
-the re-ground plots.
+Concretely, as of 2026-09: `out-repass/` holds the **re-ground** Wikipedia plots (199 enriched batches) and
+everything the live dataset `5b1c3213b6a1` was built from. Build from it, not from `out-t02`.
 
 ## `out-*` is gitignored — deleting it is permanent
 
@@ -16,45 +15,25 @@ the re-ground plots.
 of enriched plot text, vectors, and LLM run outputs that cost real time and money to produce:
 
 ```
-out-repass/enriched      the re-ground plots — the newest and best grounding
-out-t02/enriched         the older plots the live corpus was built from
+out-repass/              the re-ground plots, the paid classify and delta passes, the live generation
+out-t02/                 the July generation and its plots
 out-premise-v2/          the v2 premise run + its vectors
-out-premise-999/         999 tags from the v2 run — now redundant, see below
 ```
 
-Never delete one to save space without asking, and never assume "it's in git".
-
-## Derived artifacts are rebuildable only if their INPUTS are committed
-
-The premise index shipped for months while 999 of its tag strings lived only in a gitignored directory
-(#13). A rebuild from a fresh checkout came up short, and the failure looked like a regression to a state
-someone had already fixed. Committed sources now: `data/premise-tags-v2.json` (44,531, complete),
-`data/premise-tags-v1.json` (37,533, kept as the v1 generation's record — **not** because a vector blob is
-aligned to it; the alignment note below corrects exactly that claim, and this line used to make it).
-
-**`out-premise-999/tags.json` is no longer irreplaceable.** All 999 of its keys are present in
-`data/premise-tags-v2.json` — verified by set comparison, 0 missing. `build_premise_worklist.py` used to
-hard-exit without it, calling it results that exist nowhere else, so a fresh checkout could not run the
-script at all. It now reads both committed files and treats that directory as an optional extra.
-
-**`vectors-premise.bin` aligns to its own generation's `labels-premise.json` — not to a tags file.**
-Measured: `out-repass` is 45,599,752 bytes = 44,531 × 1024 + 8, matching premise-tags-v2's count; the last
-published generation (`out-publish`) is 39,456,776 = 38,532 rows, matching neither committed tags file but
-matching its own `labels-premise.json` exactly. So the row order to check a premise vector against is
-always the labels file shipped beside it. Any note claiming it is "aligned to v1" is reading the wrong
-pair.
+Never delete one to save space without asking, and never assume "it's in git". An input a derived artifact
+needs belongs in `data/` (see `data/README.md`); a premise vector blob aligns to the `labels-premise.json`
+built beside it, never to a tags file.
 
 ## Embed where you serve
 
 Corpus vectors and live query vectors must come from the same `den-embed` **instance**, not the same
-version string. See `docs/OPERATE.md` "The alignment rule" — it is the current state and the procedure.
-`docs/LESSONS.md` is why. Do not restate either elsewhere; one copy, kept true.
+version string. `docs/OPERATE.md` "The alignment rule" is the procedure and the current state.
 
 ## Docs
 
-- `docs/OPERATE.md` — current state + how to run. No history, no changelog.
-- `docs/LESSONS.md` — what the pipeline taught, and why the procedure has its shape.
-- `README.md` — reference: what the artifacts are and what is in them.
+- `README.md` — what the dataset is and what is published.
+- `docs/OPERATE.md` — how to run it, and current state. No history, no changelog.
+- `docs/LESSONS.md` — why the procedure has its shape.
+- `AGENTS.md` — where in the code each question is answered.
 
-A fact belongs in exactly one of these. The embedder rule was stated in two and one silently went stale,
-which is how a false "Resolved" claim survived next to a correct table.
+A fact belongs in exactly one document, and what the code states, a document should not restate.
