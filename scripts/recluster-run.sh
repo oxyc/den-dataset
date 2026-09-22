@@ -3,8 +3,9 @@
 #
 #   scripts/recluster-run.sh [OUT_DIR]        # default: ./out-t02
 #
-# Costs nothing but CPU (no API calls) — ~30s over the 37k×1024 corpus at k=800 — so it is safe to run on a
-# timer. Writes candidates and stops: naming a cluster is a human judgement, and adding a label is a taxonomy
+# Costs nothing but CPU (no API calls) — ~15 minutes over the 47.5k×1024 corpus at k=800, measured on a
+# loaded laptop where the Swift it replaced took ~2 — so it is safe to run on a timer. The time is the price
+# of reproducing the Swift's arithmetic bit for bit in pure Python (see `scripts/recluster.py`). Writes candidates and stops: naming a cluster is a human judgement, and adding a label is a taxonomy
 # bump, which under DT-F forces a whole-universe reclassification. Auto-adding labels here would silently
 # trigger the most expensive pass in the system.
 #
@@ -13,13 +14,11 @@
 # existing label explains (low purity). Work the top of the list.
 set -euo pipefail
 
+cd "$(dirname "$0")/.." || exit 1
 OUT_DIR="${1:-out-t02}"
 K="${K:-800}"
 MIN_SIZE="${MIN_SIZE:-25}"
-BIN=".build/release/taxonomy-backfill"
 REPORT="$OUT_DIR/recluster-$(date -u +%Y-%m-%d).json"
-
-[ -x "$BIN" ] || { echo "building release binary…"; swift build -c release; }
 
 # Globbed for the same reason the vectors are: the name carries the taxonomy version, and hardcoding it
 # breaks the weekly re-cluster on a taxonomy bump.
@@ -36,16 +35,33 @@ done
 [ -f "$labels" ] || { echo "error: no labels in $OUT_DIR" >&2; exit 1; }
 [ -n "$vectors" ] || { echo "error: no vectors blob in $OUT_DIR" >&2; exit 1; }
 
-"$BIN" recluster --labels "$labels" --vectors "$vectors" \
-                 --k "$K" --iterations 5 --min-size "$MIN_SIZE" --out "$REPORT"
+# recluster.py needs Python 3.12 (math.sumprod — see the script). A machine's `python3` is often older (macOS
+# ships 3.9), so the first interpreter new enough runs it: $PYTHON if set, then the usual names on PATH.
+py=""
+for candidate in "${PYTHON:-python3}" python3 python3.14 python3.13 python3.12; do
+  if command -v "$candidate" >/dev/null 2>&1 &&
+     "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 12))' 2>/dev/null; then
+    py="$candidate"
+    break
+  fi
+done
+[ -n "$py" ] || {
+  echo "error: recluster.py needs Python 3.12 or newer (for math.sumprod), and none of ${PYTHON:+$PYTHON, }python3," \
+       "python3.14, python3.13 or python3.12 on PATH is one. Install one, or set PYTHON to its path." >&2
+  exit 1
+}
+
+"$py" scripts/recluster.py --labels "$labels" --vectors "$vectors" \
+                           --k "$K" --iterations 5 --min-size "$MIN_SIZE" --out "$REPORT"
 
 echo "== tightest candidates =="
-python3 - "$REPORT" <<'PY'
+"$py" - "$REPORT" <<'PY'
 import json, sys
 rows = json.load(open(sys.argv[1]))
 for r in rows[:10]:
+    # A cluster none of whose members carries a subgenre has no dominant label, and the report omits the key.
     print(f"  size={r['size']:4d}  cohesion={r['cohesion']:.2f}  purity={r['purity']:.2f}  "
-          f"nearest existing label: {r['dominantLabel']!r}")
+          f"nearest existing label: {r.get('dominantLabel')!r}")
     print(f"      {', '.join(r['examples'][:6])}")
 print(f"\n{len(rows)} candidate(s) → {sys.argv[1]}")
 PY

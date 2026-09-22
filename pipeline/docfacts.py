@@ -15,7 +15,7 @@ from zero each time is how a polite scrape turns into an impolite one. An id alr
 re-queried.
 
 **An id Wikidata states neither fact for is recorded EMPTY, not skipped.** Absent and empty mean different
-things one level up — `embed-corpus` reads an empty row as "no clause", while a missing key is a title the
+things one level up — the embed stage reads an empty row as "no clause", while a missing key is a title the
 scrape never reached — and recording the empty row is also what stops the resume re-querying it forever.
 
 **There is a cheaper path when the facts sidecar already exists.**
@@ -29,14 +29,14 @@ import os
 import sys
 
 from . import artifacts
-from .contract import StageError, bind
+from .contract import StageError, bind, how_to_build
 from lib import cache as caching
 from lib import http, wikidata
 
 NAME = "docfacts"
 
 PRODUCER = "pipeline/docfacts.py"
-HOW = "./den stage docfacts --out-dir <dir> --dataset-version <ver>"
+HOW = "./den stage docfacts --out-dir <dir>"
 #: Writes one file into the out-dir.
 PUBLISHES = False
 #: Wikidata's public query service, unbilled.
@@ -83,7 +83,7 @@ def outstanding(labels_path, have):
     records = labels.get("records")
     if not records:
         raise StageError(f"docfacts: {labels_path} names no records, so there is no corpus to scrape "
-                         f"facts for. Build it with: taxonomy-backfill finalize")
+                         f"facts for. Build it with: {how_to_build(artifacts.VECTOR_LABELS)}")
     todo = {}
     for record in records:
         media, tmdb_id = record["mediaType"], record["tmdbId"]

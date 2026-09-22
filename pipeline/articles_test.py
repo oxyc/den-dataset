@@ -142,7 +142,7 @@ class Selection(Staged):
         self.assertEqual(len(self.dumped()), 3)
 
     def test_a_limit_of_zero_fetches_nothing(self):
-        """Zero means zero, as it does to `enrich` and `embed-corpus` — not "no limit", which turns a
+        """Zero means zero, as it does to `enrich` and the embed stage — not "no limit", which turns a
         dry-run-sized request into the whole corpus."""
         self.batch(1, [record(n) for n in range(1, 11)])
         articles.run(self.context(limit=0))

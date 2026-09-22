@@ -149,7 +149,7 @@ class CommandLine(unittest.TestCase):
             os.remove(os.path.join(out, FIXTURE_FILES["facts"][0]))
             with self.assertRaises(StageError) as refused:
                 corpus.argv(context(out))
-            self.assertIn("merge-facts.py", str(refused.exception))
+            self.assertIn("./den stage facts", str(refused.exception))
 
     def test_the_expected_count_is_only_passed_when_one_is_named(self):
         """`--expect` is the guard that refuses a short run. Passing it unasked would make every run
@@ -178,11 +178,11 @@ class Topology(unittest.TestCase):
         self.assertEqual(corpus.SCRIPT, os.path.join(REPO, corpus.PRODUCER))
         self.assertTrue(os.path.isfile(corpus.SCRIPT))
 
-    def test_an_input_no_stage_produces_still_names_its_own_producer(self):
-        """The seam. `vector_labels` comes from a stage that is not ported, so it answers for itself until
-        that stage lands — and the registry has to carry both kinds at once."""
-        self.assertEqual(pipeline.producers()["vector_labels"],
-                         (artifacts.VECTOR_LABELS.producer, artifacts.VECTOR_LABELS.how, False))
+    def test_the_labels_it_joins_are_the_finalize_stages(self):
+        """The seam this test used to hold open is closed: `vector_labels` answered for itself until the
+        finalize stage landed, and now the registry names that stage's rule."""
+        self.assertEqual(artifacts.VECTOR_LABELS.producer, "")
+        self.assertEqual(pipeline.producers()["vector_labels"][0], "pipeline/finalize.py")
 
     def test_the_corpus_is_built_before_the_store_reads_it(self):
         self.assertLess(pipeline.STAGES.index("corpus"), pipeline.STAGES.index("store"))

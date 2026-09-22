@@ -61,6 +61,15 @@ class Paths(unittest.TestCase):
         ctx = Context(out_dir="out", dataset_version="v9")
         self.assertEqual(ctx.path(artifacts.STORE), os.path.join("out", "den-v9.store"))
 
+    def test_a_versioned_name_without_a_version_is_refused_and_any_other_resolves(self):
+        """Formatted with nothing, `facts-{version}.json` is `facts-.json` — a file every reader would miss."""
+        ctx = Context(out_dir="out")
+        self.assertEqual(ctx.path(artifacts.VECTORS), os.path.join("out", "vectors-bge-m3.bin"))
+        for resolve in (lambda: ctx.path(artifacts.STORE), lambda: ctx.paths(artifacts.CORPUS)):
+            with self.assertRaises(StageError) as refused:
+                resolve()
+            self.assertIn("--dataset-version", str(refused.exception))
+
     def test_an_override_wins(self):
         ctx = Context(out_dir="out", dataset_version="v9", overrides={"corpus": "/tmp/fixture.gz"})
         self.assertEqual(ctx.path(artifacts.CORPUS), "/tmp/fixture.gz")

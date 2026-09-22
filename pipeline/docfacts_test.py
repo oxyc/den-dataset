@@ -61,7 +61,7 @@ class Staged(unittest.TestCase):
 
 class Writing(Staged):
     def test_an_id_with_neither_fact_is_recorded_empty_rather_than_left_out(self):
-        """`embed-corpus` reads an empty row as "no clause"; a missing key is a title the scrape never
+        """The embed stage reads an empty row as "no clause"; a missing key is a title the scrape never
         reached. Recording it is also what stops the resume re-querying it forever."""
         self.labels([self.record(11), self.record(12)])
         self.answers = {("movie", 11): {"directors": ["Lucas"], "genres": ["space opera"]}}
@@ -167,13 +167,14 @@ class Refusal(Staged):
     def test_a_missing_labels_file_is_refused_with_what_builds_it(self):
         with self.assertRaises(StageError) as refused:
             docfacts.run(self.context())
-        self.assertIn("taxonomy-backfill finalize", str(refused.exception))
+        self.assertIn("./den stage finalize", str(refused.exception))
 
     def test_a_labels_file_with_no_records_is_refused(self):
         self.labels([])
         with self.assertRaises(StageError) as refused:
             docfacts.run(self.context())
         self.assertIn("no records", str(refused.exception))
+        self.assertIn("./den stage finalize", str(refused.exception))
 
 
 class Topology(unittest.TestCase):

@@ -4,11 +4,11 @@
   scripts/v2/embed_docs.py --docs docs.jsonl --out-dir out --url http://den-embed:8080 \
       --canary data/embed-canary.json
 
-Input is `embed-corpus --dump-docs` output: one `{"key": "movie:11", "doc": "…"}` per line. Output is the
-same pair of append-only stores `embed-corpus` writes — `labels.jsonl` is NOT written here (the caller
+Input is `./den stage embed --dump-docs` output: one `{"key": "movie:11", "doc": "…"}` per line. Output is
+the same pair of append-only stores the embed stage writes — `labels.jsonl` is NOT written here (the caller
 already has it); this writes `vectors.jsonl` keyed by the same `key`, plus `keys.json` in row order.
 
-## Why this exists rather than pointing embed-corpus at the box
+## Why this exists rather than pointing the embed stage at the box
 
 oxyc/den-dataset#21 measured two den-embeds disagreeing on 525 of 1024 dims for identical input, on the
 same pinned model sha256 and the same strings, and concluded the ISA was the cause. It was not: the hosts
@@ -19,7 +19,7 @@ The conclusion survives its own correction, for a better reason. A vector only m
 embedding space, and that space is the SERVICE's configuration — model, MAX_TOKENS, the document shape —
 not the machine. So the embed happens wherever the space that will answer queries lives, and `--canary` is
 what proves the space, rather than an assumption about the CPU. The plots and the composition logic live on
-the laptop; rather than ship 148 MB of enriched batches and a Swift toolchain to the box, or publish a
+the laptop; rather than ship 148 MB of enriched batches and the pipeline to the box, or publish a
 deliberately-internal service to reach it from the laptop, the composed documents travel and this embeds
 them in place.
 
@@ -27,7 +27,7 @@ them in place.
 
 den-embed's per-request budget is `sum(min(actual_tokens, max_tokens)) <= 8192`. At `MAX_TOKENS=1024` a
 corpus document can count its full 1024, so 8 documents is the ceiling and anything above it 413s. The
-default here is 7, matching what `embed-corpus --chunk` needs for the same reason. A 413 is fatal, not
+default here is 7, matching the embed stage's `CHUNK` for the same reason. A 413 is fatal, not
 retried: it means the batch size is wrong, and retrying the same request just fails again more slowly.
 
 ## Workers
@@ -83,7 +83,7 @@ def embed(url, texts, retries=4):
 
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--docs", required=True, help="embed-corpus --dump-docs output")
+ap.add_argument("--docs", required=True, help="./den stage embed --dump-docs output")
 ap.add_argument("--out-dir", required=True)
 ap.add_argument("--url", required=True)
 ap.add_argument("--batch", type=int, default=7)

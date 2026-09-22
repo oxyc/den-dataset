@@ -66,7 +66,7 @@ def main() -> None:
     # Read before the ~28 MB of dumps are fetched, so a missing file costs nothing.
     if not os.path.isfile(LABELS):
         sys.exit(f"no shipped labels at {LABELS}. Point LABELS at the published labels-t02.json, or run "
-                 f"`taxonomy-backfill finalize` into {OUT} first.")
+                 f"`./den stage finalize --out-dir {OUT}` first.")
     labels = json.load(open(LABELS))["records"]
     print(f"universe: {len(labels)} shipped titles from {LABELS}")
     for media, kind in (("movie", "movie"), ("tv", "tv_series")):

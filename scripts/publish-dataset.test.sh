@@ -147,15 +147,12 @@ PY
 publish_baseline() { cp "$DIR/dataset.meta.json" "$PUBLISHED_META"; }
 
 # The publisher, invoked the way this run is testing it. Both forms take the publish dir as their only
-# argument and leave the same two logs behind, so a case reads identically either way.
-#
-# `--dataset-version` is required by `den` because the other stages resolve versioned filenames with it.
-# This stage resolves none: the store it uploads is named by the manifest, not by the declaration, which
-# is why a placeholder is correct here rather than sloppy.
+# argument and leave the same two logs behind, so a case reads identically either way. The stage is given
+# no `--dataset-version`: the store it uploads is named by the manifest, not by the declaration.
 run_publish() {
   if [ "${DEN_PUBLISH_VIA:-script}" = "stage" ]; then
     PATH="$BIN:$PATH" python3 "$HERE/../den" stage publish --out-dir "$DIR" \
-      --dataset-version unused > "$WORK/out.log" 2> "$WORK/err.log"
+      > "$WORK/out.log" 2> "$WORK/err.log"
   else
     PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" > "$WORK/out.log" 2> "$WORK/err.log"
   fi

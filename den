@@ -9,7 +9,9 @@
 Options (both run forms):
 
     --out-dir DIR                  where artifacts are read and written  (default: out)
-    --dataset-version VER          the version the filenames carry       (required)
+    --dataset-version VER          the version the filenames carry — required by `run`, and by a stage
+                                   that names a file with it (corpus, store); facts reads it from the
+                                   manifest and refuses one that disagrees
     --stamp-meta PATH              the manifest to declare the outputs in
     --mode MODE                    which universe the worklist builds: export, discover or delta
     --since YYYY-MM-DD             the window a delta worklist collects titles from
@@ -22,6 +24,7 @@ Options (both run forms):
     --imdb-floor N                 the IMDb vote count that admits a title TMDB's floor left out
     --regional-imdb-floor N        the same, for the regional tier
     --plan                         the classify pass validates and reports, and buys nothing
+    --dump-docs PATH               the embed pass writes its documents here and embeds nothing
     --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
                                    NAME to name every shard of a set
 
@@ -30,7 +33,14 @@ inputs and outputs. Anything this file grows beyond argument parsing belongs the
 """
 import argparse
 import os
+import platform
 import sys
+
+# 3.11 is the oldest interpreter the suites have been run on; `int | None` in pipeline/contract.py alone needs
+# 3.10. Refused here by name, because on macOS's 3.9 the import below dies in a TypeError about `|`.
+if sys.version_info < (3, 11):
+    sys.exit(f"den needs Python 3.11 or newer; {sys.executable} is {platform.python_version()}. "
+             f"Run it with a newer one (python3.12 ./den …), or put one first on PATH.")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -82,7 +92,8 @@ def context(args):
                             expect=args.expect, pause_ms=args.pause_ms, limit=args.limit,
                             media=args.media or "", vote_floor=args.vote_floor,
                             regional_vote_floor=args.regional_vote_floor, imdb_floor=args.imdb_floor,
-                            regional_imdb_floor=args.regional_imdb_floor, plan=args.plan)
+                            regional_imdb_floor=args.regional_imdb_floor, plan=args.plan,
+                            dump_docs=args.dump_docs or "")
 
 
 def execute(module, ctx):
@@ -97,9 +108,11 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("stages", help="list the pipeline")
 
-    def with_options(sub):
+    def with_options(sub, version_required):
         sub.add_argument("--out-dir", default="out")
-        sub.add_argument("--dataset-version", required=True)
+        # A run always reaches corpus and store, whose files are named by it. One stage needs it only if
+        # it resolves such a name, and `Context` refuses that without one — most stages never do.
+        sub.add_argument("--dataset-version", required=version_required, default="")
         sub.add_argument("--stamp-meta")
         sub.add_argument("--mode", help="which universe the worklist builds: export, discover or delta")
         sub.add_argument("--since", help="the window a delta worklist collects titles from, YYYY-MM-DD")
@@ -119,15 +132,17 @@ def main(argv=None):
                          help="the regional tier's IMDb vote floor (default 500)")
         sub.add_argument("--plan", action="store_true",
                          help="the classify pass validates and reports its call plan, and buys nothing")
+        sub.add_argument("--dump-docs", metavar="PATH",
+                         help="the embed pass writes the documents it composes here and embeds nothing")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
         return sub
 
-    run = with_options(commands.add_parser("run", help="run every stage, in order"))
+    run = with_options(commands.add_parser("run", help="run every stage, in order"), version_required=True)
     run.add_argument("--publish", action="store_true",
                      help="also run the publishing stage, which CLOBBERS the moving data-latest release")
     run.add_argument("--spend", action="store_true",
                      help="also run the stages that BUY from a paid provider (the classify pass is ~$20)")
-    with_options(commands.add_parser("stage", help="run one stage")).add_argument("name")
+    with_options(commands.add_parser("stage", help="run one stage"), version_required=False).add_argument("name")
 
     genres_moods_enrich.register(commands)
 

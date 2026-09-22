@@ -7,7 +7,7 @@ The only coupling to the app is the artifact **format**.
 
 Enrichment prose is sourced **live from Wikipedia** (Wikidata SPARQL → article → plot section, ToS-clean)
 rather than shipping TMDB overviews, and embeddings come from the **`den-embed`** service (**bge-m3**,
-1024-dim int8). The offline FNV embedder remains as a `--embedder fnv` fallback.
+1024-dim int8).
 
 - [`docs/OPERATE.md`](docs/OPERATE.md) — **current state and how to run it**: the alignment rule, the
   re-embed and incremental-top-up procedures. Start there for anything you intend to execute.
@@ -141,39 +141,42 @@ the other 421 would be dropped by the ToS rule regardless.
   it reads and writes; `./den stages` prints it.
 - `lib/` — what a stage needs from outside the machine: HTTP with retry, the response cache, and the
   upstream clients (TMDB, Wikidata, Wikipedia — the whole article in `wikipedia.py`, the plot in `plot.py`).
-- `Sources/DenDataset/` — the library the remaining Swift phases still need: the `t02` `Taxonomy`, the
-  `HashingEmbedder` + `Quantizer`, and the format + producer model types.
-- `Sources/taxonomy-backfill/` — the CLI that drives the phases not ported yet (`embed-corpus`, `facts`,
-  `finalize`, `recluster`).
-- `Tests/DenDatasetTests/` — golden (embedder/quantizer determinism), conformance (artifact format), and a
-  fixture-based end-to-end smoke test (no TMDB, no network).
+- `Sources/DenDataset/Taxonomy.swift` — all that is left of the Swift producer, and not compiled: it is the
+  taxonomy as data. `scripts/v2/combined_questions.py` parses it as the classify pass's vocabulary and
+  hashes it into that pass's manifest, so it stays where that hash says it is.
+- `scripts/` — the operator's drivers, the publisher and its guards. The weekly re-cluster is
+  `scripts/recluster.py`, driven by `scripts/recluster-run.sh`: it is in no build order. It takes ~15
+  minutes over the corpus at k=800 (the Swift took ~2) and needs Python 3.12, whose `math.sumprod` is what
+  keeps it there — a plain Python dot product gives the same bytes 4.5x slower. The stages need 3.11, the
+  oldest their suites have been run on; `./den` refuses anything older.
 
 ## Build / test
 
-```sh
-swift build
-swift test
-```
+There is nothing to build. The tests are the steps in `.github/workflows/ci.yml` — `python3 -m unittest`
+over each suite it names, and `bash scripts/publish-dataset.test.sh` — on Python 3.12.
 
 ## The tool — phases
 
 ```
-./den stage worklist  --mode discover|export|delta --out-dir <dir> --dataset-version <ver>
-./den stage fetch     --out-dir <dir> --dataset-version <ver> [--media movie|tv]
-./den stage articles  --out-dir <dir> --dataset-version <ver>
-./den stage classify  --out-dir <dir> --dataset-version <ver> [--plan]
-./den stage docfacts  --out-dir <dir> --dataset-version <ver>
-taxonomy-backfill embed-corpus  --out-dir <dir> --labels labels-t02.json [--doc-facts …]
-taxonomy-backfill finalize      --out-dir <dir>
+./den stage worklist  --mode discover|export|delta --out-dir <dir>
+./den stage fetch     --out-dir <dir> [--media movie|tv]
+./den stage articles  --out-dir <dir>
+./den stage classify  --out-dir <dir> [--plan]
+./den stage docfacts  --out-dir <dir>
+./den stage embed     --out-dir <dir> [--limit N] [--dump-docs PATH]
+./den stage finalize  --out-dir <dir>
+./den stage facts     --out-dir <dir>     # needs <dir>/facts-delta-ids.txt
 ```
 
-Or `./den run`, which is the whole order — see `./den stages`.
+Or `./den run --dataset-version <ver>`, which is the whole order — see `./den stages`. The version is the
+`datasetVersion` finalize writes into the manifest: `corpus` and `store` name their files by it, and `facts`
+reads it from the manifest and refuses a flag that says otherwise. No other stage takes it.
 
 The worklist builds BOTH media in one call and writes one list per media rather than taking a `--media`.
 It and the drain hit TMDB and need `TMDB_API_KEY`; one drain batch is `python3 -m pipeline.enrich`. The per-title
 labels and facets come from the `classify` stage — the decision-only pass in `scripts/v2/run_combined.py`,
 which reads the dumped articles and writes the `combined-v1-r2*.jsonl` shards the corpus join consumes.
-`embed-corpus` composes and embeds those already-decided labels; `finalize` writes the shipped artifacts.
+`embed` composes and embeds those already-decided labels; `finalize` writes the shipped artifacts.
 Label quality is scored by `scripts/eval-taxonomy.py` against the golden set in `data/eval/golden-large.json`.
 CI tests the scorer; the labels themselves are not in git, so they are scored at publish time.
 `publish-dataset.sh` refuses a publish whose labels score below any floor in `data/eval/quality-floors.json`.
@@ -190,11 +193,10 @@ out-dir; `publish-dataset.sh` prunes their keys out of the manifest.
 - `labels-<tax>.json` — the derived labels (no raw TMDB text; asserted). Also what the publish-time quality
   gate scores against the golden set — it reads this file by name, not from the manifest.
 - `vectors-bge-m3.bin` — a `DENVEC02` blob: magic, little-endian `[u32 count][u32 dim]`, a `u64` key per row
-  (`(media << 32) | tmdbId`, media 0 = movie), then `count × dim` int8 rows (dim 1024 for the bge-m3 build;
-  `--embedding-version` overrides the label for an FNV run). The keys are the format's point: row order used
-  to live only in `labels-<tax>.json`'s record order, so a regenerated labels file moved every vector onto
-  the wrong title with nothing able to see it. Layout and rationale: `Sources/DenDataset/VectorBlob.swift`
-  and `scripts/v2/vector_blob.py`. An older blob is converted, never re-embedded, by
+  (`(media << 32) | tmdbId`, media 0 = movie), then `count × dim` int8 rows (dim 1024, and anything else
+  is refused). The keys are the format's point: row order used to live only in `labels-<tax>.json`'s record
+  order, so a regenerated labels file moved every vector onto the wrong title with nothing able to see it.
+  Layout and rationale: `scripts/v2/vector_blob.py`. An older blob is converted, never re-embedded, by
   `scripts/v2/migrate_vector_blob.py` — den-embed's output differs by build host, so re-running it changes
   the values and not just the layout.
 - `dataset.meta.json` — the manifest the server reads (dataset version, hashes, byte counts, timestamps).
@@ -230,11 +232,11 @@ coverage-fill was merged (*The Dark Knight* was one of them). Derive the live ga
 `premise-tags-wip/missing.json`, which is stale DT-H-era state.
 
 **`maxTokens: 0` in `index/embedder.json` means "the service was too old to report it"** — NOT "there was
-no limit". `assertDocFits` returns early on it, so the guard is inert against the shipped store. What the
-shipped vectors were actually truncated at is unknown.
+no limit". The embed stage's fit check skips it, so the guard is inert against such a store. What its
+vectors were actually truncated at is unknown.
 
 **There are TWO den-embed instances and they differ.** The container answering *query* traffic runs
-`max_tokens 512`; `embed-corpus-run.sh` boots its **own** container at 1024 (lines 56, 86). Embedding the
+`max_tokens 512`; `embed-corpus-run.sh` boots its **own** container at 1024. Embedding the
 corpus against the query service is the failure mode to guard — see rule 2 below for what it costs.
 
 **`datasetVersion` is a content hash** (`sha256(labelsSha:vectorsSha)`), not a semantic version. It moves
@@ -354,9 +356,9 @@ differences that have actually bitten were both diagnosed as something else firs
 state and what to do: `docs/OPERATE.md` "The alignment rule". Evidence: oxyc/den-dataset#21. Not restated
 here, so there is one copy to keep true.
 
-What the gate still cannot see is the **doc shape** and the **plot cap**. The shipped index is the CC0 lean
-shape (`embed-corpus --doc-facts`), and its cap is recorded nowhere. Both differ silently from what a
-default `embed-corpus` would compose, so neither is safe to append without establishing them first.
+What the embedder gate cannot see is the **doc shape** and the **plot cap**. Both are pinned in
+`pipeline/embed.py` (the CC0 lean shape, no director clause, cap 3500 — recovered by re-embedding probes
+against the shipped rows) and recorded per store in `index/composition.json`, which a top-up is held to.
 
 ### 2. The token cap is most of what the vector sees
 Plot is **~87%** of the composed document by length (median 93%); facts and tags are ~204 chars. den-embed
@@ -373,7 +375,7 @@ The per-title mean is the flattering view — short plots keep 100% and lift the
 index the total-text column is the honest one: at 512 the corpus loses **half its plot prose**, and what it
 loses is the long plots, where the detail that distinguishes two similar titles lives.
 
-`assertDocFits` refuses up front rather than letting the service quietly halve a document. Do not raise the
+The embed stage refuses up front rather than letting the service quietly halve a document. Do not raise the
 plot cap without raising the service's token cap in the same change, and vice versa.
 
 ### 3. No Wikipedia plot ⇒ the title does not ship
@@ -382,8 +384,9 @@ deriving from, so it is dropped entirely. This is **95.4% of everything the pipe
 deliberate policy, not attrition.
 
 Two consequences that are easy to trip over:
-- `finalize`'s ship guard is literally `s.contains("overview")`. A future field carrying prose under another
-  name (`summary`, `synopsis`) sails straight into the shipped artifact. Widen the guard if you add one.
+- `finalize`'s ship guard matches key NAMES, at every depth, against a fixed list of prose fields
+  (`SHIP_GUARD` in `pipeline/finalize.py`). A future field carrying prose under a name not on that list
+  sails straight into the shipped artifact. Widen the list if you add one.
 - 19,255 enriched rows carry TMDB prose in `overview`. Any pass that feeds `overview` to an LLM **must** gate
   on `hasWikiPlot`, or it sends TMDB Content to an AI application — barred by TMDb §1.C.
 

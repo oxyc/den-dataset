@@ -35,11 +35,11 @@ class Listing(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         # The order, and that it is the real one: the universe is built before anything is drawn from it,
         # the titles are enriched before anything reads their plots, the articles dumped before the pass
-        # that reads them, classified before the vectors are embedded, the vectors before the facts passes
-        # are merged over their ids, the merged facts before the corpus that joins them, the corpus before
-        # the store built from it, and the publish that uploads the store is last.
-        expected = ("worklist", "fetch", "articles", "classify", "docfacts", "embed", "facts", "corpus",
-                    "store", "publish")
+        # that reads them, classified before the vectors are embedded, the vectors finalized into the
+        # labels file the facts passes scrape the ids of, the merged facts before the corpus that joins
+        # them, the corpus before the store built from it, and the publish that uploads the store is last.
+        expected = ("worklist", "fetch", "articles", "classify", "docfacts", "embed", "finalize", "facts",
+                    "corpus", "store", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
@@ -55,6 +55,15 @@ class Listing(unittest.TestCase):
 
 
 class Dispatch(unittest.TestCase):
+    def test_an_interpreter_older_than_the_floor_is_refused_by_name(self):
+        """macOS's `python3` is 3.9, where the stages die importing a `int | None` annotation."""
+        pretend = ("import runpy, sys; sys.version_info = (3, 10, 14); sys.argv = sys.argv[1:]; "
+                   "runpy.run_path(sys.argv[0], run_name='__main__')")
+        result = subprocess.run([sys.executable, "-c", pretend, DEN, "stages"], capture_output=True, text=True,
+                                cwd=HERE)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("needs Python 3.11 or newer", result.stderr)
+
     def test_a_stage_that_is_not_in_the_order_is_refused_with_the_order(self):
         # A name no stage has and none is likely to take. It used to be "worklist", which stopped testing
         # anything the day that stage landed — a refusal test has to name something that stays unknown.
@@ -68,6 +77,18 @@ class Dispatch(unittest.TestCase):
             result = den("stage", "store", "--out-dir", out, "--dataset-version", "test")
             self.assertEqual(result.returncode, 1)
             self.assertIn("consolidate_corpus.py", result.stderr)
+
+    def test_the_version_is_asked_only_of_what_names_a_file_by_it(self):
+        """finalize names none of its files by it, so it is not asked for one; the store does, and without
+        one it is refused naming the flag, not written as `den-.store`. A run always reaches the store."""
+        with tempfile.TemporaryDirectory() as out:
+            unversioned = den("stage", "finalize", "--out-dir", out)
+            self.assertNotIn("--dataset-version", unversioned.stderr)
+            self.assertIn("embed_labels", unversioned.stderr, "it got as far as its own inputs")
+            versioned = den("stage", "store", "--out-dir", out)
+            self.assertEqual(versioned.returncode, 1)
+            self.assertIn("pass --dataset-version", versioned.stderr)
+            self.assertEqual(den("run", "--out-dir", out).returncode, 2, "argparse: the flag is required")
 
     def test_run_stops_before_publishing_unless_asked(self):
         """`den run` is the exploratory command; publishing is the one step that leaves this machine.
@@ -129,23 +150,10 @@ class Dispatch(unittest.TestCase):
         grounded title plus an `articles.jsonl` row for it, because a row already in the dump's output is
         a row it resumes past rather than fetches. `fetch` drains in-process, so it gets a checkpoint that
         already holds both universes, with credentials in the environment so the drain does not go hunting
-        for a `den.env` this checkout has no reason to own. Nothing here reaches TMDB. `DEN_BACKFILL_BIN`
-        is a stub for the stages that still run the binary.
+        for a `den.env` this checkout has no reason to own. Nothing here reaches TMDB.
         """
         with tempfile.TemporaryDirectory() as out:
-            stub = os.path.join(out, "stub")
-            with open(stub, "w", encoding="utf-8") as fh:
-                fh.write("#!/usr/bin/env python3\n"
-                         "import json, os, sys\n"
-                         "argv = sys.argv[1:]\n"
-                         "where = argv[argv.index('--out-dir') + 1]\n"
-                         "os.makedirs(os.path.join(where, 'enriched'), exist_ok=True)\n"
-                         "with open(os.path.join(where, 'enrich-checkpoint.json'), 'w') as fh:\n"
-                         "    json.dump({'processed': [], 'nextBatch': 1}, fh)\n"
-                         "print(json.dumps({'remaining': 0, 'count': 0}))\n")
-            os.chmod(stub, 0o755)
-            for name, value in (("DEN_BACKFILL_BIN", stub),
-                                ("TMDB_API_KEY", "stub-key-nothing-here-calls-tmdb"),
+            for name, value in (("TMDB_API_KEY", "stub-key-nothing-here-calls-tmdb"),
                                 ("WIKIMEDIA_ENTERPRISE_TOKEN", "stub-bearer")):
                 previous = os.environ.get(name)
                 os.environ[name] = value
@@ -190,7 +198,8 @@ class Dispatch(unittest.TestCase):
         loader.exec_module(module)
         args = argparse.Namespace(set=[], out_dir="out", dataset_version="v", stamp_meta=None, mode=None,
                                   since=None, expect=None, pause_ms=0, limit=None, media=None, vote_floor=40,
-                                  regional_vote_floor=10, imdb_floor=1500, regional_imdb_floor=300, plan=False)
+                                  regional_vote_floor=10, imdb_floor=1500, regional_imdb_floor=300, plan=False,
+                                  dump_docs=None)
         ctx = module.context(args)
         self.assertEqual((ctx.vote_floor, ctx.regional_vote_floor, ctx.imdb_floor, ctx.regional_imdb_floor),
                          (40, 10, 1500, 300))

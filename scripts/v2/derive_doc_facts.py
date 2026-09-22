@@ -55,7 +55,7 @@ rows, no_director, no_genre = {}, 0, 0
 for r in facts["records"]:
     directors = sorted({x for x in (label(q) for q in r.get("directors") or []) if x})
     genres = sorted({g for g in (stripped_genre(label(q) or "") for q in r.get("genres") or []) if g})
-    # An empty row is recorded, not skipped: `embed-corpus` reads this as "Wikidata states neither", and a
+    # An empty row is recorded, not skipped: the embed stage reads this as "Wikidata states neither", and a
     # missing key would be indistinguishable from a title the scrape never reached.
     rows[f"{r['mediaType']}:{r['tmdbId']}"] = {"directors": directors, "genres": genres}
     no_director += not directors

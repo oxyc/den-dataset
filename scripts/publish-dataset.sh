@@ -8,7 +8,7 @@
 # alias titles, and both vector matrices as sections — and atlas mmaps it. Everything else in the out-dir is
 # an INPUT to that build and stays there; step 0 prunes their keys out of the manifest.
 #
-#   taxonomy-backfill finalize --out-dir out   # labels-*.json + vectors-*.bin + dataset.meta.json
+#   ./den stage finalize --out-dir out                           # labels-*.json + vectors-*.bin + manifest
 #   python3 scripts/v2/build_store.py … --stamp-meta out/dataset.meta.json    # THE artifact
 #   scripts/publish-dataset.sh [OUT_DIR]       # default: ./out, then ./data
 #

@@ -51,7 +51,7 @@ class Artifact:
     """One file — or one set of shards — a stage reads or writes.
 
     `producer`/`how`/`dedicated` are the registration `check-producers.py` asks for. `dedicated` is false
-    for a producer that builds several artifacts (`taxonomy-backfill` builds four), because the staleness
+    for a producer that builds several artifacts (the embed stage writes five), because the staleness
     warning is only meaningful for a producer edited FOR this artifact.
 
     `producer`/`how` are EMPTY for an artifact this pipeline produces. The stage that declares it in
@@ -131,7 +131,10 @@ class Context:
     """
 
     out_dir: str
-    dataset_version: str
+    #: What `{version}` in a filename becomes. Empty for a run that names no such file — most stages never
+    #: do, and a version they would only ignore is not asked of them. Resolving a versioned name without
+    #: one is refused (`_filename`) rather than written as `facts-.json`.
+    dataset_version: str = ""
     overrides: dict = dataclasses.field(default_factory=dict)
     #: The manifest to declare the outputs in. Without it a store is written and nothing names it.
     stamp_meta: str = ""
@@ -173,6 +176,18 @@ class Context:
     regional_vote_floor: int | None = None
     imdb_floor: int | None = None
     regional_imdb_floor: int | None = None
+    #: Where the embed pass writes the documents it composes INSTEAD of embedding them, so they can be
+    #: embedded on the den-embed that will serve them. Empty embeds as usual. A path rather than a switch:
+    #: the documents travel, so the operator names where they go.
+    dump_docs: str = ""
+
+    def _filename(self, artifact):
+        """The declared filename with the dataset version in it, or a refusal when it needs one and the run
+        was given none."""
+        if "{version}" in artifact.filename and not self.dataset_version:
+            raise StageError(f"{artifact.name} is named by the dataset version ({artifact.filename}) and this "
+                             f"run was given none — pass --dataset-version.")
+        return artifact.filename.format(version=self.dataset_version)
 
     def path(self, artifact):
         if artifact.shards:
@@ -185,7 +200,7 @@ class Context:
             raise StageError(f"{artifact.name} was pointed at {len(override)} paths and names one file")
         if override is not None:
             return override
-        return os.path.join(self.out_dir, artifact.filename.format(version=self.dataset_version))
+        return os.path.join(self.out_dir, self._filename(artifact))
 
     def paths(self, artifact):
         """Every file a shard set names, sorted.
@@ -197,7 +212,7 @@ class Context:
         override = self.overrides.get(artifact.name)
         if override is not None:
             return tuple(override) if isinstance(override, (list, tuple)) else (override,)
-        pattern = os.path.join(self.out_dir, artifact.filename.format(version=self.dataset_version))
+        pattern = os.path.join(self.out_dir, self._filename(artifact))
         return tuple(sorted(globbing.glob(pattern)))
 
     def shard(self, artifact):
@@ -217,8 +232,7 @@ class Context:
                              f"one shard — name the shard to write, or leave it to the declaration")
         if override is not None:
             return override
-        return os.path.join(self.out_dir,
-                            artifact.filename.format(version=self.dataset_version).replace("*", ""))
+        return os.path.join(self.out_dir, self._filename(artifact).replace("*", ""))
 
     def require(self, artifact):
         """The input's path, or a refusal that names what builds it.
@@ -239,7 +253,7 @@ class Context:
         found = self.paths(artifact)
         if found:
             return found
-        pattern = artifact.filename.format(version=self.dataset_version)
+        pattern = self._filename(artifact)
         raise StageError(f"{artifact.name}: nothing in {self.out_dir} matches {pattern}. "
                          f"Build it with: {how_to_build(artifact)}")
 

@@ -40,13 +40,8 @@ VOTE_FLOOR="${VOTE_FLOOR:-50}"
 # a backlog would grow without ever saying so; state the limit and report what is left over.
 LIMIT="${LIMIT:-150}"
 SINCE="$(date -u -v-"${DAYS_BACK}"d +%Y-%m-%d 2>/dev/null || date -u -d "${DAYS_BACK} days ago" +%Y-%m-%d)"
-BIN=".build/release/taxonomy-backfill"
 
 den_load_env
-
-# Always rebuild: `[ -x "$BIN" ] || swift build` would let a timer run a months-old binary against current
-# sources. The build is a no-op when nothing changed.
-swift build -c release >/dev/null
 
 # The published labels blob, found rather than hardcoded — its name carries the taxonomy version, and a
 # taxonomy bump would otherwise silently point `--known` at a file that no longer exists.
@@ -63,10 +58,9 @@ left=0
 
 # One invocation for both media: the stage builds the whole universe, and the two lists are pointed into
 # `$OUT_DIR/delta/` with `--set` so a delta's forty rows are not written over the full run's 47k-title
-# worklists under the same names. `--dataset-version` is required by `den` and unused here — neither
-# worklist filename carries a version.
+# worklists under the same names.
 ./den stage worklist --mode delta --since "$SINCE" \
-     --out-dir "$OUT_DIR" --dataset-version delta \
+     --out-dir "$OUT_DIR" \
      --set "vector_labels=$LABELS" \
      --set "universe_movie=$OUT_DIR/delta/universe-movie.json" \
      --set "universe_tv=$OUT_DIR/delta/universe-tv.json"
@@ -108,21 +102,21 @@ cat <<EOF
 Next, by hand — the classify stage BUYS, so it is not run unattended. In \`./den stages\` order:
 
   1. Dump the articles the classify pass reads:
-       ./den stage articles --out-dir $OUT_DIR --dataset-version <ver>
+       ./den stage articles --out-dir $OUT_DIR
   2. Classify — with --plan first, to see the call and cost plan:
-       ./den stage classify --out-dir $OUT_DIR --dataset-version <ver> --plan
-       ./den stage classify --out-dir $OUT_DIR --dataset-version <ver>
+       ./den stage classify --out-dir $OUT_DIR --plan
+       ./den stage classify --out-dir $OUT_DIR
   3. Scrape the document's director and genre, embed, and finalize:
-       ./den stage docfacts --out-dir $OUT_DIR --dataset-version <ver>
-       ./den stage embed --out-dir $OUT_DIR --dataset-version <ver>
-       $BIN finalize --out-dir $OUT_DIR
+       ./den stage docfacts --out-dir $OUT_DIR
+       ./den stage embed --out-dir $OUT_DIR
+       ./den stage finalize --out-dir $OUT_DIR
   4. Merge the facts (its two scrape passes are docs/OPERATE.md step 6a), join the corpus, build the
-     store, publish:
-       ./den stage facts --out-dir $OUT_DIR --dataset-version <ver>
+     store, publish. <ver> is the datasetVersion finalize wrote into $OUT_DIR/dataset.meta.json:
+       ./den stage facts --out-dir $OUT_DIR
        ./den stage corpus --out-dir $OUT_DIR --dataset-version <ver> --expect <titles>
        ./den stage store --out-dir $OUT_DIR --dataset-version <ver> --stamp-meta $OUT_DIR/dataset.meta.json
-       ./den stage publish --out-dir $OUT_DIR --dataset-version <ver>
+       ./den stage publish --out-dir $OUT_DIR
 
-(\`docfacts\` and \`embed-corpus\` read the shipped labels blob, so a new id is only scraped and embedded
+(\`docfacts\` and \`embed\` read the shipped labels blob, so a new id is only scraped and embedded
 once the classify pass's rows have reached it — see docs/OPERATE.md for the order.)
 EOF

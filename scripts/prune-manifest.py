@@ -9,9 +9,9 @@ facets, rail facets, the entity table, alias titles, and both vector matrices as
 publishes `den-<ver>.store` and `dataset.meta.json`, and nothing else (oxyc/den#113).
 
 The keys have to be pruned HERE rather than never written, because the producers that write them are still
-the producers that build the store's INPUTS: `taxonomy-backfill finalize` writes `labels-t02.json` and
-declares it in the same pass, `ManifestMerge` carries every unowned key forward, and `build_store.py` then
-reads those files. The blobs keep being built; they stop being published.
+the producers that build the store's INPUTS: the finalize stage writes `labels-t02.json` and declares it in
+the same pass, carrying every key it does not own forward (`pipeline/jsonbytes.py`'s `merge_manifest`), and
+`build_store.py` then reads those files. The blobs keep being built; they stop being published.
 
 ## A keep-list, not a list of things to delete
 

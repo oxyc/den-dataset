@@ -139,7 +139,7 @@ generation 38,532. Neither number is `premise-tags-v1.json`'s 37,533.
 **Deploy the env with the corpus.** `maxTokens` is part of the embedder identity, so the serving box must
 run den-embed with `MAX_TOKENS=1024` permanently or the manifest and the service will disagree.
 
-`embed-corpus` still refuses when a plot cap would not fit the service's token cap, because den-embed
+The embed stage still refuses a service whose token cap the pinned plot cap would not fit, because den-embed
 truncates server-side and says nothing. Its ceiling is 1024 tokens (peak RSS 1219 MB against a 1536 MB
 limit), so a longer cap needs both settings raised together.
 
@@ -154,7 +154,6 @@ ssh root@pve 'incus exec den -- podman run --rm --network den docker.io/curlimag
 
 # 1. Secrets — copy the template and fill it (gitignored via *.env). The fetch stage sources this.
 cd ~/Projects/Personal/den-dataset
-swift build -c release && BIN=.build/release/taxonomy-backfill
 cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterprise username/password (optional)
 
 # 2. Worklist — the universe, ORDERED popularity-desc so we process the titles most likely to have a
@@ -163,11 +162,11 @@ cp den.env.example den.env        # then edit: TMDB_API_KEY (required) + Enterpr
 python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popularity-sorted)
 #    THIS IS THE RE-EMBED'S UNIVERSE — the ids we already ship, reordered. It is not the same universe as
 #    the worklist stage, which is where new titles come from:
-#      ./den stage worklist --mode export --out-dir out --dataset-version <ver>
+#      ./den stage worklist --mode export --out-dir out
 #        every id in TMDB's daily dump (put movie_ids.json / tv_series_ids.json in the out-dir first —
 #        `fetch_export` above leaves them gzipped, so gunzip them). The stage refuses a run that did not
 #        name a mode, and one whose dump lost lines to the parse.
-#      ./den stage worklist --mode delta --since YYYY-MM-DD --out-dir out --dataset-version <ver> \
+#      ./den stage worklist --mode delta --since YYYY-MM-DD --out-dir out \
 #          --set universe_movie=out/delta/universe-movie.json --set universe_tv=out/delta/universe-tv.json
 #        what `scripts/delta-run.sh` builds daily — new titles only, skipping out/labels-t02.json. The two
 #        --set flags are why it keeps its lists in delta/: a delta written over the full one does not
@@ -178,55 +177,66 @@ python3 scripts/build-worklist.py        # -> out/worklist-{movie,tv}.json (popu
 #    batch prints wikiPlot vs tagsOnly. Per batch the stage reads den.env if TMDB_API_KEY is not already
 #    set, and mints a fresh 24h Enterprise bearer if none is held (scripts/lib/den-env.sh). Resumable via
 #    the enrich checkpoint.
-#    `./den stage fetch --out-dir out --dataset-version <ver>` runs the whole drain — both worklists, batch
-#    after batch, until nothing remains, with three stopping rules: an aborted batch is retried, a batch
-#    that finishes having moved `remaining` not at all is a stall, and a batch where every title fell below
-#    the vote floor says so instead of blaming the upstream. `--media movie|tv` does one; `--vote-floor 0`
-#    re-includes the low-vote tail. To drain the RE-EMBED universe above rather than the stage's own, point
-#    it there:
-./den stage fetch --out-dir out --dataset-version <ver> \
+#    `./den stage fetch --out-dir out` runs the whole drain — both worklists, batch after batch, until
+#    nothing remains, with three stopping rules: an aborted batch is retried, a batch that finishes having
+#    moved `remaining` not at all is a stall, and a batch where every title fell below the vote floor says
+#    so instead of blaming the upstream. `--media movie|tv` does one; `--vote-floor 0` re-includes the
+#    low-vote tail. To drain the RE-EMBED universe above rather than the stage's own, point it there:
+./den stage fetch --out-dir out \
     --set universe_movie=out/worklist-movie.json --set universe_tv=out/worklist-tv.json
 #    One batch by hand (credentials already in the environment):
 python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --limit 150
 #    (Observed on the popular tier: ~96% wikiPlot hit; the misses are recent/obscure titles with no enwiki article.)
+#
+#    THE FLOORS (`pipeline/floors.py` has the measurements). A title is admitted when its TMDB vote count
+#    clears its TMDB floor OR its IMDb vote count clears its IMDb floor — a union, so nothing TMDB admits is
+#    lost — and the floors are per tier: a title of European, South American or AU/NZ origin is judged by the
+#    lower of the two. Both the stage and `python3 -m pipeline.enrich` take all four:
+#      --vote-floor N            worldwide TMDB floor           (default 50)
+#      --regional-vote-floor N   regional-origin TMDB floor     (default 15)
+#      --imdb-floor N            worldwide IMDb floor           (default 2000)
+#      --regional-imdb-floor N   regional-origin IMDb floor     (default 500)
+#    A below-floor title is not checkpointed (a vote count only climbs), so it is judged again next batch.
+#    Each batch report counts who admitted what — `admittedByTmdb`, `admittedByImdb`, `admittedByBoth` — and
+#    `shortOfImdbId`, the titles TMDB left short that Wikidata names no IMDb id for, so TMDB alone decided
+#    them. `imdbGate` says whether IMDb took part in that batch:
+#      downloaded | unchanged    today's `title.ratings` dump judged it (fetched, or a 304 on the copy held)
+#      stale: <error>; using the copy from N day(s) ago
+#                                the download failed and an older dump judged it — it can only under-admit,
+#                                since counts only climb; the next batch with a fresh dump catches up
+#      off: <error>              no dump at all: this batch ran on the TMDB floors alone, and the titles
+#                                only IMDb would have admitted stay pending rather than being dropped
+#    The IMDb counts themselves never leave the process — IMDb's licence is non-transferable — so no report,
+#    batch or artifact carries one; the dump is kept under the cache root (`.cache/imdb/` by default),
+#    outside every out-dir.
 
 # 3a. Classify — the Jev pass that produced the shipped labels and facets: one typed request per title over
 #     the dumped article, into the `combined-v1-r2*.jsonl` shards the corpus join reads. It is the only step
 #     here that costs money ($20.47 for 47,529 titles), so run it with --plan first; it resumes, so a repeat
 #     buys only what is missing. The questions, the planner and the audit are in `scripts/v2/FACETS-V2.md`.
-./den stage articles --out-dir out --dataset-version <ver>            # the whole article per grounded title
-./den stage classify --out-dir out --dataset-version <ver> --plan     # then again without --plan
+./den stage articles --out-dir out            # the whole article per grounded title
+./den stage classify --out-dir out --plan     # then again without --plan
 
-# 4. embed-corpus — compose(facts + already-decided tags + Wikipedia plot) -> den-embed -> int8[1024];
+# 4. Embed — compose(genres + creators + already-decided tags + Wikipedia plot) -> den-embed -> int8[1024];
 #     append to the index store. Reads labels-t02.json, so run it after a classification pass that wrote
 #     labels (step 3a, or `scripts/v2/merge_classify_labels.py`), or to re-embed a corpus whose labels did
-#     not change. The flags must match out/index/composition.json or the run refuses — two doc
-#     shapes in one vector space is the failure that record exists to prevent.
+#     not change. The document shape — lean, no director clause, plot cap 3500 — is pinned in
+#     `pipeline/embed.py` and recorded in out/index/composition.json; a store that records another is
+#     refused, because two doc shapes in one vector space is the failure that record exists to prevent.
 #     First run in a fresh out-dir records the service's identity to out/index/embedder.json; later runs
 #     refuse if the service no longer matches it. An out-dir with a store but no embedder.json also refuses —
 #     what built it is unknown, and guessing is how the corpus/query drift went unnoticed in the first place.
-#     The same holds for out/index/composition.json, which records how the DOCUMENT was composed —
-#     docShape, dropDirector, plotCap. The embedder identity cannot see any of those, and they change the
-#     vector completely.
+#     Every run verifies the canary against the service before it appends a row, and records the verified
+#     space as out/index/embedding-space.json. It resumes, repairs a store torn by a kill, and takes
+#     `--pause-ms` and `--limit` for a long run (`scripts/embed-corpus-run.sh` segments one).
+#     `doc-facts.json` is two of the document's clauses and is required: `./den stage docfacts --out-dir
+#     out` (~770 SPARQL requests, resumable), or `scripts/v2/derive_doc_facts.py
+#     --facts out/facts-<ver>.json --out out/doc-facts.json` when a facts sidecar already exists.
 export DEN_EMBED_URL=http://127.0.0.1:8791     # default; set if the service is elsewhere
-#     `./den stage embed --out-dir out --dataset-version <ver>` runs exactly this, with the composition
-#     pinned rather than typed — `--doc-facts`, `--doc-drop-director` and `--plot-cap 3500` are what the
-#     shipped index was built with, and the stage checks the run's own index/composition.json against them
-#     afterwards, which is the proof that the composition asked for is the one recorded. (A misspelling is
-#     no longer a silently different document: embed-corpus refuses a flag it does not declare, and
-#     `--help` lists the ones it does.) It resumes the same way, adds `--pause-ms` and `--limit` for a long
-#     run, and refuses a run that recorded no verified space.
-#     `doc-facts.json` is two of the document's clauses — director and genre, from Wikidata — and without
-#     it the command composes the FULL shape instead, which is a different vector space with nothing in
-#     the output saying so. `./den stage embed` runs the scrape as its own stage first; by hand it is
-#     `./den stage docfacts --out-dir out --dataset-version <ver>` (~770 SPARQL requests, resumable), or
-#     `scripts/v2/derive_doc_facts.py --facts out/facts-<ver>.json --out out/doc-facts.json` when a facts
-#     sidecar already exists, which needs no requests at all.
-$BIN embed-corpus --out-dir out --labels out/labels-t02.json \
-    --doc-facts out/doc-facts.json --doc-drop-director --plot-cap 3500
+./den stage embed --out-dir out
 #     `--dump-docs <path>` writes the composed documents and embeds NOTHING, for embedding elsewhere — the
-#     arm64/x86_64 split means the documents travel to the serving box rather than the vectors coming back.
-#     It needs no embedder: gating it on one would mean standing up a service purely to write text.
+#     documents travel to the serving box rather than the vectors coming back. It needs no embedder: gating
+#     it on one would mean standing up a service purely to write text.
 
 # 4a. The other half of --dump-docs: embed the documents ON THE BOX, against the service that answers live
 #     queries. The canary is mounted alongside the script because it is the thing that decides whether any
@@ -248,21 +258,41 @@ python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels ou
 #     finalize (step 6) then stamps it into dataset.meta.json as `embeddingSpace`.
 
 # 6. Finalize — index store -> labels-t02.json + vectors-bge-m3.bin + dataset.meta.json (+ gzip + report).
-$BIN finalize --out-dir out
+#    Refuses a torn store, vectors of two lengths or of any length but 1024, and an identity record that
+#    disagrees with the vectors or will not parse. `datasetVersion` is derived from the two artifacts'
+#    hashes, so this is where the version the later stages take is decided — the <ver> below is that value.
+./den stage finalize --out-dir out
 
-# 6a. The FACTS the store ranks on — the two scrape passes merged. The scrape runs TWICE and cannot run
-#     once: the corpus pass covers the ids in labels-t02.json and is stamped --has-vector, the delta pass
-#     covers ids given outright and is not, and /recommend must never let a vectorless record into an ANN
-#     path. Both passes and the merge all write facts-<ver>.json, so move the corpus pass aside first —
-#     without that the delta pass overwrites it and the merged file is short by every delta title, which
-#     is how a rebuild once dropped 137 of them and nothing but /recommend noticed.
-$BIN facts --out-dir out --labels out/labels-t02.json --has-vector
-mv out/facts-<ver>.json out/facts-<ver>.pre-merge.json
-$BIN facts --out-dir out --ids <the delta ids>     # writes out/facts-unversioned.json
-./den stage facts --out-dir out --dataset-version <ver>
-#     The stage runs scripts/merge-facts.py with those two files and --version, built from
-#     `pipeline/facts.py`'s declaration rather than retyped; `pipeline/facts_test.py` holds the two to the
-#     same bytes. A missing pass is a refusal naming what writes it, not a smaller merge.
+# 6a. The FACTS the store ranks on — both Wikidata scrape passes, merged. The scrape runs TWICE and cannot
+#     run once: the corpus pass covers the ids in labels-t02.json and is stamped hasVector, the delta pass
+#     covers the ids in out/facts-delta-ids.txt and is not, and /recommend must never let a vectorless record
+#     into an ANN path. The delta list is YOURS to write: the titles /recommend needs facts for that have no
+#     vector, `movie:1` / `tv:2`, one per line or comma-separated. The stage refuses to run without it — a
+#     merge missing the delta pass is short by every title only it covers, which is how a rebuild once
+#     dropped 137 of them and nothing but /recommend noticed.
+#
+#     Derive it fresh for every rebuild; never reuse an old one. It is every title the LAST published facts
+#     file carries that the new labels do not — plus any new id atlas is missing, appended by hand:
+python3 - out/facts-<previous ver>.json out/labels-t02.json > out/facts-delta-ids.txt <<'PY'
+import json, sys
+facts, labels = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:3])
+vectors = {f"{r['mediaType']}:{r['tmdbId']}" for r in labels["records"]}
+print("\n".join(sorted({f"{r['mediaType']}:{r['tmdbId']}" for r in facts["records"]} - vectors)))
+PY
+#     The difference, not the previous file's vectorless records: a title the classify pass dropped from
+#     the labels has lost its vector and belongs here, and a title that has since been embedded does not.
+#     The list the last rebuild used (out-repass/facts-missing-ids.txt, 8,949 ids) is now wholly embedded;
+#     scraped again as the delta it would cost hours and leave out every title that is vectorless today.
+#     Measured on out-repass on 2026-09-22: 79 ids — 76 the shipped facts carry as vectorless and three it
+#     still stamps hasVector (movie:121329, movie:51870, tv:42680) whose vectors the classify pass dropped.
+./den stage facts --out-dir out
+#     The version is read from out/dataset.meta.json, so no flag is needed; a --dataset-version that
+#     disagrees with it is refused. Each pass writes straight to the name the merge reads
+#     (facts-<ver>.pre-merge.json and facts-<ver>.delta.json), keeps its own checkpoint (the corpus pass in
+#     the out-dir, where the Swift scrape left one; the delta pass under facts-delta/), and resumes from it. A
+#     batch WDQS fails is dropped whole and the stage refuses to merge a pass that skipped one;
+#     `scripts/facts-run.sh out` loops until nothing is skipped. The merge is scripts/merge-facts.py, run
+#     with --version.
 
 # 7. (retired) There used to be a poster sidecar here — `metadata-<ver>.json`, title/poster/year per
 #    shipped id, fetched from TMDB. The release stopped carrying it when the store took the card fields
@@ -300,7 +330,7 @@ python3 scripts/v2/build_store.py \
 
 # 8. Publish — the moving `data-latest` GitHub release den-atlas fetches. It uploads the store and the
 #    manifest, and prunes every retired blob's keys out of that manifest first.
-./den stage publish --out-dir out --dataset-version <ver>
+./den stage publish --out-dir out
 #     The stage runs `scripts/publish-dataset.sh out`, which is still the rule and still runnable by
 #     hand — but BY HAND it must be run FROM THE REPO ROOT, because the ownership guard resolves producer
 #     paths and `git ls-files` against the working directory. The stage runs it there whatever directory
@@ -310,10 +340,6 @@ python3 scripts/v2/build_store.py \
 #     DEN_ALLOW_SHARED_PLOTS, DEN_ALLOW_DROPPING_BLOBS).
 ```
 
-`$BIN` is `.build/release/taxonomy-backfill` (`swift build -c release`).
-
-`finalize --embedding-version <v>` overrides the artifact label. The default path is the bge-m3 build above.
-
 ## Recovering a store's composition
 
 A store with rows and no `index/composition.json` refuses a top-up, because how its documents were composed
@@ -322,17 +348,20 @@ cannot be known — and guessing writes the guess down as a fact. Recover it ins
 The shipped store's values are already established: **`{"docShape":"lean","dropDirector":true,"plotCap":3500}`**
 for `out-t02-cc0b`. They apply to that store and no other. For any other store:
 
+The embed stage composes that one shape and nothing else, so a probe composes its own documents with
+`pipeline/compose.py` — `capped_plot(plot, cap)`, and `lean(...)` with a `Directed by …` clause prepended
+for the director variant — and embeds them with `lib/denembed.embed_many`.
+
 1. **Pick probes.** ~10 titles whose plot is far longer than any candidate cap, that carry **no** Wikidata
    director (so the director flag cannot confound the cap), and that appear in exactly one batch. Plus 2
    short-plot titles that **do** carry a director — the cap cannot touch those, so they isolate the flag and
    double as a rig control.
-2. **Target them with a subset `--labels` file.** `--limit` is a counter, not a selector; it takes the first
-   N in read order. A `LabelsArtifact` holding only the probe records works — every other title is skipped
-   as `missingLabel`.
-3. **Settle the shape first**, at any cap, on the short-plot director titles: run with and without
-   `--doc-drop-director`. Exactly one matches.
-4. **Then sweep the cap** on the long titles, holding the shape fixed. `assertDocFits` caps it at 3596, so
-   the answer is an integer in (0, 3596].
+2. **Compose only the probes.** A labels file holding only the probe records works — every other title is
+   skipped as `missingLabel`.
+3. **Settle the shape first**, at any cap, on the short-plot director titles: with and without the director
+   clause. Exactly one matches.
+4. **Then sweep the cap** on the long titles, holding the shape fixed. At a 1024-token service the fit check
+   allows up to 3596, so the answer is an integer in (0, 3596].
 5. **Compare exact bytes**, from the store's own `index/vectors.jsonl` against the shipped
    `vectors-bge-m3.bin` (a `DENVEC02` blob: 16-byte header, a u64 key per row, then row-major int8 — look
    the row up BY KEY, `(media << 32) | tmdbId`, rather than by position in `labels-t02.json`). Judge

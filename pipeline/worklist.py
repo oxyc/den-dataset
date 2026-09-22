@@ -35,7 +35,7 @@ import os
 import sys
 
 from . import artifacts, floors as floor_rules
-from .contract import StageError, bind
+from .contract import StageError, bind, how_to_build
 from lib import cache as caching
 from lib import tmdb as tmdb_api
 
@@ -43,7 +43,7 @@ NAME = "worklist"
 
 #: The rule this stage runs. It is this file now, so the producer registry names what actually executes.
 PRODUCER = "pipeline/worklist.py"
-HOW = "./den stage worklist --mode export --out-dir <dir> --dataset-version <ver>"
+HOW = "./den stage worklist --mode export --out-dir <dir>"
 #: Writes two files into the out-dir. Cheap to repeat — the cost is downstream, at `enrich`.
 PUBLISHES = False
 #: TMDB's own API and its public daily dumps, neither of them billed. What this stage DECIDES is expensive
@@ -142,7 +142,7 @@ def known_ids(path, media):
     if not records:
         raise StageError(f"worklist: {path} names no records, so there is nothing to tell a delta what is "
                          f"already published. Point vector_labels at the published labels; build them "
-                         f"with: taxonomy-backfill finalize")
+                         f"with: {how_to_build(artifacts.VECTOR_LABELS)}")
     return {record["tmdbId"] for record in records if record.get("mediaType") == media}
 
 

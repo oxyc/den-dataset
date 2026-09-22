@@ -61,9 +61,9 @@ import pipeline  # noqa: E402  — the stage declarations this file's registries
 # `pipeline/store.py` and `pipeline/corpus.py` build their command lines out of it, so a declaration that
 # has drifted from what runs fails at an argument parser, not here, and there is no second list to forget.
 #
-# The third field gates the staleness warning only. `main.swift` holds the whole tool, so it is edited for
-# reasons that have nothing to do with any one blob — warning on it would fire constantly and teach everyone
-# to ignore the check, which is how a guard dies.
+# The third field gates the staleness warning only. A producer that writes several blobs is edited for
+# reasons that have nothing to do with any one of them — warning on it would fire constantly and teach
+# everyone to ignore the check, which is how a guard dies.
 DECLARED = {a.name: a for a in pipeline.declared()}
 REGISTRY = pipeline.producers()
 
@@ -86,8 +86,8 @@ PRODUCERS = {
 # producer is a real tracked file — so a stale entry breaks the test rather than protecting anything.
 #
 # `factsFile` stays, now as the `manifest_key` on the `facts` entry in `pipeline/artifacts.py`. Its producer
-# is `scripts/merge-facts.py`, the stage that merges the two scrape passes — the scrape builds the halves and
-# the merge builds the file, which is the distinction the 137 lost delta records were bought with. The key is
+# is the facts stage, which scrapes both halves and merges them — one owner for the whole file, which is the
+# distinction the 137 lost delta records were bought with. The key is
 # merely unpublished, not unbuildable: the loop below only visits keys the manifest actually names, so the
 # entry costs nothing and covers a generation that publishes facts again.
 #
@@ -134,7 +134,7 @@ UNMANIFESTED = tuple(
 # guard passed, and none of them was looking at the thing that had not been rebuilt.
 #
 # Moving them into UNMANIFESTED was the other option and it is worse. Those entries carry no `dedicated`
-# flag and `main.swift` produces four of them, so every publish would warn about a file edited for
+# flag and `pipeline/finalize.py` produces two of them, so every publish would warn about a file edited for
 # reasons that have nothing to do with any one artifact — which is how a guard dies.
 #
 # It is the STORE STAGE's declared inputs, verbatim. `pipeline/store.py` hands the writer exactly these

@@ -101,13 +101,12 @@ class Declaration(unittest.TestCase):
         self.assertIn(artifacts.STORE, [bind(e).artifact for e in publish.INPUTS])
         self.assertEqual(pipeline.producers()["store"], (store.PRODUCER, store.HOW, True))
 
-    def test_the_manifest_still_answers_for_itself(self):
-        """The seam. `dataset.meta.json` comes from `taxonomy-backfill finalize`, which is not a stage
-        yet; the publisher rewrites it (the prune, the counts, `storeRebuild`) but does not create it, so
-        a refusal for a missing one has to name finalize rather than name the publisher."""
+    def test_the_manifest_is_the_finalize_stages(self):
+        """The publisher rewrites `dataset.meta.json` (the prune, the counts, `storeRebuild`) but does not
+        create it, so a refusal for a missing one has to name finalize rather than name the publisher."""
         self.assertIn(artifacts.MANIFEST, [bind(e).artifact for e in publish.INPUTS])
-        self.assertEqual(pipeline.producers()["manifest"],
-                         (artifacts.MANIFEST.producer, artifacts.MANIFEST.how, False))
+        self.assertEqual(artifacts.MANIFEST.producer, "")
+        self.assertEqual(pipeline.producers()["manifest"][0], "pipeline/finalize.py")
 
     def test_publishing_is_the_last_thing_that_happens(self):
         self.assertEqual(pipeline.STAGES[-1], "publish")
