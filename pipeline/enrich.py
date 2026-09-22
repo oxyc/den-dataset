@@ -304,8 +304,11 @@ def run(worklist_path, out_dir, vote_floor=VOTE_FLOOR, limit=LIMIT, exclude_anim
 
     A worklist may hold BOTH media. The Swift command refused one that did, citing vote files that carried
     no media type and readers that keyed a row by a bare id — `loadVotePasses`, the escalation and
-    `assemble`. Those readers are deleted, every reader of a batch left keys it by `mediaType:tmdbId`, and
-    every set, map and query here is keyed by the pair, so the refusal guarded nothing any more.
+    `assemble`. Those readers are deleted, and every set, map and query here is keyed by the pair. Not
+    every reader of a batch is: `scripts/check-votes.py` matches vote records by bare id and refuses a
+    mixed batch for that reason, but it checks the retired vote-pass output and nothing runs it. The
+    stages that read a batch — `articles`, `embed-corpus`, the corpus, the census — and the provenance
+    backfill key by `mediaType:tmdbId`.
     """
     if limit < 1:
         raise StageError(f"enrich: --limit {limit} takes nothing, and would report the worklist as drained")

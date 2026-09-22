@@ -372,6 +372,30 @@ class Batch(unittest.TestCase):
         rows = self.rows()
         self.assertEqual((rows["tv:95"]["plotArticle"], rows["movie:95"]["plotArticle"]), ("Buffy", "Armageddon"))
 
+    def test_remaining_counts_a_series_and_a_film_that_share_an_id_apart(self):
+        """`remaining` is how the drain decides it is finished. Counted by bare id, a processed movie 95
+        would mark series 95 done and the drain would stop with it never enriched."""
+        self.mapping.update({("movie", 95): {"article": "Armageddon"}, ("tv", 95): {"article": "Buffy"}})
+        bodies = {"/movie/95": detail(95), "/tv/95": detail(95), "/tv/7": detail(7)}
+        report = self.run_batch(bodies, [("movie", 95), ("tv", 95), ("tv", 7)], limit=1)
+        self.assertEqual(report["remaining"], 2, "tv:95 and tv:7 are still pending")
+        report = self.run_batch(bodies, [("movie", 95), ("tv", 95), ("tv", 7)], limit=2)
+        self.assertEqual(report["remaining"], 0)
+
+    def test_a_series_only_worklist_reports_zero_once_its_batch_is_written(self):
+        report = self.run_batch({"/tv/1": detail(1), "/tv/2": detail(2)}, [("tv", 1), ("tv", 2)])
+        self.assertEqual((report["count"], report["remaining"]), (2, 0))
+
+    def test_a_key_is_recovered_only_when_the_same_media_holds_it(self):
+        """Series 95 written after movie 95 is a new title, not a re-covered one — and series 7 written twice
+        is, whichever media the earlier batch was read as."""
+        os.makedirs(os.path.join(self.out, "enriched"))
+        put(enrich.batch_path(self.out, 1), json.dumps([{"tmdbId": 95, "mediaType": "movie"},
+                                                         {"tmdbId": 7, "mediaType": "tv"}]))
+        again = enrich.recovered(self.out, 2, [{"tmdbId": 95, "mediaType": "tv"},
+                                               {"tmdbId": 7, "mediaType": "tv"}])
+        self.assertEqual(again, ["tv:7 (batch 1)"])
+
     def test_each_media_is_asked_about_its_own_ids_only(self):
         """The query TEXT is the mapping's cache key. Asking about the whole batch under each media returns
         the same facts — WDQS answers only the ids that are that media — but hashes to a different key, so
