@@ -26,11 +26,10 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from delta_questions import delta_questions  # noqa: E402
 from pipeline import run_combined as rc  # noqa: E402
+from pipeline.delta_questions import delta_questions  # noqa: E402
 from pipeline.article_sections import sha256_text  # noqa: E402
 from pipeline.combined_questions import taxonomy  # noqa: E402
 

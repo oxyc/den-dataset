@@ -17,8 +17,8 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import run_delta  # noqa: E402
-from delta_questions import delta_questions  # noqa: E402
 from pipeline import article_sections, combined_questions  # noqa: E402
+from pipeline.delta_questions import delta_questions  # noqa: E402
 from pipeline import run_combined as rc  # noqa: E402
 from pipeline.run_combined_test import FakeClient, answer_for  # noqa: E402
 
