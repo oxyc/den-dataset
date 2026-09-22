@@ -54,8 +54,10 @@ jobs:
         with:
           scandir: ./scripts
           severity: warning
-      - name: Python worklist builder compiles
-        run: python3 -m py_compile scripts/build-worklist.py
+      - name: Python worklist builder
+        run: |
+          python3 -m py_compile scripts/build-worklist.py
+          python3 -m unittest scripts/test_build_worklist.py
       # The embed path, which runs from a container on the box with nothing installed: these must stay
       # importable on a bare python3, because a syntax error there surfaces as a failed corpus run hours in.
       - name: The embed path compiles
