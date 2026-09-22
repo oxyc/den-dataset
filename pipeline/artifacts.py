@@ -40,6 +40,27 @@ DELTA = Artifact(
     shards=True,
 )
 
+#: The enrichment's batch files, named as the DIRECTORY that holds them rather than as a shard set. The
+#: embed pass reads them in batch-number order and lets the newest win, because 505 keys appear in several
+#: batches disagreeing about `hasWikiPlot` — which decides whether a title embeds with its plot or without
+#: one. Resolving the set here would move that rule out of the only reader that has it.
+ENRICHED = Artifact(
+    name="enriched",
+    filename="enriched",
+    producer="scripts/enrich-run.sh",
+    how="scripts/enrich-run.sh movie 150",
+)
+
+#: Wikidata's director (P57) and genre (P136) per title: the two clauses of the lean document that used to
+#: come from TMDB. Scraped separately from the embed pass because it is ~770 SPARQL requests.
+DOC_FACTS = Artifact(
+    name="doc_facts",
+    filename="doc-facts.json",
+    producer=BACKFILL,
+    how="taxonomy-backfill doc-facts",
+    dedicated=False,
+)
+
 CORPUS = Artifact(
     name="corpus",
     filename="corpus-{version}.jsonl.gz",
@@ -50,6 +71,46 @@ CORPUS = Artifact(
 ENTITIES = Artifact(
     name="entities",
     filename="corpus-{version}-entities.json.gz",
+)
+
+#: The embed pass's two append-only stores, written line by line and resumed from. `finalize` turns them
+#: into `labels-t02.json` and `vectors-bge-m3.bin`; until then they are the corpus's vectors. Paired by
+#: position, which is why a kill between the two lines is repaired before anything appends to them.
+EMBED_LABELS = Artifact(
+    name="embed_labels",
+    filename="index/labels.jsonl",
+    dedicated=False,
+)
+
+EMBED_VECTORS = Artifact(
+    name="embed_vectors",
+    filename="index/vectors.jsonl",
+    dedicated=False,
+)
+
+#: How the documents in those stores were composed. The embedder identity cannot see it and two runs of
+#: one service differ entirely on one clause, so the shape is recorded as its own fact and appending in a
+#: different one is refused.
+COMPOSITION = Artifact(
+    name="composition",
+    filename="index/composition.json",
+    dedicated=False,
+)
+
+#: Which den-embed built the store. `finalize` only ever checked that the vectors share one LENGTH, which
+#: every bge-m3 generation does, so a run resumed after an upgrade produced a corpus half-embedded by each.
+EMBEDDER = Artifact(
+    name="embedder",
+    filename="index/embedder.json",
+    dedicated=False,
+)
+
+#: The known-answer canary's verdict for the service that embedded these rows — the space's published name,
+#: which `finalize` stamps into `dataset.meta.json`.
+EMBEDDING_SPACE = Artifact(
+    name="embedding_space",
+    filename="index/embedding-space.json",
+    dedicated=False,
 )
 
 FACTS = Artifact(
@@ -131,5 +192,6 @@ RELEASE = Artifact(
     remote=True,
 )
 
-CATALOGUE = (COMBINED, DELTA, CORPUS, ENTITIES, FACTS, VECTORS, VECTOR_LABELS, PREMISE_VECTORS,
-             PREMISE_LABELS, STORE, MANIFEST, RELEASE)
+CATALOGUE = (COMBINED, DELTA, ENRICHED, DOC_FACTS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
+             EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, FACTS, VECTORS, VECTOR_LABELS,
+             PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)

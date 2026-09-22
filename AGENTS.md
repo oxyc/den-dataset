@@ -15,10 +15,10 @@ prose somewhere that can go stale without anything failing.
 
 ## The part that is still being rebuilt
 
-`pipeline/` holds **three** stages today — the corpus join, the store build and the publish — and
-everything else still runs from `docs/OPERATE.md` under `scripts/` and `scripts/v2/`. That is the
-migration in oxyc/den-dataset#27, not a second generation: stages join `STAGES` one at a time, and the
-old tree is deleted in the commit that makes the new one authoritative.
+`pipeline/` holds **four** stages today — the embed pass, the corpus join, the store build and the
+publish — and everything else still runs from `docs/OPERATE.md` under `scripts/` and `scripts/v2/`.
+That is the migration in oxyc/den-dataset#27, not a second generation: stages join `STAGES` one at a
+time, and the old tree is deleted in the commit that makes the new one authoritative.
 
 Three rules keep it from becoming `scripts/v3/`, and all three are enforced rather than written down:
 

@@ -11,6 +11,8 @@ Options (both run forms):
     --dataset-version VER          the version the filenames carry       (required)
     --stamp-meta PATH              the manifest to declare the outputs in
     --expect N                     the title count the corpus join is held to
+    --pause-ms N                   milliseconds the embed pass idles between requests
+    --limit N                      stop the embed pass after N new titles
     --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
                                    NAME to name every shard of a set
 
@@ -64,7 +66,7 @@ def context(args):
             overrides[name] = path
     return pipeline.Context(out_dir=args.out_dir, dataset_version=args.dataset_version,
                             overrides=overrides, stamp_meta=args.stamp_meta or "",
-                            expect=args.expect)
+                            expect=args.expect, pause_ms=args.pause_ms, limit=args.limit)
 
 
 def execute(module, ctx):
@@ -84,6 +86,9 @@ def main(argv=None):
         sub.add_argument("--dataset-version", required=True)
         sub.add_argument("--stamp-meta")
         sub.add_argument("--expect", type=int, help="the title count the corpus join is held to")
+        sub.add_argument("--pause-ms", type=int, default=0,
+                         help="milliseconds the embed pass idles between requests")
+        sub.add_argument("--limit", type=int, help="stop the embed pass after N new titles")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
         return sub
 

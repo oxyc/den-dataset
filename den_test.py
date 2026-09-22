@@ -32,13 +32,13 @@ class Listing(unittest.TestCase):
     def test_stages_answers_what_runs_in_what_order_and_what_it_touches(self):
         result = den("stages")
         self.assertEqual(result.returncode, 0, result.stderr)
-        # The order, and that it is the real one: the corpus is joined before the store is built from it,
-        # and the publish that uploads the store is last.
-        self.assertIn("1. corpus", result.stdout)
-        self.assertIn("2. store", result.stdout)
-        self.assertIn("3. publish", result.stdout)
-        self.assertLess(result.stdout.index("1. corpus"), result.stdout.index("2. store"))
-        self.assertLess(result.stdout.index("2. store"), result.stdout.index("3. publish"))
+        # The order, and that it is the real one: the vectors are embedded before the corpus is joined,
+        # the corpus before the store is built from it, and the publish that uploads the store is last.
+        for position, name in enumerate(("embed", "corpus", "store", "publish"), start=1):
+            self.assertIn(f"{position}. {name}", result.stdout)
+        order = [result.stdout.index(f"{n}. {s}")
+                 for n, s in enumerate(("embed", "corpus", "store", "publish"), start=1)]
+        self.assertEqual(order, sorted(order), "den stages printed them out of order")
         for line in ("premise_labels", "scripts/v2/build_store.py", "scripts/v2/consolidate_corpus.py",
                      "scripts/publish-dataset.sh"):
             self.assertIn(line, result.stdout)
@@ -75,9 +75,13 @@ class Dispatch(unittest.TestCase):
             # refusal names. Reaching publish at all would mean the release was in the run.
             self.assertNotIn("publish-dataset.sh", plain.stderr + plain.stdout)
             self.assertNotIn("data-latest", plain.stderr + plain.stdout)
-            # It stops at the FIRST stage, on that stage's own missing input — which is the evidence the
-            # run was a run and not a no-op.
-            self.assertIn("==> corpus", plain.stdout + plain.stderr)
+            # It ran — it stops at the first stage on that stage's own missing input. Asserted as "some
+            # stage started" rather than naming one, because which stage is first changes as the port
+            # proceeds and this test is about publishing, not about the order.
+            import pipeline
+            banners = plain.stdout + plain.stderr
+            self.assertTrue(any(f"==> {m.NAME}" in banners for m in pipeline.stages()),
+                            f"no stage ran at all: {banners!r}")
 
     def test_the_order_still_contains_publish_even_though_run_skips_it(self):
         """The list stays truthful: `den stages` is what the pipeline IS, not what `den run` chose."""
