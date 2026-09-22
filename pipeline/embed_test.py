@@ -235,6 +235,43 @@ class Gates(Staged):
         os.remove(os.path.join(self.out, "index", "composition.json"))
         self.assertIn("out-t02-cc0b", self.refused())
 
+    def test_a_refusal_after_the_embedder_passes_writes_no_record(self):
+        """The embedder and the canary pass on a fresh store, then the composition refuses. The space and
+        the embedder must not have been recorded for a run that did nothing."""
+        os.makedirs(os.path.join(self.out, "index"))
+        with open(os.path.join(self.out, "index", "composition.json"), "w", encoding="utf-8") as fh:
+            json.dump(dict(embed.SHIPPED_COMPOSITION, plotCap=1500), fh)
+        self.assertIn("two document shapes", self.refused())
+        self.assertEqual(sorted(os.listdir(os.path.join(self.out, "index"))), ["composition.json"])
+
+    def test_a_refused_run_does_not_repair_a_torn_store(self):
+        """The repair rewrites both stores. A run the gates refuse leaves them byte for byte as it found
+        them, so whoever looks at the refusal still sees the tear."""
+        self.run_stage(limit=2)
+        index = os.path.join(self.out, "index")
+        with open(os.path.join(index, "labels.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record(3, "tv")) + "\n")
+        with open(os.path.join(index, "labels.jsonl"), encoding="utf-8") as fh:
+            before = fh.read()
+        self.service.health = dict(self.service.health, vector_epoch=2)
+        self.assertIn("mix two embedders", self.refused())
+        with open(os.path.join(index, "labels.jsonl"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), before)
+
+    def test_the_recorded_embedder_is_kept_as_written(self):
+        """Equality leaves the runtime string out, so a service that moved from t/0 to t/1 is the same
+        embedder. The record still says what built the rows; rewriting it would move the manifest's
+        `embedderRuntime` to a build that embedded none of them."""
+        self.write_embedder_record_only()
+        self.run_stage(limit=1)
+        with open(os.path.join(self.out, "index", "embedder.json"), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["runtime"], "t/0")
+
+    def write_embedder_record_only(self):
+        os.makedirs(os.path.join(self.out, "index"), exist_ok=True)
+        with open(os.path.join(self.out, "index", "embedder.json"), "w", encoding="utf-8") as fh:
+            json.dump({"model": "bge-m3", "dims": 8, "vectorEpoch": 1, "runtime": "t/0", "maxTokens": 1024}, fh)
+
     def test_a_service_that_would_cut_the_documents_is_refused(self):
         """Refused on the fit alone: the canary here was recorded at the same 512, so it would pass."""
         self.service.health = dict(self.service.health, max_tokens=512)

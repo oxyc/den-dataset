@@ -12,8 +12,9 @@ bytes against the shipped rows — 12/12 exact at these settings, 10/12 with the
 at cap 1500 — so they are constants here, not arguments. `index/composition.json` records them, and a
 store that records something else is refused rather than appended to.
 
-**Nothing is appended until three things agree.** Each refuses before the stores are touched, because the
-repair below rewrites files and a run that cannot do any work has no business repairing anything:
+**Nothing is written until three things agree, and the composition above.** Every gate decides before any
+file is touched — the records of the space, the embedder and the composition, the repair below, the rows —
+because a run that cannot do any work has no business recording or repairing anything:
 
   * **the embedder** — `index/embedder.json` holds what built the store, and a service that is not the
     same embedder (model, dims, epoch, token cap — never the build string) is refused: appending would mix
@@ -124,8 +125,9 @@ def has_rows(path):
 
 
 def gate_embedder(ctx, url):
-    """The service against the store, the space and the cap — before anything is written. Returns the
-    verified space."""
+    """The service against the store, the space and the cap. Decides and writes nothing. Returns the
+    verified space, and the identity to record — None when the store already records one, which is kept
+    as written: a newer runtime string is the same embedder, not a fact to overwrite the build with."""
     path = ctx.path(artifacts.EMBEDDER)
     now = denembed.identity(url)
     previous = denembed.stored_identity(read_json(path))
@@ -159,15 +161,13 @@ def gate_embedder(ctx, url):
         stamp = denembed.verify(canary_path(), url, say)
     except denembed.CanaryFailure as failure:
         raise StageError(f"embed: {failure}") from None
-    write_pretty(ctx.path(artifacts.EMBEDDING_SPACE), stamp)
-    if previous is None:
-        write_pretty(path, now)
     say(f"embedder: {denembed.label(now)}")
-    return stamp
+    return stamp, (now if previous is None else None)
 
 
 def gate_composition(ctx):
-    """The same guard for how the document is composed, which the embedder identity cannot see."""
+    """The same guard for how the document is composed, which the embedder identity cannot see. Decides
+    and writes nothing; True when the store records no composition yet and this run must write one."""
     path = ctx.path(artifacts.COMPOSITION)
     recorded = read_json(path)
     valid = (isinstance(recorded, dict) and isinstance(recorded.get("docShape"), str)
@@ -179,7 +179,7 @@ def gate_composition(ctx):
                 f"embed: this store's documents were composed as {got} and this stage composes "
                 f"{SHIPPED_COMPOSITION} — appending would put two document shapes in one vector space, which "
                 f"no similarity score can separate afterwards. Start a fresh --out-dir.")
-        return
+        return False
     if has_rows(ctx.path(artifacts.EMBED_LABELS)):
         # The suggested values are out-t02-cc0b's and nobody else's: several other stores have rows and no
         # record and were composed differently, so the message has to say whose they are.
@@ -189,7 +189,7 @@ def gate_composition(ctx):
             f'{{"docShape":"lean","dropDirector":true,"plotCap":3500}} — write that file. For any OTHER '
             f"store these values are wrong: recover them (docs/OPERATE.md, \"Recovering a store's "
             f"composition\"), or start a fresh --out-dir.")
-    write_pretty(path, SHIPPED_COMPOSITION)
+    return True
 
 
 def aligned(label_line, vector_line):
@@ -296,14 +296,22 @@ def run(ctx):
     os.makedirs(os.path.abspath(ctx.out_dir), exist_ok=True)
     labels, enriched, doc_facts = inputs(ctx)
     url = denembed.base_url()
-    stamp = None
+    stamp = identity = None
     if not ctx.dump_docs:
         try:
-            stamp = gate_embedder(ctx, url)
+            stamp, identity = gate_embedder(ctx, url)
         except (http.HTTPError, ValueError, KeyError) as unreachable:
             raise StageError(f"embed: den-embed at {url} could not be asked ({unreachable})") from None
-    gate_composition(ctx)
+    first_composition = gate_composition(ctx)
     say(f"composition: {SHIPPED_COMPOSITION}")
+
+    # Every gate has decided. Only now is anything written — a record, a repair, a row.
+    if stamp is not None:
+        write_pretty(ctx.path(artifacts.EMBEDDING_SPACE), stamp)
+    if identity is not None:
+        write_pretty(ctx.path(artifacts.EMBEDDER), identity)
+    if first_composition:
+        write_pretty(ctx.path(artifacts.COMPOSITION), SHIPPED_COMPOSITION)
 
     labels_store, vectors_store = ctx.path(artifacts.EMBED_LABELS), ctx.path(artifacts.EMBED_VECTORS)
     reconcile(labels_store, vectors_store)
