@@ -30,8 +30,8 @@ regional tier, which only ever admits more; 831 LEAVE it and are judged at 50 TM
 and **272 of those then clear no floor at all** — below 50 on TMDB, below 2,000 on IMDb, out of the
 corpus. 239 of the 272 are co-productions TMDB files under several origins and Wikidata under one
 (`Doll & Em`: TMDB GB, P495 US), and 33 have no P495 at all. Those are precisely the regional titles the
-15 exists for, and a below-floor verdict is never checkpointed, so they would not fail — they would stay
-pending, re-fetched and re-refused every pass, silently. The tier therefore stays on TMDB's origins until
+15 exists for, and a below-floor verdict holds only for the day, so they would not fail — they would be
+re-fetched and re-refused every day, silently. The tier therefore stays on TMDB's origins until
 something states a co-production's countries as fully as TMDB does. It is the one field keeping the
 per-title detail call alive.
 

@@ -115,7 +115,7 @@ jobs:
       # was a one-off replay — the merge-base binary and the port over out-repass worklists, on a scratch
       # copy of the response cache with the network denied — and cannot run here: CI has no cache. What
       # runs here is each rule on its own against stubbed upstreams, the batch file's bytes against the
-      # Swift encoder's captured output, and the drain loop's three stopping rules.
+      # Swift encoder's captured output, and the drain loop's stopping rules.
       #
       # `store/format_test.py` holds the two fixed-point encoders' refusals. Deleting either one leaves a
       # store that passes every structural guard and quietly rounds the values it ships, which is the loss

@@ -7,7 +7,7 @@ this stage owns is which worklist it is handed, the credentials it runs under, a
 
 **It is a loop, and the loop is the stage's.** The corpus is ~120 batches. The driver that ran them —
 `scripts/enrich-all.sh` — decided when to stop by `sed`-ing `belowFloor` out of a JSON line, off a
-stream it was also teeing to a log. Its three stopping rules were each bought by a run that went wrong
+stream it was also teeing to a log. Its stopping rules were each bought by a run that went wrong
 (see `drain`), and they are here because a resumed, partially-complete run is easier to reason about when
 ONE thing decides what "done" means and that thing is the same thing that declares the artifacts.
 
@@ -156,7 +156,7 @@ def batch(ctx, media):
 def drain(ctx, media):
     """Run batches until the worklist has nothing left. Returns the number of batches that ran.
 
-    Three stopping rules, all `enrich-all.sh`'s, all bought by a run:
+    Two stopping rules, both `enrich-all.sh`'s, both bought by a run:
 
       * **an aborted batch is retried, not fatal.** A transient Wikidata outage that outlived the retries
         used to kill a twelve-hour drain. Only an abort is retried: a refusal — an unreadable checkpoint, a
@@ -166,10 +166,10 @@ def drain(ctx, media):
         deliberately not checkpointed, so during an upstream outage every id defers and `remaining` does
         not move. Counting only aborts, the loop spun with no sleep, re-issuing the whole batch as fast as
         the upstream could refuse it.
-      * **a batch where every title was below the vote floor is not an outage.** Below-floor ids are not
-        checkpointed either ("a vote count only climbs"), so a worklist of them can never drain at that
-        floor. That reported "upstream is refusing" for two and a half hours while Wikipedia was answering
-        perfectly well, so it says which it is.
+
+    A title below every floor does not hold the drain open: `enrich` records the verdict for the day and
+    `remaining` leaves it out, so a worklist of them drains, and a later day judges them again
+    (`enrich.standing`).
     """
     aborts = stalls = batches = 0
     previous = None
@@ -197,26 +197,11 @@ def drain(ctx, media):
             announce_prose_source(media, served)
             return batches
         if remaining == previous:
-            if report.get("belowFloor", 0) > 0 and report.get("count", 0) == 0:
-                # Only when NOTHING was deferred: a batch of both is still waiting on an upstream, and
-                # reporting it as all below the floor named the wrong cause.
-                if not report.get("deferred", 0):
-                    raise StageError(
-                        f"fetch: every title in this {media} batch is below the vote floor, so the worklist "
-                        f"cannot drain at it — below-floor ids are not checkpointed, because a vote count "
-                        f"only climbs. Re-run with --vote-floor 0 to include the low-vote tail, or filter "
-                        f"the worklist. This is not an upstream failure. (The IMDb half of the gate: "
-                        f"{report.get('imdbGate')}.)")
             stalls += 1
             if stalls >= STALLS:
-                below, deferred = report.get("belowFloor", 0), report.get("deferred", 0)
-                cause = ("the ids are being attempted and deferred, which is an upstream refusing rather than "
-                         "a worklist that is done")
-                if below:
-                    cause = (f"{deferred} of them deferred by an upstream refusing, and {below} below the vote "
-                             f"floor, which never drain at it (--vote-floor 0, or filter the worklist)")
                 raise StageError(f"fetch: {STALLS} {media} batches in a row finished with {remaining} "
-                                 f"still pending — {cause}. Stopping.")
+                                 f"still pending — the ids are being attempted and deferred, which is an "
+                                 f"upstream refusing rather than a worklist that is done. Stopping.")
             pause(stalls * 60)
         else:
             stalls = 0

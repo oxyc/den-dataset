@@ -170,9 +170,8 @@ class Context:
     #: only do one would leave the other to be remembered.
     media: str = ""
     #: The TMDB vote count the enrichment keeps a title above, when the default is not wanted. 0 re-includes
-    #: the low-vote tail for a full-catalogue pass. Below-floor ids are deliberately not checkpointed — a
-    #: vote count only climbs — so a worklist full of them cannot drain at the default, and this is the
-    #: knob the refusal for that sends an operator to.
+    #: the low-vote tail for a full-catalogue pass. A below-floor verdict holds for the day it was made and
+    #: for the floors it was made by, so lowering this re-judges those titles at once.
     vote_floor: int | None = None
     #: The other three admission floors (`pipeline/floors.py`): the regional tier's TMDB floor, and the IMDb
     #: floor of each tier. None keeps the measured default.
