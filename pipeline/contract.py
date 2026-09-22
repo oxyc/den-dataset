@@ -144,6 +144,13 @@ class Context:
     #: cost is linear and was priced at 15 documents a request: ~2,600 flushes over the corpus, so each
     #: 1000ms adds ~45 minutes. This stage sends 7, so the same pause costs roughly twice that.
     pause_ms: int = 0
+    #: Which universe the worklist builds — `export`, `discover` or `delta`. Not defaulted: they are three
+    #: different catalogues, enrichment is billed per title, and the one the command picks unasked is the
+    #: pilot's 500. See `pipeline/worklist.py`.
+    mode: str = ""
+    #: The date a `delta` collects titles from, `YYYY-MM-DD`. Per run by construction — `delta-run.sh`
+    #: computes it from how many days back the pass is looking.
+    since: str = ""
     #: Stop the embed pass after this many NEW titles. ONNX Runtime's memory arena grows to its peak and
     #: never shrinks, so a long-lived den-embed creeps up until it OOMs the machine; the run is segmented
     #: to let the service be restarted between segments, and the store is what makes that free.
