@@ -40,6 +40,12 @@ HOW = "scripts/v2/run_combined.py"
 #: Writes into the out-dir and nowhere else. A repeat run costs nothing it already has — see the resume
 #: above — which is a different thing from costing nothing.
 PUBLISHES = False
+#: The only stage that buys. `den run` leaves it out unless asked with `--spend`, because the resume is a
+#: mitigation and not a guarantee: an article dump rebuilt with more titles makes the difference missing,
+#: and a run that was meant to rebuild a store buys it. `--plan` cannot warn about that — it estimates the
+#: whole input without consulting what is done, so it reads ~$20 whether the run would buy everything or
+#: nothing.
+SPENDS = True
 SCRIPT = os.path.join(REPO, PRODUCER)
 
 #: In the pass's own argument order, which `classify_test.py` holds against its parser. `--enriched-dir` is

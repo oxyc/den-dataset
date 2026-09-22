@@ -99,6 +99,28 @@ class Dispatch(unittest.TestCase):
         self.assertTrue(pipeline.stage("publish").PUBLISHES)
         self.assertFalse(pipeline.stage("store").PUBLISHES)
 
+    def test_a_stage_must_say_whether_it_spends(self):
+        """The same reason as PUBLISHES, for the other effect that leaves the out-dir. A stage that buys
+        from a paid provider and forgot to say so would be bought by every exploratory `den run`."""
+        import pipeline
+        for module in pipeline.stages():
+            self.assertIsInstance(module.SPENDS, bool, f"{module.NAME} does not declare SPENDS")
+        self.assertTrue(pipeline.stage("classify").SPENDS)
+        self.assertFalse(pipeline.stage("store").SPENDS)
+
+    def test_den_run_leaves_out_the_stage_that_buys(self):
+        """`den run` over an out-dir holding nothing must not reach the paid pass at all.
+
+        The refusal it would otherwise raise is about a missing input, which is the RIGHT answer for the
+        wrong reason: fill that input in and the same command starts buying. So the check is that the
+        stage is not attempted — the run reaches a later stage's complaint, never classify's.
+        """
+        with tempfile.TemporaryDirectory() as out:
+            gated = den("run", "--dataset-version", "test", "--out-dir", out)
+            self.assertNotIn("==> classify", gated.stderr)
+            asked = den("run", "--dataset-version", "test", "--out-dir", out, "--spend")
+            self.assertIn("==> classify", asked.stderr)
+
     def test_set_wants_a_pair(self):
         result = den("stage", "store", "--dataset-version", "test", "--set", "corpus")
         self.assertEqual(result.returncode, 1)

@@ -251,10 +251,11 @@ def validate(module, name):
     The list in `pipeline/__init__.py` is what a reader is promised describes the pipeline. A name in it
     pointing at a module with no contract makes the list a lie in the one direction nothing else checks.
     """
-    # PUBLISHES is declared rather than defaulted: `den run` skips a publishing stage unless asked, and a
-    # stage that forgot to say so would be swept back into every exploratory run — uploading to a moving
-    # public release because nobody wrote `False`. Making it required means the omission is a refusal.
-    for attribute in ("NAME", "PRODUCER", "HOW", "INPUTS", "OUTPUTS", "PUBLISHES", "run"):
+    # PUBLISHES and SPENDS are declared rather than defaulted: `den run` skips those stages unless asked,
+    # and a stage that forgot to say so would be swept back into every exploratory run — uploading to a
+    # moving public release, or buying a corpus from a paid provider, because nobody wrote `False`. Both
+    # failures are silent and neither is undone by noticing afterwards, so the omission is a refusal.
+    for attribute in ("NAME", "PRODUCER", "HOW", "INPUTS", "OUTPUTS", "PUBLISHES", "SPENDS", "run"):
         if not hasattr(module, attribute):
             raise StageError(f"stage {name}: {module.__name__} declares no {attribute}")
     if module.NAME != name:
@@ -265,8 +266,9 @@ def validate(module, name):
                 raise StageError(f"stage {name}: {field} holds {entry!r}, which is not an Artifact")
     if not module.OUTPUTS:
         raise StageError(f"stage {name}: declares no OUTPUTS, so nothing downstream can name what it made")
-    if not isinstance(module.PUBLISHES, bool):
-        raise StageError(f"stage {name}: PUBLISHES is {module.PUBLISHES!r}, which is not True or False")
+    for gate in ("PUBLISHES", "SPENDS"):
+        if not isinstance(getattr(module, gate), bool):
+            raise StageError(f"stage {name}: {gate} is {getattr(module, gate)!r}, not True or False")
     if not callable(module.run):
         raise StageError(f"stage {name}: run is not callable")
     return module

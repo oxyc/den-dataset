@@ -44,6 +44,8 @@ HOW = "scripts/publish-dataset.sh <out-dir>"
 #: Uploads to the moving `data-latest` release, so `den run` skips it unless asked with --publish.
 #: The only stage whose effect leaves this machine, and the only one a repeat run cannot undo.
 PUBLISHES = True
+#: Uploads an artifact someone already paid for; it buys nothing itself.
+SPENDS = False
 SCRIPT = os.path.join(REPO, PRODUCER)
 
 #: The release carries the store and the manifest that describes it (oxyc/den#113). The store is the store
