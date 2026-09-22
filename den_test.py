@@ -51,9 +51,11 @@ class Listing(unittest.TestCase):
 
 class Dispatch(unittest.TestCase):
     def test_a_stage_that_is_not_in_the_order_is_refused_with_the_order(self):
-        result = den("stage", "worklist", "--dataset-version", "test")
+        # A name no stage has and none is likely to take. It used to be "worklist", which stopped testing
+        # anything the day that stage landed — a refusal test has to name something that stays unknown.
+        result = den("stage", "reticulate", "--dataset-version", "test")
         self.assertEqual(result.returncode, 1)
-        self.assertIn("no stage named 'worklist'", result.stderr)
+        self.assertIn("no stage named 'reticulate'", result.stderr)
         self.assertIn("store", result.stderr)
 
     def test_a_missing_input_is_refused_with_the_command_that_builds_it(self):
@@ -109,16 +111,35 @@ class Dispatch(unittest.TestCase):
         self.assertFalse(pipeline.stage("store").SPENDS)
 
     def test_den_run_leaves_out_the_stage_that_buys(self):
-        """`den run` over an out-dir holding nothing must not reach the paid pass at all.
+        """`den run` must not reach the paid pass unless asked for it by name.
 
-        The refusal it would otherwise raise is about a missing input, which is the RIGHT answer for the
-        wrong reason: fill that input in and the same command starts buying. So the check is that the
-        stage is not attempted — the run reaches a later stage's complaint, never classify's.
+        The first stage has to SUCCEED for this to say anything. An out-dir holding nothing refuses at
+        stage one, and then classify is unreached whether or not the gate works — the assertion passes
+        while testing nothing, which is the shape the publish gate's own test has to live with because
+        publish is last. So the worklist is stubbed past, and the two runs are compared at the stage
+        after it.
         """
         with tempfile.TemporaryDirectory() as out:
-            gated = den("run", "--dataset-version", "test", "--out-dir", out)
+            stub = os.path.join(out, "stub")
+            with open(stub, "w", encoding="utf-8") as fh:
+                fh.write("#!/usr/bin/env python3\n"
+                         "import json, sys\n"
+                         "argv = sys.argv[1:]\n"
+                         "json.dump([{'tmdbId': 1, 'mediaType': 'movie'}],\n"
+                         "          open(argv[argv.index('--out') + 1], 'w'))\n")
+            os.chmod(stub, 0o755)
+            previous = os.environ.get("DEN_BACKFILL_BIN")
+            os.environ["DEN_BACKFILL_BIN"] = stub
+            self.addCleanup(os.environ.__setitem__, "DEN_BACKFILL_BIN", previous or "")
+            # `discover` because it is the one mode that reads no input file — this test is about which
+            # stages run, not about feeding the first one a TMDB dump.
+            run = ("run", "--dataset-version", "test", "--out-dir", out, "--mode", "discover")
+
+            gated = den(*run)
+            self.assertIn("==> worklist", gated.stderr, "the stub did not get the run past stage one")
             self.assertNotIn("==> classify", gated.stderr)
-            asked = den("run", "--dataset-version", "test", "--out-dir", out, "--spend")
+
+            asked = den(*run, "--spend")
             self.assertIn("==> classify", asked.stderr)
 
     def test_set_wants_a_pair(self):

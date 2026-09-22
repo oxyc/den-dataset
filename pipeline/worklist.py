@@ -47,6 +47,10 @@ PRODUCER = artifacts.BACKFILL
 HOW = "taxonomy-backfill worklist"
 #: Writes two files into the out-dir. Cheap to repeat — the cost is downstream, at `enrich`.
 PUBLISHES = False
+#: TMDB's own API and its public daily dumps, neither of them billed. What this stage DECIDES is expensive —
+#: a universe of 1.2M ids is an enrichment nobody meant to start — which is why the mode is refused rather
+#: than defaulted here, rather than gated by a flag: the size is the choice, not the running.
+SPENDS = False
 COMMAND = "worklist"
 
 #: Where `swift build -c release` leaves the binary, repo-relative. The same build `pipeline/embed.py`
