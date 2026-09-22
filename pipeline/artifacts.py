@@ -30,7 +30,7 @@ ARTICLES = Artifact(
 #: TMDB's daily ID export, one per media — the universe `worklist --mode export` parses. A public static
 #: file (no API key), and the only input to the full run's universe that comes from outside this repo.
 #: `scripts/build-worklist.py`'s `fetch_export` is what fetches it, under exactly these names, and leaves it
-#: GZIPPED; the Swift reader takes text, so the decompression it does not do is part of the `how`.
+#: GZIPPED; the worklist stage's parse takes text, so the decompression it does not do is part of the `how`.
 EXPORT_MOVIE = Artifact(
     name="export_movie",
     filename="movie_ids.json",

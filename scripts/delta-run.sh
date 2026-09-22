@@ -11,7 +11,7 @@
 #                           → new titles since the window, above the vote floor, minus what's published
 #   enrich                  → TMDB + Wikipedia plot for those ids only
 #   ---- THE PASS STOPS HERE ----
-#   classify → embed → finalize → publish
+#   articles → classify → docfacts → embed → finalize → facts → corpus → store → publish
 #
 # WHY IT STOPS: the second half BUYS — the classify stage is the one step that spends at a paid provider —
 # so it is deliberately not unattended. This script ends at that boundary and prints the commands to finish,
@@ -102,18 +102,24 @@ echo "== enriched $total new title(s) into batch(es):$batches =="
 [ "$left" -gt 0 ] && echo "   ($left still pending — re-run, or raise LIMIT)"
 cat <<EOF
 
-Next, by hand — the classify stage BUYS, so it is not run unattended:
+Next, by hand — the classify stage BUYS, so it is not run unattended. In \`./den stages\` order:
 
   1. Dump the articles the classify pass reads:
-       $BIN dump-articles --enriched-dir $OUT_DIR/enriched --out $OUT_DIR/articles.jsonl
+       ./den stage articles --out-dir $OUT_DIR --dataset-version <ver>
   2. Classify — with --plan first, to see the call and cost plan:
        ./den stage classify --out-dir $OUT_DIR --dataset-version <ver> --plan
        ./den stage classify --out-dir $OUT_DIR --dataset-version <ver>
-  3. Then embed, finalize and publish:
+  3. Scrape the document's director and genre, embed, and finalize:
+       ./den stage docfacts --out-dir $OUT_DIR --dataset-version <ver>
        ./den stage embed --out-dir $OUT_DIR --dataset-version <ver>
        $BIN finalize --out-dir $OUT_DIR
-       scripts/publish-dataset.sh $OUT_DIR
+  4. Merge the facts (its two scrape passes are docs/OPERATE.md step 6a), join the corpus, build the
+     store, publish:
+       ./den stage facts --out-dir $OUT_DIR --dataset-version <ver>
+       ./den stage corpus --out-dir $OUT_DIR --dataset-version <ver> --expect <titles>
+       ./den stage store --out-dir $OUT_DIR --dataset-version <ver> --stamp-meta $OUT_DIR/dataset.meta.json
+       ./den stage publish --out-dir $OUT_DIR --dataset-version <ver>
 
-(\`embed-corpus\` reads the shipped labels blob, so a new id is only embeddable once the classify pass's
-rows have reached it — see docs/OPERATE.md for the order.)
+(\`docfacts\` and \`embed-corpus\` read the shipped labels blob, so a new id is only scraped and embedded
+once the classify pass's rows have reached it — see docs/OPERATE.md for the order.)
 EOF

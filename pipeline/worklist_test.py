@@ -18,6 +18,7 @@ dump.
 """
 import json
 import os
+import re
 import tempfile
 import unittest
 
@@ -244,6 +245,19 @@ class Delta(Staged):
             worklist.universe(context(self.out, mode="delta", since="2026-09-07"), "movie", FakeTMDB({}))
         self.assertIn("taxonomy-backfill finalize", str(refused.exception))
 
+    def test_a_labels_file_that_names_no_records_is_refused_rather_than_read_as_nothing_published(self):
+        """A wrong `--set vector_labels=…` is a file with no `records` in it. Read as an empty set it skips
+        nothing, and the delta re-enriches the published catalogue at the per-title price. `docfacts`
+        refuses the same shape, and so did the Swift command."""
+        with open(os.path.join(self.out, "labels-t02.json"), "w", encoding="utf-8") as fh:
+            json.dump({"taxonomyVersion": "t02"}, fh)
+        client = FakeTMDB({"movie": [[12]]})
+        with self.assertRaises(StageError) as refused:
+            worklist.universe(context(self.out, mode="delta", since="2026-09-07"), "movie", client)
+        self.assertIn("labels-t02.json", str(refused.exception))
+        self.assertIn("no records", str(refused.exception))
+        self.assertEqual(client.asked, [])
+
     def test_a_delta_that_found_nothing_is_not_a_failure(self):
         """The answer on a quiet day. Refusing it would fail the daily pass for doing its job — which is
         why `scripts/delta-run.sh` counts titles that survived enrichment rather than worklist rows."""
@@ -268,6 +282,21 @@ class Delta(Staged):
         for name in ("vector_labels", "universe_movie", "universe_tv"):
             self.assertIn(f"--set \"{name}=", invocation, f"the daily pass does not point {name} anywhere")
 
+    def test_the_hand_off_names_commands_that_exist_in_the_pipelines_order(self):
+        """What the daily pass prints for a person to run next. It named `dump-articles` after that command
+        was deleted — the binary answers `unknown command` — and skipped `docfacts`, whose absence composes
+        a different vector space. Every stage from the dump on, in `STAGES` order, and every `$BIN` command
+        one the binary still declares."""
+        with open(os.path.join(REPO, "scripts", "delta-run.sh"), encoding="utf-8") as fh:
+            script = fh.read()
+        with open(os.path.join(REPO, "Sources", "taxonomy-backfill", "main.swift"), encoding="utf-8") as fh:
+            commands = set(re.findall(r'^\s*name: "([a-z-]+)",$', fh.read(), re.M))
+        hand_off = script.split("Next, by hand")[1]
+        stages = list(dict.fromkeys(re.findall(r"\./den stage ([a-z]+)", hand_off)))
+        self.assertEqual(stages, list(pipeline.STAGES[pipeline.STAGES.index("articles"):]))
+        for command in re.findall(r'\$BIN"? ([a-z-]+)', script):
+            self.assertIn(command, commands, f"delta-run.sh runs `{command}`, which the binary does not have")
+
     def test_the_media_the_daily_pass_enriches_are_the_media_this_stage_builds(self):
         """The stage writes both lists in one call and the script then drains each. A media the script
         loops over and the stage does not build is a `universe-<media>.json` that is never there."""
@@ -278,6 +307,32 @@ class Delta(Staged):
 
 
 class Written(Staged):
+    def test_the_file_is_the_swift_encoders_layout(self):
+        """A golden, not a round trip through `write`: sorted keys, two-space indent, ` : ` and no trailing
+        newline — what `taxonomy-backfill worklist` wrote, which is how the export was proven equal to it
+        byte for byte over a 1.2M-line dump. Nothing else in CI holds the layout that proof rests on."""
+        worklist.run(context(self.out, mode="export"))
+        with open(os.path.join(self.out, "universe-movie.json"), "rb") as fh:
+            self.assertEqual(fh.read(), b'[\n  {\n    "mediaType" : "movie",\n    "tmdbId" : 11\n  },\n'
+                                        b'  {\n    "mediaType" : "movie",\n    "tmdbId" : 12\n  }\n]')
+
+    def test_an_empty_universe_is_written_as_an_empty_list(self):
+        """`[]`, where Swift wrote `[\\n\\n]`. Only a quiet delta writes one, nothing hashes it, and both
+        parse to the same nothing — so the port's spelling is pinned rather than the encoder quirk."""
+        worklist.run(context(self.out, mode="delta", since="2026-09-07"),
+                     FakeTMDB({"movie": [[]], "tv": [[]]}))
+        with open(os.path.join(self.out, "universe-movie.json"), "rb") as fh:
+            self.assertEqual(fh.read(), b"[]")
+
+    def test_a_write_that_fails_part_way_leaves_the_previous_universe(self):
+        """In place, the file is truncated before the rows arrive, and `enrich` drains a short worklist as
+        a finished run."""
+        path = os.path.join(self.out, "universe-movie.json")
+        worklist.write(path, [worklist.entry(11, "movie")])
+        with self.assertRaises(TypeError):
+            worklist.write(path, [worklist.entry(11, "movie"), {"tmdbId": object(), "mediaType": "movie"}])
+        self.assertEqual(self.universe(path), [{"tmdbId": 11, "mediaType": "movie"}])
+
     def test_the_file_is_byte_stable_for_one_universe(self):
         """Two runs over one dump must produce one file. It is read by a person as often as by `enrich`,
         and a key order that moves makes every diff of two universes unreadable."""

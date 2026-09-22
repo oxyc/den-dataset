@@ -36,6 +36,7 @@ import sys
 
 from . import artifacts
 from .contract import StageError, bind
+from lib import cache as caching
 from lib import tmdb as tmdb_api
 
 NAME = "worklist"
@@ -134,8 +135,14 @@ def known_ids(path, media):
     """
     with open(path, encoding="utf-8") as handle:
         labels = json.load(handle)
-    return {record["tmdbId"] for record in labels.get("records", [])
-            if record.get("mediaType") == media}
+    # A file with no records is not "nothing published" — it is the wrong file, and read as an empty set
+    # it skips nothing, so the delta bills the whole catalogue again. `docfacts` refuses the same shape.
+    records = labels.get("records") if isinstance(labels, dict) else None
+    if not records:
+        raise StageError(f"worklist: {path} names no records, so there is nothing to tell a delta what is "
+                         f"already published. Point vector_labels at the published labels; build them "
+                         f"with: taxonomy-backfill finalize")
+    return {record["tmdbId"] for record in records if record.get("mediaType") == media}
 
 
 def collect(client, media, params, limit=None):
@@ -199,14 +206,20 @@ def universe(ctx, media, client=None):
 
 
 def write(path, rows):
-    """The worklist, pretty-printed with sorted keys.
+    """The worklist, pretty-printed with sorted keys and ` : ` — the Swift encoder's layout.
 
     Byte-stable across runs: the file is read by a human as often as by `enrich`, and a key order that
-    moves makes every diff of two universes unreadable.
+    moves makes every diff of two universes unreadable. Swift's layout rather than Python's so a universe
+    diffs cleanly against every one the Swift command wrote. The one place it does not follow Swift is an
+    empty list: `[]`, where Swift wrote `[\\n\\n]`. Nothing hashes a worklist, both parse to the same
+    nothing, and an empty one only ever comes from a quiet delta, never from a list worth diffing.
+
+    Swapped in whole rather than written in place: an interrupted write leaves a truncated universe, and
+    `enrich` drains a short worklist as a finished run.
     """
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(rows, handle, indent=2, separators=(",", " : "), sort_keys=True, ensure_ascii=False)
+    body = json.dumps(rows, indent=2, separators=(",", " : "), sort_keys=True, ensure_ascii=False)
+    caching.write_atomically(path, body.encode("utf-8"))
 
 
 def run(ctx, client=None):
