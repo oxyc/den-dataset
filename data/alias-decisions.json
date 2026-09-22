@@ -43,6 +43,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 14405,
+      "alias": "South of the Border",
+      "why": "Only Wikidata's en altLabel supports it for Beverly Hills Chihuahua; no other language carries it and no release used it. It is the exact title of Oliver Stone's documentary, the Taxi Driver/Alien pattern: a popular title borrowing another work's name"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 16871,
       "alias": "Spell",
       "why": "Spell is a separate 2020 film; Drag Me to Hell never carried it"
@@ -840,12 +846,6 @@
       "tmdbId": 13892,
       "alias": "Crime 101",
       "why": "TMDB records it as an alternative title"
-    },
-    {
-      "mediaType": "movie",
-      "tmdbId": 14405,
-      "alias": "South of the Border",
-      "why": "unsure: only Wikidata's en altLabel supports it and no other language carries it; kept because a wrong keep only adds a result, and Stone's documentary still owns the exact name"
     },
     {
       "mediaType": "movie",
