@@ -221,7 +221,7 @@
   "tv:97513",
   "tv:99581"
  ],
- "derivedFrom": "Wikipedia plot text (hasWikiPlot titles only), via the LLM spec in premise-tags-wip/GEN-SPEC-PROD.md: 8-12 open-vocabulary structural tags, most-defining-first, NO proper nouns, NO genre or mood words; extended by the v2 run over the re-ground Wikipedia corpus, spec data/premise-tags-v1.SPEC.md, evidence limited to Jev-classified story-premise and theme-subject sections; extended 2026-09-22 by 166 titles from out-repass/handoff-0922 under the same spec: 8 from story-premise and theme-subject sections, 158 series whose articles are organised by season, tagged from the lead and the season sections",
+ "derivedFrom": "Wikipedia plot text (hasWikiPlot titles only), via the LLM spec in premise-tags-wip/GEN-SPEC-PROD.md: 8-12 open-vocabulary structural tags, most-defining-first, NO proper nouns, NO genre or mood words; extended by the v2 run over the re-ground Wikipedia corpus, spec data/premise-tags-v1.SPEC.md, evidence limited to Jev-classified story-premise and theme-subject sections; extended 2026-09-22 by 166 titles from out-repass/handoff-0922 under the same spec: 8 from story-premise and theme-subject sections, 158 series whose articles are organised by season, tagged from the lead and the season sections; 156 season-organised series and thin-plot titles re-tagged by Sonnet for their premise, production-history tags removed",
  "embeddedBy": "bge-m3 via den-embed; the vectors are vectors-premise.bin, aligned to premise-ids.json order",
  "index": "premise-v2",
  "schema": 1,
@@ -7257,14 +7257,14 @@
    "friend-zone-breakthrough"
   ],
   "movie:103475": [
-   "blues-history-documentary",
-   "sacred-vs-profane-tension",
-   "music-heritage-lives",
-   "blues-musicians-legacies",
-   "documentary-fiction-hybrid",
-   "spiritual-musical-tradition",
-   "american-music-roots",
-   "blues-artist-profiles"
+   "blues-musicians-biographical-anthology",
+   "mix-of-reenactment-and-documentary",
+   "modern-musicians-covering-old-songs",
+   "tension-between-sacred-and-profane-music",
+   "musician-turns-to-preaching",
+   "rediscovery-of-a-forgotten-musician",
+   "blending-fiction-and-archival-footage",
+   "celebrating-overlooked-blues-legends"
   ],
   "movie:10348": [
    "street-racer-vs-criminal-driver",
@@ -12742,14 +12742,12 @@
    "reconnecting-with-estranged-child"
   ],
   "movie:106023": [
-   "silent-cinema-trick-film-magic",
-   "body-parts-detached-disturbance",
-   "medieval-satire-special-effects",
-   "early-cinema-innovation",
-   "supernatural-transformations",
-   "visual-trickery-wonder",
-   "cinema-foundations",
-   "whimsical-grotesque"
+   "detached-talking-head-illusion",
+   "medieval-setting-used-for-trick-effects",
+   "multiple-exposure-special-effects",
+   "body-parts-come-to-life-separately",
+   "satirical-take-on-medieval-chivalry",
+   "early-trick-photography-showcase"
   ],
   "movie:106024": [
    "stage-magic-multiplication",
@@ -22012,14 +22010,13 @@
    "animal-rescue-mission"
   ],
   "movie:110761": [
-   "body-swap-gender",
-   "experimental-black-and-white-film",
-   "poetic-surreal-imagery",
-   "gender-transformation-mystery",
-   "mysterious-two-souls",
-   "spiritual-physical-exchange",
-   "existential-meditation",
-   "avant-garde-cinema"
+   "woman-trapped-in-a-mans-body",
+   "man-trapped-in-a-womans-body",
+   "stream-of-consciousness-voiceover",
+   "virgin-birth-imagery",
+   "black-and-white-experimental-visual-poem",
+   "body-and-gender-dissonance",
+   "poetic-monologue-over-imagery"
   ],
   "movie:11077": [
    "troublemaking-adopted-child",
@@ -22129,14 +22126,16 @@
    "aspiration-leads-to-crisis"
   ],
   "movie:110838": [
-   "aids-crisis-allegory-queer-suffering",
-   "crucifixion-reimagined-gay-couple",
-   "queer-persecution-arrested-tortured",
-   "hiv-positive-artist-mortality",
-   "section-28-resistance",
-   "religious-imagery-subversion",
-   "arthouse-experimental-form",
-   "love-destroyed-by-state"
+   "gay-couple-cast-as-christ-figure",
+   "crucifixion-story-retold-as-allegory",
+   "persecution-of-a-gay-couple",
+   "dying-director-confronts-his-own-mortality",
+   "religious-icon-harassed-by-paparazzi",
+   "betrayer-figure-exploited-in-advertising",
+   "almost-wordless-visual-tableaux",
+   "nonlinear-religious-allegory",
+   "aids-era-persecution-allegory",
+   "apostles-reimagined-as-women"
   ],
   "movie:11084": [
    "antisocial-family-comedy",
@@ -31404,14 +31403,16 @@
    "near-death-animal-rehabilitation"
   ],
   "movie:11598": [
-   "sketch-comedy-anthology-parody",
-   "film-genres-satirized",
-   "exploitation-films-mocked",
-   "television-commercials-spoofed",
-   "fistful-of-yen-kung-fu-satire",
-   "absurdist-comedy-humor",
-   "detroit-hell-on-earth-gag",
-   "exploitation-mockery"
+   "sketch-anthology-parodying-film-genres",
+   "fake-coming-attractions-trailers",
+   "martial-arts-film-parody-segment",
+   "mock-news-and-commercial-parodies",
+   "running-gag-mocking-a-citys-crime-rate",
+   "spoofs-of-exploitation-film-tropes",
+   "fictional-b-movie-studio-framing-device",
+   "audience-participation-gimmick-parody",
+   "disaster-film-trailer-parody",
+   "unconnected-comedic-vignettes"
   ],
   "movie:1159831": [
    "reanimated-companion-bride",
@@ -43346,14 +43347,14 @@
    "hidden-clues-treasure-hunt"
   ],
   "movie:1244492": [
-   "artist-rivalry-to-partnership",
-   "coming-of-age-drawing-passion",
-   "outgoing-vs-recluse-dynamic",
-   "manga-adaptation-animation",
-   "artistic-growth-inspiration",
-   "competitive-fervor-collaboration",
-   "hand-drawn-amateur-artists",
-   "youth-artistic-discovery"
+   "rival-artists-become-creative-partners",
+   "outgoing-girl-vs-reclusive-prodigy",
+   "talent-envy-sparks-rivalry",
+   "two-girls-bonded-by-drawing",
+   "truant-recluse-with-hidden-talent",
+   "childhood-rivalry-turns-to-partnership",
+   "coming-of-age-through-shared-craft",
+   "manga-artists-origin-story"
   ],
   "movie:12445": [
    "final-battle-at-school",
@@ -48895,14 +48896,14 @@
    "quest-to-reunite-scattered-friends"
   ],
   "movie:128043": [
-   "musician-self-destruction-alcoholism",
-   "marriage-breakdown-infidelity",
-   "talented-irresponsible-protagonist",
-   "family-disintegration-tragedy",
-   "character-study-close-observation",
-   "domestic-alienation",
-   "social-antisocial-behavior",
-   "depression-and-decline"
+   "self-destructive-alcoholic-musician",
+   "violinist-ruins-his-marriage",
+   "drinking-destroys-a-family",
+   "family-disintegration",
+   "talented-but-irresponsible-artist",
+   "antisocial-behavior-alienates-loved-ones",
+   "portrait-of-a-troubled-musician",
+   "domestic-conflict-and-antagonism"
   ],
   "movie:1280440": [
    "escape-from-communism",
@@ -68516,14 +68517,14 @@
    "childhood-friends-turned-family"
   ],
   "movie:1457705": [
-   "friendship-breakdown-alpine-holiday",
-   "two-couples-relationship-tensions",
-   "intimate-group-dynamics-collapse",
-   "trust-betrayal-unraveling",
-   "couples-therapy-crisis",
-   "long-standing-bonds-destroyed",
-   "emotional-intensity-escalation",
-   "psychological-thriller-dynamics"
+   "two-couples-holiday-turns-toxic",
+   "long-friendship-unravels-on-vacation",
+   "hidden-tensions-among-old-friends",
+   "alpine-holiday-setting",
+   "idyllic-vacation-goes-wrong",
+   "couples-trip-exposes-old-wounds",
+   "friendship-group-in-crisis",
+   "medical-crisis-during-the-trip"
   ],
   "movie:14578": [
    "sent-to-boarding-school-as-punishment",
@@ -105060,15 +105061,14 @@
    "comic-mistaken-identity"
   ],
   "movie:196391": [
-   "slapstick-photography-studio",
-   "prop-chain-reaction",
-   "janitor-transforms-bull",
-   "bullfight-parody",
-   "photographer-protagonist",
-   "objects-falling-chaos",
-   "actuality-film-satire",
-   "studio-self-portrait",
-   "substitute-splice-trick"
+   "photography-studio-turns-chaotic",
+   "mistaken-identity-mix-up",
+   "janitor-transforms-into-bull",
+   "mock-bullfight-parody",
+   "chain-reaction-of-mishaps",
+   "camera-crashes-through-window",
+   "staged-photo-shoot-disrupted",
+   "silent-era-visual-trick-comedy"
   ],
   "movie:196396": [
    "fortune-telling-witch",
@@ -119420,13 +119420,13 @@
   ],
   "movie:220436": [
    "sex-education-documentary",
-   "sexual-content-controversial",
-   "sexology-discussion-sketches",
-   "educational-drama",
-   "explicit-sexuality",
-   "scientific-approach-to-sex",
-   "taboo-subject-matter",
-   "censorship-battles"
+   "panel-of-sexologists",
+   "explicit-unsimulated-sex-scenes",
+   "staged-comedic-sketches",
+   "contraception-advice-segments",
+   "documentary-and-reenactment-blend",
+   "animated-interludes",
+   "sex-manual-for-general-audience"
   ],
   "movie:220447": [
    "demon-butler-contract",
@@ -177926,14 +177926,14 @@
    "henchmen-hunt-the-heroine"
   ],
   "movie:32329": [
-   "harlem-renaissance-gay-identity",
-   "langston-hughes-legacy",
-   "african-american-queer-experience",
-   "non-linear-impressionist-narrative",
-   "archive-footage-dramatic-recreation",
-   "gay-black-desire-historical",
-   "artistic-cultural-period-piece",
-   "censorship-and-reclamation"
+   "reimagined-funeral-of-a-poet",
+   "meditation-on-black-gay-identity",
+   "archival-footage-blended-with-staged-scenes",
+   "non-linear-essay-film",
+   "gay-love-story-in-a-dreamlike-nightclub",
+   "poetry-recited-over-imagery",
+   "reclaiming-a-historical-figure-as-gay",
+   "cultural-renaissance-era-setting"
   ],
   "movie:32331": [
    "scattering-ashes-of-lost-friend",
@@ -185744,14 +185744,13 @@
    "son-as-filmmaker"
   ],
   "movie:338636": [
-   "filmmaker-testament",
-   "house-memories-ghostly-voices",
-   "portrait-of-place-departing",
-   "posthumous-reflection",
-   "invisible-presence-haunting",
-   "personal-memory-film",
-   "metaphysical-meditation",
-   "end-of-era"
+   "testamentary-self-portrait",
+   "voiceover-narration-no-visible-speaker",
+   "disembodied-voices-revisit-old-house",
+   "house-visited-before-being-sold",
+   "blending-past-and-present-through-voice",
+   "filmmaker-confronts-his-own-mortality",
+   "religious-undertones-in-personal-memoir"
   ],
   "movie:338676": [
    "zombie-apocalypse-sequel",
@@ -192234,14 +192233,16 @@
    "highway-construction-scheme"
   ],
   "movie:35166": [
-   "power-abuse-public-humiliation",
-   "forced-reenactment-degradation",
-   "mockumentary-structure-satirical",
-   "communist-regime-critique-incompetence",
-   "youth-victimized-authority",
-   "absurdist-official-stupidity",
-   "tragic-outcome-social-commentary",
-   "state-violence-casual-cruelty"
+   "authorities-force-youths-to-reenact-a-crime",
+   "film-within-a-film-structure",
+   "mockumentary-of-a-forced-confession",
+   "cautionary-reenactment-turns-fatal",
+   "prosecutor-abuses-power-over-minors",
+   "public-humiliation-as-punishment",
+   "repeated-restaging-of-the-same-incident",
+   "propaganda-film-about-dangers-of-drinking",
+   "bystanders-watch-youths-degradation",
+   "accidental-death-during-a-staged-scene"
   ],
   "movie:35169": [
    "animals-vs-developer",
@@ -196625,14 +196626,13 @@
    "monotonous-demoralizing-job"
   ],
   "movie:36108": [
-   "anthology-shorts-cinema-celebration",
-   "international-filmmakers-collection",
-   "cinema-love-letter-festival",
-   "multiple-director-visions",
-   "thirty-three-three-minute-films",
-   "festival-cannes-anniversary",
-   "cinema-going-experience-theme",
-   "directors-personal-takes"
+   "anthology-of-three-minute-shorts",
+   "multiple-directors-one-theme",
+   "tribute-to-the-experience-of-moviegoing",
+   "each-short-set-in-a-cinema",
+   "omnibus-film-celebrating-cinema-itself",
+   "directors-reflect-on-why-they-make-films",
+   "closing-homage-to-a-classic-film"
   ],
   "movie:36113": [
    "promise-to-dead-friend",
@@ -247850,14 +247850,15 @@
    "childhood-best-friends-engaged"
   ],
   "movie:45054": [
-   "spanish-civil-war-historical-backdrop",
-   "father-son-reconciliation-dying",
-   "priest-religious-founder-biography",
-   "journalist-investigation-past",
-   "religious-order-history-and-influence",
-   "childhood-friendship-fractured",
-   "ideological-conflict-brothers-at-war",
-   "personal-history-political-history"
+   "journalist-investigates-dying-fathers-past",
+   "estranged-son-and-authoritarian-father",
+   "childhood-friend-of-the-father-becomes-a-priest",
+   "brothers-on-opposing-sides-of-civil-war",
+   "religious-persecution-during-a-civil-war",
+   "friend-later-canonized-as-a-saint",
+   "wartime-friendship-torn-apart-by-ideology",
+   "framing-story-of-a-deathbed-reconciliation",
+   "founding-of-a-religious-movement-dramatized"
   ],
   "movie:45061": [
    "rock-band-ambition",
@@ -322876,14 +322877,15 @@
    "wife-becomes-fighter"
   ],
   "movie:64362": [
-   "adolescent-therapy-coming-of-age",
-   "teenage-romance-subplot",
-   "brief-psychotherapy-process",
-   "unconscious-mind-mechanisms",
-   "humor-in-psychological-healing",
-   "therapist-patient-relationship",
-   "personal-growth-therapy",
-   "multiple-therapy-techniques"
+   "troubled-teenager-in-brief-therapy",
+   "psychotherapist-with-no-backstory-shown",
+   "illustrated-visualization-of-the-unconscious",
+   "teen-romance-subplot-alongside-therapy",
+   "stages-of-a-therapy-session-depicted",
+   "humorous-take-on-psychotherapy",
+   "patients-eye-view-of-a-therapist",
+   "self-image-issues-in-adolescence",
+   "therapy-techniques-demonstrated-onscreen"
   ],
   "movie:64386": [
    "religious-persecution-of-a-healer",
@@ -362360,14 +362362,15 @@
    "family-forced-to-flee-home"
   ],
   "movie:8071": [
-   "factory-strike-class-struggle",
-   "political-marxist-message",
-   "post-1968-french-unrest",
-   "capitalism-critique-social-destruction",
-   "brechtian-distancing-technique",
-   "media-tv-commercials-critique",
-   "political-drama-essay-film",
-   "social-consciousness-raising"
+   "american-reporter-and-french-husband-witness-a-strike",
+   "factory-workers-strike",
+   "class-struggle-after-civil-unrest",
+   "cross-sectioned-factory-set",
+   "brechtian-distancing-techniques",
+   "direct-camera-address-breaking-fourth-wall",
+   "tv-commercial-director-confronts-activism",
+   "self-reflexive-filmmaking-about-a-strike",
+   "almost-entirely-set-inside-one-factory"
   ],
   "movie:80713": [
    "caring-for-abusive-parent",
@@ -382683,14 +382686,15 @@
    "virtual-reality-data-heist"
   ],
   "movie:8985": [
-   "anthology-short-films-european-identity",
-   "international-directors-vision",
-   "multicultural-perspective-on-europe",
-   "eu-celebration-festival",
-   "artist-personal-views",
-   "visual-poetry-shorts",
-   "diverse-filmmaking-styles",
-   "cultural-exploration"
+   "anthology-of-national-short-films",
+   "one-director-per-eu-member-state",
+   "five-minute-vignettes-on-europe",
+   "migrants-arriving-by-boat",
+   "wordless-teen-romance-vignette",
+   "naked-bodies-painted-with-flags",
+   "shower-scene-in-eu-accession-order",
+   "multi-director-omnibus-on-national-identity",
+   "reflections-on-european-unification"
   ],
   "movie:89857": [
    "road-trip-comedy",
@@ -404180,14 +404184,11 @@
    "recovery-after-exploitation"
   ],
   "tv:1026": [
-   "anthology-television-episodes",
-   "steven-spielberg-series",
-   "varied-story-genres",
-   "science-fiction-fantasy-tales",
-   "dramatic-storytelling-variety",
-   "episode-anthology-format",
-   "imaginative-narratives",
-   "thriller-and-drama-stories"
+   "anthology-of-standalone-wonder-tales",
+   "family-friendly-fantasy-and-sci-fi-stories",
+   "avoids-heavy-handed-moralizing",
+   "one-off-fantastical-premise-each-episode",
+   "blend-of-humor-and-gentle-supernatural-wonder"
   ],
   "tv:102619": [
    "piecing-together-blacked-out-night",
@@ -404254,14 +404255,12 @@
    "trusted-advisor-with-hidden-agenda"
   ],
   "tv:1028": [
-   "hospital-medical-drama",
-   "doctors-and-nurses-ensemble",
-   "patient-stories-episodic",
-   "surgical-procedures",
-   "medical-crisis-resolved",
-   "workplace-relationships",
-   "healthcare-institution",
-   "character-relationships-long-arc"
+   "hospital-staff-ensemble-drama",
+   "doctors-and-nurses-workplace-drama",
+   "revolving-door-of-hospital-staff",
+   "fictional-hospital-setting",
+   "workplace-romance-and-rivalry",
+   "patient-of-the-week-medical-cases"
   ],
   "tv:10283": [
    "spy-comedy",
@@ -404497,15 +404496,13 @@
    "coming-of-age-quest"
   ],
   "tv:10360": [
-   "secret-agents-action",
-   "spy-duo-partnership",
-   "covert-missions",
-   "espionage-adventure",
-   "secret-agent-action-series",
-   "undercover-operations",
-   "high-stakes-missions",
-   "international-espionage",
-   "spy-thriller-adventure"
+   "veteran-secret-agent-mentors-new-partners",
+   "spy-trio-fighting-world-domination-plots",
+   "male-female-partner-banter",
+   "sci-fi-tinged-espionage-missions",
+   "martial-arts-trained-female-agent",
+   "mentor-figure-aging-out-of-fieldwork",
+   "secret-agency-operating-without-oversight"
   ],
   "tv:103752": [
    "multi-generational-family-saga",
@@ -404861,26 +404858,20 @@
    "legend-building-quest"
   ],
   "tv:1054": [
-   "soap-opera-drama",
-   "family-rivalries-and-feuds",
-   "ongoing-storylines-multiple-families",
-   "genoa-city-setting",
-   "multi-decade-character-arcs",
-   "daytime-television-serial",
-   "romance-and-family-drama",
-   "long-running-ensemble-cast",
-   "interpersonal-conflicts-and-drama"
+   "small-town-wealthy-family-dynasties-feud",
+   "decades-long-rivalry-between-matriarchs",
+   "multigenerational-soap-opera-family-sagas",
+   "daytime-drama-of-love-and-betrayal",
+   "original-families-replaced-by-new-dynasties-over-decades",
+   "fictional-midwestern-town-social-elite"
   ],
   "tv:10543": [
-   "school-teachers-daily-lives",
-   "secondary-school-setting",
-   "teacher-ensemble-cast",
-   "education-workplace",
-   "school-life-comedy",
-   "adolescent-students-backdrop",
-   "professional-relationships-teachers",
-   "workplace-comedy-education",
-   "teacher-friendships-tensions"
+   "secondary-school-teachers-personal-lives",
+   "staffroom-ensemble-drama",
+   "pub-centered-social-scenes",
+   "teachers-behaving-immaturely",
+   "running-visual-gags-each-episode",
+   "workplace-romance-among-colleagues"
   ],
   "tv:10545": [
    "vampire-coming-out",
@@ -405309,14 +405300,13 @@
    "arranged-marriages-for-power"
   ],
   "tv:1068": [
-   "mystery-solving-with-celebrity-guests",
-   "scooby-doo-mystery-format",
-   "hour-long-episodes",
-   "guest-star-appearances",
-   "animated-mystery-comedy",
-   "celebrity-crossover-episodes",
-   "mystery-inc-adventures",
-   "animated-comedy-mystery"
+   "teen-detective-gang-solves-mysteries",
+   "rotating-celebrity-guest-star-each-episode",
+   "crossover-episodes-with-other-cartoon-characters",
+   "monster-of-the-week-unmasked-as-hoax",
+   "guest-star-joins-investigation-team",
+   "talking-dog-led-detective-agency",
+   "celebrities-voice-fictionalized-versions-of-themselves"
   ],
   "tv:106840": [
    "childhood-friends-reconnect",
@@ -405615,15 +405605,14 @@
    "a-web-of-concealment"
   ],
   "tv:10821": [
-   "educational-interactive-learning",
-   "audience-participation-puzzle",
-   "animated-dog-problem-solver",
-   "preschool-curriculum-based",
-   "child-viewer-agency-empowerment",
-   "daily-routine-mystery-solving",
-   "narrative-learning-format",
-   "interactive-clue-gathering",
-   "educational-preschool-series"
+   "animated-dog-leaves-clues",
+   "guess-the-daily-plan",
+   "viewer-participation-puzzle-solving",
+   "host-addresses-viewer-directly",
+   "paw-print-trail-following",
+   "preschool-educational-format",
+   "repeated-episode-ritual-structure",
+   "narrative-storybook-presentation"
   ],
   "tv:108255": [
    "rural-veterinary-practice",
@@ -405949,14 +405938,14 @@
    "passion-discovery"
   ],
   "tv:110173": [
-   "violent-incident-small-town",
-   "aftermath-of-assault",
-   "community-fracture",
-   "mystery-of-violence",
-   "ice-hockey-town",
-   "youth-trauma",
-   "collective-guilt",
-   "scandal-unfolds"
+   "town-obsessed-with-youth-hockey",
+   "fallout-from-a-violent-incident",
+   "small-town-sports-culture-complicity",
+   "declining-town-pins-hopes-on-team",
+   "toxic-locker-room-culture",
+   "community-protects-its-star-player",
+   "sports-as-towns-only-identity",
+   "ensemble-small-town-drama"
   ],
   "tv:110232": [
    "crumbling-marriage",
@@ -406186,14 +406175,12 @@
    "community-silence"
   ],
   "tv:11095": [
-   "vietnam-war-military-drama",
-   "combat-operations-infantry",
-   "soldier-experiences-war",
-   "platoon-relationships",
-   "realistic-warfare-portrayal",
-   "military-action-survival",
-   "wartime-trauma-and-loss",
-   "service-members-brotherhood"
+   "infantry-platoon-in-an-unpopular-overseas-war",
+   "covert-special-forces-missions-behind-enemy-lines",
+   "combat-drama-following-a-single-unit",
+   "war-trauma-and-moral-toll-on-soldiers",
+   "ground-troops-eye-view-of-war",
+   "shift-from-combat-patrols-to-covert-operations"
   ],
   "tv:110971": [
    "documentary-tutorial-format",
@@ -407397,14 +407384,11 @@
    "prison-to-spy-recruitment"
   ],
   "tv:115": [
-   "college-life-sitcom",
-   "student-community-ensemble",
    "historically-black-college-setting",
-   "spin-off-from-parent-series",
-   "student-social-and-academic-life",
-   "peer-group-friendship-dynamics",
-   "coming-of-age-college-years",
-   "community-and-identity-exploration"
+   "social-issues-on-campus",
+   "will-they-wont-they",
+   "outsider-roommate-black-college",
+   "college-coming-of-age"
   ],
   "tv:115004": [
    "small-town-murder-investigation",
@@ -407821,14 +407805,14 @@
    "clash-of-old-and-new-methods"
   ],
   "tv:116761": [
-   "julia-child-biographical-focus",
-   "cooking-show-production-history",
-   "television-creation-behind-scenes",
-   "culinary-education-pioneering",
-   "1960s-period-television-setting",
-   "french-chef-show-development",
-   "life-transformation-and-ambition",
-   "women-in-television-pioneering"
+   "chef-pioneers-tv-cooking",
+   "behind-the-scenes-television",
+   "supportive-spouse-of-trailblazer",
+   "period-set-1960s-workplace",
+   "cookbook-to-tv-adaptation",
+   "woman-breaks-into-television",
+   "book-editor-friendship",
+   "changing-gender-roles-era"
   ],
   "tv:116793": [
    "recovering-addict-fresh-start",
@@ -408542,14 +408526,14 @@
    "second-chance-at-life"
   ],
   "tv:120089": [
-   "undercover-spy-fake-family",
-   "conflicting-secret-identities",
-   "spy-and-assassin-marriage",
-   "child-telepathy-secret",
-   "espionage-with-comedy",
-   "hidden-family-discovery",
-   "international-mission-disguise",
-   "family-bonding-amid-secrets"
+   "spy-builds-a-fake-family-for-a-mission",
+   "wife-secretly-an-assassin",
+   "daughter-secretly-telepathic",
+   "family-of-strangers-hiding-secrets-from-each-other",
+   "marriage-of-convenience-for-cover",
+   "infiltrating-a-political-targets-circle",
+   "mock-family-passing-as-normal",
+   "unaware-spouses-both-leading-double-lives"
   ],
   "tv:120140": [
    "alien-technology-discovery",
@@ -408625,15 +408609,13 @@
    "pursuit-of-reinvention"
   ],
   "tv:120734": [
-   "anthology-horror-comedy-blend",
-   "supernatural-young-protagonists",
-   "child-focused-horror-tales",
-   "twisted-eerie-situations",
-   "horror-stories-for-teens",
-   "episode-based-horror-twist",
-   "magical-curse-mishaps",
-   "spooky-premise-surprises",
-   "young-viewer-horror-genre"
+   "anthology-supernatural-teen-stories",
+   "new-cast-every-episode",
+   "teen-confronts-the-uncanny",
+   "kid-horror-moral-lesson",
+   "suburban-neighborhood-uncanny-events",
+   "witch-classmate-secret",
+   "haunted-treehouse-finale"
   ],
   "tv:120835": [
    "mysterious-death",
@@ -409008,14 +408990,14 @@
    "misunderstanding-turned-feud"
   ],
   "tv:12298": [
-   "boy-with-sentient-toys",
-   "space-adventures-with-toys",
-   "animated-alien-companions",
-   "childhood-fantasy-worlds",
-   "toy-characters-come-alive",
-   "science-fiction-children",
-   "boy-and-companions",
-   "space-exploration-child"
+   "boy-has-space-adventures-with-living-toys",
+   "sentient-toy-companions",
+   "alien-doll-and-robot-sidekick",
+   "child-explores-outer-space",
+   "toys-that-come-to-life",
+   "pull-string-toy-alien-friend",
+   "family-life-alongside-secret-space-adventures",
+   "childhood-imagination-made-real"
   ],
   "tv:123138": [
    "vigilante-serial-killer",
@@ -409048,14 +409030,14 @@
    "adopted-by-kind-stranger"
   ],
   "tv:12323": [
-   "anthology-mystery-stories",
-   "fact-or-fiction-audience-mystery",
-   "supernatural-paranormal-tales",
-   "coincidence-and-destiny-themes",
-   "truth-versus-fabrication-puzzle",
-   "urban-legend-and-strange-events",
-   "revelation-of-truth-at-end",
-   "viewer-engagement-guessing-game"
+   "true-or-false-stories",
+   "viewer-guesses-real-fabricated",
+   "anthology-paranormal-anecdotes",
+   "urban-legends-retold",
+   "reveal-at-episode-end",
+   "host-narrated-anthology",
+   "multiple-stories-per-episode",
+   "supernatural-coincidence-tales"
   ],
   "tv:123349": [
    "reluctant-belief-in-magic",
@@ -409909,16 +409891,15 @@
    "team-of-cadets"
   ],
   "tv:126485": [
-   "superpower-family-discovery",
-   "secret-superhuman-abilities",
-   "parent-child-power-bond",
-   "secret-agent-past-revealed",
-   "teenage-superpower-awakening",
-   "family-drama-fantasy-blend",
-   "hidden-power-inheritance",
-   "former-operative-protection",
-   "high-school-supernatural-chaos",
-   "power-family-bonds"
+   "teens-inherit-parents-powers",
+   "retired-superpowered-agents",
+   "agency-recruits-superpowered-teens",
+   "covert-agent-run-school",
+   "assassin-hunts-retired-agents",
+   "parents-hide-their-past",
+   "powers-run-in-family",
+   "black-ops-past-resurfaces",
+   "undercover-agent-teacher"
   ],
   "tv:12650": [
    "guilt-over-a-siblings-death",
@@ -410523,14 +410504,12 @@
    "petty-power-games"
   ],
   "tv:12832": [
-   "predators-sci-fi-premise",
-   "creature-menace",
-   "science-fiction-thriller",
-   "danger-lurking",
-   "paranormal-entity",
-   "supernatural-horror",
-   "invasive-threat",
-   "survival-against-creatures"
+   "anthology-of-predatory-characters",
+   "vampires-and-supernatural-antagonists",
+   "standalone-stories-of-desire-and-power",
+   "host-introduces-each-episode",
+   "corrupt-businessmen-and-femme-fatales",
+   "erotic-horror-anthology"
   ],
   "tv:128327": [
    "museum-director-drama",
@@ -410930,14 +410909,13 @@
    "guilt-and-recovery"
   ],
   "tv:12983": [
-   "mockumentary-reality-tv-satire",
-   "sketch-comedy-media-mockery",
-   "exploitation-of-ordinary-people",
-   "belgian-sketch-show",
-   "reality-tv-parody",
-   "documentary-mockery",
-   "media-satire-format",
-   "ordinary-people-satirized"
+   "mockumentary-sketches-satirizing-reality-tv",
+   "fake-talk-show-interviews-ordinary-people",
+   "exploitation-of-regular-people-by-media-satirized",
+   "host-struggles-to-keep-a-straight-face-on-camera",
+   "spoof-of-human-interest-tv-formats",
+   "tragicomic-tone-in-mock-documentary-format",
+   "sketches-target-real-tv-formats-from-the-same-network"
   ],
   "tv:12984": [
    "feuding-families-reunited",
@@ -411772,14 +411750,14 @@
    "fall-triggers-memory-loss"
   ],
   "tv:13335": [
-   "cold-case-investigation-procedural",
-   "retired-detectives-solving-old-crimes",
-   "unsolved-crime-squad-unit",
-   "wisdom-and-experience-advantage",
-   "case-by-case-mystery-solving",
-   "police-procedural-investigation",
-   "team-of-experienced-investigators",
-   "modern-investigation-of-past-crimes"
+   "retired-detectives-cold-cases",
+   "cold-case-unit-veterans",
+   "senior-officer-oversees-retirees",
+   "old-dogs-new-tricks",
+   "wisdom-versus-modern-policing",
+   "case-of-the-week",
+   "ensemble-of-mismatched-veterans",
+   "aging-detectives-prove-themselves"
   ],
   "tv:133357": [
    "dual-timeline-tech-origin-story",
@@ -412089,14 +412067,14 @@
    "spooky-mansion"
   ],
   "tv:13466": [
-   "reality-and-fantasy-blurred",
-   "musical-fantasy-interludes",
-   "characters-burst-into-song",
-   "1930s-setting-drama",
-   "depression-and-escape",
-   "diegetic-music-fantasy",
-   "potter-psychological-drama",
-   "fantasy-escape-reality"
+   "characters-lip-sync-to-period-pop-songs",
+   "bleak-reality-interrupted-by-musical-fantasy",
+   "travelling-salesman-lead",
+   "songs-express-a-characters-inner-fantasy-life",
+   "fantasy-musical-numbers-contrast-grim-reality",
+   "set-during-the-great-depression",
+   "doomed-romantic-yearning-expressed-through-song",
+   "salesman-escapes-drudgery-through-fantasy"
   ],
   "tv:134675": [
    "inheritance-windfall",
@@ -413047,14 +413025,13 @@
    "detective-lead-protagonist"
   ],
   "tv:13819": [
-   "educational-children-television",
-   "animated-learning-stories",
-   "german-children-program",
-   "mascot-character-guide",
-   "education-through-entertainment",
-   "funny-and-documentary-stories",
-   "children-educational-format",
-   "animation-learning-guide"
+   "educational-magazine-show-for-young-children",
+   "wordless-animated-mouse-elephant-and-duck-shorts",
+   "documentary-shorts-explain-everyday-processes",
+   "weekly-foreign-language-lesson-hidden-in-the-intro",
+   "humorous-stories-paired-with-educational-segments",
+   "mascot-cartoon-interludes-separate-show-segments",
+   "simple-visual-storytelling-with-no-dialogue"
   ],
   "tv:138190": [
    "space-station-comet-collision",
@@ -414125,24 +414102,24 @@
    "systemic-dysfunction"
   ],
   "tv:14396": [
-   "video-game-animation-adaptation",
-   "mario-adventures-kingdom",
-   "villain-defeat-quests",
-   "cartoon-platformer-action",
-   "heroic-brothers-team",
-   "magical-kingdom-fantasy",
-   "animated-video-game-series",
-   "adventure-based-cartoon"
+   "heroes-defend-the-kingdom",
+   "princess-and-kingdom-threatened",
+   "villains-children-attack-heroes",
+   "video-game-world-adaptation",
+   "real-world-crossover-episodes",
+   "power-up-fueled-battles",
+   "recurring-arch-villain-family",
+   "foil-the-villains-plan"
   ],
   "tv:1440": [
-   "sketch-based-comedy-format",
-   "surreal-absurdist-humor",
-   "macabre-subversive-scenarios",
-   "twist-on-ordinary-situations",
-   "dark-situational-comedy",
-   "british-sketch-tradition",
-   "unexpected-violence-and-whimsy",
-   "subversive-humor-approach"
+   "surreal-sketch-comedy",
+   "mundane-situations-turn-macabre",
+   "mock-epic-sporting-event",
+   "musicians-in-surreal-scenarios",
+   "repertory-cast-ensemble-sketches",
+   "deadpan-absurdist-humor",
+   "recurring-sketch-characters",
+   "subversion-of-ordinary-situations"
   ],
   "tv:1441": [
    "first-contact-alien-invasion-defense",
@@ -414658,14 +414635,13 @@
    "small-town-girl-abroad"
   ],
   "tv:15082": [
-   "high-school-mockumentary",
-   "multiple-character-perspectives",
-   "bullying-and-social-hierarchy",
-   "narcissistic-teacher",
-   "delinquent-student",
-   "satire-of-teenage-life",
-   "documented-chaos",
-   "ensemble-cast"
+   "actor-plays-all-leads",
+   "faux-documentary-school",
+   "three-parallel-storylines",
+   "egomaniacal-drama-teacher",
+   "snobbish-exchange-student-schemes",
+   "delinquent-facing-expulsion",
+   "principal-links-stories"
   ],
   "tv:1510": [
    "luxury-hotel-setting",
@@ -414930,15 +414906,14 @@
    "aspiring-writer-employee"
   ],
   "tv:1532": [
-   "police-detectives-partnership",
-   "buddy-cop-action",
-   "southern-california-police",
-   "street-crime-investigation",
-   "close-working-relationship",
-   "1970s-action-television",
-   "undercover-operations",
-   "informant-network-sources",
-   "crime-fighting-duo"
+   "buddy-cop-partners-with-contrasting-personalities",
+   "close-brotherly-bond-coded-as-more-than-friends",
+   "street-informant-sidekick-runs-a-bar",
+   "gruff-but-fair-police-captain-boss",
+   "distinctive-code-named-duo",
+   "case-of-the-week-street-crime",
+   "undercover-street-level-policing",
+   "odd-couple-detective-duo"
   ],
   "tv:1533": [
    "workplace-ensemble-comedy",
@@ -416374,15 +416349,14 @@
    "adolescent-soldiers-survival"
   ],
   "tv:15826": [
-   "death-docufiction-anthology",
-   "unusual-fatal-accidents",
-   "darkly-comedic-death-tales",
-   "scientific-explanation-deaths",
-   "dramatized-true-events",
-   "dark-humor-fatal-stories",
-   "accident-death-scenarios",
-   "docufiction-comedy-drama",
-   "cautionary-death-compilation"
+   "anthology-of-bizarre-deaths",
+   "comedic-death-of-week",
+   "reckless-behavior-causes-death",
+   "expert-explains-the-science",
+   "true-story-legend-blend",
+   "ironic-pun-titled-segments",
+   "docufiction-dramatized-reenactments",
+   "warning-disclaimer-framing-device"
   ],
   "tv:15830": [
    "spy-comedy",
@@ -417293,14 +417267,14 @@
    "destiny-and-reunion-quest"
   ],
   "tv:17035": [
-   "war-journalist-embedded-account",
-   "iraq-invasion-military-miniseries",
-   "soldiers-wartime-experience",
-   "military-unit-perspective",
-   "modern-warfare-documentary",
-   "true-events-adaptation-miniseries",
-   "combat-soldier-brotherhood",
-   "real-account-dramatization"
+   "embedded-reporter-with-combat-unit",
+   "marine-recon-platoon-invasion",
+   "based-on-true-reporting",
+   "ensemble-military-unit-life",
+   "real-invasion-campaign-dramatization",
+   "journalist-observes-combat",
+   "chain-of-command-tension",
+   "boredom-and-chaos-of-war"
   ],
   "tv:1705": [
    "fringe-science-task-force",
@@ -417339,16 +417313,14 @@
    "career-change-upward"
   ],
   "tv:17109": [
-   "condominium-neighbors",
-   "sitcom-physical-comedy",
-   "domestic-situations-absurd",
-   "brazilian-family-sitcom",
-   "cohabitation-mishaps",
-   "recurring-character-conflicts",
-   "practical-jokes",
-   "ensemble-cast",
-   "comedic-chaos",
-   "situational-humor"
+   "ensemble-cast-in-apartment-building",
+   "two-families-sharing-a-condominium",
+   "married-couples-bickering",
+   "multigenerational-household-comedy",
+   "domestic-comedy-of-manners",
+   "neighbor-rivalries-and-alliances",
+   "working-class-apartment-complex",
+   "extended-family-under-one-roof"
   ],
   "tv:1712": [
    "monster-family-suburban-life",
@@ -417508,14 +417480,14 @@
    "arrogant-boy-reformed"
   ],
   "tv:17450": [
-   "copycat-killer-hunt",
-   "jack-the-ripper-reference",
-   "historical-crime-reenactment",
-   "london-serial-murders",
-   "detectives-investigation",
-   "kray-twins-crimes",
-   "modern-historical-crimes",
-   "whitechapel-district"
+   "copycat-historical-murders",
+   "serial-killer-follows-a-blueprint",
+   "young-detective-veteran-partner",
+   "local-historian-consultant",
+   "new-crime-wave-each-season",
+   "organized-crime-family-returns",
+   "city-haunted-by-its-past",
+   "historical-case-reenacted-in-present"
   ],
   "tv:1746": [
    "sketch-comedy-characters",
@@ -418041,14 +418013,13 @@
    "found-family-of-friends"
   ],
   "tv:1821": [
-   "ex-convict-rehabilitation",
-   "post-prison-reintegration-struggle",
-   "crime-temptation-resist",
-   "family-loyalty-crisis",
-   "reformed-life-attempt",
-   "criminal-life-allure",
-   "british-sitcom-spin-off",
-   "prison-sequel-series"
+   "ex-convict-trying-to-go-straight",
+   "released-on-parole-resisting-relapse-into-crime",
+   "reformed-criminal-providing-for-family",
+   "temptation-of-easy-crime",
+   "father-reconnecting-with-grown-children",
+   "life-after-prison",
+   "former-cellmate-reappears-in-his-new-life"
   ],
   "tv:1823": [
    "cruise-ship-romance",
@@ -418450,14 +418421,9 @@
    "loyal-partner-sidekick"
   ],
   "tv:189": [
-   "british-sketch-comedy",
-   "comedy-troupe-satire",
-   "pythonesque-humor",
-   "60s-television-satire",
-   "variety-sketch-format",
-   "irreverent-political-satire",
-   "comedy-group-ensemble",
-   "comedic-theatrical-tradition"
+   "ensemble-sketch-comedy-troupe",
+   "host-introduces-but-never-appears-in-sketches",
+   "punchline-driven-sketch-format"
   ],
   "tv:1891": [
    "chemistry-teacher-meth-cook",
@@ -418758,14 +418724,13 @@
    "simple-values-versus-status"
   ],
   "tv:19305": [
-   "lottery-winners-ensemble-drama",
-   "working-class-lottery-winnings",
-   "wealth-transforms-characters",
-   "new-setting-each-series",
-   "lottery-dream-fulfilled",
-   "changing-lives-money",
-   "class-transformation-lottery",
-   "ensemble-life-transformation"
+   "workplace-lottery-syndicate-wins-the-jackpot",
+   "coworkers-share-a-sudden-fortune",
+   "new-syndicate-and-setting-each-season",
+   "winning-the-lottery-upends-ordinary-lives",
+   "workplace-ensemble-anthology-across-seasons",
+   "sudden-wealth-strains-relationships-and-loyalties",
+   "recurring-advisor-guides-each-new-set-of-winners"
   ],
   "tv:1931": [
    "hidden-magical-race",
@@ -419342,14 +419307,14 @@
    "dirtbike-training-academy"
   ],
   "tv:196586": [
-   "female-police-detective-lead",
-   "birmingham-police-procedural",
-   "criminal-cases-investigation",
-   "detective-inspector-solving-crimes",
-   "police-team-dynamics",
-   "case-by-case-mysteries",
-   "investigative-procedural",
-   "criminal-pursuit-and-justice"
+   "female-detective-inspector-lead",
+   "deceptively-unassuming-detective",
+   "case-of-the-week",
+   "police-station-office-politics",
+   "detective-clashes-with-colleagues",
+   "underestimated-detective-proves-herself",
+   "regional-police-force-drama",
+   "rotating-ensemble-of-colleagues"
   ],
   "tv:196614": [
    "car-accident-brings-together",
@@ -419959,14 +419924,14 @@
    "past-romance-rekindled"
   ],
   "tv:2003": [
+   "behind-the-scenes-newsroom",
    "sports-news-show-production",
-   "professional-behind-scenes-drama",
-   "broadcast-live-performance-pressure",
-   "workplace-partnerships-and-romance",
-   "ratings-competition-and-network-politics",
-   "production-team-dynamics",
-   "on-air-crisis-management",
-   "ethical-journalism-tensions"
+   "will-they-wont-they",
+   "underdog-show-fighting-cancellation",
+   "workplace-found-family",
+   "benevolent-boss-mentor-figure",
+   "ratings-pressure-network-politics",
+   "fast-paced-witty-banter"
   ],
   "tv:2004": [
    "child-genius-protagonist",
@@ -420554,14 +420519,14 @@
    "struggling-veteran-protagonist"
   ],
   "tv:202851": [
-   "university-first-year-students",
-   "grief-over-father-death",
-   "coming-out-and-identity-exploration",
-   "roommate-friendship-dynamic",
-   "family-support-and-acceptance",
-   "mental-health-struggles",
-   "sexuality-self-discovery",
-   "college-adjustment-and-growth"
+   "closeted-student-grieving-father",
+   "mismatched-university-roommates",
+   "coming-of-age-university",
+   "hidden-depression-behind-humor",
+   "first-time-exploring-sexuality",
+   "older-roommate-mentors-younger",
+   "first-year-university-adjustment",
+   "grief-processed-through-comedy"
   ],
   "tv:202864": [
    "prince-leads-hero-squad",
@@ -420780,15 +420745,14 @@
    "high-stakes-diplomacy"
   ],
   "tv:2040": [
-   "puppet-caricatures-celebrities",
-   "political-satire",
-   "contemporary-public-figures",
-   "sketch-comedy-format",
-   "satirical-news-commentary",
-   "mock-portraits-famous",
-   "topical-humor",
-   "broadcast-parody",
-   "entertainment-culture-mocked"
+   "puppet-caricatures-of-public-figures",
+   "political-satire-via-puppetry",
+   "topical-news-parody-sketches",
+   "celebrity-impersonation-puppets",
+   "musical-parody-numbers",
+   "skewering-politicians-and-royalty",
+   "satirical-sketch-anthology",
+   "mocking-real-world-headlines"
   ],
   "tv:20407": [
    "train-character-adventures",
@@ -420962,15 +420926,15 @@
    "protecting-a-child-from-authorities"
   ],
   "tv:205": [
-   "horror-parody-mockumentary",
-   "fake-1980s-television-show",
-   "low-budget-effects-pastiche",
-   "arrogant-author-framing",
-   "hospital-set-dark-comedy",
-   "deliberate-production-gaffes",
-   "meta-comedy-format",
-   "director-commentary-present-day",
-   "surreal-horror-parody"
+   "fake-lost-tv-show-rediscovered",
+   "show-within-a-show-parody",
+   "delusional-egotistical-creator-narrates-clips",
+   "deliberately-bad-eighties-production-values-parody",
+   "hospital-built-over-gates-of-hell",
+   "present-day-cast-commentary-intercut-with-footage",
+   "doctor-battles-forces-of-darkness-while-doing-hospital-admin",
+   "mockumentary-style-clip-show-framing",
+   "self-aggrandizing-horror-author-persona"
   ],
   "tv:205040": [
    "wrongful-conviction-exoneration",
@@ -421074,14 +421038,13 @@
    "family-ambition-conflict"
   ],
   "tv:2055": [
-   "animated-sketch-comedy-dark",
-   "taboo-topics-satire",
-   "adult-animation-adult-humor",
-   "dark-comedy-animation",
-   "animated-satirical-sketches",
-   "controversial-humor-animation",
-   "multiple-animation-studios",
-   "animation-style-shifting"
+   "adult-animated-sketch-anthology",
+   "darkly-satirical-sketches-on-taboo-subjects",
+   "recurring-characters-across-unrelated-sketches",
+   "wordless-melancholy-interludes-between-sketches",
+   "satire-of-arrogant-politicians-and-celebrities",
+   "shifting-animation-styles-segment-to-segment",
+   "taboo-topics-played-for-dark-comedy"
   ],
   "tv:205715": [
    "superhero-university",
@@ -421286,14 +421249,13 @@
    "bedtime-farewell"
   ],
   "tv:2072": [
-   "police-procedural-station-based",
-   "police-officers-ensemble",
-   "crime-investigation-routine",
-   "metropolitan-police-drama",
-   "officer-relationships-ongoing",
-   "case-of-the-week",
-   "public-order-maintained",
-   "workplace-police-station"
+   "police-officers-day-in-the-life",
+   "uniformed-and-plainclothes-cops-ensemble",
+   "single-police-station-setting",
+   "case-of-the-week-policing",
+   "beat-cops-and-detectives",
+   "evolving-personal-lives-of-officers",
+   "serialized-soap-style-arcs"
   ],
   "tv:20724": [
    "marriage-comedy",
@@ -422988,15 +422950,13 @@
    "underground-survival"
   ],
   "tv:21567": [
-   "science-fiction-anthology",
-   "strange-technology-stories",
-   "paranormal-phenomena-exploration",
-   "oscilloscope-introduction-narration",
-   "episode-anthology-format",
-   "futuristic-concepts-dramatized",
-   "control-voice-narrator",
-   "supernatural-science-fiction",
-   "1960s-television-classic"
+   "sci-fi-anthology-standalone-episodes",
+   "mysterious-narrator-warns-of-broadcast-takeover",
+   "monster-of-the-week-formula-in-early-episodes",
+   "hard-science-fiction-morality-tales",
+   "villain-of-the-week-alien-threat",
+   "framing-narration-opens-and-closes-episodes",
+   "cautionary-science-fiction-parables"
   ],
   "tv:215720": [
    "marriage-on-the-brink",
@@ -423205,14 +423165,13 @@
    "world-number-one-ascent"
   ],
   "tv:21699": [
-   "artist-biography-fictionalized",
-   "bohemian-brotherhood-drama",
-   "pre-raphaelite-art-world",
-   "romantic-artists-lives",
-   "creative-community-drama",
-   "art-and-passion",
-   "artist-collective",
-   "historical-artist-drama"
+   "circle-of-young-artists-founding-a-rebel-art-movement",
+   "artists-entangled-with-their-models-and-muses",
+   "tangled-love-lives-drive-the-groups-art",
+   "bohemian-friends-defy-established-art-critics",
+   "models-become-lovers-and-muses-for-multiple-painters",
+   "ensemble-drama-about-a-real-art-brotherhood",
+   "rivalry-and-romance-within-a-creative-circle"
   ],
   "tv:217088": [
    "crowdsourced-execution",
@@ -423897,14 +423856,13 @@
    "large-litter-of-puppies"
   ],
   "tv:2199": [
-   "anthology-twisted-tales",
-   "unexpected-endings",
-   "storytelling-dark-ironic",
-   "character-comeuppance",
-   "standalone-episodes",
-   "suspenseful-reveals",
-   "moral-reckoning",
-   "surprise-twist-stories"
+   "anthology-of-twist-ending-stories",
+   "standalone-episodes-different-characters",
+   "host-introduces-each-tale",
+   "dark-ironic-morality-tales",
+   "everyday-settings-turn-sinister",
+   "macabre-short-stories",
+   "ironic-comeuppance-endings"
   ],
   "tv:219937": [
    "serial-killer-protagonist",
@@ -425509,14 +425467,13 @@
    "cover-up-conspiracy"
   ],
   "tv:230": [
-   "mystery-solving-animated-series",
-   "supernatural-mysteries",
-   "young-detectives-reporters",
-   "scooby-doo-franchise-entry",
-   "monster-investigation-format",
-   "animated-adventure-comedy",
-   "recurring-characters-mysteries",
-   "children-cartoon-series"
+   "teen-gang-solves-supernatural-mysteries",
+   "talking-dog-and-younger-nephew-duo",
+   "gang-poses-as-magazine-reporters-for-access",
+   "monster-of-the-week-unmasked-as-a-hoax",
+   "absent-teammates-return-after-years-away",
+   "cowardly-dog-provides-comic-relief",
+   "reunited-full-team-dynamic"
   ],
   "tv:230069": [
    "hospital-drama",
@@ -426570,14 +426527,15 @@
    "scandal-threatens-legacy"
   ],
   "tv:238": [
-   "space-police-force",
-   "near-future-law-enforcement",
-   "solar-system-colonization-crime",
-   "frontier-justice-in-space",
-   "multinational-space-team",
-   "hard-science-fiction",
-   "moon-and-mars-bases",
-   "future-crime-investigation"
+   "space-police-force-in-near-future-colonies",
+   "new-commander-builds-a-fledgling-force",
+   "crimes-with-a-space-environment-twist",
+   "rooting-out-corrupt-officers",
+   "frontier-justice-in-the-solar-system",
+   "procedural-investigations-in-a-hostile-space-environment",
+   "recurring-fathers-legacy-theme",
+   "expanding-jurisdiction-across-space-colonies",
+   "conflict-between-human-morality-and-machine-logic"
   ],
   "tv:238005": [
    "family-secret-exposed",
@@ -426726,15 +426684,12 @@
    "revenge-killing-covered-up"
   ],
   "tv:2391": [
-   "horror-anthology-series",
-   "darkly-comedic-horror-tales",
-   "twisted-morality-payback",
-   "hosted-horror-stories",
-   "supernatural-revenge-themes",
-   "horror-with-dark-humor",
-   "episodic-horror-narratives",
-   "dark-fantasy-horror-blend",
-   "moral-punishment-consequences"
+   "host-introduced-horror-anthology",
+   "puppet-corpse-host-narrator",
+   "self-contained-macabre-tales",
+   "wisecracking-pun-filled-intros",
+   "uncensored-graphic-violence-horror",
+   "mansion-basement-framing-device"
   ],
   "tv:239362": [
    "emergency-medicine-crisis",
@@ -427677,14 +427632,14 @@
    "underworld-connections"
   ],
   "tv:2443": [
-   "fish-out-of-water-time",
-   "astronaut-awakens",
-   "time-displacement",
-   "future-world-discovery",
-   "20th-to-25th-century",
-   "science-fiction-adventure",
-   "culture-clash-temporal",
-   "distant-future-setting"
+   "time-displaced-military-officer",
+   "unofficial-defense-agent",
+   "undercover-covert-missions",
+   "flirtatious-officer-partnership",
+   "rebuilt-future-earth-society",
+   "portal-based-space-travel",
+   "alien-royal-rival-conquest",
+   "new-love-interest-weekly"
   ],
   "tv:244321": [
    "real-life-terrorist-bombing",
@@ -428491,14 +428446,14 @@
    "slapstick-humor"
   ],
   "tv:2494": [
-   "science-education-parody",
-   "retro-1980s-school-show-style",
-   "absurdist-humor",
-   "pseudo-scientific-experiments",
-   "nonsense-disguised-earnest",
-   "educational-format-mockery",
-   "comedic-instruction-fake",
-   "visual-gag-heavy"
+   "parody-of-educational-science-programs",
+   "deadpan-mock-documentary-format",
+   "fictional-pseudo-scientific-experiments",
+   "mute-scientists-performing-experiments",
+   "spoof-of-1980s-schools-tv",
+   "absurdist-fake-facts-presented-straight",
+   "module-based-anthology-format",
+   "narrator-explains-nonsense-science"
   ],
   "tv:249548": [
    "plane-hijacking",
@@ -428872,14 +428827,14 @@
    "destiny-returns"
   ],
   "tv:253": [
-   "space-exploration-voyage",
-   "starship-crew-adventures",
-   "science-fiction-future-tech",
-   "alien-species-encounters",
-   "planetary-investigation-missions",
-   "first-contact-alien-meetings",
-   "diverse-crew-ensemble",
-   "utopian-future-vision"
+   "starship-crew-explores-galaxy",
+   "self-contained-space-missions",
+   "captain-officer-doctor-trio",
+   "frontier-exploration-unknown-worlds",
+   "continuing-voyage-of-discovery",
+   "first-contact-new-civilizations",
+   "multi-year-star-charting-mission",
+   "ensemble-command-crew-adventures"
   ],
   "tv:253296": [
    "century-spanning-love-story",
@@ -429644,14 +429599,12 @@
    "workplace-secret-past"
   ],
   "tv:259140": [
-   "gender-transformation-comedy-romantic",
-   "manga-remake-anime-series",
-   "cold-water-cursed-transformation",
-   "martial-arts-school-romance",
-   "romantic-comedy-misadventures",
-   "physical-body-swap-gags",
-   "body-transformation-curse",
-   "cursed-martial-artist-school"
+   "shapeshifting-curse-complicates-life",
+   "arranged-marriage-between-two-families",
+   "cross-dressing-secret-identity",
+   "martial-artist-protagonist",
+   "rivalry-that-turns-into-romance",
+   "gender-identity-played-for-laughs"
   ],
   "tv:259265": [
    "wedding-week-setting",
@@ -430382,14 +430335,15 @@
    "southern-dynasty"
   ],
   "tv:271": [
-   "neurotic-bookstore-owner-lead",
-   "character-coming-out-journey",
-   "friends-ensemble-sitcom",
-   "bookstore-workplace-setting",
-   "daily-life-awkward-situations",
-   "community-and-acceptance",
-   "quirky-social-circle",
-   "personal-growth-through-honesty"
+   "comes-out-as-gay",
+   "single-woman-business-owner",
+   "tight-knit-friend-group",
+   "bookstore-hangout-ensemble",
+   "friends-react-to-coming-out",
+   "rambling-when-nervous",
+   "awkward-social-situations",
+   "cousin-moves-in",
+   "workplace-doubles-as-hangout"
   ],
   "tv:2710": [
    "dysfunctional-friend-group",
@@ -430716,14 +430670,13 @@
    "scientific-forensics"
   ],
   "tv:2751": [
-   "horror-anthology-series-format",
-   "supernatural-strange-occurrences",
-   "mystery-twist-endings",
-   "stories-defy-logic",
-   "true-or-false-mystery",
-   "paranormal-unexplained-events",
-   "urban-legend-narrative-style",
-   "audience-guess-the-ending"
+   "anthology-suspense-twist-stories",
+   "host-introduces-each-tale",
+   "standalone-thriller-per-episode",
+   "dark-twist-endings",
+   "ordinary-people-sinister-situations",
+   "macabre-morality-tales",
+   "archival-host-framing-device"
   ],
   "tv:275277": [
    "destination-wedding",
@@ -430874,14 +430827,13 @@
    "friendship-across-a-gap-in-wits"
   ],
   "tv:2774": [
-   "prohibition-era-crime",
-   "gangster-investigation",
-   "federal-enforcement",
-   "organized-crime-fight",
-   "1930s-chicago",
-   "historic-crime-drama",
-   "special-team-formation",
-   "incorruptible-agents"
+   "incorruptible-anti-crime-squad",
+   "prohibition-era-bootlegging",
+   "federal-agents-vs-mob-boss",
+   "power-struggle-new-boss",
+   "narrator-recaps-true-crime",
+   "squad-cannot-be-bribed",
+   "lawman-bends-the-rules"
   ],
   "tv:277439": [
    "ex-convict-revenge",
@@ -432300,15 +432252,13 @@
    "grief-workplace-relationships-death"
   ],
   "tv:3002": [
-   "sketch-comedy-variety-show",
-   "slapstick-physical-comedy",
-   "comedic-impersonations",
-   "musical-parody-performances",
-   "double-entendre-humor",
-   "chase-scenes-yakety-sax",
-   "quick-costume-changes",
-   "mime-and-burlesque-comedy",
-   "variety-television-format"
+   "sketch-comedian-plays-dozens-of-characters",
+   "celebrity-and-show-parody-impressions",
+   "episode-ending-sped-up-chase-scene",
+   "slapstick-innuendo-heavy-sketches",
+   "one-man-variety-show-format",
+   "recurring-fictional-comic-characters",
+   "musical-number-interludes"
   ],
   "tv:3003": [
    "animated-series",
@@ -432485,14 +432435,12 @@
    "schemes-with-slapstick"
   ],
   "tv:3034": [
-   "police-procedural-anthology",
-   "crime-investigation",
-   "different-cities",
-   "regional-variation",
-   "rotating-teams",
-   "long-running-series",
-   "city-as-character",
-   "episodic-mysteries"
+   "rotating-regional-police-teams",
+   "city-specific-investigations",
+   "feature-length-single-case",
+   "city-as-a-character",
+   "victim-and-killer-focus",
+   "social-issues-in-cases"
   ],
   "tv:3035": [
    "warrior-prince",
@@ -432607,14 +432555,11 @@
    "inheritance-plot"
   ],
   "tv:308": [
-   "teen-drama-school-setting",
-   "portuguese-teen-ensemble",
-   "school-life-coming-of-age",
-   "daily-teen-relationships",
-   "teen-friendship-drama",
-   "school-and-relationships",
-   "teen-ensemble-soap",
-   "school-social-life"
+   "teen-drama-set-in-a-school",
+   "ensemble-of-students-navigating-school-life",
+   "school-setting-shifts-from-private-to-public",
+   "daily-serialized-teen-soap-opera",
+   "coming-of-age-storylines-across-many-seasons"
   ],
   "tv:308014": [
    "heist-crew",
@@ -432639,14 +432584,14 @@
    "recurring-symbolic-motif"
   ],
   "tv:30860": [
-   "midlife-crisis-comedy",
-   "marriage-and-infidelity",
-   "aging-anxiety-and-decline",
-   "family-sitcom-domestic",
-   "marriage-troubles-humor",
-   "polish-comedy-family",
-   "40-year-old-protagonist",
-   "middle-aged-life-comedy"
+   "middle-aged-man-facing-a-midlife-crisis",
+   "extra-marital-temptation-in-a-marriage",
+   "fear-of-aging-and-hair-loss",
+   "attempts-to-quit-smoking",
+   "pursuit-of-fitness-to-fight-age",
+   "pride-in-career-achievements",
+   "search-for-fulfillment-through-social-activity",
+   "family-life-of-an-ordinary-household"
   ],
   "tv:30873": [
    "inventor-hosts-documentary",
@@ -432692,14 +432637,14 @@
    "conspiracy-revelation"
   ],
   "tv:3090": [
-   "children-learning-art",
-   "world-travel-missions",
-   "educational-problem-solving",
-   "classical-music-integration",
-   "ensemble-kid-team",
-   "preschool-curriculum",
-   "interactive-audience",
-   "cultural-discovery"
+   "child-adventure-team",
+   "anthropomorphic-vehicle-companion",
+   "art-and-music-lessons",
+   "audience-participation-required",
+   "rescue-and-help-missions",
+   "world-traveling-quests",
+   "viewer-prompted-actions",
+   "mission-of-the-week"
   ],
   "tv:30905": [
    "anthropomorphic-animals",
@@ -433097,14 +433042,12 @@
    "magical-powers"
   ],
   "tv:31441": [
-   "children-mystery-solving-adventure",
-   "young-friends-band-together",
-   "classic-british-children-stories",
-   "mystery-seekers-ensemble",
-   "adventure-and-friendship",
-   "youths-amateur-detectives",
-   "young-adventurers",
-   "friendship-adventure-bond"
+   "four-children-and-a-dog-solve-mysteries",
+   "summer-holiday-adventures-in-the-countryside",
+   "amateur-child-detectives-uncover-smuggling-and-crime",
+   "loyal-dog-companion-aids-the-group",
+   "episodic-mystery-of-the-week-format",
+   "island-and-coastal-mystery-settings"
   ],
   "tv:31450": [
    "revenge-after-betrayal",
@@ -433334,15 +433277,10 @@
    "disgraced-scientist-vindicated"
   ],
   "tv:31766": [
-   "detective-procedural",
-   "crime-investigation",
-   "nordic-noir",
-   "episodic-mysteries",
-   "swedish-setting",
-   "novel-adaptation",
-   "dark-atmosphere",
-   "solitary-detective",
-   "psychological-cases"
+   "small-coastal-town-setting",
+   "case-of-the-episode",
+   "police-inspector-investigates-crimes",
+   "recurring-cast-of-officers"
   ],
   "tv:318": [
    "devil-figure-rules-a-small-town",
@@ -433767,14 +433705,14 @@
    "found-support-through-illness"
   ],
   "tv:32419": [
-   "sketch-based-history-comedy",
-   "historical-event-parody",
-   "musical-comedy-segments",
-   "educational-history-lessons",
-   "humorous-historical-perspective",
-   "youth-audience-history-education",
-   "period-and-era-coverage",
-   "historical-accuracy-meets-comedy"
+   "historical-facts-through-sketches",
+   "gruesome-history-for-kids",
+   "modern-media-parodies-history",
+   "musical-numbers-about-history",
+   "puppet-narrator-explains-facts",
+   "dual-audience-kids-adults",
+   "sketches-spanning-historical-eras",
+   "education-through-irreverent-comedy"
   ],
   "tv:32504": [
    "college-cheerleading",
@@ -434262,14 +434200,14 @@
    "faction-war-hidden-from-humanity"
   ],
   "tv:32940": [
-   "anthology-legal-drama-format",
-   "character-backstory-reveals",
-   "awaiting-trial-verdict",
-   "innocent-or-guilty-mystery",
-   "criminal-motivation-exploration",
-   "personal-story-behind-crime",
-   "court-proceedings-backdrop",
-   "guilt-and-innocence-ambiguity"
+   "anthology-following-the-accused",
+   "flashback-before-the-verdict",
+   "ambiguous-guilt-until-verdict",
+   "courtroom-frame-story",
+   "different-defendant-each-episode",
+   "ordinary-person-becomes-defendant",
+   "crossover-finale-links-episodes",
+   "walking-to-hear-verdict"
   ],
   "tv:3295": [
    "two-sisters-different-classes",
@@ -434652,13 +434590,14 @@
   ],
   "tv:33645": [
    "mismatched-detective-partners",
-   "police-case-solving",
-   "fractious-workplace-partnership",
-   "marriage-counselling-subplot",
-   "london-crime-setting",
-   "reluctant-partnership",
-   "police-investigation-procedural",
-   "character-conflict-comedy"
+   "odd-couple-police-partnership",
+   "lazy-charming-detective",
+   "no-nonsense-partner-clashes",
+   "case-of-the-week",
+   "workplace-personality-clash",
+   "attending-marriage-counseling",
+   "eccentric-crime-scene-specialist",
+   "bar-hangout-ensemble"
   ],
   "tv:3365": [
    "school-drama",
@@ -436437,16 +436376,15 @@
    "family-secrets-resurface"
   ],
   "tv:37760": [
-   "father-with-memory-disease",
-   "corruption-uncovered",
-   "family-crisis",
-   "mystery-from-unreliable-witness",
-   "psychological-thriller",
-   "medical-drama",
-   "generational-conflict",
-   "investigation",
-   "betrayal",
-   "secrets-revealed"
+   "father-with-dementia-holds-the-truth",
+   "disgraced-journalist-returns-home",
+   "investigating-a-decades-old-cover-up",
+   "race-against-memory-loss",
+   "estranged-son-returns-home",
+   "sibling-caregiver-conflict",
+   "small-town-corruption-conspiracy",
+   "adult-child-uncovers-family-secret",
+   "journalist-digs-into-past-scandal"
   ],
   "tv:37774": [
    "haunted-house",
@@ -436547,14 +436485,8 @@
    "zen-philosophy-transformation"
   ],
   "tv:37971": [
-   "police-detective-crime-series",
-   "long-running-procedural-drama",
-   "german-crime-television",
-   "detective-lead-character",
-   "crime-investigation-series",
-   "detective-protagonist",
-   "crime-drama-procedural",
-   "german-police-force"
+   "veteran-police-commissioner-solves-cases-weekly",
+   "standalone-crime-of-the-week-procedural"
   ],
   "tv:380": [
    "satirical-sketch-comedy",
@@ -436577,14 +436509,10 @@
    "sibling-partnership-bond"
   ],
   "tv:38148": [
-   "crime-detective-drama-series",
-   "procedural-case-investigation",
-   "swedish-noir-atmosphere",
-   "police-investigation-procedural",
-   "detective-partnership-solving-crimes",
-   "complex-criminal-cases",
-   "scandinavian-crime-drama",
-   "martin-beck-detective-novels"
+   "veteran-detective-procedural-films",
+   "police-partner-duo-investigations",
+   "recurring-police-station-ensemble",
+   "case-of-the-film"
   ],
   "tv:38165": [
    "kingdom-destroyed-by-invaders",
@@ -436640,14 +436568,13 @@
    "mystery-case-solving"
   ],
   "tv:3828": [
-   "police-procedural-station",
-   "urban-crime-fighting",
-   "interconnected-storylines",
-   "weary-officers",
-   "personal-drama-work",
-   "procedural-ensemble",
-   "realistic-police-work",
-   "station-commander"
+   "single-precinct-ensemble",
+   "intertwined-case-storylines",
+   "morning-roll-call-opener",
+   "serialized-and-episodic-cases",
+   "work-life-balance-struggle",
+   "gritty-urban-decay",
+   "captain-and-lawyer-romance"
   ],
   "tv:38294": [
    "actor-career-crisis",
@@ -437428,14 +437355,14 @@
    "protesting-innocence"
   ],
   "tv:3962": [
-   "science-fiction-anthology-format",
-   "technological-threat-speculation",
-   "space-travel-scenarios",
-   "automation-threat-humanity",
-   "speculative-future-worlds",
-   "cautionary-sci-fi-tales",
-   "human-versus-technology",
-   "future-society-exploration"
+   "anthology-science-fiction-stories",
+   "standalone-sci-fi-per-episode",
+   "scientist-narrator-framing-device",
+   "dangers-of-automation",
+   "space-travel-cautionary-tales",
+   "speculative-technology-warnings",
+   "dystopian-future-vignettes",
+   "morality-tales-about-progress"
   ],
   "tv:39644": [
    "love-triangle",
@@ -437917,14 +437844,14 @@
    "found-family-crew"
   ],
   "tv:4038": [
-   "paranormal-anthology",
-   "haunted-locations",
-   "possession-exorcism",
-   "paranormal-investigation",
-   "eyewitness-accounts",
-   "supernatural-escalation",
-   "haunted-houses",
-   "reenacted-encounters"
+   "dramatized-true-hauntings",
+   "escalating-home-haunting",
+   "family-flees-haunted-house",
+   "investigator-called-in",
+   "denial-then-intervention",
+   "eyewitness-interviews",
+   "possession-and-exorcism-cases",
+   "true-ghost-story-anthology"
   ],
   "tv:40403": [
    "quinceanera-preparations",
@@ -438398,16 +438325,14 @@
    "successor-takes-the-lead"
   ],
   "tv:4153": [
-   "sketch-comedy-news-satire",
-   "topical-current-events",
-   "political-humor",
-   "musical-parodies",
-   "sketch-format-fast-paced",
-   "celebrity-impressions",
-   "video-editing-effects-heavy",
-   "news-mockery",
-   "comedic-celebrity-parodies",
-   "satirical-entertainment"
+   "satirical-news-sketch-show",
+   "political-and-celebrity-parody-sketches",
+   "sketch-comedy-anthology",
+   "jump-cut-video-editing-satire",
+   "mock-news-broadcast-format",
+   "musical-parody-sketches",
+   "topical-satire-of-current-events",
+   "ensemble-sketch-cast"
   ],
   "tv:4155": [
    "flatmate-dynamics",
@@ -438594,14 +438519,13 @@
    "aristocratic-intrigue"
   ],
   "tv:418": [
-   "young-mystery-solvers",
-   "scooby-doo-spinoff-younger-versions",
-   "mystery-comedy-animated",
-   "comedy-mystery-solving",
-   "hanna-barbera-animation",
-   "childhood-scooby-adventures",
-   "detective-gang-shenanigans",
-   "supernatural-mystery-format"
+   "kid-versions-of-established-detective-gang",
+   "bumbling-leader-wrongly-accuses-town-bully",
+   "amateur-gang-solves-monster-hoax-mysteries",
+   "gadget-equipped-child-genius-sidekick",
+   "wealthy-girl-with-butler-on-call",
+   "talking-dog-and-owner-solve-mysteries",
+   "recurring-false-accusation-formula"
   ],
   "tv:4184": [
    "twin-swap",
@@ -439271,15 +439195,14 @@
    "local-detective-partner"
   ],
   "tv:4303": [
-   "superhero-alien-vigilante",
-   "secret-identity-concealment",
-   "rogues-gallery-arch-enemies",
-   "animated-superhero-adaptation",
-   "crime-fighting-city-protector",
-   "justice-league-team-up",
-   "internal-power-struggle",
-   "villain-recurring-battles",
-   "superhero-tv-saga"
+   "secret-identity-superhero",
+   "alien-refugee-superpowers",
+   "corporate-tycoon-nemesis",
+   "artificial-intelligence-nemesis",
+   "god-like-dictator-villain",
+   "shared-superhero-universe-crossovers",
+   "recurring-arch-villains",
+   "powers-with-real-limits"
   ],
   "tv:43058": [
    "robot-uprising-conflict",
@@ -439422,14 +439345,12 @@
    "humanized-soldiers"
   ],
   "tv:4318": [
-   "horror-anthology",
-   "supernatural-tales",
-   "paranormal-stories",
-   "macabre-narratives",
-   "hosted-anthology",
-   "gallery-setting",
-   "twilight-zone-successor",
-   "painting-inspired-stories"
+   "host-unveils-paintings",
+   "gallery-framed-anthology",
+   "painting-depicts-the-story",
+   "black-comedy-interludes",
+   "standalone-macabre-tales",
+   "curator-host-narrator"
   ],
   "tv:43183": [
    "naughty-kid-vs-perfect-sibling",
@@ -439508,14 +439429,14 @@
    "satire-of-everyday-life"
   ],
   "tv:43252": [
-   "hostage-negotiation-crisis",
-   "kidnap-ransom-thriller",
-   "expert-negotiator-at-work",
-   "international-hostage-situations",
-   "crisis-resolution-drama",
-   "psychological-negotiation",
-   "negotiator-protagonist",
-   "miniseries-thriller-format"
+   "professional-hostage-negotiator",
+   "former-soldier-turned-negotiator",
+   "anthology-of-kidnapping-cases-each-season",
+   "group-of-tourists-kidnapped-abroad",
+   "politicians-daughter-taken-hostage",
+   "negotiator-balances-work-and-family-danger",
+   "race-against-time-hostage-negotiation",
+   "international-kidnapping-plots-each-series"
   ],
   "tv:4327": [
    "childish-buffoon-protagonist",
@@ -439605,14 +439526,14 @@
    "stage-performer-cover-identity"
   ],
   "tv:4333": [
-   "vigilante-justice",
-   "british-crime-series",
-   "law-skirting-hero",
-   "helps-the-powerless",
-   "criminal-detective-nemesis",
-   "moral-crusade",
-   "1960s-setting",
-   "literary-adaptation"
+   "vigilante-adventurer-helper",
+   "skirts-law-for-justice",
+   "bumbling-nemesis-inspector",
+   "globe-trotting-episodic-adventures",
+   "fourth-wall-introductions",
+   "suave-ladies-man",
+   "secret-agent-plot-shift",
+   "signature-halo-motif"
   ],
   "tv:43333": [
    "surreal-sketch-world",
@@ -439669,15 +439590,14 @@
    "magical-realism-horror"
   ],
   "tv:4336": [
-   "reality-show-parody-house",
-   "animated-sitcom-cohabitation",
-   "cartoon-character-caricatures",
-   "satirical-reality-tv-format",
-   "house-based-roommate-comedy",
-   "misadventures-shared-household",
-   "parody-sitcom-format",
-   "adult-animated-comedy",
-   "housemate-chaos-humor"
+   "cartoon-characters-cohabiting",
+   "reality-show-parody-format",
+   "clashing-archetype-housemates",
+   "characters-aware-theyre-cartoons",
+   "parody-of-kids-icons",
+   "competition-challenges-between-housemates",
+   "superhero-and-princess-parodies",
+   "dysfunctional-found-family-housemates"
   ],
   "tv:4344": [
    "firefighter-crew-drama",
@@ -440024,14 +439944,14 @@
    "love-triangle-with-successor"
   ],
   "tv:44037": [
-   "shakespeare-history-plays",
-   "power-struggles-court",
-   "royal-succession",
-   "english-civil-wars",
-   "political-intrigue",
-   "dynastic-conflict",
-   "medieval-setting",
-   "adapted-literature"
+   "history-plays-adapted",
+   "kings-rise-and-fall",
+   "throne-usurpation",
+   "dynastic-civil-war",
+   "child-king-power-vacuum",
+   "tyrants-rise-to-power",
+   "multi-play-anthology",
+   "royal-court-intrigue"
   ],
   "tv:44067": [
    "clumsy-superhero",
@@ -440618,14 +440538,11 @@
    "mismatched-detective-duo"
   ],
   "tv:4504": [
-   "hospital-soap-opera",
-   "medical-drama-ensemble",
-   "long-running-continuous-soap",
-   "new-zealand-hospital-setting",
-   "soap-opera-serialized",
-   "hospital-staff-and-patients",
-   "medical-romance-drama",
-   "ongoing-ensemble-relationships"
+   "medical-soap-opera-set-in-a-hospital",
+   "ensemble-hospital-staff-storylines",
+   "daily-melodrama-in-a-fictional-hospital",
+   "fictional-hospital-as-recurring-setting",
+   "staff-and-patients-intertwined-storylines"
   ],
   "tv:4507": [
    "government-department-satire",
@@ -440743,13 +440660,13 @@
   ],
   "tv:45482": [
    "police-procedural-parody",
-   "detective-satire",
-   "british-crime-comedy",
-   "slapstick-humor",
-   "absurdist-comedy",
-   "genre-deconstruction",
-   "relentless-jokes",
-   "comedic-misadventure"
+   "joke-dense-cop-spoof",
+   "mismatched-detective-duo",
+   "rapid-fire-sight-gags",
+   "messy-personal-life-detective",
+   "case-of-the-week-murders",
+   "absurdist-station-hijinks",
+   "exaggerated-cop-cliches"
   ],
   "tv:4549": [
    "new-minister-vs-civil-service",
@@ -441327,14 +441244,14 @@
    "historical-upheaval-setting"
   ],
   "tv:4612": [
-   "children-playhouse-setting",
-   "absurdist-surreal-design",
-   "educational-entertainment-format",
-   "whimsical-characters-and-gimmicks",
-   "talking-objects-and-fantasy",
-   "musical-and-comedic-segments",
-   "playful-learning-and-discovery",
-   "childlike-wonder-presented-artfully"
+   "childlike-adult-host",
+   "whimsical-talking-playhouse",
+   "anthropomorphized-household-objects",
+   "magical-genie-companion",
+   "live-action-and-animation",
+   "dual-audience-kids-adults",
+   "teaches-morals-through-play",
+   "eccentric-recurring-visitors"
   ],
   "tv:46121": [
    "serial-murder-mystery",
@@ -441357,16 +441274,14 @@
    "second-chance-at-kindness"
   ],
   "tv:46129": [
-   "how-things-work-explained",
-   "children-education-series",
-   "host-as-guide",
-   "diy-and-invention",
-   "green-living-pioneer",
-   "caravan-home-base",
-   "contraptions-built",
-   "simple-life-contrast",
-   "friendship-despite-differences",
-   "practical-science"
+   "man-living-in-a-caravan",
+   "eco-friendly-diy-lifestyle",
+   "explaining-how-everyday-things-work",
+   "curious-tinkerer-protagonist",
+   "clashing-with-conservative-neighbor",
+   "self-sustaining-off-grid-living",
+   "episodic-theme-of-the-week",
+   "nature-appreciation-for-children"
   ],
   "tv:4613": [
    "wwii-combat-unit-ensemble",
@@ -441617,14 +441532,12 @@
    "dimensional-gate-threat"
   ],
   "tv:46261": [
-   "wizard-guild-adventure-fantasy",
-   "character-team-journey-growth",
-   "magical-powers-fantasy-combat",
-   "friendship-bonds-central",
-   "long-running-adventure-series",
-   "multiple-seasons-extended-narrative",
-   "fantasy-adventure-anime",
-   "character-driven-narrative"
+   "wizards-guild-adventures",
+   "band-of-young-wizards-journey-together",
+   "magic-circle-combat-system",
+   "found-family-of-mages",
+   "episodic-magical-quests",
+   "escalating-to-a-final-war"
   ],
   "tv:46262": [
    "kid-doctor-role-play",
@@ -441933,16 +441846,15 @@
    "scandal-and-bankruptcy-ruin"
   ],
   "tv:46648": [
-   "crime-detective-investigation",
-   "psychological-murder-mystery",
-   "noir-detective-drama",
-   "morally-complex-detectives",
-   "criminal-conspiracy-uncovering",
-   "dark-crime-anthology",
-   "murder-case-investigation",
-   "detective-partnership-tension",
-   "psychological-crime-drama",
-   "noir-crime-saga"
+   "detective-duo-across-decades",
+   "cold-case-across-timelines",
+   "investigation-unravels-institutional-corruption",
+   "serial-killer-occult-links",
+   "missing-persons-remote-landscape",
+   "new-detectives-every-season",
+   "corrupt-politician-murder-investigation",
+   "isolated-team-vanishes",
+   "small-town-secrets-exposed"
   ],
   "tv:46657": [
    "rise-to-fame-of-a-performing-group",
@@ -442216,14 +442128,13 @@
    "underground-alien-marketplace"
   ],
   "tv:46923": [
-   "police-procedural-island",
-   "crime-investigation",
-   "shetland-archipelago",
-   "isolated-setting",
-   "novel-adaptation",
-   "local-mysteries",
-   "scottish-setting",
-   "remote-detective"
+   "island-set-detective",
+   "close-knit-community-secrets",
+   "season-long-single-case",
+   "small-recurring-police-team",
+   "outsider-among-locals",
+   "rural-isolation-suspicion",
+   "weather-shapes-investigation"
   ],
   "tv:46926": [
    "marriage-of-convenience",
@@ -442394,15 +442305,14 @@
    "rescue-mission"
   ],
   "tv:47": [
-   "orphan-poor-child-protagonist",
-   "low-income-tenement-community",
-   "physical-comedy-slapstick",
-   "child-centered-humor-focus",
-   "neighborhood-resident-interactions",
-   "comedic-misadventures-series",
-   "poverty-themes-lighthearted",
-   "community-based-sitcom",
-   "episodic-neighborhood-chaos"
+   "orphan-boy-tenement-courtyard",
+   "poverty-played-for-comedy",
+   "neighborhood-ensemble-antics",
+   "child-lacking-adult-supervision",
+   "slapstick-recurring-catchphrases",
+   "episodic-moral-lesson-endings",
+   "found-family-among-neighbors",
+   "classroom-and-courtyard-vignettes"
   ],
   "tv:47008": [
    "late-night-diner-anthology",
@@ -442585,14 +442495,14 @@
    "psychotic-episodes-danger"
   ],
   "tv:47361": [
-   "shakespeare-animated-adaptation",
-   "condensed-theatrical-drama",
-   "truncated-classic-plays",
-   "educational-animation",
-   "animated-bard",
-   "half-hour-shakespeare",
-   "shakespeare-condensed",
-   "children-literature-animation"
+   "animated-adaptations-of-classic-plays",
+   "anthology-of-abridged-literary-classics",
+   "narrator-fills-in-plot-points-cut-for-time",
+   "one-play-adapted-per-episode",
+   "educational-retelling-for-children",
+   "condensed-half-hour-versions-of-longer-works",
+   "original-dialogue-preserved-in-shortened-form",
+   "introducing-young-audiences-to-classic-theater"
   ],
   "tv:474": [
    "buddy-cop-partnership",
@@ -443285,15 +443195,12 @@
    "relics-of-judgment-quest"
   ],
   "tv:502": [
-   "educational-children-series",
-   "puppet-characters-muppets",
-   "live-action-animation-hybrid",
-   "alphabet-and-numbers-lessons",
-   "cultural-references-teaching",
-   "preschool-education-format",
-   "jim-henson-puppetry",
-   "sketch-comedy-educational",
-   "social-emotional-learning"
+   "educational-curriculum-for-preschoolers",
+   "puppets-and-humans-coexist-on-a-city-street",
+   "letters-numbers-and-social-skills-taught-through-sketches",
+   "mixed-media-format-live-action-puppetry-animation",
+   "celebrity-guest-cameos-teach-lessons",
+   "neighborhood-street-setting-as-classroom"
   ],
   "tv:5021": [
    "multi-generational-rural-family",
@@ -443831,15 +443738,14 @@
    "narrative-storytelling"
   ],
   "tv:5273": [
-   "anthology-suspense-thriller",
-   "crime-and-justice-comeuppance",
-   "twist-ending-darkness",
-   "hosted-dramatic-series",
-   "criminal-capture-resolution",
-   "fate-versus-escape",
-   "murder-and-deception",
-   "ironic-justice-payback",
-   "dark-suspense-tales"
+   "host-introduced-anthology",
+   "standalone-story-each-episode",
+   "wrongdoer-always-caught",
+   "suspense-mystery-anthology",
+   "onscreen-host-narrator",
+   "dark-ironic-narration",
+   "twist-ending-morality-tale",
+   "episodic-crime-and-punishment"
   ],
   "tv:5279": [
    "arranged-royal-marriage",
@@ -444321,16 +444227,15 @@
    "selling-goods-to-outside-world"
   ],
   "tv:550": [
-   "working-class-patriarch-bigoted",
-   "ideological-family-conflict",
-   "generation-gap-clashing",
-   "socialist-son-in-law",
-   "racist-attitudes-satirized",
-   "marriage-long-suffering-wife",
-   "political-reactionary",
-   "cultural-revolution-resisted",
-   "comedic-social-commentary",
-   "kitchen-sink-realism"
+   "bigoted-patriarch-clashes-with-family",
+   "father-in-law-vs-socialist-son-in-law",
+   "generational-culture-clash",
+   "working-class-family-setting",
+   "political-arguments-at-home",
+   "long-suffering-wife-mediates",
+   "family-feuds-over-politics-and-football",
+   "satire-of-prejudice-through-comedy",
+   "reactionary-father-figure"
   ],
   "tv:55011": [
    "soldier-stranded-on-homeworld",
@@ -444554,14 +444459,14 @@
    "secret-child-birth"
   ],
   "tv:56336": [
-   "serial-killer-hunt",
-   "british-french-detectives",
-   "channel-tunnel-crime",
-   "cross-border-investigation",
+   "body-split-at-border",
+   "cross-border-detective-duo",
    "moral-crusade-killer",
-   "social-commentary-terror",
-   "international-cooperation",
-   "divided-body-victim"
+   "murders-expose-social-ills",
+   "bilingual-investigation",
+   "clashing-policing-cultures",
+   "season-long-single-case",
+   "new-catastrophe-each-season"
   ],
   "tv:5639": [
    "power-to-revive-the-dead",
@@ -445670,15 +445575,12 @@
    "natural-history-narrative"
   ],
   "tv:6005": [
-   "mystery-solving-team",
-   "animated-dog-protagonist",
-   "young-detectives-ensemble",
-   "ghost-hunting-investigations",
-   "comedic-adventure-series",
-   "unmasking-fake-monsters",
-   "team-based-problem-solving",
-   "animal-sidekick-humor",
-   "episodic-mystery-cases"
+   "teen-detectives-and-dog",
+   "talking-cowardly-dog",
+   "monster-of-the-week",
+   "new-puppy-nephew-sidekick",
+   "costumed-crook-unmasking",
+   "sidekick-driven-comic-relief"
   ],
   "tv:60059": [
    "prequel-to-known-story",
@@ -445722,15 +445624,14 @@
    "in-over-their-heads-duo"
   ],
   "tv:6024": [
-   "police-procedural-spoof",
-   "detective-comedy-satire",
-   "absurdist-police-humor",
-   "parody-cop-show-format",
-   "deadpan-ridiculous-jokes",
-   "wordplay-visual-gags",
-   "slapstick-detective-comedy",
-   "satirical-law-enforcement",
-   "comedy-crime-investigation"
+   "deadpan-cop-procedural-parody",
+   "cameo-killed-in-opening",
+   "sight-gags-and-puns",
+   "straight-faced-absurd-cases",
+   "mismatched-title-narration-gag",
+   "informant-and-partner-duo",
+   "background-gag-every-scene",
+   "anachronistic-cameo-running-gag"
   ],
   "tv:60245": [
    "undercover-team-of-experts",
@@ -446464,14 +446365,15 @@
    "dream-of-a-simpler-life"
   ],
   "tv:60901": [
-   "immigrant-fish-out-of-water",
-   "american-in-sweden-culture-clash",
-   "romantic-relocation",
-   "workplace-adjustment",
-   "family-acceptance",
-   "cultural-misunderstanding",
-   "international-romantic-couple",
-   "career-sacrifice-for-love"
+   "moves-abroad-for-girlfriend",
+   "fish-out-of-water",
+   "culture-clash-relocation",
+   "unemployed-newcomer-adjusting",
+   "skeptical-in-laws",
+   "language-barrier-struggles",
+   "meeting-partners-family",
+   "celebrities-play-themselves",
+   "career-sacrificed-for-relationship"
   ],
   "tv:60904": [
    "sketch-comedy-anthology",
@@ -446568,25 +446470,25 @@
    "family-legacy-of-tyranny"
   ],
   "tv:610": [
-   "sketch-comedy-anthology",
-   "interconnected-sketches",
-   "surreal-humor",
-   "live-performance",
-   "absurdist-comedy",
-   "character-reuse",
-   "monty-python-style",
-   "alternative-comedy"
+   "sketches-linked-by-character",
+   "fictionalized-hosts-introduce",
+   "surreal-scene-transitions",
+   "alt-comedy-ensemble-cast",
+   "live-and-pretaped-sketches",
+   "recurring-dialogue-callbacks",
+   "media-and-news-satire",
+   "sketch-comedy-anthology"
   ],
   "tv:61011": [
-   "troubled-teen-sent-away",
+   "rebellious-teen-sent-to-live-with-relatives",
    "mockumentary-format",
-   "culture-clash",
-   "family-redemption-attempt",
-   "school-mischief",
-   "ethnic-humor-controversial",
-   "teenage-rebellion",
-   "expatriate-return",
-   "dysfunctional-household"
+   "expelled-student-shipped-to-homeland",
+   "fish-out-of-water-homecoming",
+   "juvenile-detention-center",
+   "clashing-with-strict-relatives",
+   "troublemaking-teenager",
+   "father-tries-to-reform-son",
+   "school-rivalry-and-fights"
   ],
   "tv:61014": [
    "period-hospital-drama",
@@ -447089,14 +446991,13 @@
    "found-family-roommates"
   ],
   "tv:61413": [
-   "struggling-actor-protagonist",
-   "comedic-failure",
-   "self-delusional-character",
-   "british-sitcom",
-   "entertainment-industry-chaos",
-   "recurring-romantic-failure",
-   "landlord-relationship",
-   "offstage-problems"
+   "washed-up-vain-actor",
+   "rivalry-with-fellow-actor",
+   "voiceover-studio-mishaps",
+   "abusive-ex-wife-relationship",
+   "novelty-song-per-episode",
+   "hapless-romantic-schemes",
+   "later-series-relocates-abroad"
   ],
   "tv:61415": [
    "holy-grail-war-fifth",
@@ -447667,16 +447568,13 @@
    "passion-vs-stability"
   ],
   "tv:61746": [
-   "anthology-dark-comedy",
-   "plot-twist-surprise-ending",
-   "self-contained-short-story",
-   "number-nine-recurring-setting",
-   "comedic-horror-blend",
-   "twisted-premise-revelation",
-   "hidden-object-treasure-hunt",
-   "british-dark-humor-satire",
-   "narrative-misdirection-tricks",
-   "episode-linked-mystery"
+   "numbered-setting-anthology",
+   "hidden-recurring-object-gag",
+   "banal-start-sinister-turn",
+   "subverted-twist-ending",
+   "real-time-single-location",
+   "dark-comedy-horror-anthology",
+   "short-play-format"
   ],
   "tv:61751": [
    "reluctant-new-ruler",
@@ -448191,14 +448089,14 @@
    "justice-and-morality-questions"
   ],
   "tv:62088": [
-   "british-raj-colonial-drama",
-   "political-independence-backdrop",
-   "class-conflict-romance",
-   "summer-resort-society",
-   "cross-cultural-relationships",
-   "power-imbalance-colonial-era",
-   "forbidden-romance-across-hierarchy",
-   "imperial-decline-backdrop"
+   "colonial-hill-station-retreat",
+   "empire-administrators-abroad",
+   "independence-movement-tensions",
+   "summer-season-ensemble-drama",
+   "colonizers-and-colonized-relations",
+   "political-power-struggle",
+   "seasonal-return-same-setting",
+   "empire-in-decline"
   ],
   "tv:62097": [
    "childs-disappearance-cold-case",
@@ -449076,14 +448974,13 @@
    "teaching-hospital-setting"
   ],
   "tv:62652": [
-   "police-detective-young",
-   "procedural-murder-cases",
-   "mediterranean-setting",
-   "prequel-origin-story",
-   "italian-crime-drama",
-   "small-town-corruption",
-   "investigative-detective",
-   "character-origin-explored"
+   "young-police-chief-newly-appointed",
+   "case-of-the-week-investigations",
+   "small-coastal-town-setting",
+   "mentor-and-rookie-partnership",
+   "long-distance-romance",
+   "origin-story-of-veteran-detective",
+   "food-loving-investigator"
   ],
   "tv:62668": [
    "notifying-past-partners-of-an-std",
@@ -449993,16 +449890,13 @@
    "close-knit-social-circle"
   ],
   "tv:6353": [
-   "orphan-in-care-home",
-   "child-protagonist-resilient",
-   "institutional-life",
-   "friendship-found-family",
-   "coming-of-age-drama",
-   "children-in-foster-system",
-   "heart-felt-kids-television",
-   "social-welfare",
-   "book-adaptation",
-   "hope-amid-hardship"
+   "girl-living-in-a-childrens-care-home",
+   "spirited-orphan-narrator",
+   "care-home-ensemble-cast",
+   "child-protagonist-tells-her-own-story",
+   "foster-care-and-adoption-themes",
+   "friendship-and-rivalry-among-wards",
+   "coming-of-age-in-care-system"
   ],
   "tv:63535": [
    "record-label-executive",
@@ -450025,15 +449919,13 @@
    "matriarch-manipulation"
   ],
   "tv:6357": [
-   "anthology-speculative-fiction",
-   "twist-ending-stories",
-   "psychological-paranoia-themes",
-   "uncanny-strange-situations",
-   "moral-lesson-tales",
-   "supernatural-unexplained-events",
-   "individual-episode-fantasy",
-   "weird-reality-distortion",
-   "thought-provoking-narratives"
+   "host-narrated-anthology",
+   "standalone-uncanny-morality-tales",
+   "surprise-twist-ending",
+   "ordinary-person-confronts-fate",
+   "opening-and-closing-monologues",
+   "self-contained-strange-encounters",
+   "moral-irony-lesson-ending"
   ],
   "tv:63593": [
    "mockumentary-anthology",
@@ -450268,24 +450160,24 @@
    "student-turned-adventurer"
   ],
   "tv:6391": [
-   "magic-trick-reveals",
-   "masked-magician-performer",
-   "illusion-secrets-exposed",
-   "stage-magic-demonstrations",
-   "instruction-in-deception",
-   "classic-illusions-explained",
-   "educational-magic-series",
-   "warehouse-performance-setting"
+   "masked-performer-exposes-magic-trick-secrets",
+   "anonymous-illusionist-hides-true-identity",
+   "reveal-segment-deconstructs-each-trick",
+   "rotating-performers-behind-the-same-masked-persona",
+   "assistants-double-as-demonstration-props",
+   "warehouse-staged-grand-illusions",
+   "secrets-of-a-secretive-profession-exposed"
   ],
   "tv:63913": [
-   "infidelity-discovery",
-   "marital-suspicion",
-   "psychological-thriller",
-   "medea-mythology-basis",
-   "revenge-aftermath",
-   "doctor-protagonist",
-   "betrayal-spiral",
-   "obsessive-investigation"
+   "wife-suspects-affair",
+   "doctor-investigates-own-marriage",
+   "secret-young-mistress",
+   "scorned-wife-revenge-plot",
+   "small-town-secrets-unravel",
+   "public-marriage-collapse",
+   "modern-myth-retelling",
+   "son-caught-in-middle",
+   "new-love-complicates-reconciliation"
   ],
   "tv:63915": [
    "brilliant-detective",
@@ -451938,14 +451830,14 @@
    "legacy-descendant-hero"
   ],
   "tv:65836": [
-   "aliens-forced-integration",
-   "half-alien-protagonist-discovers",
-   "border-guard-caught-between",
-   "alien-segregation-discrimination",
-   "science-fiction-allegory-immigration",
-   "criminal-underworld-exposure",
-   "xenophobic-society",
-   "secret-identity-reveal"
+   "aliens-integrated-into-human-society",
+   "segregated-alien-ghetto-city",
+   "border-guard-discovers-hes-half-alien",
+   "hidden-alien-heritage-protagonist",
+   "criminal-underworld-among-aliens",
+   "immigration-allegory",
+   "alien-species-as-second-class-citizens",
+   "cop-caught-between-two-worlds"
   ],
   "tv:65854": [
    "undercover-in-prison",
@@ -452009,14 +451901,11 @@
    "friends-turned-fighters"
   ],
   "tv:65942": [
-   "isekai-alternate-world-fantasy",
-   "time-loop-repeated-timelines",
-   "protagonist-resets-time",
-   "parallel-timelines-convergence",
-   "magical-time-manipulation",
-   "recursive-narrative-structure",
-   "world-building-alternate-realm",
-   "time-travel-consequences"
+   "protagonist-reborn-in-another-world",
+   "transported-to-a-fantasy-world",
+   "dark-and-violent-isekai-story",
+   "battle-against-a-giant-monster",
+   "protagonist-narrates-a-fable-to-others"
   ],
   "tv:65945": [
    "zombie-like-plague-spreads",
@@ -452281,16 +452170,14 @@
    "whistleblower-fallout"
   ],
   "tv:66292": [
-   "suburban-social-drama",
-   "murder-mystery-flashback",
-   "hidden-secrets-small-town",
-   "domestic-abuse-themes",
-   "female-friendship-conflict",
-   "psychological-dark-comedy",
-   "mystery-who-died-structure",
-   "social-hierarchy-clash",
-   "women-centered-drama",
-   "secrets-and-deception-spiral"
+   "mothers-tangled-in-murder",
+   "domestic-abuse-behind-affluence",
+   "school-parent-clique-politics",
+   "murder-investigation-frames-season",
+   "custody-battle-abusers-family",
+   "wealthy-coastal-town-facade",
+   "whodunit-among-friends",
+   "secrets-behind-perfect-facade"
   ],
   "tv:66309": [
    "recovery-from-mental-illness",
@@ -453330,15 +453217,16 @@
    "revenge-against-powerful-enemies"
   ],
   "tv:67384": [
-   "fallen-lawyer-redemption",
-   "guilty-man-freed-kills-family",
-   "lawyer-battles-corporations",
-   "wrongful-death-litigation",
-   "alcoholic-lawyer-comeback",
-   "ex-partner-antagonism",
-   "estranged-daughter-reunion",
-   "underdog-seeking-justice",
-   "hotel-office-isolation"
+   "disgraced-lawyer-seeks-redemption",
+   "anthology-case-per-season",
+   "lone-attorney-vs-corporation",
+   "wrongful-death-lawsuit",
+   "recovering-alcoholic-protagonist",
+   "estranged-firm-partner-rivalry",
+   "hidden-office-surveillance",
+   "corporate-cover-up-exposed",
+   "underdog-courtroom-battle",
+   "new-powerful-antagonist-each-season"
   ],
   "tv:67385": [
    "choosing-a-date-by-body",
@@ -453384,16 +453272,11 @@
    "marital-tension-behind-the-crown"
   ],
   "tv:67431": [
-   "children-cartoon-adventures",
-   "friendship-group",
-   "animated-comedy",
-   "childhood-friendships",
-   "episodic-stories",
-   "comic-book-adaptation",
-   "youthful-misadventures",
-   "playful-humor",
-   "innocent-escapades",
-   "comic-strip-antics"
+   "group-of-childhood-friends",
+   "neighborhood-kids-adventures",
+   "ensemble-of-child-characters",
+   "anthology-of-short-episodes",
+   "episodic-slice-of-life-for-kids"
   ],
   "tv:67439": [
    "family-survives-apocalypse",
@@ -454344,14 +454227,14 @@
    "species-reintegration-conflict"
   ],
   "tv:68728": [
-   "wwii-american-soldiers-arrive",
-   "rural-village-wartime-drama",
-   "cultural-clash-with-americans",
-   "northern-ireland-1943-setting",
-   "family-amid-war",
-   "exotic-wartime-romance",
-   "village-community-change",
-   "military-occupation-civilians"
+   "small-village-upended-by-arriving-foreign-soldiers",
+   "rural-family-adjusts-to-wartime-occupation",
+   "wartime-romance-with-an-outsider-soldier",
+   "teenage-daughter-drawn-to-a-foreign-officer",
+   "clash-of-local-and-foreign-cultures",
+   "homefront-family-during-world-war-two",
+   "liaison-officer-mediates-between-locals-and-troops",
+   "small-community-transformed-by-a-military-influx"
   ],
   "tv:68734": [
    "rise-of-a-drug-lord",
@@ -454478,14 +454361,13 @@
    "gender-violence-redemption-fight"
   ],
   "tv:68898": [
-   "comedian-adrift",
-   "wife-infidelity-aftermath",
-   "homelessness-struggle",
-   "stand-up-career-pursuit",
-   "recovery-rebuilding",
-   "semi-autobiographical",
-   "urban-comedy-drama",
-   "network-comedy-drama"
+   "homeless-after-affair",
+   "aspiring-stand-up-comedian",
+   "couch-surfing-comedians",
+   "real-comedians-play-themselves",
+   "rebuilding-life-post-divorce",
+   "behind-stand-up-scene",
+   "would-be-pastor-turned-comic"
   ],
   "tv:689": [
    "traveling-theater-troupe",
@@ -454783,14 +454665,13 @@
    "reluctant-crime-solving-partnership"
   ],
   "tv:69533": [
-   "detective-procedural",
-   "crime-investigation",
-   "french-setting",
-   "1950s-period-setting",
-   "novel-adaptation",
-   "episodic-mysteries",
-   "detective-centered",
-   "investigative-methods"
+   "veteran-inspector-solves-murders",
+   "period-set-detective-series",
+   "case-of-the-episode",
+   "old-fashioned-police-methods",
+   "small-recurring-detective-team",
+   "mid-century-setting",
+   "methodical-inspector-outwits-suspects"
   ],
   "tv:69541": [
    "rival-brothel-madams",
@@ -455383,14 +455264,13 @@
    "shared-supernatural-ability"
   ],
   "tv:70690": [
-   "science-fiction-anthology",
-   "technology-horror",
-   "supernatural-anomalies",
-   "episodic-stories",
-   "internet-age-horror",
-   "twisted-reality",
-   "twilight-zone-inspired",
-   "error-404-concept"
+   "standalone-sci-fi-anthology",
+   "technology-gone-wrong",
+   "framing-narrator-introductions",
+   "new-cast-each-episode",
+   "near-future-gadgets-and-apps",
+   "urban-legend-inspired-plots",
+   "standalone-morality-tales"
   ],
   "tv:7072": [
    "faked-death-to-escape-past",
@@ -455584,15 +455464,13 @@
    "generational-power-transfer"
   ],
   "tv:709": [
-   "sketch-comedy-anthology",
-   "toy-stop-motion-animation",
-   "pop-culture-satire-parody",
-   "short-form-comedy-segments",
-   "absurdist-humor-non-sequiturs",
-   "celebrity-cameo-appearances",
-   "random-unrelated-sketches",
-   "adult-irreverent-comedy",
-   "stop-motion-satirical-shorts"
+   "toy-based-stop-motion",
+   "pop-culture-celebrity-parody",
+   "unrelated-short-sketch-anthology",
+   "childhood-franchise-satire",
+   "adult-satire-kids-media",
+   "new-cast-every-sketch",
+   "spoof-movies-and-tv"
   ],
   "tv:7096": [
    "mass-surveillance-state",
@@ -455870,14 +455748,14 @@
    "heroic-moments"
   ],
   "tv:71414": [
-   "true-crime-real-murder-case",
-   "investigation-into-young-victim",
-   "family-grief-aftermath",
-   "justice-and-perpetrator-hunt",
-   "police-detective-procedural",
-   "criminal-responsibility",
-   "community-trauma-impact",
-   "parents-seeking-justice"
+   "manhunt-for-childs-killer",
+   "dramatized-real-murder-case",
+   "detective-leads-investigation",
+   "grieving-parents-seek-justice",
+   "child-killed-in-shooting",
+   "pursuit-of-suspects",
+   "case-built-for-trial",
+   "community-shaken-by-murder"
   ],
   "tv:71446": [
    "elaborate-mint-heist",
@@ -455990,15 +455868,15 @@
    "residency-permit-motivation"
   ],
   "tv:7166": [
-   "surreal-comedy-adventure",
-   "eccentric-failing-musicians",
-   "psychedelic-animation-effects",
-   "musical-a-cappella-bits",
-   "mystical-shaman-character",
-   "zoo-and-london-settings",
-   "absurdist-humor-format",
-   "quirky-supporting-cast",
-   "fourth-wall-breaking-comedy"
+   "eccentric-duo-of-failing-musicians",
+   "surreal-alternate-universe-comedy",
+   "mystic-shaman-roommate-and-his-animal-familiar",
+   "setting-changes-each-season-same-core-cast",
+   "genre-spanning-musical-number-interludes",
+   "flamboyant-and-uptight-friend-pairing",
+   "no-continuity-between-episodes",
+   "recurring-bizarre-side-characters-and-personas",
+   "breaking-the-fourth-wall-narration"
   ],
   "tv:71663": [
    "retired-superhero-forced-return",
@@ -456734,16 +456612,15 @@
    "tonal-experimentation"
   ],
   "tv:72597": [
-   "fbi-manhunt",
-   "mail-bombing-terrorist",
-   "wrongful-suspect-cleared",
-   "obsessive-investigator",
-   "letter-bomb-campaign",
-   "multi-year-pursuit",
-   "clues-from-letters",
-   "hideout-capture",
-   "investigator-closing-net",
-   "confession-after-arrest"
+   "anthology-manhunt-per-season",
+   "fbi-hunt-for-serial-bomber",
+   "profiler-cracks-case-via-writing-analysis",
+   "wrongly-suspected-innocent-man",
+   "family-member-turns-in-suspect",
+   "dramatized-real-criminal-investigation",
+   "decades-long-manhunt",
+   "media-frenzy-around-suspect",
+   "bombing-campaign-terrorizes-public"
   ],
   "tv:72613": [
    "rags-to-riches-medieval-saga",
@@ -457085,16 +456962,14 @@
    "gold-digging-fiancee"
   ],
   "tv:73117": [
-   "knights-templar-order",
-   "holy-grail-relic-quest",
-   "medieval-warrior-protagonist",
-   "religious-crusade-failed",
-   "spiritual-artifact-hunting",
-   "templar-persecution-decline",
-   "knight-leader-commander",
-   "historical-religious-order",
-   "order-downfall-story",
-   "faith-and-survival"
+   "knights-quest-for-relic",
+   "religious-order-persecuted",
+   "king-vs-religious-order",
+   "crusade-veteran-regains-faith",
+   "secret-forbidden-royal-affair",
+   "scheming-advisor-vs-church",
+   "mentors-assassination-sparks-investigation",
+   "training-the-next-knights"
   ],
   "tv:73126": [
    "mockumentary-investigation",
@@ -457149,16 +457024,14 @@
    "family-wartime-separation"
   ],
   "tv:73199": [
-   "medical-professionals-anthology",
-   "ethical-dilemmas-medical",
-   "doctor-patient-relationships",
-   "four-part-episodes",
-   "healthcare-stories",
-   "moral-uncertainty",
-   "trust-breached",
-   "clinical-deception",
-   "doctor-misconduct",
-   "patient-vulnerability"
+   "stolen-medical-identity",
+   "whistleblower-nurse-loses-job",
+   "impostor-posing-as-a-doctor",
+   "anthology-different-story-each-season",
+   "patients-mysteriously-dying-around-protagonist",
+   "wounded-veteran-hospital-recovery",
+   "assuming-someone-elses-identity",
+   "hospital-set-mystery"
   ],
   "tv:732": [
    "law-firm-ensemble",
@@ -457181,14 +457054,14 @@
    "sponsor-and-sponsee-bond"
   ],
   "tv:73223": [
-   "magic-user-without-powers",
-   "rivals-in-magic-academy",
-   "power-hierarchy-underdog",
-   "friendship-transcends-ability",
-   "magical-combat-training",
-   "determined-underdog",
-   "grimoire-power-system",
-   "fantasy-magic-world"
+   "born-without-magic-in-a-world-of-magic",
+   "childhood-rivalry-with-a-gifted-mage",
+   "quest-to-become-the-strongest",
+   "rare-inherited-magic-grimoire",
+   "underdog-overcomes-powerlessness",
+   "orphan-raised-alongside-a-rival",
+   "race-for-the-same-title",
+   "rise-from-the-bottom-through-effort"
   ],
   "tv:73265": [
    "android-passing-as-human",
@@ -457346,14 +457219,14 @@
    "historical-gang-warfare-setting"
   ],
   "tv:73550": [
-   "historical-terrorism-conspiracy",
-   "gunpowder-plot-assassination",
-   "religious-political-conflict",
-   "tudor-historical-drama",
-   "failed-coup-attempt",
-   "government-investigation",
-   "faith-versus-politics",
-   "historical-miniseries"
+   "real-historical-assassination-conspiracy",
+   "plot-to-destroy-parliament",
+   "religious-persecution-underground-resistance",
+   "hunted-by-the-state",
+   "plot-uncovered-by-authorities",
+   "torture-and-execution",
+   "undercover-preparation-for-attack",
+   "dramatization-of-historical-terrorism"
   ],
   "tv:73554": [
    "date-turns-into-assault",
@@ -457923,14 +457796,14 @@
    "irradiated-wasteland-setting"
   ],
   "tv:74712": [
-   "former-spy-recalled-to-field",
-   "espionage-thriller",
-   "intelligence-agency-operations",
-   "undercover-missions",
-   "geopolitical-crisis",
-   "internal-agency-conflicts",
-   "multi-season-conspiracy",
-   "field-agent-drama"
+   "retired-spy-recruited-back-into-the-field",
+   "son-follows-father-into-family-spy-agency",
+   "anthology-style-new-lead-each-season",
+   "foreign-political-crisis-intervention",
+   "rival-intelligence-agencies-collaborate",
+   "journalist-ex-wife-digs-into-family-secrets",
+   "senate-intelligence-oversight-politics",
+   "family-fractured-by-espionage-life"
   ],
   "tv:74728": [
    "trained-as-master-thief",
@@ -459374,15 +459247,15 @@
    "unconventional-crime-solving"
   ],
   "tv:78036": [
-   "anthology-horror-stories",
-   "mysterious-story-collector",
-   "supernatural-mysteries",
-   "eerie-and-macabre-tales",
-   "young-audience-horror",
-   "linked-episodes-mythology",
-   "monster-and-suspense-stories",
-   "horror-anthology-format",
-   "magical-and-fantastical-elements"
+   "anthology-of-standalone-horror-stories",
+   "masked-collector-of-stories-frames-episodes",
+   "horror-anthology-for-children",
+   "recurring-hidden-connections-between-episodes",
+   "urban-legend-host-figure",
+   "concealed-identity-narrator",
+   "small-town-locations-recur-across-episodes",
+   "new-cast-and-setting-each-episode",
+   "framing-device-bookends-each-story"
   ],
   "tv:78064": [
    "anti-mafia-prosecutor",
@@ -462250,15 +462123,13 @@
    "corrupted-networks"
   ],
   "tv:8392": [
-   "sailor-superhuman-strength",
-   "spinach-powered-transformation",
-   "romantic-love-triangle",
-   "cartoon-slapstick-violence",
-   "rival-romantic-conflict",
-   "repeated-episodic-battles",
-   "comic-strip-adaptation",
-   "sailor-maritime-adventures",
-   "absurdist-cartoon-humor"
+   "spinach-powered-super-strength",
+   "rival-suitor-love-triangle",
+   "sailor-hero-brawls",
+   "nemesis-arch-rival-showdown",
+   "nautical-comedy-adventure",
+   "baby-ward-caretaking",
+   "anthology-cartoon-shorts"
   ],
   "tv:83936": [
    "submarine-warfare",
@@ -462314,15 +462185,14 @@
    "unequal-technology-warfare"
   ],
   "tv:84000": [
-   "crime-drama-hunters",
-   "swedish-noir",
-   "criminal-investigation",
-   "procedural-mystery",
-   "northern-setting",
-   "crime-hunters-pursuit",
-   "law-enforcement-team",
-   "outdoor-wilderness-hunts",
-   "scandinavian-crime-drama"
+   "retired-detective-investigates-local-murder",
+   "small-town-secrets-and-corruption",
+   "mining-company-cover-up",
+   "reopening-a-cold-case",
+   "wrongfully-convicted-killer-released",
+   "uncle-mentors-rookie-cop-nephew",
+   "anthology-different-murder-each-season",
+   "rural-community-conspiracy"
   ],
   "tv:84052": [
    "serial-killer-investigation",
@@ -462367,16 +462237,14 @@
    "assimilating-into-human-culture"
   ],
   "tv:84200": [
-   "superhero-ensemble-team",
-   "government-agency-conspiracy",
-   "secret-society-of-villains",
-   "episodic-threat-resolution",
-   "team-expansion-mentorship",
-   "founding-members-leadership",
-   "serialized-conspiracy-arc",
-   "secret-headquarters-defense",
-   "villain-alliance-growing",
-   "expanded-roster-cooperation"
+   "giant-ensemble-superhero-team",
+   "rotating-small-team-per-episode",
+   "secret-agency-created-to-counter-heroes",
+   "villain-coalition-targets-heroes",
+   "shared-universe-crossover-cast",
+   "episodic-missions-with-serialized-arcs",
+   "public-distrust-of-superpowered-heroes",
+   "legacy-characters-join-team"
   ],
   "tv:84231": [
    "road-trip-revenge-quest",
@@ -462604,14 +462472,14 @@
    "postcards-sent-home"
   ],
   "tv:85000": [
-   "surreal-horror-comedy-anthology",
-   "loosely-connected-stories",
-   "warped-parable-narratives",
-   "absurdist-dark-humor",
-   "paranormal-and-strange-tales",
-   "animated-surreal-presentation",
-   "subversive-supernatural-comedy",
-   "existential-horror-parables"
+   "surreal-stop-motion-anthology",
+   "dream-logic-parables",
+   "narrator-links-loose-stories",
+   "multiple-vignettes-per-episode",
+   "unsettling-absurdist-imagery",
+   "warped-morality-parables",
+   "nightmare-logic-storytelling",
+   "puppet-animation-anthology"
   ],
   "tv:85014": [
    "enslaved-womans-journey",
@@ -463329,15 +463197,12 @@
    "puppeteers-caravan-arrives"
   ],
   "tv:86673": [
-   "pony-characters-as-human-teenagers",
-   "high-school-setting",
-   "animated-web-series",
-   "friendship-themes",
-   "magical-toyline-adaptation",
-   "young-audience-animation",
-   "character-reinvention-concept",
-   "team-dynamic-adventures",
-   "fantasy-to-reality-transformation"
+   "magical-ponies-reimagined-as-human-teens",
+   "high-school-setting-spinoff-of-fantasy-series",
+   "interactive-choose-your-ending-shorts",
+   "friend-group-navigating-teen-life-with-magic",
+   "musical-numbers-and-fashion-focus",
+   "magical-secret-in-mundane-high-school"
   ],
   "tv:86686": [
    "anthology-of-stories",
@@ -463400,14 +463265,15 @@
    "creative-ruin"
   ],
   "tv:86799": [
-   "deadly-disease-outbreak",
-   "ebola-virus-crisis",
-   "military-scientist-investigates",
-   "biological-threat-containment",
-   "veterinary-pathologist-hero",
-   "army-research-facility",
-   "real-event-dramatization",
-   "epidemiological-emergency"
+   "anthology-real-outbreak-per-season",
+   "army-scientist-races-to-identify-deadly-virus",
+   "animal-quarantine-facility-outbreak-origin",
+   "federal-investigators-hunt-bioterror-suspect",
+   "suspect-is-also-the-investigator",
+   "epidemic-containment-under-time-pressure",
+   "post-september-11-domestic-terror-investigation",
+   "dramatization-of-real-historical-outbreak",
+   "veterinary-pathologist-uncovers-hidden-threat"
   ],
   "tv:86830": [
    "undercover-agent-turned-priest",
@@ -463491,14 +463357,14 @@
    "men-dying-one-by-one"
   ],
   "tv:86942": [
-   "undercover-agents-infiltrate-criminals",
-   "drug-kingpin-operation",
-   "fake-couple-deception",
-   "belgian-dutch-crime-drama",
-   "real-event-inspired",
-   "limburg-drug-trade",
-   "deep-cover-assignment",
-   "police-infiltration-operation"
+   "undercover-agents-pose-as-a-couple",
+   "campground-infiltration-of-drug-kingpin",
+   "based-on-a-real-undercover-operation",
+   "fake-relationship-cover-for-investigation",
+   "new-criminal-target-each-season",
+   "law-enforcement-embedded-in-criminal-circle",
+   "long-term-undercover-identity-strain",
+   "drug-trafficking-investigation-thriller"
   ],
   "tv:86943": [
    "abandoned-by-spouse",
@@ -464441,15 +464307,14 @@
    "insular-social-circle"
   ],
   "tv:88728": [
-   "sketch-comedy-cringe-humor",
-   "absurdist-surreal-comedy",
-   "tim-robinson-sketches",
-   "awkward-situations",
-   "alternative-comedy-format",
-   "dark-comedy-sketches",
-   "ensemble-guest-stars",
-   "uncomfortable-humor-comedy",
-   "improvisation-based-sketches"
+   "sketch-comedy-of-escalating-social-humiliation",
+   "character-refuses-to-admit-being-wrong",
+   "mundane-situation-spirals-into-absurdity",
+   "cringe-comedy-confrontations",
+   "surreal-non-sequitur-sketch-premises",
+   "everyday-settings-turn-chaotic",
+   "stubborn-denial-in-the-face-of-embarrassment",
+   "blackout-sketch-format-no-recurring-characters"
   ],
   "tv:88783": [
    "face-blindness-mystery",
@@ -464566,15 +464431,14 @@
    "saboteur-nemesis"
   ],
   "tv:89113": [
-   "student-prepares-for-engineering-entrance",
-   "competitive-coaching-hub",
-   "academic-pressure-coming-of-age",
-   "hostel-life-friendships",
-   "ambitious-young-adult",
-   "indian-education-system",
-   "black-and-white-realistic-setting",
-   "peer-relationships-and-mentorship",
-   "examination-preparation-journey"
+   "teen-moves-away-for-exam-coaching",
+   "competitive-entrance-exam-pressure-cooker",
+   "coaching-hub-hostel-life",
+   "beloved-unconventional-mentor-teacher",
+   "friend-group-navigating-high-stakes-studies",
+   "small-town-student-among-elite-peers",
+   "path-to-elite-engineering-college",
+   "teacher-doubles-as-motivational-guide"
   ],
   "tv:89171": [
    "based-on-true-crime-unit",
@@ -464753,14 +464617,14 @@
    "rule-versus-compassion"
   ],
   "tv:895": [
-   "murder-mystery-anthology",
-   "black-comedy-murder",
-   "new-character-each-episode",
-   "murder-as-punchline",
-   "twisted-mystery-humor",
-   "thriller-parody",
-   "dark-british-comedy",
-   "episodic-mystery-format"
+   "same-actress-plays-a-different-character-each-episode",
+   "standalone-parody-of-murder-mysteries",
+   "anthology-of-unrelated-murder-plots",
+   "murder-weapon-displayed-in-the-end-credits",
+   "spoof-of-thriller-and-mystery-tropes",
+   "black-comedy-anthology",
+   "recurring-actress-changes-persona-every-episode",
+   "theme-song-mocks-the-weeks-murder"
   ],
   "tv:89504": [
    "talking-toy-companion",
@@ -465123,14 +464987,14 @@
    "adult-relationship-conflict"
   ],
   "tv:90241": [
-   "comedians-fictionalized-mockumentary",
-   "comedians-play-themselves",
-   "comedy-couple-sitcom",
-   "mock-documentary-self-parody",
-   "comedians-domestic-life",
-   "mockumentary-format",
-   "fictionalized-autobiography",
-   "comedy-self-portraiture"
+   "real-life-married-comedians-play-fictionalized-versions-of-themselves",
+   "mockumentary-about-a-comedy-power-couple",
+   "celebrity-guests-play-fictionalized-versions-of-themselves",
+   "domestic-sitcom-about-a-show-business-marriage",
+   "faux-documentary-crew-follows-a-real-family",
+   "comedians-satirize-their-own-public-image",
+   "marriage-friction-played-for-mockumentary-laughs",
+   "neighbors-recur-as-fictionalized-characters"
   ],
   "tv:90257": [
    "intertwined-families",
@@ -465824,14 +465688,12 @@
    "everyday-life-romance"
   ],
   "tv:91605": [
-   "anthology-women-protagonists",
-   "improvised-dialogue",
-   "intimate-documentary-style",
-   "relationship-tensions",
-   "mental-health-struggles",
-   "female-empowerment",
-   "character-studies",
-   "contemporary-women-lives"
+   "anthology-of-womens-stories",
+   "one-woman-per-episode",
+   "intimate-character-study-format",
+   "documentary-style-fly-on-the-wall",
+   "standalone-episodes-different-protagonist",
+   "relationships-and-mental-health-themes"
   ],
   "tv:91699": [
    "murder-investigation",
@@ -467079,14 +466941,14 @@
    "squire-to-prince"
   ],
   "tv:94235": [
-   "fantasy-police-procedural",
-   "city-watch-squad",
-   "crime-investigation-fantasy",
-   "episodic-mysteries",
-   "dark-urban-fantasy",
-   "punk-rock-thriller",
-   "magical-world",
-   "episodic-crime-solving"
+   "multi-species-city-watch",
+   "crime-of-the-week-format",
+   "troll-dwarf-werewolf-officers",
+   "punk-rock-fantasy-city",
+   "gruff-commander-ragtag-force",
+   "corrupt-scheming-ruler",
+   "secret-heir-hidden",
+   "werewolf-hides-true-nature"
   ],
   "tv:94244": [
    "elite-special-ops-team",
@@ -467413,14 +467275,15 @@
    "agency-corruption"
   ],
   "tv:94924": [
-   "healer-warrior-protects-humanity",
-   "supernatural-underworld-battles",
-   "anime-influenced-series",
-   "filipino-comic-adaptation",
-   "paranormal-creatures-conflict",
-   "mystical-urban-fantasy",
-   "protection-against-evil-beings",
-   "secret-battles-hidden-world"
+   "supernatural-investigator-polices-the-underworld",
+   "hidden-supernatural-world-within-modern-city",
+   "twin-bodyguards-protect-the-protagonist",
+   "police-ally-consults-supernatural-expert",
+   "folklore-creatures-invade-urban-setting",
+   "warrior-healer-battles-otherworldly-threats",
+   "case-of-the-week-supernatural-crime-investigation",
+   "inherited-role-as-protector-of-humanity",
+   "mythology-based-monster-hunter"
   ],
   "tv:94925": [
    "ancient-artifact-hunt",
@@ -467999,14 +467862,13 @@
    "grief-and-romance"
   ],
   "tv:960": [
-   "talk-show-interview-format",
-   "absurdist-comedic-host",
-   "satirical-interview-comedy",
-   "talk-show-parody",
-   "guest-interview-conversations",
-   "surreal-host-personality",
-   "absurdist-talk-show-format",
-   "comedic-interview-disruption"
+   "mock-talk-show-format",
+   "inept-self-satisfied-host",
+   "host-humiliates-guests-himself",
+   "show-within-a-show",
+   "recurring-cast-plays-guests",
+   "cringe-comedy-interview-disasters",
+   "career-ends-on-air"
   ],
   "tv:96005": [
    "bystander-guilt",
@@ -469118,14 +468980,13 @@
    "rules-bound-fantasy-world"
   ],
   "tv:9892": [
-   "fairy-tale-anthology-adaptation",
-   "grimm-tales-animated-retelling",
-   "classic-literature-anime-series",
-   "magical-storytelling-fantasy",
-   "obscure-and-famous-tales",
-   "japanese-anime-adaptation",
-   "multiple-episode-tales",
-   "fantasy-adventure-anthology"
+   "anime-anthology-of-classic-fairy-tales",
+   "one-fairy-tale-per-episode-block",
+   "pixie-narrator-introduces-each-tale",
+   "faithful-adaptations-of-grimm-tales",
+   "framing-device-host-with-no-plot-role",
+   "multiple-unrelated-fairy-tale-episodes",
+   "classic-fairy-tales-retold-for-tv"
   ],
   "tv:9894": [
    "team-assembled-for-covert-missions",
@@ -469671,14 +469532,14 @@
    "secrecy-and-fallout"
   ],
   "tv:99962": [
-   "mismatched-detective-partners",
-   "crime-investigation-procedural",
-   "detective-partnership-dynamic",
-   "bath-setting-crime-drama",
-   "criminal-case-solving",
-   "personality-clash-partnership",
-   "investigative-crime-drama",
-   "british-detective-series"
+   "mismatched-detective-duo",
+   "outsider-detective-shy-partner",
+   "case-of-the-week",
+   "fish-out-of-water",
+   "underestimated-quiet-partner",
+   "big-city-detective-small-force",
+   "picturesque-setting-crime-drama",
+   "guest-star-driven-mysteries"
   ],
   "tv:99966": [
    "zombie-outbreak",
