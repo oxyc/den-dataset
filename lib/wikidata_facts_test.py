@@ -185,6 +185,62 @@ class ImdbIds(unittest.TestCase):
         self.assertEqual((first, second, len(asked)), ({"Q1": "nm1"}, {"Q1": "nm1"}, 1))
 
 
+class People(unittest.TestCase):
+    """A person's traits (oxyc/den#136), as WDQS answers `people_query`."""
+
+    def row(self, qid, prop, value, prec=None):
+        out = {"item": ENTITY + qid, "p": prop, "v": value}
+        if prec is not None:
+            out["prec"] = str(prec)
+        return out
+
+    def test_every_trait_parses_and_a_gender_is_whatever_item_wikidata_names(self):
+        got = wd.parse_people(body(
+            self.row("Q1", "P21", ENTITY + "Q48270"),
+            self.row("Q1", "P27", ENTITY + "Q34"), self.row("Q1", "P27", ENTITY + "Q33"),
+            self.row("Q1", "P106", ENTITY + "Q33999"),
+            self.row("Q1", "P569", "+1946-06-14T00:00:00Z", 11),
+            self.row("Q1", "P570", "+2011-03-00T00:00:00Z", 10),
+            # "Unknown value" is a blank node, not an item.
+            self.row("Q2", "P21", "http://www.wikidata.org/.well-known/genid/abc123")))
+        self.assertEqual(got, {"Q1": {"gender": ["Q48270"], "citizenship": ["Q33", "Q34"],
+                                      "occupation": ["Q33999"],
+                                      "born": {"date": "1946-06-14", "precision": "day"},
+                                      "died": {"date": "2011-03", "precision": "month"}}})
+
+    def test_a_date_keeps_the_precision_wikidata_asserts_and_its_era(self):
+        self.assertEqual(wd.person_date("-0496-01-01T00:00:00Z", 9), {"date": "-0496", "precision": "year"})
+        self.assertEqual(wd.person_date("+1850-00-00T00:00:00Z", 8), {"date": "1850", "precision": "decade"})
+        self.assertIsNone(wd.person_date("+1000-00-00T00:00:00Z", 6), "a millennium is not a birth date")
+
+    def test_a_stated_day_beats_the_year_containing_it_and_the_earliest_wins(self):
+        day = {"date": "1946-06-14", "precision": "day"}
+        year = {"date": "1946", "precision": "year"}
+        self.assertEqual(wd.earliest_person_date([year, day]), day)
+        self.assertEqual(wd.earliest_person_date([{"date": "1947", "precision": "year"}, day]), day)
+        # Before the common era a larger number is earlier; string order gets this backwards.
+        self.assertEqual(wd.earliest_person_date([{"date": "-0496", "precision": "year"},
+                                                  {"date": "-0497", "precision": "year"}])["date"], "-0497")
+
+    def test_one_query_asks_all_five_at_best_rank(self):
+        query = wd.people_query(["Q2", "Q1", "Q2"])
+        self.assertIn("VALUES ?item { wd:Q1 wd:Q2 }", query)
+        for prop in ("P21", "P27", "P106"):
+            self.assertIn(f"?item wdt:{prop} ?v", query)
+        for prop in ("P569", "P570"):
+            self.assertIn(f"?st a wikibase:BestRank ; psv:{prop} ?node", query)
+
+    def test_an_answer_is_cached_per_batch(self):
+        asked = []
+        payload = body(self.row("Q1", "P21", ENTITY + "Q6581072"))
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(wd, "_sparql", lambda query: asked.append(query) or payload):
+            cache = caching.ResponseCache("wiki", directory, 3600)
+            first = wd.people(["Q1", "Q2"], cache)
+            second = wd.people(["Q2", "Q1"], cache)
+        self.assertEqual((first, second, len(asked)), ({"Q1": {"gender": ["Q6581072"]}},) * 2 + (1,))
+
+
 class Fetch(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

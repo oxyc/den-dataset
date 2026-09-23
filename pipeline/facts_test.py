@@ -41,8 +41,9 @@ class Wikidata:
         self.members = {}       # qid -> P179 member count, for the targets that are a series
         self.nconst = {}        # qid -> IMDb person id
         self.links = {}         # award qid -> what it belongs to, as `wd.award_links` answers
+        self.traits = {}        # person qid -> traits, as `wd.people` answers
         self.asked = {"facts": [], "titles": [], "names": [], "types": [], "series": [], "imdb": [],
-                      "awards": []}
+                      "awards": [], "people": []}
         self.failing = set()    # (media, tmdbId) whose batch raises
         self.languages = []     # (media, the languages the titles hop was told) per call
         self.live = False       # answered from the cache, so nothing is paced
@@ -117,6 +118,10 @@ class Wikidata:
         self.asked["imdb"].append(tuple(qids))
         return {q: self.nconst[q] for q in qids if q in self.nconst}
 
+    def people(self, qids, cache=None):
+        self.asked["people"].append(tuple(qids))
+        return {q: self.traits[q] for q in qids if q in self.traits}
+
 
 class Staged(unittest.TestCase):
     def setUp(self):
@@ -127,7 +132,7 @@ class Staged(unittest.TestCase):
         for name, stub in (("fetch_facts", self.wd.fetch_facts), ("titles", self.wd.titles_of),
                            ("entity_details", self.wd.entity_details), ("instance_of", self.wd.instance_of),
                            ("series", self.wd.series), ("imdb_ids", self.wd.imdb_ids),
-                           ("award_links", self.wd.award_links)):
+                           ("award_links", self.wd.award_links), ("people", self.wd.people)):
             original = getattr(facts.wd, name)
             setattr(facts.wd, name, stub)
             self.addCleanup(setattr, facts.wd, name, original)
@@ -403,6 +408,46 @@ class Backfill(Staged):
         self.wd.nconst = {"Q10": "nm0000010"}
         self.run_stage()
         self.assertEqual(self.read("facts-entities.json")["Q10"]["imdbId"], "nm0000010")
+
+
+class PersonTraits(Staged):
+    """Gender, birth, death, citizenship and occupation, for credited people only (oxyc/den#136)."""
+
+    TRAITS = {"gender": ["Q6581072"], "born": {"date": "1946-06-14", "precision": "day"},
+              "occupation": ["Q2526255"]}
+
+    def test_a_persons_traits_ship_by_name_and_are_asked_once(self):
+        """Q10 directs movie:1. The genre, the source work, the series and the broadcaster are no one's
+        credit, so they are not asked. The items a trait names are named, and ship like any entity."""
+        self.wd.traits = {"Q10": self.TRAITS}
+        self.wd.names["Q6581072"] = {"name": "female", "tmdbPersonId": None, "aliases": []}
+        self.run_stage()
+        # Once per pass: each keeps its own entity checkpoint.
+        self.assertEqual(self.wd.asked["people"], [("Q10",), ("Q10",)])
+        shipped = self.read(f"facts-{VERSION}.pre-merge.json")["entities"]
+        self.assertEqual({k: shipped["Q10"][k] for k in self.TRAITS}, self.TRAITS)
+        self.assertEqual(shipped["Q6581072"], {"en": "female"})
+        self.assertIn(("Q2526255", "Q6581072"), self.wd.asked["names"], "the trait values are named")
+        asked = len(self.wd.asked["people"])
+        self.run_stage()
+        self.assertEqual(self.wd.asked["people"][asked:], [], "a person who was asked is not asked again")
+
+    def test_a_person_with_no_traits_is_remembered_as_asked(self):
+        self.run_stage()
+        self.assertEqual(self.read("facts-entities.json")["Q10"]["traits"], {}, "asked, has none")
+        shipped = self.read(f"facts-{VERSION}.pre-merge.json")["entities"]["Q10"]
+        self.assertFalse(set(shipped) & {"gender", "born", "died", "citizenship", "occupation", "traits"})
+
+    def test_a_person_named_before_traits_existed_is_asked(self):
+        self.run_stage()
+        names = self.read("facts-entities.json")
+        for entry in names.values():
+            entry.pop("traits", None)
+        with open(os.path.join(self.out, "facts-entities.json"), "w", encoding="utf-8") as fh:
+            json.dump(names, fh)
+        self.wd.traits = {"Q10": self.TRAITS}
+        self.run_stage()
+        self.assertEqual(self.read("facts-entities.json")["Q10"]["traits"], self.TRAITS)
 
 
 class Resume(Staged):

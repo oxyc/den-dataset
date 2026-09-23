@@ -58,7 +58,9 @@
     }
   },
 
-  "Q91000001": {"label": "Mara Voss", "aliases": ["M. Voss"], "claims": {"P4985": ["5550001"], "P345": ["nm9000001"]}},
+  "Q91000001": {"label": "Mara Voss", "aliases": ["M. Voss"], "claims": {"P4985": ["5550001"], "P345": ["nm9000001"],
+                "P21": ["Q6581072"], "P569": [{"time": "+1971-04-02T00:00:00Z", "precision": 11}],
+                "P27": ["Q96000001"], "P106": ["Q2526255"]}},
   "Q91000002": {"label": "Idris Thale"},
   "Q91000003": {"label": "Juno Park"},
   "Q91000004": {"label": "Tomas Reyes"},
@@ -99,5 +101,7 @@
   "Q99000003": {"label": "Golden Skerry", "claims": {"P1027": ["Q99000020"]}},
   "Q99000010": {"label": "Harbour Film Awards", "claims": {"P31": ["Q107655869"]}},
   "Q99000020": {"label": "Skerry Film Festival"},
-  "Q107655869": {"label": "group of awards"}
+  "Q107655869": {"label": "group of awards"},
+  "Q6581072": {"label": "female"},
+  "Q2526255": {"label": "film director"}
 }

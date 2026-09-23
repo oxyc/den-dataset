@@ -586,6 +586,121 @@ def imdb_ids(qids, cache=None, batch=500):
     return out
 
 
+#: A person's traits (oxyc/den#136), each as Wikidata states it at best rank: sex or gender (P21),
+#: country of citizenship (P27) and occupation (P106) as the items it names, and the dates of birth (P569)
+#: and death (P570) with their precision. Nothing is inferred — not a gender from a name, not a nationality
+#: from a birthplace — so a person Wikidata says nothing about has no traits.
+PERSON_ITEMS = {"P21": "gender", "P27": "citizenship", "P106": "occupation"}
+PERSON_DATES = {"P569": "born", "P570": "died"}
+PEOPLE_CACHE_PATH = "sparql-people"
+#: `wikibase:timePrecision` → the name a person's date carries. Coarser than the titles' `PRECISION`: a
+#: birth known to the decade or the century is still a birth date — Sophocles', Homer's.
+PERSON_PRECISION = {11: "day", 10: "month", 9: "year", 8: "decade", 7: "century"}
+_TIME = re.compile(r"([+-]?)(\d+)-(\d\d)-(\d\d)T")
+
+
+def people_query(qids):
+    """One request for all five, as UNION blocks: they multiply nothing, because each block binds its own
+    rows. The dates go through `psv:` for their precision, keeping only best-rank statements as `wdt:`
+    does for the rest."""
+    values = " ".join(f"wd:{q}" for q in sorted(set(qids)))
+    items = [f"{{ ?item wdt:{p} ?v . BIND(\"{p}\" AS ?p) }}" for p in PERSON_ITEMS]
+    dates = [f"{{ ?item p:{p} ?st . ?st a wikibase:BestRank ; psv:{p} ?node . "
+             f"?node wikibase:timeValue ?v ; wikibase:timePrecision ?prec . BIND(\"{p}\" AS ?p) }}"
+             for p in PERSON_DATES]
+    return ("SELECT ?item ?p ?v ?prec WHERE {\n"
+            f"  VALUES ?item {{ {values} }}\n"
+            "  " + "\n  UNION ".join(items + dates) + "\n"
+            "}")
+
+
+def person_date(raw, precision):
+    """`+1946-06-14T00:00:00Z` at day precision → `{"date": "1946-06-14", "precision": "day"}`, cut to what
+    the precision asserts; a year before the common era keeps its sign (`-0496`). `None` for a precision
+    coarser than a century, or a value that is not a date."""
+    name = PERSON_PRECISION.get(precision)
+    match = _TIME.match(raw or "")
+    if name is None or not match:
+        return None
+    sign, year, month, day = match.groups()
+    text = f"{'-' if sign == '-' else ''}{int(year):04d}"
+    if name in ("month", "day"):
+        text += f"-{month}"
+    if name == "day":
+        text += f"-{day}"
+    return {"date": text, "precision": name}
+
+
+def _date_key(value):
+    """A person date's `(year, month, day)`, so a date before the common era sorts before one after it."""
+    text = value["date"]
+    sign = -1 if text.startswith("-") else 1
+    parts = [int(part) for part in text.lstrip("-").split("-")]
+    return (sign * parts[0], *parts[1:])
+
+
+def earliest_person_date(stated):
+    """`earliest_date` for a person's dates: a value another one refines is set aside (a bare 1946 beside
+    1946-06-14), and the earliest of the rest wins. Compared as numbers, because a person can be born
+    before the common era and string order sorts -0500 after -0496. Two values on one year at different
+    precisions (a decade and a year both written 1850) fall to the finer."""
+    keys = [_date_key(value) for value in stated]
+    finest = [value for value, key in zip(stated, keys)
+              if not any(len(other) > len(key) and other[:len(key)] == key for other in keys)]
+    order = list(PERSON_PRECISION.values())
+    return min(finest, key=lambda value: (_date_key(value), order.index(value["precision"])))
+
+
+def parse_people(payload):
+    """`Q-id -> {"gender": [...], "citizenship": [...], "occupation": [...], "born": date, "died": date}`,
+    the lists sorted by Q-id number and a field Wikidata states nothing for left out. A value that is not an
+    item — "unknown value" — is not a trait."""
+    lists, dates = {}, {}
+    for binding in bindings(payload):
+        uri, link, raw = _value(binding, "item"), _value(binding, "p"), _value(binding, "v")
+        if uri is None or link is None or raw is None:
+            continue
+        qid = _qid(uri)
+        if link in PERSON_ITEMS:
+            target = _qid(raw)
+            if target.startswith("Q") and target[1:].isdigit():
+                lists.setdefault(qid, {}).setdefault(PERSON_ITEMS[link], set()).add(target)
+        elif link in PERSON_DATES:
+            value = person_date(raw, _int(_value(binding, "prec")))
+            if value is not None:
+                found = dates.setdefault(qid, {}).setdefault(PERSON_DATES[link], [])
+                if value not in found:
+                    found.append(value)
+    out = {}
+    for qid in set(lists) | set(dates):
+        row = {name: sorted(values, key=lambda q: int(q[1:])) for name, values in lists.get(qid, {}).items()}
+        row.update({name: earliest_person_date(stated) for name, stated in dates.get(qid, {}).items()})
+        out[qid] = row
+    return out
+
+
+def people(qids, cache=None, batch=500):
+    """`Q-id -> traits` (`parse_people`) for the `qids` Wikidata states any for. Cached per batch like
+    `imdb_ids`, at its batch: the first run asks it of every credited person."""
+    out = {}
+    ordered = sorted(set(qids))
+    for start in range(0, len(ordered), batch):
+        query = people_query(ordered[start:start + batch])
+        key = cache.key(PEOPLE_CACHE_PATH, {"q": query}) if cache is not None else None
+        hit = cache.read(key) if key is not None else None
+        if hit is not None:
+            try:
+                out.update(parse_people(hit))
+                continue
+            except WikidataError:
+                pass
+        payload = _sparql(query)
+        out.update(parse_people(payload))
+        if key is not None:
+            cache.write(key, payload)
+    return out
+
+
 def instance_of(qids, batch=200):
     """`Q-id -> its P31 labels`, for the targets of `basedOn` — what a source work IS, which the bare Q-id
     cannot say.

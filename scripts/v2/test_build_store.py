@@ -205,12 +205,13 @@ class StoreFixture:
 
     def build(self, out_dir, titles=None, plot_keys=("movie:1",), premise_keys=("movie:2",),
               plot_labels=None, premise_labels=None, write_plot_vectors=None, stamp=None,
-              build_store=BUILD_STORE):
+              build_store=BUILD_STORE, entities=None):
         """`*_keys` are the blob's OWN key column; `*_labels` the labels artifact's records, which
         default to the same thing. Passing them apart is how the key-set assert is exercised;
         `write_plot_vectors` swaps in a writer of another format. `stamp` asks the writer to record
         what it read into that manifest. `build_store` runs a wrapper around the real writer instead of
-        the writer itself — the only way to reach a guard that fires on the writer's own constants."""
+        the writer itself — the only way to reach a guard that fires on the writer's own constants.
+        `entities` replaces or adds entity-table entries."""
         titles = self.TITLES if titles is None else titles
         plot_keys, premise_keys = list(plot_keys), list(premise_keys)
         plot_labels = plot_keys if plot_labels is None else list(plot_labels)
@@ -244,9 +245,9 @@ class StoreFixture:
             [sys.executable, build_store,
              "--corpus", corpus,
              # Q100 carries an alias: `ent_alias_v` is one of the sections the writer refuses to ship empty.
-             "--entities", dump("entities.json", dict(
-                 {f"Q{q}": {"en": f"Name {q}"} for q in range(100, 111)},
-                 Q100={"en": "Name 100", "aliases": ["Nom 100"]})),
+             "--entities", dump("entities.json", {
+                 **{f"Q{q}": {"en": f"Name {q}"} for q in range(100, 111)},
+                 "Q100": {"en": "Name 100", "aliases": ["Nom 100"]}, **(entities or {})}),
              "--facts", dump("facts.json", {"genreMap": {"Q1": {"movie": 18}},
                                             "records": [{"mediaType": t["mediaType"], "tmdbId": t["tmdbId"]}
                                                         for t in titles]}),
@@ -1146,6 +1147,59 @@ class SearchFactsShip(StoreFixture, unittest.TestCase):
         self.assertEqual(entities.person_imdb_id("nm0000100"), "nm0000100")
         for raw in ("co0000107", "tt0000001", "nm", "nm12x", None, ["nm1"]):
             self.assertIsNone(entities.person_imdb_id(raw), raw)
+
+
+class PersonTraitsShip(StoreFixture, unittest.TestCase):
+    """Gender, birth, death, citizenship and occupation per entity (oxyc/den#136)."""
+
+    def entity_span(self, store, name, entity):
+        offsets = store.ints(f"{name}_o")
+        return store.ints(f"{name}_v")[offsets[entity]:offsets[entity + 1]]
+
+    def test_each_trait_reaches_its_entity_and_names_its_items(self):
+        """Q100 directs movie:1 and Q101 acts in it. Q900 (non-binary) and Q34 are named; Q901 is not, and
+        is still in the entity table, named by its Q-id, because a trait points at it."""
+        entities = {
+            "Q100": {"en": "Name 100", "aliases": ["Nom 100"], "gender": ["Q900"], "citizenship": ["Q33", "Q34"],
+                     "occupation": ["Q901"], "born": {"date": "1946-06-14", "precision": "day"},
+                     "died": {"date": "2011-03", "precision": "month"}},
+            "Q101": {"en": "Name 101", "born": {"date": "-0496", "precision": "year"}},
+            "Q900": {"en": "non-binary"}, "Q34": {"en": "Sweden"}, "Q33": {"en": "Finland"},
+        }
+        with tempfile.TemporaryDirectory() as out:
+            store, stderr = self.build(out, entities=entities)
+        ent_qid, ent_name = store.ints("ent_qid"), store.ints("ent_name")
+        at = {q: i for i, q in enumerate(ent_qid)}
+        qids = {name: [ent_qid[e] for e in self.entity_span(store, name, at[100])]
+                for name in ("ent_gender", "ent_citizen", "ent_occupation")}
+        self.assertEqual(qids, {"ent_gender": [900], "ent_citizen": [33, 34], "ent_occupation": [901]})
+        self.assertEqual(store.text(ent_name[at[901]]), "Q901")
+        born, died = store.ints("ent_born", "i"), store.ints("ent_died", "i")
+        born_prec, died_prec = store.ints("ent_born_prec", "B", 1), store.ints("ent_died_prec", "B", 1)
+        # 1946-06-14 and 2011-03-01 are these many days from 1970-01-01; -0496-01-01 is 900,689 before it.
+        self.assertEqual((born[at[100]], born_prec[at[100]]), (-8602, 0))
+        self.assertEqual((died[at[100]], died_prec[at[100]]), (15034, 1))
+        self.assertEqual((born[at[101]], born_prec[at[101]]), (-900689, 2))
+        self.assertEqual((died[at[101]], died_prec[at[101]]), (-0x80000000, 0xFF))
+        self.assertEqual(self.entity_span(store, "ent_gender", at[101]), [])
+        self.assertIn('"gender": 1', stderr)
+
+    def test_a_table_with_no_traits_writes_the_sections_empty(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out)
+        entities = len(store.ints("ent_qid"))
+        self.assertEqual(store.ints("ent_gender_o"), [0] * (entities + 1))
+        self.assertEqual(set(store.ints("ent_born", "i")), {-0x80000000})
+        self.assertEqual(set(store.ints("ent_died_prec", "B", 1)), {0xFF})
+
+    def test_a_malformed_trait_is_refused(self):
+        for entry, complaint in (({"gender": ["male"]}, "is not a Wikidata item id"),
+                                 ({"born": {"date": "June 1946", "precision": "day"}}, "not a person date"),
+                                 ({"born": {"date": "1946", "precision": "millennium"}}, "not a person date")):
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as out, \
+                    self.assertRaises(AssertionError) as caught:
+                self.build(out, entities={"Q100": {"en": "Name 100", "aliases": ["Nom 100"], **entry}})
+            self.assertIn(complaint, str(caught.exception))
 
 
 class OnlyATitleIdReachesTheImdbColumn(unittest.TestCase):
