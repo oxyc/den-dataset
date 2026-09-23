@@ -15,7 +15,7 @@ service can report an identical identity and still return different numbers, bec
 configuration, its ONNX Runtime or its CPU. The only description of a space that cannot drift from the
 space is a vector it produced: `data/embed-canary.json` holds a handful of fixed texts and the exact int8
 vectors the serving box returns for them, and a run that does not reproduce every one byte for byte
-writes nothing. `scripts/v2/embed_canary.py` owns that file and regenerates it; this reads it.
+writes nothing. `pipeline/embed_canary.py` owns that file and regenerates it; this reads it.
 
 `max_tokens` is checked before any case, and is fatal on its own: it is where the service truncates, so at
 a different cap the long cases embed a different text and their bytes cannot mean anything — a partial
@@ -152,7 +152,7 @@ def read_canary(path):
         why = "a field is missing or of the wrong type"
     if not well_formed:
         raise CanaryFailure(f"{path} is not a readable embedding canary ({why}). Restore it from git, or "
-                            f"regenerate it with scripts/v2/embed_canary.py --regenerate against a known-good "
+                            f"regenerate it with pipeline/embed_canary.py --regenerate against a known-good "
                             f"embedder.")
     return canary
 
@@ -169,7 +169,7 @@ def verify(path, url, log):
     if texts_sha256(cases) != canary["textsSha256"]:
         raise CanaryFailure(f"{path}: its texts were edited without regenerating its vectors, so the "
                             f"committed answers describe texts that are no longer in it. Regenerate it with "
-                            f"scripts/v2/embed_canary.py --regenerate against a known-good embedder.")
+                            f"pipeline/embed_canary.py --regenerate against a known-good embedder.")
     if space_id(canary["canarySet"], cases) != canary["spaceId"]:
         raise CanaryFailure(f"{path}: its spaceId does not match the vectors it carries — the file was "
                             f"hand-edited. Regenerate it rather than correcting the digest.")

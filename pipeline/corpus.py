@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The CORPUS join, behind the stage contract.
 
-The rule lives in `scripts/v2/consolidate_corpus.py`: the spine that is the union of the facts and the
+The rule lives in `pipeline/consolidate_corpus.py`: the spine that is the union of the facts and the
 pass rather than the pass alone, the labels lookup that fails instead of returning something dict-like,
 the shard supersede rule and its tombstones, the prose refusal, and the join guards that count against
 the ARTIFACT rather than against a fraction of the corpus. Every one of them was bought by a failure that
@@ -39,18 +39,16 @@ import subprocess
 import sys
 
 from . import artifacts
+from . import audit_combined  # the bundle auditor, run against each shard's sidecar manifest
+from . import consolidate_corpus  # for `shard_order`, the join's own supersede order
 from .contract import REPO, StageError, bind
-
-sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
-import audit_combined  # noqa: E402  — the bundle auditor, run against each shard's sidecar manifest
-import consolidate_corpus  # noqa: E402  — for `shard_order`, the join's own supersede order
 
 NAME = "corpus"
 
 #: The rule this stage runs, repo-relative — the one spelling. `registry()` registers the outputs below
 #: against it, so what the pipeline says builds the corpus is what the pipeline executes.
-PRODUCER = "scripts/v2/consolidate_corpus.py"
-HOW = "scripts/v2/consolidate_corpus.py"
+PRODUCER = "pipeline/consolidate_corpus.py"
+HOW = "pipeline/consolidate_corpus.py"
 #: Writes into the out-dir and nowhere else, so a repeat run costs only time.
 PUBLISHES = False
 SPENDS = False

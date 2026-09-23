@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 import json
 import os
-import sys
 import tempfile
 import threading
 import unittest
 from unittest import mock
 from types import SimpleNamespace
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import article_sections
-import combined_questions
-import run_combined
-import resume_combined_excluding
+from . import article_sections, combined_questions, resume_combined_excluding, run_combined
 
 
 def answer_for(question):

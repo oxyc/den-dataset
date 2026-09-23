@@ -18,11 +18,16 @@ import sys
 import threading
 import uuid
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from article_sections import (encoded_chars, is_oversized, parse_sections, public_section, section_groups,
-                              select_global_sections, sha256_text, state_for)
-from combined_questions import (PINNED_MODEL, PROMPT, ROOT, TAXONOMY, global_questions, section_question)
-from typesafe_client import TypeSafe, TypeSafeError
+if not __package__:
+    # Run as a file, which is how the classify stage runs it: the repo, not pipeline/, is the import root.
+    sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from lib import typesafe_client
+from lib.typesafe_client import TypeSafe, TypeSafeError
+from pipeline import article_sections, combined_questions
+from pipeline.article_sections import (encoded_chars, is_oversized, parse_sections, public_section,
+                                       section_groups, select_global_sections, sha256_text, state_for)
+from pipeline.combined_questions import (PINNED_MODEL, PROMPT, ROOT, TAXONOMY, global_questions,
+                                         section_question)
 
 SCHEMA_VERSION = "combined-jev-v1"
 #: Bumped when the shape of the recorded configuration changes rather than when the questions do. `-v2`
@@ -32,6 +37,17 @@ SCHEMA_VERSION = "combined-jev-v1"
 #: two values that moved with the file, `taxonomy` and `taxonomySha256`, are compared on their own.
 PLANNER_VERSION = "whole-or-role-selected-v2"
 DEFAULT_MAX_STATE_CHARS = 110_000
+
+#: The pass's own source files, which `manifest_config` hashes into every manifest under
+#: `implementationSha256`, and `audit_combined.validate_implementation` hashes again. Keyed by FILE NAME,
+#: which is what every shipped manifest records, so a file that moves keeps its key. The paths are each
+#: module's own rather than one shared directory: the four do not live together (oxyc/den-dataset#73).
+IMPLEMENTATION = {name: os.path.abspath(path) for name, path in (
+    ("run_combined.py", __file__),
+    ("article_sections.py", article_sections.__file__),
+    ("combined_questions.py", combined_questions.__file__),
+    ("typesafe_client.py", typesafe_client.__file__),
+)}
 
 
 class RunAborted(RuntimeError):
@@ -223,11 +239,7 @@ def manifest_config(args, global_qs, label_mapping, tax, enriched_evidence_sha):
     return {
         "schemaVersion": SCHEMA_VERSION,
         "plannerVersion": PLANNER_VERSION,
-        "implementationSha256": {
-            name: sha256_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), name))
-            for name in ("run_combined.py", "article_sections.py", "combined_questions.py",
-                         "typesafe_client.py")
-        },
+        "implementationSha256": {name: sha256_file(path) for name, path in IMPLEMENTATION.items()},
         "articles": os.path.abspath(args.articles),
         "articlesSha256": sha256_file(args.articles),
         "enrichedDir": os.path.abspath(args.enriched_dir) if args.enriched_dir else None,
@@ -303,7 +315,7 @@ def load_or_create_manifest(path, config):
                 "  The rows already in the output were bought under the manifest's configuration and "
                 "stay valid; re-stamping the manifest onto this one would erase what produced them. "
                 "Finish the remaining titles in a separately manifested shard beside this one and check "
-                "the set with scripts/v2/audit_combined_bundle.py.")
+                "the set with pipeline/audit_combined_bundle.py.")
             raise SystemExit("\n".join(lines))
         return manifest
     manifest = {

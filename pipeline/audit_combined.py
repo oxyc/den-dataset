@@ -13,22 +13,26 @@ import re
 import statistics
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from article_sections import encoded_chars, is_oversized, public_section, select_global_sections, sha256_text, state_for
-from combined_questions import PROMPT, ROOT, TAXONOMY, section_question
-from run_combined import (SCHEMA_VERSION, article_key, attach_enriched_evidence, canonical, load_articles,
-                          sections_for_record, sha256_file, validate_answers)
-from typesafe_client import TypeSafe
+if not __package__:
+    # Run as a file: the repo, not pipeline/, is the import root.
+    sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from lib.typesafe_client import TypeSafe
+from pipeline.article_sections import (encoded_chars, is_oversized, public_section, select_global_sections,
+                                       sha256_text, state_for)
+from pipeline.combined_questions import PROMPT, ROOT, TAXONOMY, section_question
+from pipeline.run_combined import (IMPLEMENTATION as SOURCES, SCHEMA_VERSION, article_key,
+                                   attach_enriched_evidence, canonical, load_articles, sections_for_record,
+                                   sha256_file, validate_answers)
 
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 #: Superseded digests of the source files the pass hashes into every manifest, each with the commit that
 #: superseded it and why its rows still mean the same thing. See `validate_implementation`.
-LINEAGE = os.path.join(HERE, "implementation-lineage.json")
+LINEAGE = os.path.join(ROOT, "data", "implementation-lineage.json")
 
 #: The pass's own source files, which `run_combined.manifest_config` hashes into every shard's manifest
-#: under `implementationSha256`. A manifest must record every one of them: see `validate_implementation`.
-IMPLEMENTATION = ("run_combined.py", "article_sections.py", "combined_questions.py", "typesafe_client.py")
+#: under `implementationSha256`, by name. A manifest must record every one of them: see
+#: `validate_implementation`. Where each one lives is `SOURCES` — the paths the pass hashes, not a copy.
+IMPLEMENTATION = tuple(SOURCES)
 
 #: Where the pass keeps each committed input today, for a manifest that names it somewhere else. See
 #: `manifest_file`.
@@ -260,14 +264,16 @@ def validate_implementation(where, config, lineage=None):
                     f"shard's rows")
     allowed = []
     for name, expected in recorded.items():
-        path = os.path.join(HERE, name)
+        path = SOURCES.get(name)
+        if path is None:
+            fail(where, f"the manifest records a digest for {name}, which is not a source file of the pass")
         if sha256_file(path) == expected:
             continue
         entry = next((e for e in lineage.get(name, []) if e.get("sha256") == expected), None)
         if entry is None:
             fail(where, f"implementation hash differs for {name}: the shard was produced by {expected[:12]} "
                         f"and this tree holds {sha256_file(path)[:12]}. If that edit cannot change the rows, "
-                        f"record it in scripts/v2/implementation-lineage.json with the commit and the "
+                        f"record it in data/implementation-lineage.json with the commit and the "
                         f"reason; do not re-stamp the manifest.")
         allowed.append({"file": name, "sha256": expected, **{
             key: entry[key] for key in ("commit", "supersededBy", "why") if key in entry}})
@@ -325,7 +331,7 @@ def validate_inputs(where, config, lineage=None):
             fail(where, f"{role} artifact hash differs: the shard was bought from "
                         f"{str(recorded)[:12]} and this tree holds {actual[:12]}. If the file was "
                         f"rewritten without changing what the pass asked, record it under "
-                        f"supersededInputs in scripts/v2/implementation-lineage.json with the commit, "
+                        f"supersededInputs in data/implementation-lineage.json with the commit, "
                         f"the reason and the evidence; do not re-stamp the manifest.")
         allowed.append({"input": role, "sha256": recorded, **{
             key: entry[key] for key in ("file", "commit", "supersededBy", "why", "evidence")

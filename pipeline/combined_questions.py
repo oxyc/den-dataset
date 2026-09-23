@@ -8,16 +8,16 @@ import json
 import os
 import re
 
-from facet_questions import questions as facet_questions
-from run_facets import VALIDITY
+from .facet_questions import questions as facet_questions
+from .run_facets import VALIDITY
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: The genres & moods vocabulary, as data: JSON under `data/` with the other committed inputs
 #: (oxyc/den-dataset#27). The constant, the `--taxonomy` flag and the manifest keys `taxonomy`,
 #: `taxonomySha256` and `taxonomyVersion` keep their names — shipped manifests and the store carry them,
 #: and a recorded key that is renamed is a key its readers no longer find.
 TAXONOMY = os.path.join(ROOT, "data", "genres-moods-vocabulary.json")
-PROMPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "facets-v2.md")
+PROMPT = os.path.join(ROOT, "data", "prompts", "facets-v2.md")
 PINNED_MODEL = "jev-1.13.0"
 
 #: The label families, in the order the file writes them. `version` is read beside them.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """DT-F's weekly re-cluster: groups the embedding finds cohesive that the vocabulary has no word for.
 
-    scripts/recluster.py --labels out/labels-t02.json --vectors out/vectors-bge-m3.bin --out report.json \
+    pipeline/recluster.py --labels out/labels-t02.json --vectors out/vectors-bge-m3.bin --out report.json \
         [--k 200] [--iterations 8] [--min-size 25] [--max-purity 0.35] [--min-cohesion 0.55]
 
 k-means over the shipped vectors, then one question per cluster: how dominant is its most common existing
@@ -10,8 +10,8 @@ grab-bags; low purity with high cohesion is a coherent group the taxonomy cannot
 edits: naming a cluster is a human judgement, and adding a label is a taxonomy bump that forces a
 whole-universe reclassification.
 
-A script, not a stage. It is in no build order — nothing it writes is read by anything the pipeline
-builds — and `pipeline/` holds the stages `den run` walks. `scripts/recluster-run.sh` is its timer.
+Not a stage. It is in no build order — nothing it writes is read by anything the pipeline builds — so no
+stage imports it; `scripts/recluster-run.sh` is its timer and runs it by path.
 
 **Deterministic, and the Swift's bytes.** Seeds are stride-sampled rather than random, so a weekly run is
 comparable to the last one instead of reshuffling every cluster id; and the arithmetic is the Swift's in
@@ -41,10 +41,11 @@ if sys.version_info < (3, 12):
     sys.exit(f"recluster.py needs Python 3.12 or newer (for math.sumprod); {sys.executable} is "
              f"{platform.python_version()}. scripts/recluster-run.sh finds one on PATH, or set PYTHON to one.")
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.dirname(HERE)
-sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(HERE, "v2"))
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if not __package__:
+    # Run as a file: the repo, not pipeline/, is the import root.
+    sys.path[0] = REPO
+sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
 import vector_blob  # noqa: E402  — the DENVEC02 layout, one definition
 from pipeline import jsonbytes  # noqa: E402  — the Swift encoder's bytes
 

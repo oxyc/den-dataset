@@ -23,7 +23,8 @@ import os
 import re
 import sys
 
-PROMPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "facets-v1.md")
+PROMPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "prompts",
+                      "facets-v1.md")
 
 # `- **`era`** — when the story is set, not when it was made:` … then values until the next blank line.
 _AXIS = re.compile(r"^- \*\*`(?P<axis>[a-z]+)`\*\*\s*[—-]\s*(?P<desc>.+?):\s*$", re.M)

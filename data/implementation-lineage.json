@@ -1,0 +1,71 @@
+{
+  "note": "Superseded digests of the files run_combined.py hashes into every shard's manifest. A shard bought on an older version of the pass is still auditable ONLY if somebody wrote down why that version's rows mean the same thing; re-stamping the manifest instead would erase the provenance of a paid run to make a checker quiet. So the check stays strict and the exceptions are here, each naming the commit that superseded it and what that commit did. An unlisted digest is a refusal. Add an entry only after reading the diff: `git diff <commit>^ <commit> -- <file>`. An entry written BY the commit that supersedes it cannot name that commit's own hash, so `supersededBy` names the change instead, and a later commit fills the hash in; `git log --follow -- data/implementation-lineage.json` finds it. `superseded` is the four SOURCE files (`implementationSha256`); `supersededInputs` is the committed DATA files the same config pins by digest — the prompt and the vocabulary — which are a different thing and are not filed under a source file's name.",
+  "superseded": {
+    "run_combined.py": [
+      {
+        "sha256": "031e9f1431f33a912b036454be7e793f8a66c9e0103d7f7cb8bd64cc289808f3",
+        "commit": "c03afa0",
+        "supersededBy": "eff1457c5851a1e98ac4a200d94f41d7304923e7",
+        "why": "#27 recorded `taxonomy` repo-relative instead of absolute, bumped PLANNER_VERSION to whole-or-role-selected-v2 to declare that config-shape change, and made the resume refusal name the keys that differ. All three touch what the manifest SAYS about a run and what a refusal prints; the state, the questions, the client and the row are untouched, so a row bought on this digest is the row this file would still produce."
+      },
+      {
+        "sha256": "90290c325d6f6739b8ec34d1b7476e4448e1a933875273a1b9a261c0d9d66aff",
+        "commit": "b9e02ad",
+        "supersededBy": "c03afa0c4e8dbad44b829101b6d52fdb4485c105",
+        "why": "#60 added the delta pass's `state_section_ids` branch to `classify`, a refusal for a state carrying no article section, and a `sectionDecisions` figure in the PLAN summary. The `state_section_ids=None` path the corpus pass runs is unchanged, and none of it reaches a row, so combined-v1-r2's rows are what this file would still produce. #50 also retitled one docstring line."
+      },
+      {
+        "sha256": "c722cd65084b6fc9f027a228cd32be02d70828b59c146e83a85ee7d5032555b0",
+        "commit": "a42042a",
+        "supersededBy": "the commits that moved the pass out of scripts/ (oxyc/den-dataset#73)",
+        "why": "#73 moved the pass's modules into pipeline/ and lib/, one file per commit, this one into pipeline/. What changed here is where things are found, not what is done: the import lines, a file run by path making the repo its import root instead of adding directories to sys.path, the resume refusal naming the bundle auditor at its new path, and `implementationSha256` hashing each of the four at its module's own path (`IMPLEMENTATION`) instead of all four in this file's directory — the keys are still the four file names, so a manifest reads the same. The state, the questions, the planner, the validator and the row are untouched."
+      }
+    ],
+    "combined_questions.py": [
+      {
+        "sha256": "cc7da6666b9257c1a5e8c90e4cd65d95c9b14d211589bc0bc8764e1f4907a28f",
+        "commit": "b9e02ad",
+        "supersededBy": "eff1457c5851a1e98ac4a200d94f41d7304923e7",
+        "why": "#27 changed one constant: TAXONOMY now points at the vocabulary under data/ instead of Sources/DenDataset/Taxonomy.swift. The file was moved with `git mv` and its bytes were unchanged (sha256 dd048e59177955307d1bbff7bf88c79f4a66e8bec053c96a32769406d6172f49, the taxonomySha256 every manifest here records), and the parser reading it was untouched, so the question set built from it is identical — globalQuestionsSha256 is the same on both sides of the move. The digest that move produced is superseded in turn by the entry below."
+      },
+      {
+        "sha256": "111838f1a29685a594b59f51de868fc085598aa466f9028845e30bb717392ee8",
+        "commit": "eff1457",
+        "supersededBy": "the commit that converted the vocabulary to JSON (oxyc/den-dataset#27)",
+        "why": "#27 converted the vocabulary from Swift source to data/genres-moods-vocabulary.json, so `taxonomy()` parses JSON instead of Swift string-array literals and the hand-written Swift parser is gone. What it returns is the same `{version, family: [label, …]}` for the same labels, which the questions are built from unchanged: the questions the pass asks still hash to globalQuestionsSha256 8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964 and the label mapping to 06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577, the two digests combined-v1-r2.jsonl.manifest.json records. `scripts/v2/test_combined.py` (pipeline/run_combined_test.py since #73) pins both, so a vocabulary edit hiding behind this entry fails there."
+      },
+      {
+        "sha256": "6d6d0d469f3e25cff64d53ccc107f17adfcbc14f262703951b17e020c679453e",
+        "commit": "a42042a",
+        "supersededBy": "the commits that moved the pass out of scripts/ (oxyc/den-dataset#73)",
+        "why": "#73 moved the prompts to data/prompts/, so PROMPT names facets-v2.md there; the prompt's bytes are unchanged and its digest is the promptSha256 every manifest records. The file itself moved to pipeline/ beside the facet parser and the v1 runner that holds the `validity` question, so it imports them relatively and ROOT is one directory up instead of two — the same repo root, so TAXONOMY and PROMPT name the same files. Only where files are found changed — nothing that builds a question did, so the questions still hash to globalQuestionsSha256 8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964 and the label mapping to 06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577, which the pass's own tests pin (SHIPPED_GLOBAL_QUESTIONS_SHA, SHIPPED_LABEL_MAPPING_SHA)."
+      }
+    ],
+    "typesafe_client.py": [
+      {
+        "sha256": "8dbb112388aca23c1c7b7c87595d71b6975d81e52717dd061bc8a26ba894e546",
+        "commit": "b9e02ad",
+        "supersededBy": "7e7da380eeeef6bad0894615a435fb24d1ac9209",
+        "why": "#63 widened the retry to connection failures that arrive without an HTTP status and made the client obey a Retry-After. It touches when a request is repeated, not what is sent or how the answer is parsed, so a row bought through the old transport is the same row."
+      },
+      {
+        "sha256": "79d363a3cd2daba9103d9712ae5780f46afb1aa397cb8a89589d952bdd31b9ae",
+        "commit": "7e7da38",
+        "supersededBy": "the commit that moved typesafe_client.py into lib/ (oxyc/den-dataset#73)",
+        "why": "#73 moved the client from scripts/v2/ to lib/, beside the other upstream clients. One line changed: `api_key` finds `den.env` at the repo root one directory up from the file instead of two, which is the same file from the new place. The endpoint, the request, the retry and the parsing are byte for byte the same, so a row bought through the old path is the same row."
+      }
+    ]
+  },
+  "supersededInputs": {
+    "taxonomy": [
+      {
+        "sha256": "dd048e59177955307d1bbff7bf88c79f4a66e8bec053c96a32769406d6172f49",
+        "file": "data/taxonomy-t02.swift",
+        "commit": "eff1457",
+        "supersededBy": "the commit that converted the vocabulary to JSON (oxyc/den-dataset#27)",
+        "why": "The genres & moods vocabulary is now data/genres-moods-vocabulary.json instead of Swift source nothing compiled. Reformatting a file necessarily changes its digest, and this one is pinned by every shard manifest as taxonomySha256 — but the LABELS and the version are the same, name for name: the file was generated from what the Swift parser returned and checked field by field against it before the Swift was deleted.",
+        "evidence": "The questions are the equality that matters, because they are what the pass bought answers to. Built from this JSON they still hash to globalQuestionsSha256 8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964 and labelQuestionMappingSha256 06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577 — the digests combined-v1-r2.jsonl.manifest.json records, and the ones `scripts/v2/test_combined.py` (pipeline/run_combined_test.py since #73) pins. Regional labels are the one part no question is built from, so they were compared directly instead."
+      }
+    ]
+  }
+}

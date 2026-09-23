@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """A known-answer test for the embedding space, run before anything writes a vector.
 
-    scripts/v2/embed_canary.py --url http://den-embed:8080            # verify; exit 2 on any difference
-    scripts/v2/embed_canary.py --url http://den-embed:8080 --regenerate --out -
+    pipeline/embed_canary.py --url http://den-embed:8080            # verify; exit 2 on any difference
+    pipeline/embed_canary.py --url http://den-embed:8080 --regenerate --out -
 
 ## What this is for
 
@@ -72,8 +72,8 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_CANARY = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                              "data", "embed-canary.json")
+DEFAULT_CANARY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data",
+                              "embed-canary.json")
 
 #: The fields of `/health` that describe the space rather than the build. Reported on a failure as the
 #: likely cause; never the verdict on their own, because all four can match while the vectors differ.
@@ -349,7 +349,7 @@ def gate(url, canary=None, record=None, out=sys.stderr):
     render(report, out)
     if not ok:
         sys.exit("embed canary FAILED — refusing to write vectors. "
-                 "See scripts/v2/embed_canary.py for what regenerating the canary does and does not mean.")
+                 "See pipeline/embed_canary.py for what regenerating the canary does and does not mean.")
     if record:
         os.makedirs(os.path.dirname(os.path.abspath(record)), exist_ok=True)
         with open(record, "w", encoding="utf-8") as fh:

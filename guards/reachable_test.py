@@ -33,10 +33,47 @@ STORE_PRODUCER = pipeline.stage("store").PRODUCER
 STORE_ENTRY = os.path.join(REPO, STORE_PRODUCER)
 
 
+CI = ".github/workflows/ci.yml"
+
+
+def operator_tools_in(package_dir):
+    """The operator tools that live in a package, as its module names."""
+    prefix = os.path.relpath(package_dir, REPO) + "/"
+    return sorted(path[len(prefix):-len(".py")] for path in reachable.operator_tools()
+                  if path.startswith(prefix) and path.endswith(".py"))
+
+
+def scripts_entering(tools):
+    """The scripts under `scripts/` (held live by their own guard below), without the operator tools among
+    them when `tools` is false."""
+    scripts, _ = reachable.script_files(os.path.join(REPO, "scripts"))
+    declared = reachable.operator_tools()
+    return [script for script in scripts if tools or script not in declared]
+
+
+def pipeline_reach(tools=True):
+    """What runs reaches under `pipeline/`: the stages and what they import, and what `den`, CI, the scripts
+    under `scripts/` and the operator tools import or name — a stage's `PRODUCER` included, which is how a
+    pass the stage executes is entered. `tools=False` leaves every operator tool out, which is what the
+    operator-tool list is checked against."""
+    base = list(pipeline.STAGES) + (operator_tools_in(PIPELINE) if tools else [])
+    return reachable.reached_from(REPO, PIPELINE, base, ["den", CI] + scripts_entering(tools))
+
+
+def lib_reach(tools=True):
+    """What runs reaches under `lib/`: what the reached pipeline modules import, and what `den`, the scripts
+    under `scripts/` and the operator tools import or name."""
+    stages = [f"pipeline/{name}.py" for name in sorted(pipeline_reach(tools))]
+    base = operator_tools_in(LIB) if tools else []
+    return reachable.reached_from(REPO, LIB, base, ["den"] + stages + scripts_entering(tools))
+
+
 def script_roots():
-    """Everything that runs and can name a script: `den`, CI, the stages and what they reach."""
-    return (["den", ".github/workflows/ci.yml"]
-            + [f"pipeline/{name}.py" for name in sorted(reachable.reached(PIPELINE, pipeline.STAGES))]
+    """Everything that runs and can name a script: `den`, CI, the stages and what they reach. The operator
+    tools are not among them — they reach what they name as `extra` roots, which is what lets the list
+    be held to naming only what nothing else runs."""
+    return (["den", CI]
+            + [f"pipeline/{name}.py" for name in sorted(pipeline_reach(tools=False))]
             + [f"store/{name}.py" for name in reachable.modules(STORE)]
             + [f"lib/{name}.py" for name in reachable.modules(LIB)])
 
@@ -133,6 +170,27 @@ class Refusal(unittest.TestCase):
             self.assertEqual(reachable.roots(dir, entry), ["build"])
 
 
+class NamedRefusal(unittest.TestCase):
+    def test_a_module_run_by_path_or_imported_from_outside_is_reached_and_prose_still_is_not(self):
+        """A pass moved out of `scripts/` into `pipeline/` is executed by the path a stage's `PRODUCER`
+        spells, and imported by a script still outside — both reach it, and what it imports is reached in
+        turn. A docstring naming a module still reaches nothing."""
+        with tempfile.TemporaryDirectory() as root:
+            repo(root, {
+                "pkg/__init__.py": "",
+                "pkg/stage.py": 'PRODUCER = "pkg/pass_.py"\n',
+                "pkg/pass_.py": "from pkg import helper\n",
+                "pkg/helper.py": "",
+                "pkg/imported.py": "",
+                "pkg/told.py": "",
+                "pkg/stranded.py": "",
+                "tool.py": "'''Run pkg/told.py by hand.'''\nfrom pkg.imported import x\n",
+            })
+            reach = reachable.reached_from(root, os.path.join(root, "pkg"), ["stage"], ["tool.py"])
+            self.assertEqual(sorted(set(reachable.modules(os.path.join(root, "pkg"))) - reach),
+                             ["stranded", "told"])
+
+
 def repo(root, files):
     """A throwaway repo. `files` maps a repo-relative path to its source."""
     for path, source in files.items():
@@ -191,11 +249,12 @@ class ScriptRefusal(unittest.TestCase):
 
 class ThisRepo(unittest.TestCase):
     def test_nothing_under_pipeline_is_unreachable(self):
-        stranded = reachable.unreachable(PIPELINE, pipeline.STAGES)
+        stranded = sorted(set(reachable.modules(PIPELINE)) - pipeline_reach())
         self.assertEqual(stranded, [], f"unreachable from STAGES: {stranded}. Nothing lives under "
-                                       f"pipeline/ unless a stage reaches it — delete it, or import it "
-                                       f"from the stage that needs it. Leaving it is how scripts/v2/ "
-                                       f"came to exist.")
+                                       f"pipeline/ unless a stage reaches it, something that runs imports "
+                                       f"or names it, or guards/operator-tools.json declares it — delete "
+                                       f"it, or import it from the stage that needs it. Leaving it is how "
+                                       f"scripts/v2/ came to exist.")
 
     def test_nothing_under_store_is_unreachable(self):
         """`store/` is entered by subprocess, not by import, so its roots are the entry script's own
@@ -209,11 +268,10 @@ class ThisRepo(unittest.TestCase):
 
     def test_nothing_under_lib_is_unreachable(self):
         """`lib/` is entered by import, from whichever stages leave the machine — so its roots are those
-        stages' own import blocks, over the stages `STAGES` actually reaches. A stage that drops an
-        upstream, or leaves the order entirely, strands the client only it talked to in the same commit."""
-        entries = [os.path.join(PIPELINE, f"{name}.py")
-                   for name in sorted(reachable.reached(PIPELINE, pipeline.STAGES))]
-        stranded = reachable.unreachable(LIB, reachable.roots(LIB, *entries))
+        stages' own import blocks, over the stages `STAGES` actually reaches, and those of the scripts still
+        under `scripts/`. A stage that drops an upstream, or leaves the order entirely, strands the client
+        only it talked to in the same commit."""
+        stranded = sorted(set(reachable.modules(LIB)) - lib_reach())
         self.assertEqual(stranded, [], f"unreachable from the pipeline: "
                                        f"{[f'lib/{name}.py' for name in stranded]}. `lib/` holds what a "
                                        f"stage needs from outside the machine — delete it, or import it "
@@ -235,8 +293,12 @@ class ThisRepo(unittest.TestCase):
         read as if it did, and a redundant one would survive the day the thing that runs it stops."""
         code, _ = reachable.script_files(os.path.join(REPO, "scripts"))
         run = reachable.reached_scripts(REPO, script_roots(), code)
+        run |= {f"pipeline/{name}.py" for name in pipeline_reach(tools=False)}
+        run |= {f"lib/{name}.py" for name in lib_reach(tools=False)}
         for path, reason in reachable.operator_tools().items():
-            self.assertIn(path, code, f"{path} is in guards/operator-tools.json and is not a script")
+            self.assertTrue(path in code or (path.startswith(("pipeline/", "lib/"))
+                                             and os.path.isfile(os.path.join(REPO, path))),
+                            f"{path} is in guards/operator-tools.json and is not a script")
             self.assertTrue(reason.strip(), f"{path} is in guards/operator-tools.json with no reason")
             self.assertNotIn(path, run, f"{path} is already reached by what runs; drop it from the list")
 

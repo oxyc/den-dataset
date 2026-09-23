@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the delta question set over an article dump, reusing `run_combined`'s machinery.
 
-  scripts/v2/run_delta.py --articles out-repass/articles.jsonl --enriched-dir out-repass/enriched \
+  pipeline/run_delta.py --articles out-repass/articles.jsonl --enriched-dir out-repass/enriched \
       --combined out-repass/combined-v1-r2.jsonl \
       --combined out-repass/combined-v1-r2-token-fallback.jsonl \
       --combined out-repass/combined-v1-r2-token-fallback-2.jsonl \
@@ -26,12 +26,14 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+if not __package__:
+    # Run as a file: the repo, not pipeline/, is the import root.
+    sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-import run_combined as rc  # noqa: E402
-from article_sections import sha256_text  # noqa: E402
-from combined_questions import taxonomy  # noqa: E402
-from delta_questions import delta_questions  # noqa: E402
+from pipeline import run_combined as rc  # noqa: E402
+from pipeline.delta_questions import delta_questions  # noqa: E402
+from pipeline.article_sections import sha256_text  # noqa: E402
+from pipeline.combined_questions import taxonomy  # noqa: E402
 
 
 def corpus_states(paths, records):

@@ -68,12 +68,11 @@ sys.path.insert(0, HERE)
 
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
-from pipeline import artifacts, genres_moods  # noqa: E402
+from pipeline import artifacts, audit_combined, genres_moods  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 
 V2 = os.path.join(HERE, "scripts", "v2")
 sys.path.insert(0, V2)
-import audit_combined  # noqa: E402
 import vector_blob  # noqa: E402
 
 FIXTURE = os.path.join(HERE, "pipeline", "fixture-corpus")
@@ -116,8 +115,8 @@ def stamp_implementation(path):
     this test with the audit's advice — record a lineage entry — which is meant for shards someone paid for.
     """
     manifest = read_json(path)
-    manifest["config"]["implementationSha256"] = {name: sha256(os.path.join(V2, name))
-                                                  for name in audit_combined.IMPLEMENTATION}
+    manifest["config"]["implementationSha256"] = {name: sha256(path)
+                                                  for name, path in audit_combined.SOURCES.items()}
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
 

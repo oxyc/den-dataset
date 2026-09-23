@@ -208,7 +208,7 @@ class Canary(Served):
 
 class Committed(unittest.TestCase):
     def test_the_committed_canarys_digests_are_the_ones_this_computes(self):
-        """The same two digests `scripts/v2/embed_canary.py` computes, so the file one path regenerates is
+        """The same two digests `pipeline/embed_canary.py` computes, so the file one path regenerates is
         the file the other verifies."""
         with open(COMMITTED, encoding="utf-8") as fh:
             doc = json.load(fh)

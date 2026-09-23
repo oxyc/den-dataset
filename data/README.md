@@ -12,6 +12,8 @@ are Wikidata. Licences per file are in [`LICENSES.md`](../LICENSES.md).
 |---|---|---|
 | `genres-moods-vocabulary.json` | the genres & moods label names, per family | ours; hashed into every classify shard's manifest as `taxonomySha256` |
 | `genres-moods-definitions.json` | what each of those labels means — what a labeller is asked | — |
+| `prompts/facets-v2.md` | the plot-facet axes the classify pass asks, parsed into its questions | ours; hashed into every classify shard's manifest as `promptSha256` |
+| `prompts/facets-v1.md` | the nine-axis v1 facet prompt its census was run under | — |
 | `genres-moods-curated.json` | genres & moods for 47,539 titles, with each title's source | not rebuildable ([#56](https://github.com/oxyc/den-dataset/issues/56)); extended by `./den genres-moods` (`AGENTS.md`) |
 | `genres-moods-rule.json` | the per-label thresholds the `genres_moods` stage derives with, fitted on golden half A | ~$0.31 of Jev plus the fitting |
 | `premise-tags-v1.json` | 37,533 titles × 8–12 structural premise tags, the first generation | a full LLM pass |
@@ -22,6 +24,7 @@ are Wikidata. Licences per file are in [`LICENSES.md`](../LICENSES.md).
 | `alias-decisions.json` | keep/drop judgements on alternate titles that collide with another title's name | by hand |
 | `iconic-studios.json` | the studios a viewer browses by, each with every Wikidata item that is the same studio; the store writes the ones the corpus credits | by hand ([den#132](https://github.com/oxyc/den/issues/132)) |
 | `wikidata-item-decisions.json` | which Wikidata item answers for a title whose TMDB id several items claim, where no rule decides | by hand |
+| `implementation-lineage.json` | the superseded source and input digests a paid classify shard may still be audited on, each with the reason its rows did not move | by hand, after reading the diff |
 | `classify-queue.json` | titles whose labels were not read from the plot the corpus now holds | derived |
 | `eval/golden-large.json` | 2,568 hand-labelled titles, the genres & moods quality ruler | by hand |
 | `eval/quality-floors.json` | the scores a publish is held to (`scripts/eval-taxonomy.py`) | recorded, not rebuilt |

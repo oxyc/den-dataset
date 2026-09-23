@@ -7,15 +7,12 @@ import io
 import json
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-
-import seed_genres_moods_curated as seed  # noqa: E402
-from combined_questions import taxonomy_questions  # noqa: E402
+from . import seed_genres_moods_curated as seed
+from .combined_questions import taxonomy_questions
+from .contract import REPO
 
 _, MAPPING, _ = taxonomy_questions()
 SUB = sorted(q for q, m in MAPPING.items() if m["family"] == "subgenres")
@@ -163,7 +160,7 @@ class Seed(unittest.TestCase):
         self.run_seed()
         lines = read(self.curated).decode("utf-8").splitlines()
         self.assertEqual(sum(1 for l in lines if l.startswith('"movie:') or l.startswith('"tv:')), 3)
-        spec = importlib.util.spec_from_file_location("ev", os.path.join(HERE, "..", "eval-taxonomy.py"))
+        spec = importlib.util.spec_from_file_location("ev", os.path.join(REPO, "scripts", "eval-taxonomy.py"))
         ev = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(ev)
         version, by_key = ev.labels_by_key(self.curated)
@@ -278,7 +275,7 @@ class Seed(unittest.TestCase):
     def test_the_curated_encoding_round_trips_the_committed_file(self):
         """`--keys` reads the committed file and writes it back through `encode_curated`, so an untouched
         title must come out as the same bytes."""
-        committed = os.path.join(HERE, "..", "..", "data", "genres-moods-curated.json")
+        committed = os.path.join(REPO, "data", "genres-moods-curated.json")
         with open(committed, encoding="utf-8") as fh:
             head = json.load(fh)
         titles = head.pop("titles")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn `embed_docs.py` output from the serving box into an index store `finalize` can read.
 
-  scripts/v2/import_box_vectors.py --vectors box-vectors.jsonl --labels out-repass/genres-moods.json \
+  pipeline/import_box_vectors.py --vectors box-vectors.jsonl --labels out-repass/genres-moods.json \
       --out-dir out-repass/index --embedder-health '{"runtime":"den-embed/5.1.2",…}'
 
 `embed_docs.py` writes `{"key": "movie:11", "v": [...]}` — keyed, because the file travels between machines
@@ -43,9 +43,10 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-import embed_canary  # noqa: E402
+if not __package__:
+    # Run as a file: the repo, not pipeline/, is the import root.
+    sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from pipeline import embed_canary  # noqa: E402
 from pipeline import genres_moods  # noqa: E402  — the one reader of genres-moods.json's shape
 from pipeline.contract import StageError  # noqa: E402
 

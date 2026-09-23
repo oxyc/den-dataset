@@ -45,7 +45,7 @@ class Listing(unittest.TestCase):
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
         self.assertEqual(order, sorted(order), "den stages printed them out of order")
         for line in ("premise_labels", "universe-movie.json", "scripts/v2/build_store.py",
-                     "scripts/v2/consolidate_corpus.py", "scripts/v2/run_combined.py",
+                     "pipeline/consolidate_corpus.py", "pipeline/run_combined.py",
                      "scripts/publish-dataset.sh"):
             self.assertIn(line, result.stdout)
         # The optional input is marked as such: "the writer needs this" and "the writer can do without

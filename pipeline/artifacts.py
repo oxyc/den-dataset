@@ -127,20 +127,20 @@ GENRES_MOODS = Artifact(
 DELTA = Artifact(
     name="delta",
     filename="delta-v2*.jsonl",
-    producer="scripts/v2/run_delta.py",
-    how="scripts/v2/run_delta.py --spend",
+    producer="pipeline/run_delta.py",
+    how="pipeline/run_delta.py --spend",
     shards=True,
 )
 
 #: Tombstones: titles a re-fetch left with no plot, whose older classify and critique rows the corpus join
 #: must stop shipping. Append-only and written by hand from the re-fetch's key list, because deciding a
 #: title lost its plot is the re-fetch's call, not a stage's. Optional: an out-dir with none withdraws
-#: nothing. See `scripts/v2/consolidate_corpus.py`.
+#: nothing. See `pipeline/consolidate_corpus.py`.
 WITHDRAWN = Artifact(
     name="withdrawn",
     filename="withdrawn.jsonl",
-    producer="scripts/v2/consolidate_corpus.py",
-    how="scripts/v2/consolidate_corpus.py withdraw --keys <keys> --reason <why> --out <out-dir>/withdrawn.jsonl",
+    producer="pipeline/consolidate_corpus.py",
+    how="pipeline/consolidate_corpus.py withdraw --keys <keys> --reason <why> --out <out-dir>/withdrawn.jsonl",
     required=False,
 )
 

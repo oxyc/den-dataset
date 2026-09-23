@@ -55,7 +55,7 @@ The stage runs `run_combined.py` with the files its declaration names. The same 
 `pipeline/classify_test.py` holds the stage to:
 
 ```sh
-python3 scripts/v2/run_combined.py \
+python3 pipeline/run_combined.py \
   --articles out-repass/articles.jsonl \
   --enriched-dir out-repass/enriched \
   --out out-repass/combined-v1.jsonl \
@@ -66,10 +66,10 @@ What the runner guarantees, and why each matters when every call is paid:
 
 - **A pinned model.** A mutable `*-latest` alias is refused unless explicitly allowed: an alias cannot
   prove two calls months apart used the same weights.
-- **A manifest per shard** hashing the questions, prompt (`prompts/facets-v2.md`), vocabulary, inputs and
+- **A manifest per shard** hashing the questions, prompt (`data/prompts/facets-v2.md`), vocabulary, inputs and
   the runner's own source files. Resume refuses a changed manifest, so two configurations never share a
   file. Moving or editing one of those source files therefore needs an entry in
-  `scripts/v2/implementation-lineage.json` saying why no answer moved.
+  `data/implementation-lineage.json` saying why no answer moved.
 - **A circuit breaker.** Any exhausted retry, typed-response violation or model mismatch stops every
   worker from starting another paid call.
 - **A kernel lock on the output**, so a second agent cannot resume the same set and pay twice.
@@ -83,7 +83,7 @@ They were quarantined with `resume_combined_excluding.py` and rerun under a lowe
 questions and code. Completeness is therefore a property of the bundle:
 
 ```sh
-python3 scripts/v2/audit_combined_bundle.py \
+python3 pipeline/audit_combined_bundle.py \
   --articles out-repass/articles.jsonl \
   --enriched-dir out-repass/enriched \
   --out out-repass/combined-v1-r2.jsonl \

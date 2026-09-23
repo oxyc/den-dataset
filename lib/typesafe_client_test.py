@@ -7,15 +7,12 @@ client over a real socket, so the exceptions are the ones `urllib` actually rais
 guessed at. Backoff sleeps are patched out and recorded.
 """
 import json
-import os
-import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import typesafe_client
+from lib import typesafe_client
 
 KEY = "test-key-never-printed"
 PAYLOAD = {"answers": {"q": {"type": "noul", "noul": 0.8125}}, "model": "jev-1.13.0",

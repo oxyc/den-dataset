@@ -12,10 +12,10 @@ import sys
 import tempfile
 import unittest
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "v2"))
-sys.path.insert(0, HERE)
-import recluster  # noqa: E402
+from . import recluster
+from .contract import REPO
+
+sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
 import vector_blob  # noqa: E402
 
 LABELS = ("Heist", "Neo-Noir", "Slasher", "Time Travel")
@@ -118,13 +118,13 @@ class Interpreter(unittest.TestCase):
     def test_an_older_interpreter_is_refused_by_name(self):
         pretend = ("import runpy, sys; sys.version_info = (3, 11, 9); "
                    "runpy.run_path(sys.argv[1], run_name='__main__')")
-        done = subprocess.run([sys.executable, "-c", pretend, os.path.join(HERE, "recluster.py")],
+        done = subprocess.run([sys.executable, "-c", pretend, os.path.join(REPO, "pipeline", "recluster.py")],
                               capture_output=True, text=True)
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("needs Python 3.12 or newer", done.stderr)
 
     def run_runner(self, directory, env):
-        return subprocess.run(["bash", os.path.join(HERE, "recluster-run.sh"), directory],
+        return subprocess.run(["bash", os.path.join(REPO, "scripts", "recluster-run.sh"), directory],
                               capture_output=True, text=True, env=env)
 
     def test_the_runner_refuses_when_no_interpreter_on_path_is_new_enough(self):

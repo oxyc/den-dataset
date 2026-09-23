@@ -32,7 +32,7 @@ since den-embed serialises on one model lock.
 that writes a vector checks them before opening its output, byte-identical or refuse:
 
 ```sh
-scripts/v2/embed_canary.py --url http://den-embed:8080      # exit 0, or exit 2 and a report per case
+pipeline/embed_canary.py --url http://den-embed:8080        # exit 0, or exit 2 and a report per case
 ```
 
 The verified identity is stamped into `dataset.meta.json` as `embeddingSpace`. `--regenerate` is only for
@@ -97,14 +97,14 @@ python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --li
 
 # 5a. Or embed ON THE BOX: write the documents here, embed there, bring the vectors back.
 ./den stage embed --out-dir out --dump-docs out/docs.jsonl
-#     Copy docs.jsonl, scripts/v2/embed_docs.py, scripts/v2/embed_canary.py and data/embed-canary.json into
+#     Copy docs.jsonl, pipeline/embed_docs.py, pipeline/embed_canary.py and data/embed-canary.json into
 #     the container's /tmp (`ssh root@pve 'incus exec den -- tee /tmp/<name>' < <file>`), then:
 ssh root@pve 'incus exec den -- podman run --rm --network den \
     -v /tmp/embed_docs.py:/embed_docs.py:ro -v /tmp/embed_canary.py:/embed_canary.py:ro \
     -v /tmp/embed-canary.json:/canary.json:ro -v /tmp/box:/w:z \
     docker.io/library/python:3.12-slim python /embed_docs.py \
         --docs /w/docs.jsonl --out-dir /w/out --url http://den-embed:8080 --canary /canary.json'
-python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels out/genres-moods.json \
+python3 pipeline/import_box_vectors.py --vectors box/vectors.jsonl --labels out/genres-moods.json \
     --out-dir out/index --embed-space box/embedding-space.json \
     --embedder-health '{"model":"bge-m3","dims":1024,"vector_epoch":1,"runtime":"…","max_tokens":1024}'
 
