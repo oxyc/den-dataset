@@ -10,10 +10,14 @@
 #
 #   ./den stage finalize --out-dir out                           # labels-*.json + vectors-*.bin + manifest
 #   python3 scripts/v2/build_store.py … --stamp-meta out/dataset.meta.json    # THE artifact
-#   scripts/publish-dataset.sh [OUT_DIR]       # default: ./out, then ./data
+#   scripts/publish-dataset.sh [OUT_DIR] [--unsigned]       # default: ./out, then ./data
 #
 # Requires `gh` authenticated with write access to the repo. The blobs are gitignored (large derived data),
 # so they live as release assets, never in git.
+#
+# SIGNED (oxyc/den#127): the meta is signed with the Ed25519 key at $DEN_DATASET_SIGNING_KEY (default
+# ~/.config/den/dataset-signing.pem) just before anything uploads — see scripts/sign-manifest.py. No key
+# is a refusal; `--unsigned` publishes without a signature, deliberately.
 #
 # Run it FROM THE REPO ROOT: the ownership guard resolves producer paths (`pipeline/…`, `scripts/…`) and
 # `git ls-files` against the working directory.
@@ -22,7 +26,15 @@ set -euo pipefail
 # An explicit argument is taken at its word. Falling back to ./data when the NAMED directory has no manifest
 # meant `publish-dataset.sh out-t03` — a typo, or a dir not yet finalized — silently published ./data
 # instead and reported success.
-DIR="${1:-}"
+DIR=""
+unsigned=0
+for arg in "$@"; do
+  case "$arg" in
+    --unsigned) unsigned=1 ;;
+    -*) echo "error: unknown option $arg" >&2; exit 2 ;;
+    *) [ -z "$DIR" ] || { echo "error: one out-dir only (got $DIR and $arg)" >&2; exit 2; }; DIR="$arg" ;;
+  esac
+done
 if [ -n "$DIR" ]; then
   [ -f "$DIR/dataset.meta.json" ] || { echo "error: no dataset.meta.json in $DIR — run finalize first" >&2; exit 1; }
 else
@@ -32,6 +44,17 @@ else
 fi
 
 REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
+
+# The signing key is checked FIRST, before the prune rewrites the meta. Publishing unsigned used to be the
+# only thing this script did, silently, and a consumer that pins our key refuses an unsigned meta.
+signing_key="${DEN_DATASET_SIGNING_KEY:-$HOME/.config/den/dataset-signing.pem}"
+if [ "$unsigned" -eq 0 ] && [ ! -f "$signing_key" ]; then
+  echo "error: no dataset signing key at $signing_key — the meta would publish unsigned." >&2
+  echo "       Put the Ed25519 key (PKCS#8 PEM) there, or point DEN_DATASET_SIGNING_KEY at it. Its public" >&2
+  echo "       half must be PUBLIC_KEY in scripts/sign-manifest.py, which is what consumers pin." >&2
+  echo "       To publish unsigned on purpose: scripts/publish-dataset.sh $DIR --unsigned. Nothing uploaded." >&2
+  exit 1
+fi
 
 shopt -s nullglob
 meta="$DIR/dataset.meta.json"
@@ -491,6 +514,25 @@ print(" ".join(sorted(k for k, v in old.items()
     [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
     echo "       DEN_ALLOW_DROPPING_BLOBS=1 — continuing." >&2
   fi
+fi
+
+# SIGN — the last write to the meta, and before any upload, so a signing failure leaves the release as it
+# was. Every guard above has finished rewriting the meta (prune, counts, storeRebuild, the grounding stamp).
+#
+# `--unsigned` also DROPS a signature the meta already carries: `finalize` merges over the previous meta,
+# so one signed for an older generation would ride along, and the app treats a wrong signature as worse
+# than none.
+if [ "$unsigned" -eq 1 ]; then
+  echo "publishing UNSIGNED (--unsigned): a consumer that pins the dataset key will refuse this dataset." >&2
+  python3 - "$meta" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+if meta.pop("signature", None) is not None:
+    json.dump(meta, open(sys.argv[1], "w"), indent=1)
+PY
+else
+  DEN_DATASET_SIGNING_KEY="$signing_key" python3 "$(dirname "$0")/sign-manifest.py" sign "$meta" \
+    || { echo "       Nothing uploaded." >&2; exit 1; }
 fi
 
 # 3) BLOBS — driven by the MANIFEST, not by a parallel list of globs.
