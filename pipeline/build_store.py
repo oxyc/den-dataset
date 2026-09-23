@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build `den-<version>.store` — the single artifact den-atlas loads.
 
-  scripts/v2/build_store.py --corpus out-repass/corpus-<ver>.jsonl.gz \
+  pipeline/build_store.py --corpus out-repass/corpus-<ver>.jsonl.gz \
       --entities out-repass/corpus-<ver>-entities.json.gz \
       --facets out-repass/facets.bin \
       --vectors out-repass/vectors-bge-m3.bin --vector-labels out-repass/labels-t02.json \
@@ -37,7 +37,7 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from store import build  # noqa: E402
 from store.cards import display_title, release_year  # noqa: E402  — re-exported; see below
 from store.facets import FACET_AXES, publishable, row_applicability  # noqa: E402
@@ -48,7 +48,7 @@ from store.inputs import (INPUT_ARGS, build_inputs, input_digest,  # noqa: E402
 # `display_title`, `release_year`, `title_imdb_id`, `publishable`, `row_applicability`, `FACET_AXES`,
 # `INPUT_ARGS`, `input_digest` and `labels_by_key` are imported so that this file's module namespace is
 # the whole surface the pipeline addresses the writer through: `scripts/check-producers.py` and
-# `scripts/v2/migrate_vector_blob.py` load it by path, and `test_build_store.py` exercises the helpers
+# `pipeline/migrate_vector_blob.py` load it by path, and `build_store_test.py` exercises the helpers
 # against it. Each one's implementation is in the `store/` module named for its section group.
 
 # ---- where every section's bytes come from ---------------------------------------------------------
@@ -60,7 +60,7 @@ from store.inputs import (INPUT_ARGS, build_inputs, input_digest,  # noqa: E402
 # failed.
 #
 # The table and the two guards that read it live HERE rather than in `store/`, because they refuse on
-# names resolved through this module: `test_build_store.py` reaches a guard by loading this file and
+# names resolved through this module: `build_store_test.py` reaches a guard by loading this file and
 # replacing `PROVENANCE` or `VENDOR_ALLOWED` on it, which is the only way to make a guard that fires on
 # the writer's own constants fail on demand. Behind an import they would still run and could no longer
 # be shown to.

@@ -18,7 +18,7 @@ packages are entered differently, so they name their roots differently:
              the way scripts are — executed by the path a stage's `PRODUCER` spells, imported by a
              script still outside, run by hand — so `reached_from` widens the closure by those, and
              still not by prose.
-  store/     whatever `scripts/v2/build_store.py` imports, read off that file by `roots()`. Nothing
+  store/     whatever `pipeline/build_store.py` imports, read off that file by `roots()`. Nothing
              imports `store/` from inside the repo's own import graph — the store stage runs the writer
              in a subprocess — so a hand-kept root list here would be a second copy of the writer's
              import block, free to drift from it. Which script is the entry is not a copy either: it is

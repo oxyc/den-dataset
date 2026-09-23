@@ -16,12 +16,11 @@ another repo, though, and skips when that repo is absent.
 """
 import importlib.util
 import os
-import sys
 import tempfile
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-V2 = os.path.join(REPO, "scripts", "v2")
+PIPELINE = os.path.join(REPO, "pipeline")
 
 
 def load(name, path):
@@ -31,12 +30,11 @@ def load(name, path):
     return module
 
 
-sys.path.insert(0, V2)
-writer = load("build_store", os.path.join(V2, "build_store.py"))
-# The two-title corpus `test_build_store.py` already defines, reused rather than rebuilt: it is shaped
+writer = load("build_store", os.path.join(PIPELINE, "build_store.py"))
+# The two-title corpus `build_store_test.py` already defines, reused rather than rebuilt: it is shaped
 # to fill every list section the writer refuses to ship empty, and a second definition of "a valid
 # corpus" is the drift this store's guards exist to prevent.
-fixture = load("test_build_store", os.path.join(V2, "test_build_store.py"))
+fixture = load("build_store_test", os.path.join(PIPELINE, "build_store_test.py"))
 
 
 class SectionOrder(fixture.StoreFixture, unittest.TestCase):

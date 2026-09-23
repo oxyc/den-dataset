@@ -182,7 +182,7 @@ manifest; without it the publish refuses.
 The same writer typed by hand, which `pipeline/store_test.py` holds to the same bytes:
 
 ```sh
-python3 scripts/v2/build_store.py \
+python3 pipeline/build_store.py \
     --corpus out/corpus-<ver>.jsonl.gz --entities out/corpus-<ver>-entities.json.gz \
     --facts out/facts-<ver>.json \
     --vectors out/vectors-bge-m3.bin --vector-labels out/labels-t02.json \

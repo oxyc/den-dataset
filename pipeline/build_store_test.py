@@ -23,7 +23,7 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+sys.path.insert(0, os.path.dirname(HERE))
 from store import vector_blob  # noqa: E402
 
 BUILD_STORE = os.path.join(HERE, "build_store.py")
@@ -33,7 +33,7 @@ DIMS = 1024
 
 def spec_dir():
     """den-spec, as a sibling checkout or via DEN_SPEC_DIR."""
-    return os.environ.get("DEN_SPEC_DIR", os.path.join(HERE, "..", "..", "..", "den-spec"))
+    return os.environ.get("DEN_SPEC_DIR", os.path.join(HERE, "..", "..", "den-spec"))
 
 
 def spec_or_fail(*parts):
@@ -1102,7 +1102,7 @@ class SearchFactsShip(StoreFixture, unittest.TestCase):
         won, offsets = store.ints("award_w", "B", 1), store.ints("award_o")
         self.assertEqual([(self.span(store, "award", r), won[offsets[r]:offsets[r + 1]]) for r in (0, 1)],
                          [([0], [1]), ([0], [0])])
-        with open(os.path.join(HERE, "..", "..", "data", "award-ceremony-merges.json"), "rb") as fh:
+        with open(os.path.join(HERE, "..", "data", "award-ceremony-merges.json"), "rb") as fh:
             self.assertEqual(record["sha256"], hashlib.sha256(fh.read()).hexdigest())
         self.assertEqual(record["applied"], 1)
         self.assertNotIn("Q708135", record["stale"])
@@ -1313,7 +1313,7 @@ class TheAliasDecisionsAreApplied(StoreFixture, unittest.TestCase):
     still carries that altLabel, so a fresh scrape brings it back; the store is where every path ends.
     """
 
-    DECISIONS = os.path.join(HERE, "..", "..", "data", "alias-decisions.json")
+    DECISIONS = os.path.join(HERE, "..", "data", "alias-decisions.json")
 
     def titles(self):
         def titled(key, names):

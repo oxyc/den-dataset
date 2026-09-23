@@ -36,7 +36,7 @@ Three rules keep it from becoming `scripts/v3/`, and all three are enforced rath
 
 Tests sit beside the code: `pipeline/store.py` and `pipeline/store_test.py`, no parallel tree.
 
-Soft ceiling of ~400 lines per file. `scripts/v2/build_store.py` was 1,468 and is the reason the number
+Soft ceiling of ~400 lines per file. `pipeline/build_store.py` was 1,468 and is the reason the number
 is written down; it is now the command line and the publication policy, over a `store/` package with one
 module per section group in `wire/store-v1.md`. Nothing there is over 260 lines.
 

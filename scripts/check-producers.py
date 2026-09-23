@@ -164,7 +164,7 @@ def build_store():
     global _build_store
     if _build_store is None:
         spec = importlib.util.spec_from_file_location(
-            "build_store", os.path.join(HERE, "v2", "build_store.py"))
+            "build_store", os.path.join(REPO, "pipeline", "build_store.py"))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         _build_store = module
@@ -200,7 +200,7 @@ def check_store_inputs(meta, out_dir):
         warnings.append(
             "the manifest records no storeInputs, so NOTHING checked what this store was built from. Its "
             "inputs are no longer published, so no other guard here can see them either. Rebuild it with "
-            "scripts/v2/build_store.py --stamp-meta, which records them.")
+            "pipeline/build_store.py --stamp-meta, which records them.")
         return problems, warnings, changed
 
     for entry in record:

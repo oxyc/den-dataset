@@ -23,7 +23,7 @@ def gate(meta_path, decisions_path=DECISIONS):
     with open(meta_path, encoding="utf-8") as fh:
         meta = json.load(fh)
     decisions = os.path.relpath(decisions_path)
-    rebuild = f"scripts/v2/build_store.py … --stamp-meta {meta_path}"
+    rebuild = f"pipeline/build_store.py … --stamp-meta {meta_path}"
     record = meta.get("wikidataItems")
     if not (isinstance(record, dict) and isinstance(record.get("ambiguous"), list)):
         print(f"error: the manifest records no wikidataItems, so nothing says how many titles the store ships "

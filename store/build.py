@@ -9,7 +9,7 @@ corpus knows.
   3. add     — one pass writing every group's columns, then the puts, in section-table order
 
 The count asserts at the end are the rule this writer exists for: every section is sourced BY KEY from
-its own artifact and its count held against that artifact. See `scripts/v2/build_store.py`'s docstring
+its own artifact and its count held against that artifact. See `pipeline/build_store.py`'s docstring
 for the joins that bought each one.
 """
 import hashlib

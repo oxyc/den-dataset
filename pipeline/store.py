@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The STORE build, behind the stage contract.
 
-The rule lives in `scripts/v2/build_store.py` and the `store/` package it drives — the section writers,
+The rule lives in `pipeline/build_store.py` and the `store/` package it drives — the section writers,
 join guards and count asserts, every one of them bought by a join bug this pipeline actually had. None of
 it is reimplemented
 here and none of it is wrapped in new behaviour: this stage decides which files the writer is handed and
@@ -24,8 +24,8 @@ NAME = "store"
 
 #: The rule this stage runs, repo-relative — the one spelling. `registry()` registers the store against
 #: it, so the producer the guard names is the file the stage executes.
-PRODUCER = "scripts/v2/build_store.py"
-HOW = "scripts/v2/build_store.py --stamp-meta"
+PRODUCER = "pipeline/build_store.py"
+HOW = "pipeline/build_store.py --stamp-meta"
 #: Writes into the out-dir and nowhere else, so a repeat run costs only time.
 PUBLISHES = False
 SPENDS = False
