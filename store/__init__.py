@@ -17,6 +17,6 @@ section they are after reads the heading, then opens the module of the same name
   inputs.py     reading the build's inputs, and the record of what it read
   build.py      the order the groups run in; implements no section itself
 
-`scripts/v2/build_store.py` is the command line, and it owns the publication guards, which refuse on
+`pipeline/build_store.py` is the command line, and it owns the publication guards, which refuse on
 tables that live there.
 """

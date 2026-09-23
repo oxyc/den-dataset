@@ -11,7 +11,7 @@ import sys
 
 #: Every argument that names a file or directory this READS. The record below is built from it, and
 #: `check-producers.py` maps each entry to the producer that builds it — so adding an input here is what
-#: makes the new input owned and checked. `test_build_store.py` asserts this covers the parser's inputs
+#: makes the new input owned and checked. `build_store_test.py` asserts this covers the parser's inputs
 #: and `test_check_producers.py` asserts every one of them has a producer.
 #:
 #: `metadata` is gone from here because it is gone from the parser: the TMDB sidecar supplied the title,

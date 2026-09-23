@@ -84,7 +84,7 @@ def read(path, allow_legacy=False):
             sys.exit(f"{path}: not a {MAGIC.decode()} vector blob (first bytes {blob[:8]!r}). A v1 blob "
                      f"carries no keys, so joining it would rest on a labels file's record order — the "
                      f"exact failure the format bump removes. Convert it: "
-                     f"scripts/v2/migrate_vector_blob.py --blob {path} --labels <labels-*.json> --out <new>")
+                     f"pipeline/migrate_vector_blob.py --blob {path} --labels <labels-*.json> --out <new>")
         if len(blob) < LEGACY_HEADER_BYTES:
             sys.exit(f"{path}: {len(blob)} bytes, too short to be a vector blob")
         count, dim = struct.unpack("<II", blob[:LEGACY_HEADER_BYTES])

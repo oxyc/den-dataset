@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One-time: rewrite a v1 vector blob as `DENVEC02`, prepending the keys it always implied.
 
-    scripts/v2/migrate_vector_blob.py --blob out/vectors-bge-m3.bin \
+    pipeline/migrate_vector_blob.py --blob out/vectors-bge-m3.bin \
         --labels out/labels-t02.json --out out-migrated/vectors-bge-m3.bin
 
 REWRITES, never re-embeds. den-embed's output differs by BUILD HOST — an arm64 laptop and the x86_64 box
@@ -20,9 +20,8 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from build_store import labels_by_key  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pipeline.build_store import labels_by_key  # noqa: E402
 from store import vector_blob  # noqa: E402
 
 

@@ -9,7 +9,7 @@
 # an INPUT to that build and stays there; step 0 prunes their keys out of the manifest.
 #
 #   ./den stage finalize --out-dir out                           # labels-*.json + vectors-*.bin + manifest
-#   python3 scripts/v2/build_store.py … --stamp-meta out/dataset.meta.json    # THE artifact
+#   python3 pipeline/build_store.py … --stamp-meta out/dataset.meta.json    # THE artifact
 #   scripts/publish-dataset.sh [OUT_DIR] [--unsigned]       # default: ./out, then ./data
 #
 # Requires `gh` authenticated with write access to the repo. The blobs are gitignored (large derived data),
@@ -105,7 +105,7 @@ python3 "$(dirname "$0")/prune-manifest.py" --prune "$meta"
 # build-worklist.py drops in there) are the store's inputs, not publish candidates. Naming them here would
 # print a "skipping" line for each on every publish, which is how a notice stops being read.
 blobs=("$DIR"/den-*.store)
-[ ${#blobs[@]} -ge 1 ] || { echo "error: no den-<version>.store in $DIR — it is the only artifact this release carries. Build it with scripts/v2/build_store.py --stamp-meta $meta" >&2; exit 1; }
+[ ${#blobs[@]} -ge 1 ] || { echo "error: no den-<version>.store in $DIR — it is the only artifact this release carries. Build it with pipeline/build_store.py --stamp-meta $meta" >&2; exit 1; }
 
 # What actually publishes: the files the manifest names, plus whatever else the glob found that it does
 # not (announced as such).
@@ -525,7 +525,7 @@ print(" ".join(sorted(k for k, v in old.items()
     echo "       Every retired blob is already filtered out above, so what remains is an artifact the" >&2
     echo "       release still carries — in practice the store. Build it, which also declares it:" >&2
     echo "" >&2
-    echo "          python3 scripts/v2/build_store.py … --out $DIR/den-<version>.store --stamp-meta $meta" >&2
+    echo "          python3 pipeline/build_store.py … --out $DIR/den-<version>.store --stamp-meta $meta" >&2
     echo "" >&2
     echo "       If dropping them is deliberate, set DEN_ALLOW_DROPPING_BLOBS=1." >&2
     [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1

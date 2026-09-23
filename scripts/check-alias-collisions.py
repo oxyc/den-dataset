@@ -131,7 +131,7 @@ def gate(meta_path, decisions_path):
     with open(meta_path, encoding="utf-8") as fh:
         meta = json.load(fh)
     decisions = os.path.relpath(decisions_path)
-    rebuild = f"scripts/v2/build_store.py … --stamp-meta {meta_path}"
+    rebuild = f"pipeline/build_store.py … --stamp-meta {meta_path}"
     record = meta.get("aliasDecisions")
     if not (isinstance(record, dict) and isinstance(record.get("undecided"), int)
             and isinstance(record.get("sha256"), str)):

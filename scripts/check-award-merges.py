@@ -24,7 +24,7 @@ def gate(meta_path, merges_path=MERGES):
     with open(meta_path, encoding="utf-8") as fh:
         meta = json.load(fh)
     merges = os.path.relpath(merges_path)
-    rebuild = f"scripts/v2/build_store.py … --stamp-meta {meta_path}"
+    rebuild = f"pipeline/build_store.py … --stamp-meta {meta_path}"
     record = meta.get("awardMerges")
     if not (isinstance(record, dict) and isinstance(record.get("stale"), list)):
         print(f"error: the manifest records no awardMerges, so nothing says which award ceremony merges the "

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The store stage — that it is a wrapper and not a second writer.
 
-Two things are worth testing about a stage whose whole job is to hand `scripts/v2/build_store.py` the
+Two things are worth testing about a stage whose whole job is to hand `pipeline/build_store.py` the
 right files:
 
   * that the declaration and the writer's argument list still name the same inputs. This is the pin the
@@ -10,22 +10,20 @@ right files:
   * that the stage's bytes are the hand-typed command's bytes. `docs/OPERATE.md` is what people run
     today, and a wrapper that is nearly the same command is worse than no wrapper.
 
-The fixture is `scripts/v2/test_build_store.py`'s, reused rather than rebuilt: the inputs the writer
+The fixture is `pipeline/build_store_test.py`'s, reused rather than rebuilt: the inputs the writer
 accepts are precise — real DENVEC02 blobs, an entity carrying an alias, a genre map — and a second
 fixture beside it would be a second definition of what a valid corpus is.
 """
 import hashlib
 import importlib.util
 import os
-import sys
 import tempfile
 import unittest
 
 from . import artifacts, store
 from .contract import Context, StageError
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-V2 = os.path.join(REPO, "scripts", "v2")
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def load(name, path):
@@ -35,9 +33,8 @@ def load(name, path):
     return module
 
 
-sys.path.insert(0, V2)
-writer = load("build_store", os.path.join(V2, "build_store.py"))
-fixture = load("test_build_store", os.path.join(V2, "test_build_store.py"))
+writer = load("build_store", os.path.join(HERE, "build_store.py"))
+fixture = load("build_store_test", os.path.join(HERE, "build_store_test.py"))
 
 #: What `StoreFixture.build` writes, by artifact. Named here rather than guessed, so a rename in that
 #: fixture fails as a missing file with a path in the message.
@@ -59,7 +56,7 @@ def sha256(path):
 
 class Declaration(unittest.TestCase):
     def test_the_stage_declares_exactly_what_the_writer_reads(self):
-        """`build_store.INPUT_ARGS` is anchored to its own parser by `test_build_store.py`, and this
+        """`build_store.INPUT_ARGS` is anchored to its own parser by `build_store_test.py`, and this
         anchors the declaration to it. Between them, an input can only be added or dropped in one place
         without something going red — which is what the hand-kept `STORE_INPUTS` could not say.
         """
@@ -116,7 +113,7 @@ class CommandLine(unittest.TestCase):
 
 class Equivalence(fixture.StoreFixture, unittest.TestCase):
     def test_the_stage_writes_the_bytes_the_hand_typed_command_writes(self):
-        """`den stage store` against `python3 scripts/v2/build_store.py …`, on one set of inputs.
+        """`den stage store` against `python3 pipeline/build_store.py …`, on one set of inputs.
 
         Byte-identical is the right bar and not an overstrict one: the writer promises deterministic
         output, and that promise is what makes the store's content hash — the thing the publisher and

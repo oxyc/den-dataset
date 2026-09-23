@@ -69,7 +69,7 @@ a day with no error anywhere. They are still built as the store's inputs; the pu
   CC BY-SA.
 - **Every per-title key is `movie:123` / `tv:123`.** The two TMDB id spaces overlap (tv 95 is *Buffy*,
   movie 95 is *Armageddon*); a bare-id checkpoint once silently skipped 940 series.
-- **Nothing licensed ships.** `scripts/v2/build_store.py` declares the source of every store section and
+- **Nothing licensed ships.** `pipeline/build_store.py` declares the source of every store section and
   refuses a vendor-sourced one; `finalize`'s `SHIP_GUARD` refuses prose fields by name, so a new prose field
   under a new name must be added to it. Details in `LICENSES.md`.
 - **Corpus and queries use the same embedder** — `docs/OPERATE.md`, "The alignment rule".

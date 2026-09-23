@@ -16,13 +16,8 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEN = os.path.join(HERE, "den")
-V2 = os.path.join(HERE, "scripts", "v2")
 
-sys.path.insert(0, V2)
-_spec = importlib.util.spec_from_file_location("test_build_store", os.path.join(V2, "test_build_store.py"))
-fixture = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(fixture)
-
+from pipeline import build_store_test as fixture  # noqa: E402
 from pipeline.store_test import FIXTURE_FILES  # noqa: E402  — one spelling of the fixture's filenames
 
 
@@ -45,7 +40,7 @@ class Listing(unittest.TestCase):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
         self.assertEqual(order, sorted(order), "den stages printed them out of order")
-        for line in ("premise_labels", "universe-movie.json", "scripts/v2/build_store.py",
+        for line in ("premise_labels", "universe-movie.json", "pipeline/build_store.py",
                      "pipeline/consolidate_corpus.py", "pipeline/run_combined.py",
                      "scripts/publish-dataset.sh"):
             self.assertIn(line, result.stdout)
