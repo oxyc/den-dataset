@@ -76,7 +76,7 @@ def write_json(path, doc):
 
 
 def write_facets(path, n):
-    """A DFI2 facets blob header — magic plus a u32 count, as `build-facets-bin.py` writes it."""
+    """A DFI2 facets blob header — magic plus a u32 count, as the deleted `build-facets-bin.py` wrote it."""
     with open(path, "wb") as f:
         f.write(b"DFI2" + struct.pack("<I", n))
 

@@ -179,7 +179,7 @@ class Run(Refresh):
         self.cached("Film 5", f"Lead.\n== Plot ==\n{PLOT}", 55)
         self.batch(1, [grounded(1, PLOT, 100, title="TMDB title", keywords=["legacy"]),
                        grounded(2, PLOT, 100), grounded(3, PLOT, 100), grounded(4, PLOT, 100),
-                       grounded(5, PLOT.strip(), None),
+                       grounded(5, PLOT.strip(), None, title="TMDB title", topCast=["Legacy Cast"]),
                        grounded(6, PLOT, 100, wikidataItem="Q1", wikidataCandidates=["Q1", "Q2"])])
         self.current = {("en", "Film 1"): 101, ("en", "Film 2"): 102, ("en", "Film 3"): 103,
                         ("en", "Film 4"): 104, ("en", "Film 5"): 55, ("en", "Film 6"): 106}
@@ -220,6 +220,14 @@ class Run(Refresh):
         self.refreshed()
         self.assertEqual(self.latest()["movie:5"]["plotRevId"], 55)
 
+    def test_a_backfilled_record_sheds_the_tmdb_fields_no_reader_wants(self):
+        """Only its revision is new, but it is written into a new batch, and an old row's TMDB title, cast,
+        vote count, language and origin are not copied forward into it (oxyc/den-dataset#53)."""
+        self.refreshed()
+        row = self.latest()["movie:5"]
+        self.assertEqual({"title", "topCast", "voteCount", "originalLanguage", "originCountry"} & set(row), set())
+        self.assertEqual((row["overview"], row["genreIDs"]), (PLOT.strip(), [18]))
+
     def test_a_second_refresh_finds_nothing_left_but_the_failure(self):
         self.refreshed()
         surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
@@ -242,9 +250,8 @@ class Run(Refresh):
     def test_a_refreshed_record_keeps_its_tmdb_half_and_item_and_drops_legacy_fields(self):
         self.refreshed()
         row = self.latest()["movie:1"]
-        self.assertEqual((row["voteCount"], row["originCountry"]), (900, ["US"]))
-        self.assertNotIn("title", row)
-        self.assertNotIn("keywords", row)
+        self.assertEqual(row["genreIDs"], [18])
+        self.assertEqual({"title", "keywords", "voteCount", "originalLanguage", "originCountry"} & set(row), set())
         self.assertEqual(self.latest()["movie:6"]["wikidataItem"], "Q1")
         self.assertIn(({"movie": {6: ["Q2"]}}), [excluded for _ids, excluded in self.candidate_calls],
                       "the item set aside at enrichment stays set aside")

@@ -122,13 +122,16 @@ def title_record(body, tmdb_id, media):
     grounded on, and over the whole repass it refused 3 titles out of 59,209 — so nothing crosses now.
 
     ONLY WHAT A READER NEEDS crosses (oxyc/den-dataset#53). `originCountry` picks the admission tier
-    (`pipeline/floors.py`) and `voteCount` is the gate's count for an export row; `genreIDs` is where
-    `./den genres-moods` takes a new title's `animated` flag from (genre 16). `originalLanguage` is still
-    written. `title`, `year`, `genres`, `keywords`, `keywordIDs`, `director` and `topCast` were written for
-    readers that are gone: the Swift batch decoder that required `title`, the classify dump that now names
-    a title by Wikidata's label and year (`pipeline/articles.targets`), and the premise ruler's candidate
-    miner (`scripts/v2/premise_mine_candidates.py`), which reads `keywordIDs` off the `out-t02` batches
-    already on disk and is not run on new ones.
+    (`pipeline/floors.py`) and `voteCount` is the gate's count for an export row — both read in `enrich`
+    and neither written to the batch (`pipeline/enrich.written`); `genreIDs` is where `./den genres-moods`
+    takes a new title's `animated` flag from (genre 16), and is the one TMDB field a batch row carries. `title`, `year`, `genres`, `keywords`, `keywordIDs`,
+    `director` and `topCast` were written for readers that are gone: the Swift batch decoder that required
+    `title`, the classify dump that now names a title by Wikidata's label and year
+    (`pipeline/articles.targets`), and the premise ruler's candidate miner
+    (`scripts/v2/premise_mine_candidates.py`), which reads `keywordIDs` off the `out-t02` batches already
+    on disk and is not run on new ones. `originalLanguage` went last: the other-language fallback orders
+    by Wikidata's P364, and its one remaining reader was `scripts/build-facets-bin.py`, whose `facets.bin`
+    no manifest carries any more.
     """
     if not isinstance(body, dict):
         raise ValueError("TMDB detail body is not an object")
@@ -143,7 +146,7 @@ def title_record(body, tmdb_id, media):
     return {
         "tmdbId": tmdb_id, "mediaType": media,
         "genreIDs": [genre["id"] for genre in genres],
-        "originCountry": countries, "originalLanguage": _field(body, "original_language", str),
+        "originCountry": countries,
         "voteCount": _field(body, "vote_count", int) or 0,
     }
 
