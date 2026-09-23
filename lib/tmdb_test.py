@@ -146,11 +146,11 @@ class Record(unittest.TestCase):
 
     def test_the_facts_it_does_carry_and_nothing_else(self):
         """Each field is here for a reader: the admission tier, the export row's count, the `animated` flag
-        `./den genres-moods` takes from genre 16. The title, year, genre names, keywords, director and cast
-        were written for readers that are gone, and nothing named by a person crosses at all."""
+        `./den genres-moods` takes from genre 16. The title, year, genre names, keywords, director, cast and
+        original language were written for readers that are gone, and nothing named by a person crosses."""
         record = tmdb_api.title_record(SHAWSHANK, 278, "movie")
         self.assertEqual(record, {"tmdbId": 278, "mediaType": "movie", "genreIDs": [18, 80],
-                                  "originCountry": ["US"], "originalLanguage": "en", "voteCount": 29000})
+                                  "originCountry": ["US"], "voteCount": 29000})
         for text in ("Shawshank", "Darabont", "Robbins", "prison", "Drama", "1994"):
             self.assertNotIn(text, json.dumps(record))
 

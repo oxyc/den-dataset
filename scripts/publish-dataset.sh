@@ -180,9 +180,9 @@ done < "$manifest_files"
 
 # 2) REFUSE A MANIFEST THAT DROPS A FILE THE PUBLISHED ONE DECLARES.
 #
-# No STAGE writes facets.bin or the premise blobs. They have committed producers now
-# (scripts/build-facets-bin.py, scripts/build-premise-tags.py, scripts/v2/embed_tags.py — see
-# check-producers.py), but nothing in the run order calls them, so their manifest keys still survive only
+# No STAGE writes the premise blobs. They have committed producers now
+# (scripts/build-premise-tags.py, scripts/v2/embed_tags.py — see check-producers.py; facets.bin had
+# one too, deleted with oxyc/den-dataset#53), but nothing in the run order calls them, so their manifest keys still survive only
 # because `finalize` merges over the meta ALREADY IN THAT OUT-DIR. Finalizing into a FRESH dir (which is what the
 # documented full re-embed and embed-corpus-run.sh both do) emits a manifest that simply does not mention
 # them, and every check above passes vacuously: you cannot catch a missing file by iterating the keys of a

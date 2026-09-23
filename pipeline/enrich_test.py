@@ -212,19 +212,24 @@ class Batch(unittest.TestCase):
                          "not even the TMDB overview's LENGTH is carried any more")
 
     def test_a_batch_row_carries_only_the_tmdb_fields_a_reader_needs(self):
-        """oxyc/den-dataset#53. `genreIDs` stays for `./den genres-moods`' `animated` flag; the title, year,
-        genre names, keywords, director and cast were written for readers that are gone."""
+        """oxyc/den-dataset#53. `genreIDs` stays for `./den genres-moods`' `animated` flag and `originCountry`
+        for the admission tier; the title, year, genre names, keywords, director, cast and original language
+        were written for readers that are gone. `voteCount` admitted this export row — its worklist row states
+        no count — and is still not written: nothing after the gate reads it."""
         self.mapping[("movie", 1)] = {"article": "One"}
         self.plots[("One", "en")] = found("W" * 200)
         body = detail(1, release_date="1994-09-23", genres=[{"id": 16, "name": "Animation"}],
+                      original_language="ja", origin_country=["JP"],
                       keywords={"keywords": [{"id": 378, "name": "prison"}]},
                       credits={"cast": [{"name": "Tim Robbins", "order": 0}],
                                "crew": [{"name": "Frank Darabont", "job": "Director"}]})
-        self.run_batch({"/movie/1": body}, [("movie", 1)])
+        report = self.run_batch({"/movie/1": body}, [("movie", 1)])
+        self.assertEqual((report["admittedByTmdb"], report["votesFromWorklist"]), (1, 0))
         row = self.rows()["movie:1"]
-        self.assertEqual({"title", "year", "genres", "keywords", "keywordIDs", "director", "topCast"} & set(row),
-                         set())
-        self.assertEqual(row["genreIDs"], [16])
+        tmdb_sourced = {"title", "year", "genres", "keywords", "keywordIDs", "director", "topCast",
+                        "originalLanguage", "voteCount", "genreIDs", "originCountry"}
+        self.assertEqual(tmdb_sourced & set(row), {"genreIDs", "originCountry"})
+        self.assertEqual((row["genreIDs"], row["originCountry"]), ([16], ["JP"]))
 
     def test_creators_are_wikidatas_or_none_never_tmdbs(self):
         """`createdBy` is composed into the embedding document. With no Wikidata P170 it is EMPTY — TMDB's

@@ -53,12 +53,12 @@ from .contract import StageError
 #: Titles per batch the refresh writes: the fetch stage's batch size, for the same reasons.
 BATCH = 500
 
-#: What a refreshed record keeps from the one it replaces: the TMDB half `lib/tmdb.title_record` writes and
-#: the Wikidata item it was resolved to. Everything else is `reground`'s to write again — and a field left
+#: What a refreshed record keeps from the one it replaces: the TMDB half a batch still carries and the
+#: Wikidata item it was resolved to. Everything else is `reground`'s to write again — and a field left
 #: over from the old grounding (a `plotArticle` on a title that lost its plot) would be a lie about the new
-#: one. Older batches carry TMDB fields no reader wants any more (oxyc/den-dataset#53); they are not copied.
-KEPT = ("tmdbId", "mediaType", "genreIDs", "originCountry", "originalLanguage", "voteCount",
-        "wikidataItem", "wikidataCandidates")
+#: one. Older batches carry TMDB fields no reader wants any more (oxyc/den-dataset#53); they are not copied,
+#: and a record only given its backfilled revision sheds them through `enrich.written` too.
+KEPT = ("tmdbId", "mediaType", "genreIDs", "originCountry", "wikidataItem", "wikidataCandidates")
 
 UNCHANGED, MOVED, GONE, UNKNOWN = "unchanged", "moved", "gone", "unknown"
 
@@ -270,8 +270,8 @@ def run(ctx, cache=None, ask=wikipedia.revisions, now=None):
             report["batches"].append(os.path.basename(write_batch(ctx.out_dir, rows)))
         print(f"  refresh: {min(start + BATCH, len(stale))} of {len(stale)} re-fetched", file=sys.stderr)
 
-    backfilled = [dict(record, plotRevId=revision) for _v, record, revision in surveyed.values()
-                  if revision is not None]
+    backfilled = [enrich.written(dict(record, plotRevId=revision))
+                  for _v, record, revision in surveyed.values() if revision is not None]
     for start in range(0, len(backfilled), BATCH):
         report["batches"].append(os.path.basename(write_batch(ctx.out_dir, backfilled[start:start + BATCH])))
     report["recorded"] = len(backfilled)

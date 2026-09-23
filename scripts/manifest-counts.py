@@ -133,7 +133,8 @@ def store_rows(path):
 
 
 def facets_rows(path):
-    """`count` from a DFI2 facets blob, or None if this is not one (`build-facets-bin.py`: magic + u32)."""
+    """`count` from a DFI2 facets blob, or None if this is not one (magic + u32, as the deleted
+    `build-facets-bin.py` wrote it)."""
     try:
         with open(path, "rb") as f:
             head = f.read(8)

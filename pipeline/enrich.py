@@ -26,7 +26,7 @@ may ground it on anything else.
 **The batch file is read by `articles`, `embed`, `genres-moods`, `scripts/backfill-plot-provenance.py` and
 the census**, and it is written in the Swift encoder's exact layout (`swift_json`), so a batch this writes
 and one the Swift pass wrote diff as data rather than as formatting. Its TMDB fields are the few those
-readers need — see `lib/tmdb.title_record`.
+readers need — see `lib/tmdb.title_record` and `written`.
 """
 import argparse
 import concurrent.futures
@@ -389,9 +389,18 @@ def reground(record, facts, cache, token):
     return "grounded", grounded(record, found, article, role), found.get("source")
 
 
+#: TMDB fields no reader of a batch wants, left out of every row written (oxyc/den-dataset#53). `voteCount`
+#: is still on the record `lib/tmdb.title_record` builds, because admission reads it (`tmdb_votes`); after
+#: the gate nothing does. The rest are what older batches carry, and a record copied forward from one of
+#: those (`pipeline/refresh`) sheds them here. Batches already on disk keep theirs, and no reader minds
+#: either way.
+UNREAD_TMDB = frozenset({"voteCount", "originalLanguage", "title", "year", "genres", "keywords", "keywordIDs",
+                         "director", "topCast"})
+
+
 def written(record):
     """The record as the batch carries it. An unknown is an ABSENT key, as the Swift encoder wrote it."""
-    return {name: value for name, value in record.items() if value is not None}
+    return {name: value for name, value in record.items() if value is not None and name not in UNREAD_TMDB}
 
 
 def recovered(out_dir, batch_id, survivors):
