@@ -27,7 +27,7 @@ def main():
     ap.add_argument('--label', required=True)
     ap.add_argument('--order', default=None, help='optional JSON list of keys fixing row order')
     ap.add_argument('--out-dir',
-                    default='/Users/cindy/Projects/Personal/den-dataset/out-t02/v2/vectors')
+                    default=os.path.join(os.environ.get('DEN_T02_DIR', 'out-t02'), 'v2', 'vectors'))
     args = ap.parse_args()
 
     vectors = {}

@@ -32,7 +32,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from aggregate_tags import same_idea  # noqa: E402
 from pipeline.llm_phase import load_manifest, read_output, expected_ids  # noqa: E402
 
-V2 = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'
+V2 = os.path.join(os.environ.get('DEN_T02_DIR', 'out-t02'), 'v2')  # the July generation's out-dir: DEN_T02_DIR, else ./out-t02
 
 
 def collect(phase_dir):

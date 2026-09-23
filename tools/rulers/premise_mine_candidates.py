@@ -33,7 +33,7 @@ import re
 import sys
 from collections import defaultdict
 
-ROOT = '/Users/cindy/Projects/Personal/den-dataset/out-t02'
+ROOT = os.environ.get('DEN_T02_DIR', 'out-t02')  # the July generation's out-dir: DEN_T02_DIR, else ./out-t02
 V2 = os.path.join(ROOT, 'v2')
 CORPUS = os.path.join(V2, 'corpus', 'wikiplot-corpus.jsonl')
 ENRICHED = os.path.join(ROOT, 'enriched')

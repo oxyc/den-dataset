@@ -19,8 +19,8 @@ import json
 import os
 import sys
 
-CORPUS = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2/corpus/wikiplot-corpus.jsonl'
-V2 = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'
+V2 = os.path.join(os.environ.get('DEN_T02_DIR', 'out-t02'), 'v2')  # the July generation's out-dir: DEN_T02_DIR, else ./out-t02
+CORPUS = os.path.join(V2, 'corpus', 'wikiplot-corpus.jsonl')
 
 # A handful of plots run to 53k chars. Capping the tail keeps one title from dominating a
 # batch's context; head+tail keeps a third-act reveal that IS the premise.
