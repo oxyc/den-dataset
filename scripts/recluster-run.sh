@@ -5,7 +5,7 @@
 #
 # Costs nothing but CPU (no API calls) — ~15 minutes over the 47.5k×1024 corpus at k=800, measured on a
 # loaded laptop where the Swift it replaced took ~2 — so it is safe to run on a timer. The time is the price
-# of reproducing the Swift's arithmetic bit for bit in pure Python (see `scripts/recluster.py`). Writes candidates and stops: naming a cluster is a human judgement, and adding a label is a taxonomy
+# of reproducing the Swift's arithmetic bit for bit in pure Python (see `pipeline/recluster.py`). Writes candidates and stops: naming a cluster is a human judgement, and adding a label is a taxonomy
 # bump, which under DT-F forces a whole-universe reclassification. Auto-adding labels here would silently
 # trigger the most expensive pass in the system.
 #
@@ -51,8 +51,8 @@ done
   exit 1
 }
 
-"$py" scripts/recluster.py --labels "$labels" --vectors "$vectors" \
-                           --k "$K" --iterations 5 --min-size "$MIN_SIZE" --out "$REPORT"
+"$py" pipeline/recluster.py --labels "$labels" --vectors "$vectors" \
+                            --k "$K" --iterations 5 --min-size "$MIN_SIZE" --out "$REPORT"
 
 echo "== tightest candidates =="
 "$py" - "$REPORT" <<'PY'

@@ -43,22 +43,29 @@ def operator_tools_in(package_dir):
                   if path.startswith(prefix) and path.endswith(".py"))
 
 
+def scripts_entering(tools):
+    """The scripts under `scripts/` (held live by their own guard below), without the operator tools among
+    them when `tools` is false."""
+    scripts, _ = reachable.script_files(os.path.join(REPO, "scripts"))
+    declared = reachable.operator_tools()
+    return [script for script in scripts if tools or script not in declared]
+
+
 def pipeline_reach(tools=True):
     """What runs reaches under `pipeline/`: the stages and what they import, and what `den`, CI, the scripts
-    under `scripts/` (held live by their own guard below) and the operator tools that live here import or
-    name — a stage's `PRODUCER` included, which is how a pass the stage executes is entered."""
-    scripts, _ = reachable.script_files(os.path.join(REPO, "scripts"))
+    under `scripts/` and the operator tools import or name — a stage's `PRODUCER` included, which is how a
+    pass the stage executes is entered. `tools=False` leaves every operator tool out, which is what the
+    operator-tool list is checked against."""
     base = list(pipeline.STAGES) + (operator_tools_in(PIPELINE) if tools else [])
-    return reachable.reached_from(REPO, PIPELINE, base, ["den", CI] + scripts)
+    return reachable.reached_from(REPO, PIPELINE, base, ["den", CI] + scripts_entering(tools))
 
 
 def lib_reach(tools=True):
     """What runs reaches under `lib/`: what the reached pipeline modules import, and what `den`, the scripts
-    under `scripts/` and the operator tools that live here import or name."""
-    scripts, _ = reachable.script_files(os.path.join(REPO, "scripts"))
-    stages = [f"pipeline/{name}.py" for name in sorted(pipeline_reach())]
+    under `scripts/` and the operator tools import or name."""
+    stages = [f"pipeline/{name}.py" for name in sorted(pipeline_reach(tools))]
     base = operator_tools_in(LIB) if tools else []
-    return reachable.reached_from(REPO, LIB, base, ["den"] + stages + scripts)
+    return reachable.reached_from(REPO, LIB, base, ["den"] + stages + scripts_entering(tools))
 
 
 def script_roots():
