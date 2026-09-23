@@ -26,7 +26,7 @@ OUT = os.environ.get("OUT_DIR", "out")
 # deleted when the app stopped carrying the dataset, so the documented invocation failed before it fetched
 # anything.
 LABELS = os.environ.get("LABELS", os.path.join(OUT, "labels-t02.json"))
-UA = "den-dataset/1.0 (github.com/oxyc/den-dataset)"
+UA = "den-dataset/1.0 (https://github.com/oxyc/den-dataset)"
 
 
 def fetch_export(kind: str) -> str:

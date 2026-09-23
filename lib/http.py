@@ -28,9 +28,10 @@ import threading
 import time
 import urllib.parse
 
-#: Required by the Wikimedia APIs. The same string the Swift passes sent, so the traffic this pipeline
-#: produces still identifies as one project rather than two.
-USER_AGENT = "den-dataset/1.0 (github.com/oxyc/den-dataset)"
+#: Required by the Wikimedia APIs. The contact must be a full URL: since 2026-09-23 Wikimedia's robot policy
+#: answers 403 to this client when it reads `(github.com/oxyc/den-dataset)`, on WDQS and the wikis alike,
+#: and accepts the same string with `https://`.
+USER_AGENT = "den-dataset/1.0 (https://github.com/oxyc/den-dataset)"
 
 #: Seconds. Long enough for a WDQS query over a 100-id batch, short enough that a dead socket surfaces.
 TIMEOUT = 60
