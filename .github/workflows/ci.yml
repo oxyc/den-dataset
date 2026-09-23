@@ -62,7 +62,7 @@ jobs:
       # The committed genres & moods (`data/genres-moods-curated.json`) and the one-off that seeded them. The
       # file itself is gated against the baseline by `scripts/test_eval_taxonomy.py` below.
       - name: Genres & moods seed
-        run: python3 -m unittest scripts/v2/test_seed_genres_moods_curated.py
+        run: python3 -m unittest pipeline/seed_genres_moods_curated_test.py
       # The hand enrichment that writes into that file (`./den genres-moods prepare|merge`): what it selects,
       # the batches and validator the agents get, July's assemble thresholds, and that a merge keeps the
       # file's bytes, refuses a result past the tolerance and never lowers the baseline on its own.

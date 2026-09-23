@@ -62,9 +62,11 @@ def lib_reach(tools=True):
 
 
 def script_roots():
-    """Everything that runs and can name a script: `den`, CI, the stages and what they reach."""
+    """Everything that runs and can name a script: `den`, CI, the stages and what they reach. The operator
+    tools are not among them — they reach what they name as `extra` roots, which is what lets the list
+    be held to naming only what nothing else runs."""
     return (["den", CI]
-            + [f"pipeline/{name}.py" for name in sorted(pipeline_reach())]
+            + [f"pipeline/{name}.py" for name in sorted(pipeline_reach(tools=False))]
             + [f"store/{name}.py" for name in reachable.modules(STORE)]
             + [f"lib/{name}.py" for name in reachable.modules(LIB)])
 

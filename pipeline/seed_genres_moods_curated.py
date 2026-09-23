@@ -2,7 +2,7 @@
 """Seed `data/genres-moods-curated.json` from `labels-t02.json`, with the September phase's subgenres &
 moods replaced by ones derived from the classify pass.
 
-  scripts/v2/seed_genres_moods_curated.py \
+  pipeline/seed_genres_moods_curated.py \
       --labels out-repass/labels-t02.json --phase out-repass/classify \
       --combined out-repass/combined-v1-r2.jsonl \
       --combined out-repass/combined-v1-r2-token-fallback.jsonl \
@@ -49,7 +49,7 @@ classify row and is refused below.
 
 ## Re-deriving a few titles: `--keys`
 
-  scripts/v2/seed_genres_moods_curated.py --keys reclassified.txt \
+  pipeline/seed_genres_moods_curated.py --keys reclassified.txt \
       --labels out-repass/labels-t02.json --phase out-repass/classify \
       --combined out-repass/combined-v1-r2.jsonl … --combined out-reground/combined-v1-r2.jsonl \
       --out out-repass/labels-t02.json --curated data/genres-moods-curated.json
@@ -77,8 +77,9 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+if not __package__:
+    # Run as a file: the repo, not pipeline/, is the import root.
+    sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from pipeline import consolidate_corpus as cc  # noqa: E402  — the corpus join's supersede rule and tombstones
 from pipeline.combined_questions import taxonomy_questions  # noqa: E402
 

@@ -9,7 +9,7 @@
   "scripts/v2/merge_classify_labels.py": "folds a classification phase directory into labels-t02.json without losing a title",
   "scripts/v2/embed_premise_v2.py": "builds the premise vector blob, reusing only base vectors the live embedder reproduces byte for byte",
   "scripts/build-premise-tags.py": "rebuilds data/premise-tags-v1.json, the strings behind the v1 premise vectors, from the v1 tag batches; it reads labels-premise.json, it does not write it",
-  "scripts/v2/seed_genres_moods_curated.py": "seeded data/genres-moods-curated.json; moves into the package that owns it under oxyc/den-dataset#73",
+  "pipeline/seed_genres_moods_curated.py": "seeded data/genres-moods-curated.json, and re-derives the subgenres and moods of listed September titles (--keys)",
   "pipeline/resume_combined_excluding.py":"resumes a paid combined run with capacity exceptions quarantined to their own shard, which audit_combined_bundle.py then verifies",
   "scripts/v2/assert_compliance.py": "after any subagent LLM phase: proves from the batch files on disk that no TMDB prose reached a model (TMDb 1.C)",
   "scripts/v2/build_premise_worklist.py": "premise-tag generation (oxyc/den-dataset#18 step 13): which titles are sent, and the evidence they are shown",
