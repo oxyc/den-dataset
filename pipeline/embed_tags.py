@@ -24,7 +24,7 @@ import time
 import urllib.error
 import urllib.request
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from store import vector_blob  # noqa: E402
 
 V2 = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'

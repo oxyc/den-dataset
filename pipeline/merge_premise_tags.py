@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fold the v2 generation run into the published premise tags, and say which strings are new.
 
-  scripts/v2/merge_premise_tags.py --phase out-premise-v2/gen --out data/premise-tags-v2.json
-  scripts/v2/merge_premise_tags.py --into data/premise-tags-v2.json --phase A/gen --phase B \
+  pipeline/merge_premise_tags.py --phase out-premise-v2/gen --out data/premise-tags-v2.json
+  pipeline/merge_premise_tags.py --into data/premise-tags-v2.json --phase A/gen --phase B \
       --note "extended by ..." --embed-list embed.json      # a later run, appended to v2
 
 The first form builds v2 from v1 and ran once. Every later run appends with `--into`.
@@ -59,7 +59,7 @@ _spec.loader.exec_module(_v)
 def compose(tags):
     """The embedding document for a title: tags, most-defining first, space separated.
 
-    Identical to the v1 composition (scripts/v2/embed_tags.py) so a v1-vs-v2 comparison measures the tags
+    Identical to the v1 composition (pipeline/embed_tags.py) so a v1-vs-v2 comparison measures the tags
     and not the formatting. Hyphens stay — bge-m3 sub-word tokenizes them, and splitting a compound
     premise into its parts measurably blurs it.
     """

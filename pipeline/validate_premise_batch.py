@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check a premise-generation batch against its input, and reject the whole batch on corruption.
 
-  scripts/v2/validate_premise_batch.py --phase out-premise-v2/gen [--batch 0000] [--strict-language]
+  pipeline/validate_premise_batch.py --phase out-premise-v2/gen [--batch 0000] [--strict-language]
 
 A generating model can return a correct row COUNT while inventing ids, duplicating one key and dropping
 another — `README.md` records exactly that: ids fabricated in 3 of 12 batches and a key duplicated in a 4th,
@@ -168,7 +168,7 @@ def ordinary_vocabulary(path=None):
     """
     global _ordinary
     if _ordinary is None:
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         tags = json.load(open(path or os.path.join(root, "data/premise-tags-v1.json"),
                               encoding="utf-8"))["tags"]
         counts = {}

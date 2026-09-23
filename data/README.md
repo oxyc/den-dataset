@@ -73,7 +73,7 @@ them situation or device); a hard negative is **unrelated** (0–1) yet confusab
 subject). An anchor with no twin yields no triplet. The axis count is **not** a difficulty gradient —
 premise accuracy was flat across 4, 5 and 6 — so never weight by it.
 
-Both rulers split DEV/TEST by `scripts/v2/split.py`, a hash of the key, so a title is in the same half in
+Both rulers split DEV/TEST by `tools/rulers/split.py`, a hash of the key, so a title is in the same half in
 both. **TEST has been read once**, for the premise-vs-plot result; sweep on DEV, commit the setting, then
 read TEST. Compare two arms with `paired_triplets.py` (McNemar on the discordant cases): at ~150 triplets
 one flipped case moves accuracy 0.66 pp, and a tie fails, because replacing a working system has its own

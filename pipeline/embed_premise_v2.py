@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the premise-v2 vector blob, reusing every vector the live embedder would reproduce byte-for-byte.
 
-  scripts/v2/embed_premise_v2.py --tags data/premise-tags-v2.json --out-dir out-premise-v2/vectors \
+  pipeline/embed_premise_v2.py --tags data/premise-tags-v2.json --out-dir out-premise-v2/vectors \
       --url http://10.89.0.198:8080
 
 ## Why this is not "embed the strings that changed"
@@ -42,7 +42,7 @@ import time
 import urllib.error
 import urllib.request
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pipeline import embed_canary  # noqa: E402
 from store import vector_blob  # noqa: E402
 

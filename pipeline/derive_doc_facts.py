@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build `doc-facts.json` from the facts sidecar instead of re-scraping Wikidata.
 
-  scripts/v2/derive_doc_facts.py --facts out-t02-cc0b/facts-c85c707b0b18.json --out out-repass/doc-facts.json
+  pipeline/derive_doc_facts.py --facts out-t02-cc0b/facts-c85c707b0b18.json --out out-repass/doc-facts.json
 
 `taxonomy-backfill doc-facts` issues ~770 SPARQL requests to fetch two clauses — director and genre — that
 the facts sidecar already contains for every shipped title, as QIDs plus an `entities` map holding the
@@ -30,7 +30,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lib.wikidata import stripped_genre  # noqa: E402
 
