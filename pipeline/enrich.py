@@ -24,7 +24,7 @@ have an article on the title — see `pipeline/floors.py` for the floors and why
 TMDB's count leaves short costs its Wikipedia count, one Wikidata SPARQL per media for all of them
 together.
 
-**The batch file is read by `articles`, `embed`, `genres-moods`, `scripts/backfill-plot-provenance.py` and
+**The batch file is read by `articles`, `embed`, `genres-moods`, `pipeline/backfill_plot_provenance.py` and
 the census**, and it is written in the Swift encoder's exact layout (`swift_json`), so a batch this writes
 and one the Swift pass wrote diff as data rather than as formatting. It holds no TMDB field — see
 `written`.
@@ -513,7 +513,7 @@ def admit(records, floors, today, cache, worklist_votes=None, excluded=None, cat
     and how many titles were judged on a count their worklist row carried.
 
     A title an earlier build admitted keeps that admission when its worklist row states no TMDB count: a
-    list of ids — a re-fetch plan, `scripts/build-worklist.py`'s — carries nothing TMDB's half of the gate
+    list of ids — a re-fetch plan, `pipeline/build_worklist.py`'s — carries nothing TMDB's half of the gate
     could judge it by, and judged on its Wikipedia count alone 61 of 200 corpus titles in a replay were
     refused. Two things say a build admitted it: the shipped `catalogue`, which every out-dir can read, and
     the row's own `"admitted": true` (`planned`), which a plan built from an out-dir writes for the titles
@@ -602,8 +602,8 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     no media type and readers that keyed a row by a bare id — `loadVotePasses`, the escalation and
     `assemble`. Those readers are deleted, and every set, map and query here is keyed by the pair. So is
     every reader of a batch today — the `articles`, `embed` and `genres-moods` stages, `run_combined.py`'s
-    evidence fallback, the census (`scripts/check-plot-invariants.py`), the provenance backfill and
-    `scripts/v2/premise_mine_candidates.py` all key by `mediaType:tmdbId` — and a mixed batch is safe only
+    evidence fallback, the census (`pipeline/check_plot_invariants.py`), the provenance backfill and
+    `tools/rulers/premise_mine_candidates.py` all key by `mediaType:tmdbId` — and a mixed batch is safe only
     while that holds: a reader keyed by a bare id would read series 95 as movie 95.
     """
     if limit < 1:

@@ -110,11 +110,11 @@ class Declaration(unittest.TestCase):
         self.assertEqual(worklist.VOTE_FLOOR, min(floors.DEFAULT.tmdb, floors.DEFAULT.regional_tmdb))
 
     def test_the_daily_pass_admits_at_the_worldwide_floor(self):
-        with open(os.path.join(REPO, "scripts", "delta-run.sh"), encoding="utf-8") as fh:
+        with open(os.path.join(REPO, "pipeline", "delta-run.sh"), encoding="utf-8") as fh:
             self.assertIn(f"VOTE_FLOOR:-{floors.DEFAULT.tmdb}", fh.read())
 
     def test_it_does_not_write_the_shipped_catalogues_filename(self):
-        """`scripts/build-worklist.py` owns `worklist-<media>.json` — the ids Den already ships, ordered by
+        """`pipeline/build_worklist.py` owns `worklist-<media>.json` — the ids Den already ships, ordered by
         popularity. This stage enumerates all of TMDB: 1,247,062 movie ids against a corpus of 47,618.
 
         They used to share a filename, so whichever ran last decided which universe the next enrich billed
@@ -171,7 +171,7 @@ class Export(Staged):
         os.remove(os.path.join(self.out, "movie_ids.json"))
         with self.assertRaises(StageError) as refused:
             worklist.run(context(self.out, mode="export"))
-        self.assertIn("build-worklist.py", str(refused.exception))
+        self.assertIn("build_worklist.py", str(refused.exception))
         self.assertIn("gunzip", str(refused.exception))
 
     def test_an_empty_dump_is_a_refusal_not_a_finished_run(self):
@@ -299,21 +299,21 @@ class Delta(Staged):
 
     def test_a_delta_that_found_nothing_is_not_a_failure(self):
         """The answer on a quiet day. Refusing it would fail the daily pass for doing its job — which is
-        why `scripts/delta-run.sh` counts titles that survived enrichment rather than worklist rows."""
+        why `pipeline/delta-run.sh` counts titles that survived enrichment rather than worklist rows."""
         made = worklist.run(context(self.out, mode="delta", since="2026-09-07"),
                             FakeTMDB({"movie": [[]], "tv": [[]]}))
         self.assertIn("universe-movie.json", made)
         self.assertEqual(self.universe(os.path.join(self.out, "universe-movie.json")), [])
 
     def test_the_daily_pass_names_the_window_the_labels_and_both_outputs(self):
-        """The one mode with a live caller. `scripts/delta-run.sh` runs this every day, so its invocation
+        """The one mode with a live caller. `pipeline/delta-run.sh` runs this every day, so its invocation
         is the oracle for what a delta needs — and the two `--set` lines are not decoration: without them a
         delta's forty rows are written over the full run's 47k-title worklists under the same names.
 
         The genres & moods override is the expensive one to lose. Point it at nothing and the pass
         re-enriches the whole published catalogue at the per-title price, reporting an ordinary-looking count.
         """
-        with open(os.path.join(REPO, "scripts", "delta-run.sh"), encoding="utf-8") as fh:
+        with open(os.path.join(REPO, "pipeline", "delta-run.sh"), encoding="utf-8") as fh:
             script = fh.read()
         invocation = script.split("./den stage worklist")[1].split("\n\n")[0]
         self.assertIn("--mode delta", invocation)
@@ -326,7 +326,7 @@ class Delta(Staged):
         was deleted — the binary answers `unknown command` — and skipped `docfacts`, whose absence composes
         a different vector space. Every stage from the dump on, in `STAGES` order — and no Swift binary, which
         no longer exists to answer."""
-        with open(os.path.join(REPO, "scripts", "delta-run.sh"), encoding="utf-8") as fh:
+        with open(os.path.join(REPO, "pipeline", "delta-run.sh"), encoding="utf-8") as fh:
             script = fh.read()
         hand_off = script.split("Next, by hand")[1]
         stages = list(dict.fromkeys(re.findall(r"\./den stage ([a-z_]+)", hand_off)))
@@ -337,7 +337,7 @@ class Delta(Staged):
     def test_the_media_the_daily_pass_enriches_are_the_media_this_stage_builds(self):
         """The stage writes both lists in one call and the script then drains each. A media the script
         loops over and the stage does not build is a `universe-<media>.json` that is never there."""
-        with open(os.path.join(REPO, "scripts", "delta-run.sh"), encoding="utf-8") as fh:
+        with open(os.path.join(REPO, "pipeline", "delta-run.sh"), encoding="utf-8") as fh:
             script = fh.read()
         self.assertIn("for media in movie tv; do", script)
         self.assertEqual(sorted(worklist.MEDIA), ["movie", "tv"])
@@ -389,7 +389,7 @@ class Topology(unittest.TestCase):
 
     def test_the_producer_it_names_is_this_file(self):
         """A stage registered against a rule that is not there is an artifact nothing can rebuild — and
-        `check-producers.py` refuses a publish on exactly that."""
+        `check_producers.py` refuses a publish on exactly that."""
         self.assertEqual(worklist.PRODUCER, "pipeline/worklist.py")
         self.assertTrue(os.path.isfile(os.path.join(REPO, worklist.PRODUCER)))
 
@@ -401,7 +401,7 @@ class Topology(unittest.TestCase):
         leaves it gzipped — so the `how` an operator is sent to includes the step that fetch does not do."""
         for artifact in (artifacts.EXPORT_MOVIE, artifacts.EXPORT_TV):
             producer, how, _ = pipeline.producers()[artifact.name]
-            self.assertEqual(producer, "scripts/build-worklist.py")
+            self.assertEqual(producer, "pipeline/build_worklist.py")
             self.assertIn("gunzip", how)
             self.assertTrue(os.path.isfile(os.path.join(REPO, producer)))
 

@@ -72,7 +72,7 @@ cp den.env.example den.env        # TMDB_API_KEY (worklist discover/delta); Ente
 ./den stage worklist --mode delta --since YYYY-MM-DD --out-dir out \
     --set universe_movie=out/delta/universe-movie.json --set universe_tv=out/delta/universe-tv.json
 #    Keep a delta's lists under delta/: written over the full ones, they END the enrich run.
-#    To re-embed exactly what ships instead, `python3 scripts/build-worklist.py` writes
+#    To re-embed exactly what ships instead, `python3 pipeline/build_worklist.py` writes
 #    out/worklist-{movie,tv}.json, and step 3 drains those with --set universe_movie=… universe_tv=….
 #    Those rows state no TMDB count, and say "admitted": true, so each keeps the admission an earlier
 #    build gave it. A re-fetch or re-ground plan built from an out-dir must write "admitted": true on every
@@ -152,7 +152,7 @@ PY
 
 Take the difference, not the previous file's vectorless records: a title the classify pass dropped has lost
 its vector and belongs here. On `out-repass` on 2026-09-22 this was 79 ids. A batch Wikidata fails is dropped
-whole and the merge refuses a pass that skipped one; `scripts/facts-run.sh out` loops until nothing is
+whole and the merge refuses a pass that skipped one; `pipeline/facts-run.sh out` loops until nothing is
 skipped.
 
 About one title in 560 has its TMDB id claimed by two Wikidata items (series 2559: "Boon" and "Bonn").
@@ -198,19 +198,19 @@ blob's key pruned from the manifest first.
 ./den stage publish --out-dir out
 ```
 
-The stage runs `scripts/publish-dataset.sh out` from the repo root. By hand it must be run from the root too,
+The stage runs `pipeline/publish-dataset.sh out` from the repo root. By hand it must be run from the root too,
 because its ownership guard resolves producer paths and `git ls-files` against the working directory.
 Overrides are environment variables and reach the guards either way (`DEN_STORE_REBUILD`,
 `DEN_ALLOW_SHARED_PLOTS`, `DEN_ALLOW_DROPPING_BLOBS`).
 
 The publish also scores the genres & moods labels against `data/eval/golden-large.json` and refuses a
 score more than the tolerance under the baseline in `data/eval/quality-floors.json`. The baseline moves only
-when recorded: `scripts/eval-taxonomy.py out/labels-t02.json --record` after an improvement ships, with
+when recorded: `pipeline/eval_taxonomy.py out/labels-t02.json --record` after an improvement ships, with
 `--accept-drop` for a deliberate drop. Commit the result.
 
 ## The daily delta
 
-`scripts/delta-run.sh [DAYS_BACK] [OUT_DIR]` builds a delta worklist and enriches one batch per media. It
+`pipeline/delta-run.sh [DAYS_BACK] [OUT_DIR]` builds a delta worklist and enriches one batch per media. It
 **stops before the classify pass** — that step buys, so it never runs unattended — and prints steps 3a–8 with
 the batch ids it wrote. A title below the vote floor is recorded as judged for that day and not counted as
 pending, so it is judged again the next day, or at once if its count or a floor changes, until it earns

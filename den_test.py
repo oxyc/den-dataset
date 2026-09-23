@@ -42,7 +42,7 @@ class Listing(unittest.TestCase):
         self.assertEqual(order, sorted(order), "den stages printed them out of order")
         for line in ("premise_labels", "universe-movie.json", "pipeline/build_store.py",
                      "pipeline/consolidate_corpus.py", "pipeline/run_combined.py",
-                     "scripts/publish-dataset.sh"):
+                     "pipeline/publish-dataset.sh"):
             self.assertIn(line, result.stdout)
         # The optional input is marked as such: "the writer needs this" and "the writer can do without
         # it" are different answers to the same question. So is a flag that takes a set of shards.

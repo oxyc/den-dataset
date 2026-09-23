@@ -194,7 +194,7 @@ class Facts:
         # reader chained (`den-atlas/src/facts.rs`: `t.en.chain(t.orig).chain(t.aliases)`).
         #
         # This wrote `aliases` alone until 2026-09-21, and it is a DIFFERENT field:
-        # `check-alias-collisions.py` treats `own_names = [orig, en]` as the set aliases are vetted against,
+        # `check_alias_collisions.py` treats `own_names = [orig, en]` as the set aliases are vetted against,
         # so the two never overlap by construction. The names dropped were therefore exactly a title's own.
         # atlas builds its display-title search index from these, so every title whose original name differs
         # from its TMDB one stopped being findable by that name — "Gisaengchung" for Parasite. The

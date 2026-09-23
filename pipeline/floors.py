@@ -70,11 +70,11 @@ That made a list of ids a narrower gate than a `/discover` universe: replayed ov
 id-only worklist refused 61 that TMDB's count had admitted (`Loose Change`, `The Answer Man`, `Casi
 divas`). So a title the shipped catalogue (`data/genres-moods-curated.json`) names, on a row that states no
 count, keeps the admission an earlier build gave it (`pipeline/enrich.admit`): a re-fetch plan or
-`scripts/build-worklist.py`'s list needs no flag. The same replay then admitted 172 of the 200. The other
+`pipeline/build_worklist.py`'s list needs no flag. The same replay then admitted 172 of the 200. The other
 28 were enriched once and never shipped, every one of them plotless, so the catalogue does not name them.
 The plan that re-fetches them does know: a row may say `"admitted": true`, which keeps its admission the
 same way, and whatever builds a plan from an out-dir writes it for every title that out-dir enriched
-(`scripts/build-worklist.py` does). With it, the replay admitted all 200 and no flag is needed. A new
+(`pipeline/build_worklist.py` does). With it, the replay admitted all 200 and no flag is needed. A new
 title, and any row that states a count, is judged as above. Both Wikipedia floors at 0 still admit every
 title, for a list nothing records as admitted.
 """

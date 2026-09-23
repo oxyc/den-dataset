@@ -458,7 +458,7 @@ def run(ctx):
                 raise StageError(f"embed: den-embed refused a request ({refused}). Everything before it is "
                                  f"in the stores; re-run to continue from there.") from None
         made = vectors_store
-    # One JSON line on stdout, which `scripts/embed-corpus-run.sh` reads `written` from to know when the
+    # One JSON line on stdout, which `pipeline/embed-corpus-run.sh` reads `written` from to know when the
     # corpus is done.
     superseded = tally.get("superseded", 0)
     print(json.dumps({"written": written, "skipped": len(done) - superseded, "superseded": superseded,

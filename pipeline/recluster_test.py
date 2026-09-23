@@ -1,7 +1,7 @@
 """`recluster.py` — the weekly re-cluster, held to the report the Swift binary wrote.
 
 The golden below is the merge-base `taxonomy-backfill recluster` (4169e60) over `fixture()`, pasted in. Over
-the real corpus at `scripts/recluster-run.sh`'s settings the two reports were byte-identical too
+the real corpus at `pipeline/recluster-run.sh`'s settings the two reports were byte-identical too
 (oxyc/den-dataset#27).
 """
 import hashlib
@@ -122,7 +122,7 @@ class Interpreter(unittest.TestCase):
         self.assertIn("needs Python 3.12 or newer", done.stderr)
 
     def run_runner(self, directory, env):
-        return subprocess.run(["bash", os.path.join(REPO, "scripts", "recluster-run.sh"), directory],
+        return subprocess.run(["bash", os.path.join(REPO, "pipeline", "recluster-run.sh"), directory],
                               capture_output=True, text=True, env=env)
 
     def test_the_runner_refuses_when_no_interpreter_on_path_is_new_enough(self):

@@ -8,10 +8,10 @@ here and none of it is wrapped in new behaviour: this stage decides which files 
 runs it, so `den stage store` and the hand-typed command in `docs/OPERATE.md` produce the same bytes.
 
 What it does add is the declaration below. The writer's inputs used to be described in three places — its
-own `INPUT_ARGS`, the command in the docs, and `STORE_INPUTS` in `scripts/check-producers.py` — and the
+own `INPUT_ARGS`, the command in the docs, and `STORE_INPUTS` in `pipeline/check_producers.py` — and the
 third drifted from the first twice in one day. Now the argument list is BUILT from `INPUTS`, so a
 declaration that disagrees with the writer fails at its argument parser rather than in a registry nobody
-runs, and `check-producers.py` reads the same tuple instead of keeping a copy.
+runs, and `check_producers.py` reads the same tuple instead of keeping a copy.
 """
 import os
 import subprocess

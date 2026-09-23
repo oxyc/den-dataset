@@ -667,7 +667,7 @@ class Batch(unittest.TestCase):
         self.assertEqual(self.checkpoint()["judgedBelow"]["movie:2"]["votes"], None)
 
     def test_a_shipped_title_on_a_list_of_ids_keeps_its_admission_and_a_new_one_does_not(self):
-        """A re-fetch plan or `scripts/build-worklist.py` list names titles an earlier build admitted, and
+        """A re-fetch plan or `pipeline/build_worklist.py` list names titles an earlier build admitted, and
         carries no TMDB count. Judged on its Wikipedia count alone a shipped title with few articles was
         refused — 61 of 200 in a replay — unless someone remembered the floor flags. A new title with the
         same count is judged as any other, and a shipped title whose row states a count is judged on it."""
@@ -1067,7 +1067,7 @@ class CommandLine(unittest.TestCase):
 
     def invocations(self):
         found = []
-        for path in ("scripts/delta-run.sh", "docs/OPERATE.md"):
+        for path in ("pipeline/delta-run.sh", "docs/OPERATE.md"):
             with open(os.path.join(REPO, path), encoding="utf-8") as fh:
                 text = fh.read().replace("\\\n", " ")
             found += [(path, line.split("python3 -m pipeline.enrich", 1)[1])
@@ -1078,7 +1078,7 @@ class CommandLine(unittest.TestCase):
     def test_every_documented_invocation_parses(self):
         """The daily delta runs this unattended; a flag the parser does not know is a dead timer."""
         found = self.invocations()
-        self.assertEqual(sorted({path for path, _ in found}), ["docs/OPERATE.md", "scripts/delta-run.sh"])
+        self.assertEqual(sorted({path for path, _ in found}), ["docs/OPERATE.md", "pipeline/delta-run.sh"])
         for path, rest in found:
             words = rest.split("|")[0].split("#")[0].replace(")", " ").split()
             flags = {word for word in words if word.startswith("--")}

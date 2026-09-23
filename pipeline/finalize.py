@@ -33,7 +33,7 @@ record's vector, which is what makes an incremental top-up an append rather than
 
 **There is no `labels-t02.json.gz`.** It was the precompressed copy den-atlas served to clients sending
 `Accept-Encoding: gzip`, and that stopped when the blobs were retired for the store (oxyc/den#113):
-`prune-manifest.py` drops every `*GzFile` key, so the release has not named it since, and no reader in
+`prune_manifest.py` drops every `*GzFile` key, so the release has not named it since, and no reader in
 this repo, in den-atlas or in the box's sync looks for it. It went on being written anyway — 11 MB per
 run into the out-dir, for nobody. `labelsGzFile` stays in `OWNED` so a rewrite over an older manifest
 drops the key rather than inheriting a claim about a file that is no longer there.

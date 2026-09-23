@@ -5,7 +5,7 @@ Two things are worth testing about a stage whose whole job is to hand `pipeline/
 right files:
 
   * that the declaration and the writer's argument list still name the same inputs. This is the pin the
-    derived producer registry hangs from — `check-producers.py` reads `INPUTS`, so if `INPUTS` may drift
+    derived producer registry hangs from — `check_producers.py` reads `INPUTS`, so if `INPUTS` may drift
     from the writer then the drift has only moved;
   * that the stage's bytes are the hand-typed command's bytes. `docs/OPERATE.md` is what people run
     today, and a wrapper that is nearly the same command is worse than no wrapper.

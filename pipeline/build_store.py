@@ -25,7 +25,7 @@ each passed the guards in force at the time. A count that does not match its sou
 
 `--stamp-meta` also records WHAT IT READ — every input's path, sha256, size and mtime, as `storeInputs`
 in the manifest. See `store/inputs.py`: the inputs stopped being published artifacts, so they stopped
-being covered by the ownership guard, and this record is what `check-producers.py` holds them to.
+being covered by the ownership guard, and this record is what `check_producers.py` holds them to.
 
 ## What it publishes, which is not everything it reads
 
@@ -47,7 +47,7 @@ from store.inputs import (INPUT_ARGS, build_inputs, input_digest,  # noqa: E402
 
 # `display_title`, `release_year`, `title_imdb_id`, `publishable`, `row_applicability`, `FACET_AXES`,
 # `INPUT_ARGS`, `input_digest` and `labels_by_key` are imported so that this file's module namespace is
-# the whole surface the pipeline addresses the writer through: `scripts/check-producers.py` and
+# the whole surface the pipeline addresses the writer through: `pipeline/check_producers.py` and
 # `pipeline/migrate_vector_blob.py` load it by path, and `build_store_test.py` exercises the helpers
 # against it. Each one's implementation is in the `store/` module named for its section group.
 

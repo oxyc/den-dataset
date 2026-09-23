@@ -67,7 +67,7 @@ BATCH = 500
 ABORTS = 6
 STALLS = 6
 
-#: The credential bootstrap, over `scripts/lib/den-env.sh`: the only credential a batch uses is a 24h
+#: The credential bootstrap, over `lib/den-env.sh`: the only credential a batch uses is a 24h
 #: Wikimedia Enterprise bearer, minted by `enterprise_login` from the Enterprise username and password. A
 #: batch asks TMDB nothing (oxyc/den-dataset#53), so no TMDB key is needed here. The Enterprise credentials
 #: come from the environment when it holds them — GitHub Actions puts them there as secrets, with no file to
@@ -75,9 +75,9 @@ STALLS = 6
 #:
 #: The bearer comes back on a pipe this process owns; it never reaches an argv, a log or a file. The
 #: shell's own messages go to stderr, where an operator sees them as they happen.
-LOAD_AND_LOGIN = ('. scripts/lib/den-env.sh; if [ -f den.env ]; then den_load_env >&2 || exit 1; fi; '
+LOAD_AND_LOGIN = ('. lib/den-env.sh; if [ -f den.env ]; then den_load_env >&2 || exit 1; fi; '
                   'enterprise_login; printf "%s" "${WIKIMEDIA_ENTERPRISE_TOKEN:-}"')
-LOGIN_ONLY = '. scripts/lib/den-env.sh; enterprise_login; printf "%s" "${WIKIMEDIA_ENTERPRISE_TOKEN:-}"'
+LOGIN_ONLY = '. lib/den-env.sh; enterprise_login; printf "%s" "${WIKIMEDIA_ENTERPRISE_TOKEN:-}"'
 
 
 def media_types(ctx):

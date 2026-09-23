@@ -56,11 +56,11 @@ HOW = "./den stage facts --out-dir <dir>"
 PUBLISHES = False
 #: Wikidata's public query service, unbilled.
 SPENDS = False
-SCRIPT = os.path.join(REPO, "scripts", "merge-facts.py")
+SCRIPT = os.path.join(REPO, "pipeline", "merge_facts.py")
 
 #: Ids per SPARQL request. 25 rather than the Swift's default 100: a 100-id batch stalled from this
 #: client until the 60 s timeout while the identical query answered in ~1 s elsewhere, and the run never
-#: cleared its first batch on resume. `scripts/facts-run.sh` passed 25 for that reason, so the cached
+#: cleared its first batch on resume. `pipeline/facts-run.sh` passed 25 for that reason, so the cached
 #: bodies on disk are keyed on 25-id batches — the batch is part of the query text, and the query text is
 #: the cache key.
 BATCH = 25

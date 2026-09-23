@@ -503,7 +503,7 @@ class RecordsWhatItRead(StoreFixture, unittest.TestCase):
     """`--stamp-meta` records WHAT THE BUILD READ, as `storeInputs`.
 
     oxyc/den#113's remaining gap. `data-latest` carries one blob, so the manifest names one blob, so
-    `check-producers.py` — which walks the manifest's keys — checks one blob. The labels, vectors,
+    `check_producers.py` — which walks the manifest's keys — checks one blob. The labels, vectors,
     metadata, facts and corpus the store is built FROM are still produced and no longer declared, and a
     store built from a stale one of them published with every guard green. This record is the only thing
     that can see them, so it has to name every input and hash it truthfully.
@@ -1307,7 +1307,7 @@ class TheCardReadsBackFromTheCorpus(StoreFixture, unittest.TestCase):
 
 class TheAliasDecisionsAreApplied(StoreFixture, unittest.TestCase):
     """`data/alias-decisions.json` takes effect in the store, and the store records how many colliding
-    aliases it ships undecided — the number `check-alias-collisions.py --gate` refuses a publish on.
+    aliases it ships undecided — the number `check_alias_collisions.py --gate` refuses a publish on.
 
     Run against the committed file, whose `drop` list takes "Alien" off Taxi Driver (movie:103). Wikidata
     still carries that altLabel, so a fresh scrape brings it back; the store is where every path ends.
@@ -1349,7 +1349,7 @@ class TheAliasDecisionsAreApplied(StoreFixture, unittest.TestCase):
 
 class TheTitlesWithNoItemChosenAreRecorded(StoreFixture, unittest.TestCase):
     """A title several Wikidata items claim, with nothing chosen between them, has no Wikidata fields and so
-    no card. The store records each one as `wikidataItems.ambiguous`, which `check-wikidata-items.py
+    no card. The store records each one as `wikidataItems.ambiguous`, which `check_wikidata_items.py
     --gate` refuses a publish on; a contested title with its item chosen is not listed."""
 
     def test_only_a_contested_title_with_no_item_is_listed(self):

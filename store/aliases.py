@@ -5,13 +5,13 @@
 name a title carries as the strongest signal it has, so an alias that is really another title's name puts
 that title at the top of a search for it: Taxi Driver carries "Alien" and ranked second for `q=alien`.
 Whether such an alias is a real release title or junk is a fact about the world rather than the data, so a
-person decides each one — `scripts/check-alias-collisions.py` explains why no rule can, and writes the
+person decides each one — `pipeline/check_alias_collisions.py` explains why no rule can, and writes the
 undecided ones out for review.
 
 The store build is where the decisions take effect. Every `drop` alias is removed from the corpus rows
 before anything is interned, so it reaches neither `alias_titles` nor the card's name fallback. The build
 also counts the colliding aliases nobody has decided, and `--stamp-meta` records that count with the
-decisions file's hash as `aliasDecisions` — which `check-alias-collisions.py --gate` holds a publish to.
+decisions file's hash as `aliasDecisions` — which `check_alias_collisions.py --gate` holds a publish to.
 
 Applying them to a facts file does not hold. The drops were once applied that way by hand and the facts
 since have not carried them, but Wikidata still carries "Alien" on Taxi Driver, so a scrape into a fresh

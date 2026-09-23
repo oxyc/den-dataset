@@ -438,7 +438,7 @@ def write_genres_moods_answer(out, key):
 
 
 def gate_passes(candidate, golden, floors, flag):
-    """The quality gate's stand-in: the verdict `scripts/eval-taxonomy.py --gate` gives a pass."""
+    """The quality gate's stand-in: the verdict `pipeline/eval_taxonomy.py --gate` gives a pass."""
     return subprocess.CompletedProcess([candidate, golden, floors, flag], 0, "", "")
 
 

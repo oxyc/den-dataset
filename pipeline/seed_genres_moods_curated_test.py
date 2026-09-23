@@ -160,7 +160,7 @@ class Seed(unittest.TestCase):
         self.run_seed()
         lines = read(self.curated).decode("utf-8").splitlines()
         self.assertEqual(sum(1 for l in lines if l.startswith('"movie:') or l.startswith('"tv:')), 3)
-        spec = importlib.util.spec_from_file_location("ev", os.path.join(REPO, "scripts", "eval-taxonomy.py"))
+        spec = importlib.util.spec_from_file_location("ev", os.path.join(REPO, "pipeline", "eval_taxonomy.py"))
         ev = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(ev)
         version, by_key = ev.labels_by_key(self.curated)
