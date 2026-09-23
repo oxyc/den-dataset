@@ -21,8 +21,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import vector_blob  # noqa: E402
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from build_store import labels_by_key  # noqa: E402
+from store import vector_blob  # noqa: E402
 
 
 def main():

@@ -14,9 +14,7 @@ import unittest
 
 from . import recluster
 from .contract import REPO
-
-sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
-import vector_blob  # noqa: E402
+from store import vector_blob
 
 LABELS = ("Heist", "Neo-Noir", "Slasher", "Time Travel")
 

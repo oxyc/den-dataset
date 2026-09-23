@@ -3,13 +3,9 @@
 den-spec `wire/store-v1.md` § "Vectors". Each blob is re-ordered from its own row order into the
 store's by KEY; a row with no vector is zeroed and its `_has` byte left at 0.
 """
-import os
 import sys
 
-_V2 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "v2")
-if _V2 not in sys.path:
-    sys.path.insert(0, _V2)
-import vector_blob  # noqa: E402  — the blob layout, shared with the migration
+from . import vector_blob  # the blob layout, shared with the migration
 
 DIMS = 1024
 

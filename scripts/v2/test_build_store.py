@@ -23,8 +23,8 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import vector_blob  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+from store import vector_blob  # noqa: E402
 
 BUILD_STORE = os.path.join(HERE, "build_store.py")
 MIGRATE = os.path.join(HERE, "migrate_vector_blob.py")

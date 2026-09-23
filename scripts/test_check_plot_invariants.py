@@ -406,9 +406,7 @@ def write_store(dir, vectors, sections=("keys", "vec_plot_has")):
     """A store with `keys` and `vec_plot_has` for `{key: has_vector}`, written by the real section writer."""
     import sys
     sys.path.insert(0, os.path.dirname(HERE))
-    sys.path.insert(0, os.path.join(HERE, "v2"))
-    from store import format
-    import vector_blob
+    from store import format, vector_blob
     keys = list(vectors)
     sec = format.Sections(len(keys))
     if "keys" in sections:

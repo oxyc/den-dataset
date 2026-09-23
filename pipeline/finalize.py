@@ -53,9 +53,7 @@ import time
 from . import artifacts, jsonbytes
 from .contract import REPO, StageError, bind
 from lib import cache as caching
-
-sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
-import vector_blob  # noqa: E402  — the DENVEC02 layout, one definition shared with the store writer
+from store import vector_blob  # the DENVEC02 layout, one definition shared with the store writer
 
 NAME = "finalize"
 PRODUCER = "pipeline/finalize.py"

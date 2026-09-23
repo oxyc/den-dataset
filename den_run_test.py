@@ -69,10 +69,7 @@ import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
 from pipeline import artifacts, audit_combined, enrich, genres_moods  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
-
-V2 = os.path.join(HERE, "scripts", "v2")
-sys.path.insert(0, V2)
-import vector_blob  # noqa: E402
+from store import vector_blob  # noqa: E402
 
 FIXTURE = os.path.join(HERE, "pipeline", "fixture-corpus")
 UPSTREAM = os.path.join(FIXTURE, "upstream")
