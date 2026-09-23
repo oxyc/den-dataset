@@ -6,12 +6,11 @@ One batch is `pipeline/enrich.py` and is tested there. What is tested here is th
   * **the loop.** `scripts/enrich-all.sh` ran the batches and decided when to stop, and that decision is
     the stage's. Each of its stopping rules is exercised — the retried abort and the stall with ids still
     being attempted — against a scripted `batch`, because what is under test is the counting, and a real
-    drain is ~120 batches of TMDB quota. That a below-floor title does not hold a drain open is `enrich`'s
+    drain is ~120 batches of requests. That a below-floor title does not hold a drain open is `enrich`'s
     to test, and `den_run_test.py` drains one end to end.
-  * **the credential split.** The TMDB key and the Wikimedia bearer are asked about separately, because
-    they arrive together only on a workstation.
-  * **a drained run end to end**, through the real batch code, which returns before it builds a TMDB
-    client: nothing is fetched and nothing is written.
+  * **the credentials.** Only the Wikimedia bearer, from the environment or `den.env`.
+  * **a drained run end to end**, through the real batch code, which returns before it asks anything:
+    nothing is fetched and nothing is written.
 """
 import io
 import json
@@ -93,7 +92,7 @@ class Declaration(unittest.TestCase):
     def test_it_never_asks_for_the_anime_exclusion(self):
         """Opt-IN, because excluding anime by default silently cost the corpus 1,498 titles."""
         with mock.patch.object(enrich, "run", return_value={"remaining": 0}) as ran, \
-                mock.patch.object(fetch, "credentials", return_value=("k", None)):
+                mock.patch.object(fetch, "credentials", return_value=None):
             directory = tempfile.TemporaryDirectory()
             self.addCleanup(directory.cleanup)
             write_inputs(directory.name)
@@ -106,7 +105,7 @@ class Declaration(unittest.TestCase):
         """Four floors, four flags: one that stops at `Context` is a run that says it lowered a floor and
         judged every title by the default."""
         with mock.patch.object(enrich, "run", return_value={"remaining": 0}) as ran, \
-                mock.patch.object(fetch, "credentials", return_value=("k", None)):
+                mock.patch.object(fetch, "credentials", return_value=None):
             directory = tempfile.TemporaryDirectory()
             self.addCleanup(directory.cleanup)
             write_inputs(directory.name)
@@ -119,7 +118,7 @@ class Declaration(unittest.TestCase):
         which reads exactly like a finished run."""
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        with mock.patch.object(fetch, "credentials", return_value=("k", None)):
+        with mock.patch.object(fetch, "credentials", return_value=None):
             with self.assertRaises(StageError) as refused:
                 fetch.batch(context(directory.name), "movie")
         self.assertIn(worklist.HOW, str(refused.exception))
@@ -128,40 +127,43 @@ class Declaration(unittest.TestCase):
 class Credentials(unittest.TestCase):
     """The shell is the seam: `scripts/lib/den-env.sh` still reads `den.env` and mints the bearer."""
 
-    def minted(self, environ, stdout=b"file-key\0bearer\0", code=0):
+    def minted(self, environ, stdout=b"bearer", code=0):
         completed = subprocess.CompletedProcess([], code, stdout=stdout)
         with mock.patch.object(fetch.subprocess, "run", return_value=completed) as ran:
             answer = fetch.credentials(environ)
         return answer, (ran.call_args[0][0][2] if ran.called else None)
 
-    def test_the_two_credentials_are_asked_about_separately(self):
-        """Keying the whole bootstrap on the TMDB key meant exporting it by hand skipped the Enterprise
-        login too — a run that records less about its own rows, not just a slower one."""
-        (key, bearer), script = self.minted({})
-        self.assertEqual((key, bearer), ("file-key", "bearer"))
+    def test_the_bearer_is_all_a_batch_needs(self):
+        """A batch asks TMDB nothing (oxyc/den-dataset#53), so no TMDB key is loaded or asked for."""
+        bearer, script = self.minted({})
+        self.assertEqual(bearer, "bearer")
         self.assertIn("den_load_env", script)
         self.assertIn("enterprise_login", script)
+        self.assertNotIn("TMDB", script)
 
-        (key, bearer), script = self.minted({"TMDB_API_KEY": "k"}, stdout=b"k\0bearer\0")
-        self.assertEqual((key, bearer), ("k", "bearer"))
-        self.assertNotIn("den_load_env", script, "GitHub Actions has the key and no den.env to read")
-        self.assertIn("enterprise_login", script)
+        bearer, script = self.minted({"WIKIMEDIA_ENTERPRISE_USERNAME": "u", "WIKIMEDIA_ENTERPRISE_PASSWORD": "p"})
+        self.assertEqual(bearer, "bearer")
+        self.assertNotIn("den_load_env", script, "GitHub Actions has the credentials and no den.env to read")
 
-        (key, bearer), script = self.minted({"TMDB_API_KEY": "k", "WIKIMEDIA_ENTERPRISE_TOKEN": "t"})
-        self.assertEqual(((key, bearer), script), (("k", "t"), None), "nothing left to mint")
+        bearer, script = self.minted({"WIKIMEDIA_ENTERPRISE_TOKEN": "t"})
+        self.assertEqual((bearer, script), ("t", None), "nothing left to mint")
+
+    def test_no_den_env_is_not_a_refusal(self):
+        """The free action API needs no credential, so a checkout with no den.env still fetches."""
+        self.assertIn("if [ -f den.env ]", fetch.LOAD_AND_LOGIN)
 
     def test_no_bearer_is_none_and_the_free_api_answers(self):
-        (key, bearer), _script = self.minted({"TMDB_API_KEY": "k"}, stdout=b"k\0\0")
+        bearer, _script = self.minted({}, stdout=b"")
         self.assertIsNone(bearer)
 
-    def test_no_key_anywhere_is_a_refusal_not_an_abort(self):
-        """No den.env will not appear by waiting; the shell driver spent six backoffs finding that out."""
+    def test_a_den_env_that_will_not_load_is_a_refusal_not_an_abort(self):
+        """It will not load by waiting; the shell driver spent six backoffs finding that out."""
         with self.assertRaises(StageError):
             self.minted({}, stdout=b"", code=1)
 
     def test_the_secrets_never_reach_an_argv(self):
-        _answer, script = self.minted({})
-        self.assertNotIn("file-key", script)
+        _answer, script = self.minted({"WIKIMEDIA_ENTERPRISE_PASSWORD": "s3cret"})
+        self.assertNotIn("s3cret", script)
 
 
 class Loop(Staged):
@@ -260,7 +262,7 @@ class Run(Staged):
 
 
 class Drained(unittest.TestCase):
-    """The real batch code on a drained out-dir: it returns before it builds a TMDB client."""
+    """The real batch code on a drained out-dir: it returns before it asks anything."""
 
     def test_a_drained_worklist_is_one_batch_that_fetches_nothing_and_writes_nothing(self):
         directory = tempfile.TemporaryDirectory()
@@ -270,7 +272,7 @@ class Drained(unittest.TestCase):
         checkpoint = os.path.join(out, artifacts.ENRICH_CHECKPOINT.filename)
         with open(checkpoint, "rb") as fh:
             before = fh.read()
-        environ = {"TMDB_API_KEY": "nothing-may-reach-tmdb", "WIKIMEDIA_ENTERPRISE_TOKEN": "unused"}
+        environ = {"WIKIMEDIA_ENTERPRISE_TOKEN": "unused"}
         with mock.patch.dict(os.environ, environ), \
                 mock.patch.object(enrich.http, "request", side_effect=AssertionError("no request")):
             made = fetch.run(context(out, media="movie"))

@@ -5,6 +5,7 @@ No network: `urlopen` is replaced in every test that could reach it.
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -46,6 +47,23 @@ class Labels(unittest.TestCase):
                 module.main()
             urlopen.assert_not_called()
             self.assertIn(os.path.join(out, "labels-t02.json"), str(refused.exception))
+
+
+class Rows(unittest.TestCase):
+    def test_every_row_says_an_earlier_build_admitted_it(self):
+        """The labels are what a build admitted and shipped. The rows carry no TMDB count, so without
+        `admitted` the enrichment would judge each title again on its Wikipedia count alone."""
+        with tempfile.TemporaryDirectory() as out:
+            labels = os.path.join(out, "labels-t02.json")
+            with open(labels, "w") as fh:
+                json.dump({"records": [{"mediaType": "movie", "tmdbId": 11}, {"mediaType": "tv", "tmdbId": 7}]}, fh)
+            module = load(out, labels=labels)
+            with mock.patch.object(module, "fetch_export", return_value="dump"), \
+                    mock.patch.object(module, "popularity", return_value={}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                module.main()
+            with open(os.path.join(out, "worklist-movie.json")) as fh:
+                self.assertEqual(json.load(fh), [{"tmdbId": 11, "mediaType": "movie", "admitted": True}])
 
 
 class Fetch(unittest.TestCase):

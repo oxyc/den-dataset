@@ -22,7 +22,7 @@ NOW = datetime.datetime(2026, 9, 22, 12, 0, tzinfo=datetime.timezone.utc)
 
 
 def grounded(tmdb_id, text, revision=100, article=None, language="en", media="movie", **extra):
-    record = {"tmdbId": tmdb_id, "mediaType": media, "genreIDs": [18], "originCountry": ["US"],
+    record = {"tmdbId": tmdb_id, "mediaType": media, "genreIDs": [18], "animated": True, "originCountry": ["US"],
               "originalLanguage": "en", "voteCount": 900, "hasWikiPlot": True, "overview": text,
               "plotArticle": article or f"Film {tmdb_id}", "plotLanguage": language,
               "plotArticleRole": "own", "plotArticleRedirected": False, "plotSections": ["Plot"],
@@ -222,11 +222,12 @@ class Run(Refresh):
 
     def test_a_backfilled_record_sheds_the_tmdb_fields_no_reader_wants(self):
         """Only its revision is new, but it is written into a new batch, and an old row's TMDB title, cast,
-        vote count, language and origin are not copied forward into it (oxyc/den-dataset#53)."""
+        vote count, language, origin and genres are not copied forward into it (oxyc/den-dataset#53)."""
         self.refreshed()
         row = self.latest()["movie:5"]
-        self.assertEqual({"title", "topCast", "voteCount", "originalLanguage", "originCountry"} & set(row), set())
-        self.assertEqual((row["overview"], row["genreIDs"]), (PLOT.strip(), [18]))
+        self.assertEqual({"title", "topCast", "voteCount", "originalLanguage", "originCountry", "genreIDs"} & set(row),
+                         set())
+        self.assertEqual((row["overview"], row["animated"]), (PLOT.strip(), True))
 
     def test_a_second_refresh_finds_nothing_left_but_the_failure(self):
         self.refreshed()
@@ -247,11 +248,12 @@ class Run(Refresh):
         self.assertEqual({token for _a, _l, _c, token in self.plot_calls}, {None},
                          "the action API, which records a revision; Enterprise names none")
 
-    def test_a_refreshed_record_keeps_its_tmdb_half_and_item_and_drops_legacy_fields(self):
+    def test_a_refreshed_record_keeps_its_animated_flag_and_item_and_drops_every_tmdb_field(self):
         self.refreshed()
         row = self.latest()["movie:1"]
-        self.assertEqual(row["genreIDs"], [18])
-        self.assertEqual({"title", "keywords", "voteCount", "originalLanguage", "originCountry"} & set(row), set())
+        self.assertIs(row["animated"], True)
+        self.assertEqual({"title", "keywords", "voteCount", "originalLanguage", "originCountry", "genreIDs"} & set(row),
+                         set())
         self.assertEqual(self.latest()["movie:6"]["wikidataItem"], "Q1")
         self.assertIn(({"movie": {6: ["Q2"]}}), [excluded for _ids, excluded in self.candidate_calls],
                       "the item set aside at enrichment stays set aside")

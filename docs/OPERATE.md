@@ -64,7 +64,7 @@ given to any of them is only checked against it. The daily delta prints the same
 
 ```sh
 # 1. Secrets. den.env is gitignored; the fetch stage reads it.
-cp den.env.example den.env        # TMDB_API_KEY (required); Enterprise username/password (optional)
+cp den.env.example den.env        # TMDB_API_KEY (worklist discover/delta); Enterprise username/password (optional)
 
 # 2. The worklist — which titles to enrich.
 ./den stage worklist --mode export --out-dir out     # every id in TMDB's daily dump (gunzip
@@ -74,8 +74,13 @@ cp den.env.example den.env        # TMDB_API_KEY (required); Enterprise username
 #    Keep a delta's lists under delta/: written over the full ones, they END the enrich run.
 #    To re-embed exactly what ships instead, `python3 scripts/build-worklist.py` writes
 #    out/worklist-{movie,tv}.json, and step 3 drains those with --set universe_movie=… universe_tv=….
+#    Those rows state no TMDB count, and say "admitted": true, so each keeps the admission an earlier
+#    build gave it. A re-fetch or re-ground plan built from an out-dir must write "admitted": true on every
+#    row that out-dir enriched — the plotless titles among them are in no catalogue — or those rows are
+#    judged again as new (pipeline/floors.py). A plan without it is a list nothing records as admitted:
+#    --wikipedia-floor 0 --regional-wikipedia-floor 0 admits every title on it.
 
-# 3. Fetch — TMDB detail plus the live Wikipedia plot per title, resumable.
+# 3. Fetch — Wikidata and the live Wikipedia plot per title, resumable. Asks TMDB nothing.
 ./den stage fetch --out-dir out
 #    One batch by hand, credentials already in the environment:
 python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --limit 150
@@ -152,13 +157,12 @@ skipped.
 
 About one title in 560 has its TMDB id claimed by two Wikidata items (series 2559: "Boon" and "Bonn").
 Every stage that asks Wikidata by TMDB id — enrich, articles, docfacts, facts — answers from ONE of them,
-chosen by `lib/wikidata.resolve`: first `data/wikidata-item-decisions.json`, then TMDB's own IMDb id and
-year, the item stating no other TMDB id, the item with an English article. The row records `wikidataItem` and
-`wikidataCandidates`. A title nothing chooses for ships with no Wikidata fields; the facts stage warns and
-counts it (`ambiguousItems`), and the publish refuses until it is decided in that file. A decision for an id
-that is no longer contested is refused as stale. facts and docfacts read the TMDB record from the
-enrichment's cache; on a miss they need `TMDB_API_KEY` (`. scripts/lib/den-env.sh; den_load_env`). A
-checkpointed row scraped under another choice is scraped again on the next run.
+chosen by `lib/wikidata.resolve`: first `data/wikidata-item-decisions.json`, then the item stating no other
+TMDB id, then the item with an English article. The row records `wikidataItem` and `wikidataCandidates`. A
+title nothing chooses for ships with no Wikidata fields; the facts stage warns and counts it
+(`ambiguousItems`), and the publish refuses until it is decided in that file. A decision for an id that is no
+longer contested is refused as stale. A checkpointed row scraped under another choice is scraped again on
+the next run.
 
 **7. The corpus** — the pass shards, facts and genres & moods joined into one JSONL, the source of truth.
 

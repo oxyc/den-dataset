@@ -136,11 +136,12 @@ class Staged(unittest.TestCase):
             original = getattr(facts.wd, name)
             setattr(facts.wd, name, stub)
             self.addCleanup(setattr, facts.wd, name, original)
-        for name, stub in (("claimants", self.wd.claimants_of), ("item_evidence", self.wd.item_evidence)):
+        # The committed decisions name real ids the stubs say nothing claims; read, they refuse as stale.
+        for name, stub in (("claimants", self.wd.claimants_of), ("item_evidence", self.wd.item_evidence),
+                           ("load_decisions", lambda path=None: {})):
             original = getattr(facts.wikidata, name)
             setattr(facts.wikidata, name, stub)
             self.addCleanup(setattr, facts.wikidata, name, original)
-        self.tmdb = {}          # path -> TMDB detail body, for the contested titles only
         self.wd.facts = {
             ("movie", 1): {"imdbId": "tt1", "directors": ["Q10"], "genres": ["Q20"], "basedOn": ["Q30"],
                            "franchise": ["Q40"], "released": {"date": "1999", "precision": "year"}},
@@ -166,11 +167,7 @@ class Staged(unittest.TestCase):
         return Context(out_dir=self.out, dataset_version=version)
 
     def run_stage(self, version=VERSION):
-        return facts.run(self.context(version), cache=object(), client=self)
-
-    def get(self, path, params=None):
-        """The TMDB client `facts.run` is given: answers the contested titles' detail calls."""
-        return self.tmdb[path]
+        return facts.run(self.context(version), cache=object())
 
     def read(self, name):
         with open(os.path.join(self.out, name), encoding="utf-8") as fh:
@@ -576,16 +573,15 @@ class OneItemPerTitle(Staged):
                          "aliases": []}},
             BOON: {"imdbId": "tt0090400", "cast": ["Q5362535"],
                    "t": {"article": "Boon (TV series)", "label": "Boon", "original": None, "aliases": []}}}
-        self.wd.evidence = {BONN: {"imdb": ["tt13905034"], "years": [1986, 2022], "claims": [2559, 215780]},
-                            BOON: {"imdb": ["tt0090400"], "years": [], "claims": [2559]}}
-        self.tmdb["/tv/2559"] = {"id": 2559, "name": "Boon", "first_air_date": "1986-01-14",
-                                 "external_ids": {"imdb_id": "tt0090400"}}
+        self.wd.evidence = {BONN: {"claims": [2559, 215780], "articles": ["Bonn – Alte Freunde, neue Feinde"]},
+                            BOON: {"claims": [2559], "articles": ["Boon (TV series)"]}}
 
     def record(self):
         return next(r for r in self.read(f"facts-{VERSION}.pre-merge.json")["records"]
                     if (r["mediaType"], r["tmdbId"]) == ("tv", 2559))
 
-    def test_every_field_comes_from_the_item_tmdb_names(self):
+    def test_every_field_comes_from_the_item_chosen(self):
+        """Bonn also states its own TMDB id, so Boon is the one that states this id alone."""
         for order in ([BOON, BONN], [BONN, BOON]):
             with self.subTest(order=order):
                 for name in ("facts-fields.json", "facts-entities.json", "facts-source-types.json"):
@@ -620,9 +616,8 @@ class OneItemPerTitle(Staged):
 
     def ambiguous(self):
         self.wd.claimants[("tv", 2559)] = [BOON, BONN]
-        self.wd.evidence = {BONN: {"imdb": [], "years": [], "claims": [2559]},
-                            BOON: {"imdb": [], "years": [], "claims": [2559]}}
-        self.tmdb["/tv/2559"] = {"id": 2559, "name": "Boon"}
+        self.wd.evidence = {BONN: {"claims": [2559], "articles": []},
+                            BOON: {"claims": [2559], "articles": []}}
 
     def test_an_ambiguous_title_is_counted_loudly_in_the_report(self):
         self.ambiguous()

@@ -2,6 +2,9 @@
   "Q90000001": {
     "tmdb": {"movie": 900001}, "enwiki": "The Lighthouse Ledger", "label": "The Lighthouse Ledger",
     "aliases": ["Lighthouse Ledger"],
+    "sitelinks": {"ca": "The Lighthouse Ledger", "eu": "The Lighthouse Ledger", "gl": "The Lighthouse Ledger",
+                  "eo": "The Lighthouse Ledger", "la": "The Lighthouse Ledger", "cy": "The Lighthouse Ledger",
+                  "ast": "The Lighthouse Ledger", "hr": "The Lighthouse Ledger", "sk": "The Lighthouse Ledger"},
     "claims": {
       "P31": ["Q97000001"], "P345": ["tt9000001"], "P577": [{"time": "+2019-05-04T00:00:00Z", "precision": 11}],
       "P57": ["Q91000001"], "P58": ["Q91000002"], "P161": ["Q91000003", "Q91000004"], "P136": ["Q92000001"],
@@ -14,6 +17,7 @@
   },
   "Q90000002": {
     "tmdb": {"tv": 900001}, "enwiki": "Signal Lost (TV series)", "label": "Signal Lost",
+    "sitelinks": {"ca": "Signal Lost", "eu": "Signal Lost"},
     "claims": {
       "P31": ["Q97000002"], "P345": ["tt9000011"], "P580": [{"time": "+2020-01-10T00:00:00Z", "precision": 11}],
       "P582": [{"time": "+2022-03-01T00:00:00Z", "precision": 11}], "P170": ["Q91000012"], "P161": ["Q91000013"],
@@ -33,6 +37,9 @@
   },
   "Q90000004": {
     "tmdb": {"movie": 900003}, "enwiki": "Quiet Harbour (film)", "label": "Quiet Harbour",
+    "sitelinks": {"ca": "Quiet Harbour", "eu": "Quiet Harbour", "gl": "Quiet Harbour", "eo": "Quiet Harbour",
+                  "la": "Quiet Harbour", "cy": "Quiet Harbour", "ast": "Quiet Harbour", "hr": "Quiet Harbour",
+                  "sk": "Quiet Harbour"},
     "claims": {
       "P31": ["Q97000001"], "P345": ["tt9000003"], "P577": [{"time": "+2021-01-01T00:00:00Z", "precision": 9}],
       "P57": ["Q91000015"], "P495": ["Q96000001"], "P364": ["Q95000001"]
@@ -43,9 +50,13 @@
     "claims": {"P31": ["Q97000001"], "P345": ["tt9000004"]}
   },
   "Q90000006": {
-    "tmdb": {"tv": 900005}, "sitelinks": {"ja": "東京ナイトリレー"}, "label": "Tokyo Night Relay",
+    "tmdb": {"tv": 900005}, "label": "Tokyo Night Relay",
+    "sitelinks": {"ja": "東京ナイトリレー", "ca": "Tokyo Night Relay", "eu": "Tokyo Night Relay",
+                  "gl": "Tokyo Night Relay", "eo": "Tokyo Night Relay", "la": "Tokyo Night Relay",
+                  "cy": "Tokyo Night Relay", "ast": "Tokyo Night Relay", "hr": "Tokyo Night Relay",
+                  "sk": "Tokyo Night Relay"},
     "claims": {
-      "P31": ["Q97000002"], "P345": ["tt9000005"], "P580": [{"time": "+2018-04-07T00:00:00Z", "precision": 11}],
+      "P31": ["Q97000003"], "P345": ["tt9000005"], "P580": [{"time": "+2018-04-07T00:00:00Z", "precision": 11}],
       "P136": ["Q92000003"], "P495": ["Q96000004"], "P364": ["Q95000003"], "P449": ["Q91000016"],
       "P1476": [{"text": "東京ナイトリレー", "lang": "ja"}]
     }
@@ -90,6 +101,7 @@
   "Q96000005": {"label": "Australia", "claims": {"P297": ["AU"]}},
   "Q97000001": {"label": "film"},
   "Q97000002": {"label": "television series"},
+  "Q97000003": {"label": "anime television series"},
   "Q97000004": {"label": "novel"},
   "Q97000006": {"label": "film trilogy", "claims": {"P279": ["Q24856"]}},
   "Q97000007": {"label": "Wikimedia list article"},

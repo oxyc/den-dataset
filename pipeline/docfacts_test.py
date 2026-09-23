@@ -33,9 +33,12 @@ class Staged(unittest.TestCase):
         self.answers = {}
         self.original = docfacts.wikidata.doc_facts
         docfacts.wikidata.doc_facts = self.stub
-        # The items claiming each (media, id), what each item states, and the TMDB records the choice reads.
-        self.claimants, self.evidence, self.tmdb, self.excluded = {}, {}, {}, []
-        self.originals = {name: getattr(docfacts.wikidata, name) for name in ("claimants", "item_evidence")}
+        # The items claiming each (media, id), and what each item states.
+        self.claimants, self.evidence, self.excluded = {}, {}, []
+        self.originals = {name: getattr(docfacts.wikidata, name)
+                          for name in ("claimants", "item_evidence", "load_decisions")}
+        # The committed decisions name real ids the stubs say nothing claims; read, they refuse as stale.
+        docfacts.wikidata.load_decisions = lambda path=None: {}
         docfacts.wikidata.claimants = lambda ids, media, cache=None: {
             i: self.claimants[(media, i)] for i in ids if (media, i) in self.claimants}
         docfacts.wikidata.item_evidence = lambda qids, media, cache=None: {
@@ -52,10 +55,6 @@ class Staged(unittest.TestCase):
         self.excluded.append((media, excluded))
         return {tmdb_id: self.answers[(media, tmdb_id)]
                 for tmdb_id in ids if (media, tmdb_id) in self.answers}
-
-    def get(self, path, params=None):
-        """The TMDB client the stage is given: the contested titles' detail calls."""
-        return self.tmdb[path]
 
     def labels(self, records):
         """`genres-moods.json` holding `records`, keyed the way the genres & moods stage writes it."""
@@ -87,16 +86,15 @@ class Writing(Staged):
                                         "movie:12": {"directors": [], "genres": []}})
 
     def test_a_contested_title_is_asked_about_one_item_and_says_which(self):
-        """Series 2559 is claimed by "Boon" and by "Bonn"; TMDB names Boon's IMDb id. The director and
+        """Series 2559 is claimed by "Boon" and by "Bonn", which also states its own id. The director and
         genres composed into its document are Boon's alone — and a row written before the choice existed,
         which merged both, is asked again."""
         self.labels([self.record(2559, "tv")])
         self.claimants[("tv", 2559)] = ["Q132860965", "Q116226000"]
-        self.evidence = {"Q116226000": {"imdb": ["tt13905034"], "years": [1986], "claims": [2559, 215780]},
-                         "Q132860965": {"imdb": ["tt0090400"], "years": [], "claims": [2559]}}
-        self.tmdb["/tv/2559"] = {"first_air_date": "1986-01-14", "external_ids": {"imdb_id": "tt0090400"}}
+        self.evidence = {"Q116226000": {"claims": [2559, 215780], "articles": []},
+                         "Q132860965": {"claims": [2559], "articles": []}}
         docfacts.write(os.path.join(self.out, "doc-facts.json"), {"tv:2559": {"directors": ["Both"], "genres": []}})
-        docfacts.run(self.context(), client=self)
+        docfacts.run(self.context())
         self.assertEqual(self.excluded, [("tv", {2559: ["Q116226000"]})])
         self.assertEqual(self.facts()["tv:2559"], {"directors": [], "genres": [], "wikidataItem": "Q132860965",
                                                    "wikidataCandidates": ["Q116226000", "Q132860965"]})

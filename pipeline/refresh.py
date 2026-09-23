@@ -53,12 +53,12 @@ from .contract import StageError
 #: Titles per batch the refresh writes: the fetch stage's batch size, for the same reasons.
 BATCH = 500
 
-#: What a refreshed record keeps from the one it replaces: the TMDB half a batch still carries and the
-#: Wikidata item it was resolved to. Everything else is `reground`'s to write again — and a field left
-#: over from the old grounding (a `plotArticle` on a title that lost its plot) would be a lie about the new
-#: one. Older batches carry TMDB fields no reader wants any more (oxyc/den-dataset#53); they are not copied,
-#: and a record only given its backfilled revision sheds them through `enrich.written` too.
-KEPT = ("tmdbId", "mediaType", "genreIDs", "wikidataItem", "wikidataCandidates")
+#: What a refreshed record keeps from the one it replaces: its key, its `animated` flag and the Wikidata
+#: item it was resolved to. Everything else is `reground`'s to write again — and a field left over from the
+#: old grounding (a `plotArticle` on a title that lost its plot) would be a lie about the new one. Older
+#: batches carry TMDB fields, `genreIDs` among them (oxyc/den-dataset#53); they are not copied, and a record
+#: only given its backfilled revision sheds them through `enrich.written` too.
+KEPT = ("tmdbId", "mediaType", "animated", "wikidataItem", "wikidataCandidates")
 
 UNCHANGED, MOVED, GONE, UNKNOWN = "unchanged", "moved", "gone", "unknown"
 

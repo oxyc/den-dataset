@@ -61,9 +61,10 @@ Wikidata"`:
 section, `VENDOR_ALLOWED` — the TMDB-sourced sections a build may still emit — is **empty**, and a build
 whose sections are not exactly the declared set refuses to write.
 
-**The store is the only artifact that check covers.** The pipeline's intermediate files still hold TMDB
-fields: the enriched batches are TMDB detail records by construction, and the article dump and the Jev pass
-copy a TMDB `title` and `year` onto every row. Those are local working files and must not be published. Two
+**The store is the only artifact that check covers.** The enrichment asks TMDB nothing since
+oxyc/den-dataset#53, and a batch it writes holds no TMDB field — `pipeline/enrich.NOT_WRITTEN`, which the
+end-to-end run asserts. Batches written before that, `out-repass/` among them, are TMDB detail records by
+construction. Those are local working files and must not be published. Two
 releases that published them by hand — `articles-2026-09-19` and `raw-2026-09-20` — were deleted on
 2026-09-22 for exactly that reason; nothing in code produced or checked them, so no guard saw them. `genres` are Wikidata Q-ids mapped into TMDB's
 genre *id space* — the values are CC0 and the vocabulary is TMDB's. No TMDB prose is redistributed at all:

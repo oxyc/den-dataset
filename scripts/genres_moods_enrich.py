@@ -128,7 +128,12 @@ def read_classify(paths, withdrawn=None):
 
 
 def read_animated(enriched_dir):
-    """`key` → TMDB's animation flag (genre 16), the newest batch winning, as the embed pass reads them."""
+    """`key` → the batch row's `animated` flag — Wikidata's, read off its genres and types by `enrich` —
+    the newest batch that states one winning.
+
+    A row that states none is not read as `false`. Older batches carry TMDB's genre ids instead, and that
+    flag is TMDB's (oxyc/den-dataset#53): such a title has no enrichment row to take `animated` from until
+    it is enriched again."""
     out = {}
     if not os.path.isdir(enriched_dir):
         return out
@@ -136,7 +141,8 @@ def read_animated(enriched_dir):
     for name in sorted(names, key=lambda n: int(n[6:-5])):
         with open(os.path.join(enriched_dir, name), encoding="utf-8") as fh:
             for row in json.load(fh):
-                out[key_of(row)] = 16 in (row.get("genreIDs") or [])
+                if isinstance(row.get("animated"), bool):
+                    out[key_of(row)] = row["animated"]
     return out
 
 

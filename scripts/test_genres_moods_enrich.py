@@ -39,7 +39,7 @@ class Fixture(unittest.TestCase):
     gated titles plus the ones under test; a golden set over the gated titles and movie:2; recorded floors.
 
     movie:1 is labelled, movie:2 is curated with neither subgenres nor moods, movie:3 is new (and
-    animated per TMDB); movie:4 is about another work, movie:5 has no article, movie:6's article changed
+    animated per its batch row); movie:4 is about another work, movie:5 has no article, movie:6's article changed
     since classify, movie:7 is new with no enrichment row, tv:8 is new and from 2025.
     """
 
@@ -70,8 +70,8 @@ class Fixture(unittest.TestCase):
                     arts.write(json.dumps({"mediaType": media, "tmdbId": int(tmdb_id), "title": f"T{tmdb_id}",
                                            "article": f"T {tmdb_id}", "language": "en", "text": body}) + "\n")
         with open(os.path.join(self.out, "enriched", "batch-1.json"), "w") as fh:
-            json.dump([{"mediaType": "movie", "tmdbId": 3, "genreIDs": [16]},
-                       {"mediaType": "tv", "tmdbId": 8, "genreIDs": [35, 18]}], fh)
+            json.dump([{"mediaType": "movie", "tmdbId": 3, "animated": True},
+                       {"mediaType": "tv", "tmdbId": 8, "animated": False}], fh)
         gated = [f"movie:{100 + i}" for i in range(30)]
         # movie:1 has subgenres and no moods: labelled, so not "missing".
         titles = {"movie:1": entry("Drama", [("Prison", 0.7)]),

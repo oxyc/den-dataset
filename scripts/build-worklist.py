@@ -71,7 +71,10 @@ def main() -> None:
     print(f"universe: {len(labels)} shipped titles from {LABELS}")
     for media, kind in (("movie", "movie"), ("tv", "tv_series")):
         pop = popularity(fetch_export(kind))
-        wl = [{"tmdbId": r["tmdbId"], "mediaType": media} for r in labels if r["mediaType"] == media]
+        # `admitted`: every title here was admitted by the build that wrote the labels, so enrich keeps it
+        # without a TMDB count rather than judging it again as new (pipeline/enrich.admit).
+        wl = [{"tmdbId": r["tmdbId"], "mediaType": media, "admitted": True}
+              for r in labels if r["mediaType"] == media]
         missing = sum(1 for e in wl if e["tmdbId"] not in pop)
         wl.sort(key=lambda e: pop.get(e["tmdbId"], 0.0), reverse=True)  # absent ids sink to the tail
         out = os.path.join(OUT, f"worklist-{media}.json")

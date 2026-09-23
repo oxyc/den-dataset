@@ -44,7 +44,6 @@ from . import artifacts, finalize, jsonbytes
 from .contract import REPO, StageError, bind
 from lib import cache as caching
 from lib import http, wikidata
-from lib import tmdb as tmdb_api
 from lib import wikidata_facts as wd
 
 NAME = "facts"
@@ -167,10 +166,10 @@ def title_strings(found):
     return out
 
 
-def identities(types, cache, client):
+def identities(types, cache):
     """`(key -> resolution, kind -> items to leave out)` for every title of a pass: which ONE Wikidata item
-    answers for it (`lib/wikidata.resolve`), chosen on the evidence the enrichment chooses on — TMDB's IMDb
-    id and year, from the detail call it cached — so a title's facts and its plot name the same work.
+    answers for it (`lib/wikidata.resolve`), chosen as the enrichment chooses, so a title's facts and its
+    plot name the same work.
 
     Asked for the whole pass before the first batch, and refused rather than skipped when it fails: every
     batch after it would otherwise merge two works again."""
@@ -178,8 +177,7 @@ def identities(types, cache, client):
     try:
         for kind, ids in types.items():
             media = "tv" if kind == "tv" else "movie"
-            resolved = wikidata.resolve(ids, media, cache,
-                                        lambda tmdb_id, media=media: tmdb_api.title_identity(client, media, tmdb_id))
+            resolved = wikidata.resolve(ids, media, cache)
             found.update({f"{kind}:{tmdb_id}": value for tmdb_id, value in resolved.items()})
             excluded[kind] = wikidata.set_aside(resolved)
     except wikidata.DecisionError as stale:
@@ -187,10 +185,6 @@ def identities(types, cache, client):
     except (wikidata.WikidataError, http.HTTPError) as failure:
         raise StageError(f"facts: choosing each title's Wikidata item failed ({failure}). Nothing new was "
                          f"scraped; re-run.") from None
-    except tmdb_api.TMDBError as refusal:
-        raise StageError(f"facts: several Wikidata items claim one TMDB id, and TMDB's record of that title "
-                         f"is not cached, so choosing between them needs TMDB itself: {refusal}. "
-                         f"`scripts/lib/den-env.sh` loads it from den.env.") from None
     return found, excluded
 
 
@@ -489,14 +483,14 @@ def ambiguous_keys(records):
                   if r.get("wikidataCandidates") and not r.get("wikidataItem"))
 
 
-def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, client=None):
+def scrape(keys, has_vector, directory, version, out, cache, pace=PACE):
     """One pass: `keys` scraped into `out`, checkpointed in `directory`. Returns how many ids it skipped."""
     fields_path = os.path.join(directory, "facts-fields.json")
     fields = checkpoint(fields_path)
     types = by_type(keys)
     requested = [f"{kind}:{i}" for kind, ids in types.items() for i in ids]
     say(f"facts: {sum(len(ids) for ids in types.values())} titles, {len(wd.SPECS)} properties")
-    resolved, excluded = identities(types, cache, client)
+    resolved, excluded = identities(types, cache)
     contested = {key for key, found in resolved.items() if found.get("candidates")}
     say(f"facts: {len(contested)} titles have several Wikidata items claiming their TMDB id; "
         f"{sum(1 for key in contested if resolved[key]['item'] is None)} of them nothing singles one out of")
@@ -569,11 +563,8 @@ def merge(ctx):
     return out
 
 
-def run(ctx, cache=None, client=None):
-    """Scrape both passes, then merge them into the file that ships. Returns its path.
-
-    `client` is a `lib/tmdb.TMDB`, asked only about titles several Wikidata items claim; built with no key
-    when not given, so a run whose answers are all on disk needs none."""
+def run(ctx, cache=None):
+    """Scrape both passes, then merge them into the file that ships. Returns its path."""
     ctx.require(artifacts.MANIFEST)
     try:
         ctx = dataclasses.replace(ctx, dataset_version=finalize.manifest_version(ctx))
@@ -582,13 +573,11 @@ def run(ctx, cache=None, client=None):
     labels = ctx.require(BOUND[artifacts.VECTOR_LABELS.name].artifact)
     delta = ctx.require(artifacts.DELTA_IDS)
     cache = wikidata.cache_for() if cache is None else cache
-    client = client or tmdb_api.TMDB(require_key=False)
     skipped = 0
     for has_vector, keys, artifact in ((True, keys_from_labels(labels), artifacts.CORPUS_FACTS),
                                        (False, keys_from_ids(delta), artifacts.DELTA_FACTS)):
         directory = os.path.join(ctx.out_dir, CHECKPOINTS[has_vector])
-        skipped += scrape(keys, has_vector, directory, ctx.dataset_version, ctx.path(artifact), cache,
-                          client=client)
+        skipped += scrape(keys, has_vector, directory, ctx.dataset_version, ctx.path(artifact), cache)
     if skipped:
         raise StageError(f"facts: {skipped} ids were skipped after their batches failed, so the scrape is "
                          f"not finished and the merge would publish without them. Everything else is "

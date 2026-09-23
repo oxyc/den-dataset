@@ -17,6 +17,13 @@ class Tiers(unittest.TestCase):
                 self.assertEqual(floors.DEFAULT.of({"originCountry": origin}), (50, 10))
         self.assertEqual(floors.DEFAULT.of({}), (50, 10))
 
+    def test_the_worklists_answer_decides_over_wikidatas_origin(self):
+        """`regional` is what `/discover` said; P495 is only asked where it said nothing. A co-production
+        TMDB files under GB and Wikidata under US stays regional."""
+        self.assertEqual(floors.DEFAULT.of({"regional": True, "originCountry": ["US"]}), (15, 3))
+        self.assertEqual(floors.DEFAULT.of({"regional": False, "originCountry": ["FR"]}), (50, 10))
+        self.assertEqual(floors.DEFAULT.of({"regional": None, "originCountry": ["FR"]}), (15, 3))
+
     def test_japan_is_not_regional(self):
         """Its low-vote tail is mostly anime; its popular titles clear the worldwide floor."""
         self.assertNotIn("JP", floors.REGIONAL_ORIGINS)
