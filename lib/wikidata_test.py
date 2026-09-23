@@ -506,6 +506,26 @@ class Targets(unittest.TestCase):
         self.assertIn("wdt:P4983 ?tmdb", series)
         self.assertIn("wdt:P580 ?start", series)
         self.assertIn('wikibase:language "en,mul"', film)
+        self.assertIn("wdt:P1476 ?original", film)
+        self.assertNotIn("?film rdfs:label ?local", film, "an English article needs no other label")
+
+    def test_it_asks_for_the_labels_in_the_articles_languages_but_english(self):
+        query = wikidata.target_query([1, 2], "movie", languages={"fr", "en", "de"})
+        self.assertIn('FILTER(?localLang IN ("de", "fr"))', query)
+
+    def test_a_works_other_names_are_its_titles_and_its_labels_by_language(self):
+        """A French article is headed "Il était une fois, une fois", and Wikidata's English label is "The
+        Belgian Job": P1476 and the French label are what say they are one work."""
+        payload = rows(
+            {"tmdb": cell("1"), "filmLabel": cell("The Belgian Job"), "original": cell("Zz"),
+             "local": cell("Il était une fois, une fois"), "localLang": cell("fr")},
+            {"tmdb": cell("1"), "filmLabel": cell("The Belgian Job"), "original": cell("Aa"),
+             "local": cell("Il était une fois, une fois"), "localLang": cell("fr")},
+            {"tmdb": cell("2"), "filmLabel": cell("Solaris")})
+        found = wikidata.parse_targets(payload)
+        self.assertEqual((found[1]["originals"], found[1]["labels"]),
+                         (["Aa", "Zz"], {"fr": "Il était une fois, une fois"}))
+        self.assertEqual((found[2]["originals"], found[2]["labels"]), ([], {}))
 
     def test_the_earliest_year_and_a_series_start_wins(self):
         payload = rows(
@@ -514,14 +534,16 @@ class Targets(unittest.TestCase):
             {"tmdb": cell("1"), "filmLabel": cell("Solaris"), "released": cell("1973-01-01T00:00:00Z")},
             {"tmdb": cell("2"), "filmLabel": cell("The Wire"), "released": cell("2001-01-01T00:00:00Z"),
              "start": cell("2002-06-02T00:00:00Z")})
-        self.assertEqual(wikidata.parse_targets(payload),
-                         {1: {"title": "Solaris", "year": 1972}, 2: {"title": "The Wire", "year": 2002}})
+        found = wikidata.parse_targets(payload)
+        self.assertEqual({i: (t["title"], t["year"]) for i, t in found.items()},
+                         {1: ("Solaris", 1972), 2: ("The Wire", 2002)})
 
     def test_a_bare_qid_is_no_title_and_an_item_with_nothing_is_present_and_empty(self):
         """The label service answers the Q-id when the item has no `en` or `mul` label: an identifier, not a
         name. An unknown or blank date is no year, not year zero."""
         payload = rows({"tmdb": cell("3"), "filmLabel": cell("Q123"), "released": cell("t2891")})
-        self.assertEqual(wikidata.parse_targets(payload), {3: {"title": None, "year": None}})
+        self.assertEqual(wikidata.parse_targets(payload),
+                         {3: {"title": None, "year": None, "originals": [], "labels": {}}})
 
     def test_a_body_that_is_not_a_result_is_refused_and_not_kept(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -531,9 +553,10 @@ class Targets(unittest.TestCase):
                     wikidata.targets([1], "movie", cache)
             self.assertIsNone(cache.read(cache.key("sparql-target", {"q": wikidata.target_query([1], "movie")})))
             answer = rows({"tmdb": cell("1"), "filmLabel": cell("F")})
+            named = {1: {"title": "F", "year": None, "originals": [], "labels": {}}}
             with mock.patch.object(wikidata.http, "request", return_value=answer) as sent:
-                self.assertEqual(wikidata.targets([1], "movie", cache), {1: {"title": "F", "year": None}})
-                self.assertEqual(wikidata.targets([1], "movie", cache), {1: {"title": "F", "year": None}})
+                self.assertEqual(wikidata.targets([1], "movie", cache), named)
+                self.assertEqual(wikidata.targets([1], "movie", cache), named)
             self.assertEqual(sent.call_count, 1, "a real answer is served from disk the second time")
 
     def test_no_ids_asks_nothing(self):
