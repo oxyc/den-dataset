@@ -32,6 +32,36 @@ fail=0
 ok() { pass=$((pass + 1)); echo "  ok: $1"; }
 bad() { fail=$((fail + 1)); echo "  FAIL: $1" >&2; }
 
+# A scratch signing key for the whole run: every publish signs the meta, and one without a key is refused.
+# Inherited through the environment, which is how it reaches the publisher through the stage too. The
+# signer refuses a key other than the pinned one, so the scratch key's public half stands in for the pin.
+KEYDIR="$(mktemp -d)"
+trap 'rm -rf "$KEYDIR"' EXIT
+python3 "$HERE/sign-manifest.py" keygen "$KEYDIR/key.pem" >/dev/null || { echo "keygen failed" >&2; exit 1; }
+export DEN_DATASET_SIGNING_KEY="$KEYDIR/key.pem"
+DEN_DATASET_PUBLIC_KEY="$(python3 "$HERE/sign-manifest.py" public-key)" || { echo "public-key failed" >&2; exit 1; }
+export DEN_DATASET_PUBLIC_KEY
+
+# Does the meta's signature verify, with openssl, against the scratch key's public half?
+signature_verifies() {
+  python3 - "$HERE/sign-manifest.py" "$1" "$DEN_DATASET_SIGNING_KEY" <<'PY'
+import base64, importlib.util, json, subprocess, sys, tempfile
+spec = importlib.util.spec_from_file_location("sign_manifest", sys.argv[1])
+sm = importlib.util.module_from_spec(spec); spec.loader.exec_module(sm)
+meta = json.load(open(sys.argv[2]))
+raw = meta.get("signature", "")
+if not raw.startswith("ed25519:"):
+    sys.exit(1)
+with tempfile.TemporaryDirectory() as d:
+    open(f"{d}/payload", "wb").write(sm.payload(meta))
+    open(f"{d}/sig", "wb").write(base64.b64decode(raw[len("ed25519:"):]))
+    subprocess.run(sm.openssl() + ["pkey", "-in", sys.argv[3], "-pubout", "-out", f"{d}/pub.pem"], check=True)
+    done = subprocess.run(sm.openssl() + ["pkeyutl", "-verify", "-pubin", "-inkey", f"{d}/pub.pem", "-rawin",
+                                          "-in", f"{d}/payload", "-sigfile", f"{d}/sig"], capture_output=True)
+sys.exit(done.returncode)
+PY
+}
+
 # A working tree for one case: a stub `gh`, an out-dir, and a "published" manifest for it to compare against.
 setup() {
   WORK="$(mktemp -d)"
@@ -212,10 +242,82 @@ if run_publish; then
   grep -q "alias gate: the store applied" "$WORK/out.log" \
     && ok "the store's alias decisions were checked" \
     || bad "the happy path published without the alias gate"
+  signature_verifies "$DIR/dataset.meta.json" \
+    && ok "the meta it publishes carries a signature that verifies against the key" \
+    || bad "the published meta is unsigned, or its signature does not verify"
 else
   bad "the happy path failed: $(tail -3 "$WORK/err.log")"
 fi
 teardown
+
+# --- signing (oxyc/den#127) -----------------------------------------------------------------------------
+#
+# Every publish went out unsigned, silently. With no key the publish is now refused, and only an explicit
+# `--unsigned` lets one through.
+
+setup
+write_meta
+publish_baseline
+if DEN_DATASET_SIGNING_KEY="$WORK/no-such-key.pem" run_publish; then
+  bad "a publish with no signing key went out"
+else
+  grep -q "no dataset signing key" "$WORK/err.log" && grep -q -- "--unsigned" "$WORK/err.log" \
+    && ok "a publish with no signing key is refused, and the refusal names --unsigned" \
+    || bad "refused, but not for the key: $(tail -3 "$WORK/err.log")"
+fi
+[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
+teardown
+
+# A key openssl cannot use is refused at the signing step, which runs before the first upload.
+setup
+write_meta
+publish_baseline
+printf 'not a key' > "$WORK/bad.pem"
+if DEN_DATASET_SIGNING_KEY="$WORK/bad.pem" run_publish; then
+  bad "a publish whose signing failed went out"
+else
+  grep -q "openssl could not" "$WORK/err.log" \
+    && ok "a key that cannot sign is refused" \
+    || bad "refused, but not for the signing: $(tail -3 "$WORK/err.log")"
+fi
+[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
+teardown
+
+# A real key that is not the one consumers pin: its signature would be refused everywhere.
+setup
+write_meta
+publish_baseline
+python3 "$HERE/sign-manifest.py" keygen "$WORK/other.pem" >/dev/null
+if DEN_DATASET_SIGNING_KEY="$WORK/other.pem" run_publish; then
+  bad "a meta signed with a key nobody pins went out"
+else
+  grep -q "not the dataset signing key" "$WORK/err.log" \
+    && ok "a key other than the pinned one is refused" \
+    || bad "refused, but not for the key: $(tail -3 "$WORK/err.log")"
+fi
+[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
+teardown
+
+# `--unsigned` is a flag of the script; the stage passes the out-dir alone, so through it there is no
+# unsigned publish at all.
+if [ "${DEN_PUBLISH_VIA:-script}" != "stage" ]; then
+  setup
+  # A signature left over from an earlier generation, which `finalize` would carry forward.
+  write_meta aaaaaaaaaaaa 10 '{"signature": "ed25519:c3RhbGU="}'
+  publish_baseline
+  if DEN_DATASET_SIGNING_KEY="$WORK/no-such-key.pem" PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" --unsigned \
+       > "$WORK/out.log" 2> "$WORK/err.log"; then
+    grep -q "UNSIGNED" "$WORK/err.log" \
+      && ok "--unsigned publishes without a key, and says so" \
+      || bad "--unsigned published silently"
+    grep -q '"signature"' "$DIR/dataset.meta.json" \
+      && bad "--unsigned published a stale signature" \
+      || ok "and drops a stale signature rather than publishing one that cannot verify"
+  else
+    bad "--unsigned was refused: $(tail -3 "$WORK/err.log")"
+  fi
+  teardown
+fi
 
 # --- labels that score below what ships ------------------------------------------------------------
 #
