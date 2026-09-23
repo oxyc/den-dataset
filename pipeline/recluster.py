@@ -45,9 +45,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if not __package__:
     # Run as a file: the repo, not pipeline/, is the import root.
     sys.path[0] = REPO
-sys.path.insert(0, os.path.join(REPO, "scripts", "v2"))
-import vector_blob  # noqa: E402  — the DENVEC02 layout, one definition
 from pipeline import jsonbytes  # noqa: E402  — the Swift encoder's bytes
+from store import vector_blob  # noqa: E402  — the DENVEC02 layout, one definition
 
 #: How far behind the best fast score a centroid can be and still be re-scored exactly. Nine orders of
 #: magnitude above the error it has to cover.

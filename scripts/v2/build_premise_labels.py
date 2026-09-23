@@ -31,8 +31,8 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import vector_blob  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from store import vector_blob  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--ids", required=True, help="premise-v2-ids.json — the blob's row order")

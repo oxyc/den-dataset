@@ -140,8 +140,8 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "v2"))
-from vector_blob import unpack_key  # noqa: E402  — the u64 key the store and the vector blobs share
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from store.vector_blob import unpack_key  # noqa: E402  — the u64 key the store and the vector blobs share
 
 
 def batch_files(enriched_dir, max_batch_id=None):

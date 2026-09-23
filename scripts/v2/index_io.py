@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Load the shipped int8 vector blobs and answer top-k queries against them.
 
-Blob format: see `vector_blob.py`. A `DENVEC02` blob names its own rows; the v1 blobs this
+Blob format: see `store/vector_blob.py`. A `DENVEC02` blob names its own rows; the v1 blobs this
 file was written against do not, and take their row order from the sidecar written beside
 them — `labels-t02.json` records for the plot index, `premise-tags-wip/premise-ids.json` for
 the premise index. Getting that pairing wrong produces an index that loads cleanly and returns
@@ -16,8 +16,8 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import vector_blob  # noqa: E402
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from store import vector_blob  # noqa: E402
 
 ROOT = '/Users/cindy/Projects/Personal/den-dataset/out-t02'
 
