@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Three invariants between the enriched corpus and the shipped labels, reported rather than enforced.
+"""Invariants between the enriched corpus and what ships: one enforced, one ratcheted, the rest reported.
 
 A title with a Wikipedia plot should end up with labels and therefore a vector. When it does not, it has no
 More Like This and cannot be reached by any thematic query — and nothing notices. That is how Spirited Away,
@@ -8,6 +8,28 @@ labels; it surfaced only because someone asked why The Wire had no similar title
 
 This is the same shape as the failures `check-producers.py` exists for: an artifact drifting from the thing
 it derives from, with nothing positioned to notice.
+
+## Enforced: a title the store ships with a plot has a plot vector (oxyc/den-dataset#10)
+
+With `--store`, every title the store carries whose newest enriched row says `hasWikiPlot` must have
+`vec_plot_has` set, or this exits 3 and names each one. It is read off the store's own `keys` and
+`vec_plot_has` sections rather than off the labels file, because the store is what atlas serves: the labels
+are only the embed's worklist, and `build_store.py` holding the blob to them is one more link a reader would
+have to trust. A store with no such section cannot answer the question, and refuses the same way.
+
+The usual cause is a title that was never classified — the embed covers exactly the labelled titles — and the
+fix is to classify and embed it, not to publish around it. A batch enriched AFTER the embed pass is the
+other way in (four of the original six arrived 4-7 h after it), and it is refused too: the title really does
+ship with a plot and no vector. Enrich into the tree the publish reads only as part of a run that goes on to
+classify and embed.
+
+Out of scope, deliberately: a title with a plot that the store does not carry at all. That is an admission
+decision, not a missing vector. Measured on out-repass (batches <= 199, the store published under
+5b1c3213b6a1): 0 violations, so there is no exception list; add one only for a case that needs it.
+
+The converse — a vector for a title whose newest row has no plot — is reported below as "labelled and NOT
+hasWikiPlot" (10 on out-repass), not refused: those vectors were built from a plot a later re-enrich
+dropped, and whether that is wrong depends on why it dropped.
 
 ## The third invariant: a title's plot text must be about that title (#16)
 
@@ -74,10 +96,11 @@ enrich time. This counts and ratchets; it does not judge.
 
 ## Why it WARNS on the standing count and REFUSES on a regression
 
-The first two invariants are violated today — 6 and 0 under the newest-wins reading, 3 and 1 under the
-lexical one the readers used before — and so is the third, 1,066 times. A gate that refuses the next publish
-on a pre-existing violation gets switched off, so the standing count reports and returns 0. Turn it into a
-gate once the counts are zero.
+When this was written the first two invariants were violated — 6 and 0 under the newest-wins reading, 3 and
+1 under the lexical one the readers used before — and so was the third, 1,066 times. A gate that refuses the
+next publish on a pre-existing violation gets switched off, so the standing counts report and return 0. The
+first reached zero and is now the `--store` gate above; the labels-based lines below are kept as the report
+they were.
 
 `--shared-plot-baseline` is the part that bites now. It is the previous publish's count, and any INCREASE
 exits 2 — the record-count guard's shape, which refuses a regression against the published manifest rather
@@ -99,6 +122,7 @@ records it as `maxBatchId`.
     scripts/check-plot-invariants.py --enriched-dir out-t02/enriched --labels out-publish/labels-t02.json
     scripts/check-plot-invariants.py ... --max-batch-id 177 --facts out-publish/facts-<ver>.json
     scripts/check-plot-invariants.py ... --shared-plot-baseline 1066 --stamp-meta out/dataset.meta.json
+    scripts/check-plot-invariants.py ... --store out/den-<version>.store
 
 `--facts` does two things at once, which is worth knowing before adding it to a publish. It SCOPES the
 census to the shipped keys — 8,949 of the 47,529 grounded titles never shipped — and it supplies the
@@ -107,12 +131,17 @@ the exemption alone at full scope, 407 with both. The publish gate does not pass
 is the unscoped, unexempted count.
 
 Exit codes: 0 fine (or a standing violation, warned) · 1 `--fail` and a standing violation · 2 the
-shared-article count REGRESSED against `--shared-plot-baseline`.
+shared-article count REGRESSED against `--shared-plot-baseline` · 3 a title the store ships has a plot and
+no plot vector, or the store cannot say. 3 wins over 2, so `DEN_ALLOW_SHARED_PLOTS` cannot wave it through.
 """
 import argparse
 import json
 import os
+import struct
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "v2"))
+from vector_blob import unpack_key  # noqa: E402  — the u64 key the store and the vector blobs share
 
 
 def batch_files(enriched_dir, max_batch_id=None):
@@ -133,6 +162,45 @@ def batch_files(enriched_dir, max_batch_id=None):
             continue
         out.append((n, name))
     return [name for _, name in sorted(out)]
+
+
+def store_plot_vectors(path):
+    """`key -> bool` for every title the store ships: whether its `vec_plot_has` byte is set.
+
+    Reads the header, the section table and the two sections, not the 130 MB file. Raises ValueError when
+    the file cannot answer — not a store, or no `keys`/`vec_plot_has` section — because a gate that
+    cannot tell must refuse rather than pass. Layout: den-spec `wire/store-v2.md`, `store/format.py`.
+    """
+    with open(path, "rb") as fh:
+        head = fh.read(64)
+        if len(head) < 64 or head[:8] != b"DENSTOR1":
+            raise ValueError(f"{path} is not a den store")
+        count, rows = struct.unpack_from("<II", head, 24)
+        table = {}
+        for _ in range(count):
+            name, off, length, _width = struct.unpack("<16sQII", fh.read(32))
+            table[name.rstrip(b"\0").decode()] = (off, length)
+        missing = [name for name in ("keys", "vec_plot_has") if name not in table]
+        if missing:
+            raise ValueError(f"{path} has no {' or '.join(missing)} section, so it cannot say which titles "
+                             f"carry a plot vector")
+
+        def section(name, width):
+            off, length = table[name]
+            if length != rows * width:
+                raise ValueError(f"{path}: section {name} is {length} bytes for {rows} rows")
+            fh.seek(off)
+            return fh.read(length)
+
+        keys = struct.unpack(f"<{rows}Q", section("keys", 8))
+        has = section("vec_plot_has", 1)
+    return {unpack_key(k): bool(h) for k, h in zip(keys, has)}
+
+
+def plot_without_vector(has_plot, shipped):
+    """The titles the store ships whose newest enriched row has a plot and whose store row has no plot
+    vector. A title the store does not carry is not one: it is absent, which is an admission question."""
+    return sorted(k for k, vec in shipped.items() if not vec and has_plot.get(k))
 
 
 ROLES = ("own", "own-other-language", "source-work")
@@ -306,16 +374,21 @@ def main():
     ap.add_argument("--stamp-meta",
                     help="record this run's shared-article counts into that manifest, as the next "
                          "publish's baseline")
+    ap.add_argument("--store",
+                    help="the den-<version>.store to publish; exit 3 if a title it ships has a plot and no "
+                         "plot vector")
     args = ap.parse_args()
 
     # Last occurrence wins, matching `finalize`'s own de-dup.
     has_plot = {}
     grounded = {}
+    titles = {}
     for name in batch_files(args.enriched_dir, args.max_batch_id):
         with open(os.path.join(args.enriched_dir, name), encoding="utf-8") as fh:
             for r in json.load(fh):
                 key = f"{r['mediaType']}:{r['tmdbId']}"
                 has_plot[key] = bool(r.get("hasWikiPlot"))
+                titles[key] = r.get("title") or ""
                 # A title RE-enriched into a later batch without a plot must leave the grounded set, or the
                 # census keeps reporting the article its superseded row was grounded on.
                 if has_plot[key]:
@@ -371,6 +444,30 @@ def main():
         with open(args.stamp_meta, "w", encoding="utf-8") as fh:
             json.dump(meta, fh, indent=1)
             fh.write("\n")
+
+    # Checked before the ratchet's return: 2 has an override in the publisher and this has none.
+    if args.store:
+        try:
+            shipped = store_plot_vectors(args.store)
+        except (OSError, ValueError, struct.error) as err:
+            print(f"\nerror: plot-vector gate: {err}. Nothing can say whether every title with a plot "
+                  f"has a vector.", file=sys.stderr)
+            return 3
+        missing = plot_without_vector(has_plot, shipped)
+        with_plot = sum(1 for k in shipped if has_plot.get(k))
+        if missing:
+            print(f"\nerror: {len(missing)} of the {with_plot} titles the store ships with a Wikipedia plot "
+                  f"have NO plot vector (oxyc/den-dataset#10):", file=sys.stderr)
+            for key in missing[:50]:
+                print(f"         {key:16s} {titles.get(key)!r}", file=sys.stderr)
+            if len(missing) > 50:
+                print(f"         … and {len(missing) - 50} more", file=sys.stderr)
+            print("       Each has no More Like This and no thematic reach. The embed covers exactly the "
+                  "labelled titles,\n       so these were never classified — or were enriched after the "
+                  "embed ran. Classify and\n       embed them, rebuild the store, and publish again.",
+                  file=sys.stderr)
+            return 3
+        print(f"plot-vector gate: all {with_plot} titles the store ships with a plot have a plot vector")
 
     if args.shared_plot_baseline is not None and shared_titles > args.shared_plot_baseline:
         print(f"\nerror: grounding REGRESSED — {shared_titles} titles are grounded on an article that "
