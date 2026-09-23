@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Consolidate every per-title signal into ONE inspectable JSONL — the dataset's source of truth.
 
-  scripts/v2/consolidate_corpus.py \
+  pipeline/consolidate_corpus.py \
       --combined out-repass/combined-v1-r2.jsonl \
       --combined out-repass/combined-v1-r2-token-fallback.jsonl \
       --combined out-repass/combined-v1-r2-token-fallback-2.jsonl \
@@ -37,7 +37,7 @@ A re-fetch can leave a title with no plot at all (a redirect that no longer coun
 were answered from an article it no longer has, and no new run will answer it, so nothing supersedes
 them. `withdrawn.jsonl` in the out-dir says so, one title per line, written by
 
-  scripts/v2/consolidate_corpus.py withdraw --keys A-to-plotless.txt --reason "…" \
+  pipeline/consolidate_corpus.py withdraw --keys A-to-plotless.txt --reason "…" \
       --out out-repass/withdrawn.jsonl
 
 and passed to the join as `--withdrawn`. A tombstone removes the rows of every run that STARTED before

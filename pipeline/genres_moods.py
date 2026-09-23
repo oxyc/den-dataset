@@ -37,7 +37,7 @@ from .combined_questions import PINNED_MODEL, slug, taxonomy
 from .contract import REPO, StageError
 
 sys.path.insert(0, os.path.join(REPO, "scripts"))
-import genres_moods_enrich as gm  # noqa: E402  — puts scripts/v2 on the path
+import genres_moods_enrich as gm  # noqa: E402
 import genres_moods_merge as gmm  # noqa: E402
 
 NAME = "genres_moods"

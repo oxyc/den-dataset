@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The corpus stage — that it is a wrapper, and that the two things this port added still hold.
 
-The join itself is tested where it lives, in `scripts/v2/test_consolidate_corpus.py`: every guard in it
+The join itself is tested where it lives, in `pipeline/consolidate_corpus_test.py`: every guard in it
 was bought by a failure that happened, and none of them is reimplemented here. What is tested here is the
 stage around it, which had to answer two questions the store stage did not:
 
@@ -14,12 +14,11 @@ stage around it, which had to answer two questions the store stage did not:
     artifact. The test for that is that the artifact carries no producer of its own and the registry
     still answers.
 
-The fixture is `scripts/v2/test_consolidate_corpus.py`'s, reused rather than rebuilt: a second definition
+The fixture is `pipeline/consolidate_corpus_test.py`'s, reused rather than rebuilt: a second definition
 of what a valid pass shard looks like is a second thing to keep true.
 """
 import contextlib
 import hashlib
-import importlib.util
 import io
 import json
 import os
@@ -33,23 +32,11 @@ import pipeline
 
 from . import artifacts, corpus, store
 from . import audit_combined  # the bundle auditor the stage runs, for its recorded lineage
+from . import consolidate_corpus as script
+from . import consolidate_corpus_test as fixture
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-V2 = os.path.join(REPO, "scripts", "v2")
-
-sys.path.insert(0, V2)
-
-
-def load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-script = load("consolidate_corpus", os.path.join(V2, "consolidate_corpus.py"))
-fixture = load("test_consolidate_corpus", os.path.join(V2, "test_consolidate_corpus.py"))
 
 VERSION = "testver"
 
@@ -309,7 +296,7 @@ class Topology(unittest.TestCase):
 class Equivalence(unittest.TestCase):
     def hand_typed(self, out, target):
         """The command as `consolidate_corpus.py`'s own docstring writes it."""
-        command = [sys.executable, os.path.join(V2, "consolidate_corpus.py")]
+        command = [sys.executable, os.path.join(REPO, "pipeline", "consolidate_corpus.py")]
         for name in FIXTURE_FILES["combined"]:
             command += ["--combined", os.path.join(out, name)]
         for name in sorted(FIXTURE_FILES["delta"]):
@@ -415,7 +402,7 @@ class Supersede(unittest.TestCase):
         with tempfile.TemporaryDirectory() as out:
             self.fold_in(out)
             reference = os.path.join(out, "reference.jsonl.gz")
-            command = [sys.executable, os.path.join(V2, "consolidate_corpus.py")]
+            command = [sys.executable, os.path.join(REPO, "pipeline", "consolidate_corpus.py")]
             for name in sorted(FIXTURE_FILES["combined"] + self.REGROUND[:1]):
                 command += ["--combined", os.path.join(out, name)]
             for name in sorted(FIXTURE_FILES["delta"] + self.REGROUND[1:]):

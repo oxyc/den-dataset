@@ -11,7 +11,7 @@ failing. Each test below is one of them.
     dict, so every lookup missed and nothing complained.
   - Eleven titles were absent from a derived blob for a day because a producer read one shard of three.
 
-Run: `python3 scripts/v2/test_consolidate_corpus.py`
+Run: `python3 -m unittest pipeline/consolidate_corpus_test.py`
 """
 import contextlib
 import gzip

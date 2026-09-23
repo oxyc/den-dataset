@@ -55,7 +55,7 @@ jobs:
         run: python3 -m py_compile scripts/v2/embed_canary.py scripts/v2/embed_docs.py scripts/v2/embed_premise_v2.py scripts/v2/import_box_vectors.py
       - name: Jev facet contracts
         run: |
-          python3 -m py_compile pipeline/run_facets.py pipeline/run_combined.py pipeline/run_delta.py pipeline/audit_combined.py scripts/v2/consolidate_corpus.py
+          python3 -m py_compile pipeline/run_facets.py pipeline/run_combined.py pipeline/run_delta.py pipeline/audit_combined.py pipeline/consolidate_corpus.py
           # The auditor is included deliberately: it is the only thing standing between a corrupted bundle
           # and a published dataset, and the pass it audits cost $20.47 and will not be run again.
           python3 -m unittest pipeline/run_facets_test.py pipeline/run_combined_test.py pipeline/audit_combined_test.py pipeline/run_delta_test.py lib/typesafe_client_test.py
@@ -77,7 +77,7 @@ jobs:
       # digests, and that its cases still cover a query, a non-Latin text, the corpus document shape and
       # a text past the token cap.
       - name: The publisher's guards
-        run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py scripts/test_prune_manifest.py scripts/v2/test_consolidate_corpus.py scripts/test_eval_taxonomy.py scripts/v2/test_embed_canary.py scripts/test_check_plot_invariants.py scripts/test_backfill_plot_provenance.py scripts/test_recluster.py
+        run: python3 -m unittest scripts/v2/test_build_store.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py scripts/test_prune_manifest.py pipeline/consolidate_corpus_test.py scripts/test_eval_taxonomy.py scripts/v2/test_embed_canary.py scripts/test_check_plot_invariants.py scripts/test_backfill_plot_provenance.py scripts/test_recluster.py
         env:
           DEN_SPEC_DIR: ${{ github.workspace }}/den-spec-checkout
       # The ranking metrics. `scripts/v2/reco_metrics.py` is what `score_reco.py` scores a ranking change

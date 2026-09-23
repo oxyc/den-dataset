@@ -39,10 +39,8 @@ import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-sys.path.append(os.path.join(HERE, "v2"))
 sys.path.insert(0, REPO)
-import consolidate_corpus  # noqa: E402
-from pipeline import artifacts  # noqa: E402
+from pipeline import artifacts, consolidate_corpus  # noqa: E402
 from pipeline.article_sections import parse_sections  # noqa: E402
 from pipeline.combined_questions import TAXONOMY, taxonomy  # noqa: E402
 from pipeline.contract import Context, StageError  # noqa: E402

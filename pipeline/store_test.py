@@ -103,7 +103,7 @@ class CommandLine(unittest.TestCase):
         with tempfile.TemporaryDirectory() as out:
             with self.assertRaises(StageError) as refused:
                 store.argv(self.paths(out, skip=("corpus",)))
-            self.assertIn("scripts/v2/consolidate_corpus.py", str(refused.exception))
+            self.assertIn("pipeline/consolidate_corpus.py", str(refused.exception))
 
     def test_the_manifest_is_only_stamped_when_one_is_named(self):
         with tempfile.TemporaryDirectory() as out:
