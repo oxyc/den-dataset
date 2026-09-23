@@ -109,6 +109,11 @@ class Batch(unittest.TestCase):
             patch = mock.patch.object(target, stub, getattr(self, stub + "_stub"))
             patch.start()
             self.addCleanup(patch.stop)
+        # The committed decisions name real ids (movie:3 among them), which the stubs here say nothing claims;
+        # read here, they would refuse every batch that holds one of those ids as stale.
+        patch = mock.patch.object(enrich.wikidata, "load_decisions", lambda path=None: {})
+        patch.start()
+        self.addCleanup(patch.stop)
         # Every upstream is behind a stub above. A request that reaches the wire — TMDB above all — fails.
         patch = mock.patch.object(http, "request", side_effect=AssertionError("an unstubbed upstream was asked"))
         patch.start()

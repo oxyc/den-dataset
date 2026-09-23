@@ -35,7 +35,10 @@ class Staged(unittest.TestCase):
         docfacts.wikidata.doc_facts = self.stub
         # The items claiming each (media, id), and what each item states.
         self.claimants, self.evidence, self.excluded = {}, {}, []
-        self.originals = {name: getattr(docfacts.wikidata, name) for name in ("claimants", "item_evidence")}
+        self.originals = {name: getattr(docfacts.wikidata, name)
+                          for name in ("claimants", "item_evidence", "load_decisions")}
+        # The committed decisions name real ids the stubs say nothing claims; read, they refuse as stale.
+        docfacts.wikidata.load_decisions = lambda path=None: {}
         docfacts.wikidata.claimants = lambda ids, media, cache=None: {
             i: self.claimants[(media, i)] for i in ids if (media, i) in self.claimants}
         docfacts.wikidata.item_evidence = lambda qids, media, cache=None: {

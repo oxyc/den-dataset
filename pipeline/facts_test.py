@@ -136,7 +136,9 @@ class Staged(unittest.TestCase):
             original = getattr(facts.wd, name)
             setattr(facts.wd, name, stub)
             self.addCleanup(setattr, facts.wd, name, original)
-        for name, stub in (("claimants", self.wd.claimants_of), ("item_evidence", self.wd.item_evidence)):
+        # The committed decisions name real ids the stubs say nothing claims; read, they refuse as stale.
+        for name, stub in (("claimants", self.wd.claimants_of), ("item_evidence", self.wd.item_evidence),
+                           ("load_decisions", lambda path=None: {})):
             original = getattr(facts.wikidata, name)
             setattr(facts.wikidata, name, stub)
             self.addCleanup(setattr, facts.wikidata, name, original)
