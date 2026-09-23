@@ -101,8 +101,8 @@ jobs:
       # oracle is out for the toolchain, and a 28 MB daily dump from files.tmdb.org.
       #
       # `lib/` is tested here rather than beside a stage because two stages share it, and because its
-      # cache key is a CONTRACT with 2.1 GB of bodies already on disk: `lib/cache_test.py` pins two
-      # digests that name real files under `.cache/`, so a derivation that drifts fails here rather than
+      # cache key is a CONTRACT with 2.1 GB of bodies already on disk: `lib/cache_test.py` pins a
+      # digest that names a real file under `.cache/`, so a derivation that drifts fails here rather than
       # silently re-fetching the whole corpus.
       #
       # The classify stage's cannot be byte comparison at all: a provider answers the rows and each one
@@ -134,7 +134,7 @@ jobs:
         run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/refresh_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/genres_moods_test.py pipeline/docfacts_test.py pipeline/compose_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py store/format_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/wikidata_facts_test.py lib/plot_test.py lib/enterprise_test.py lib/denembed_test.py guards/reachable_test.py den_test.py
       # The stages above are tested one at a time; this runs them IN ORDER, so what one writes is what the
       # next reads (oxyc/den-dataset#27, acceptance item 1). `den run` over the fixture corpus in
-      # `pipeline/fixture-corpus/`, with TMDB, Wikipedia and Wikidata answered from that directory,
+      # `pipeline/fixture-corpus/`, with Wikipedia and Wikidata answered from that directory and TMDB refused,
       # den-embed a stand-in on a local port, and every other connection refused — offline end to end. It
       # asserts that `den run`, given no dataset version, runs every stage but the two that buy or publish,
       # the six inputs no stage produces yet (seeded by hand, and failing here the day a stage produces one),

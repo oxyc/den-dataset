@@ -46,14 +46,16 @@ class FakeTMDB:
     thing has and the shape a stage that reused one query would get wrong.
     """
 
-    def __init__(self, pages):
+    def __init__(self, pages, regional=None):
         self.pages = pages
+        self.regional = regional or {}
         self.asked = []
 
     def discover(self, media, params, page=1):
-        """A scripted page is a list of ids, or of `(id, vote_count)` pairs where the count matters."""
+        """A scripted page is a list of ids, or of `(id, vote_count)` pairs where the count matters. A query
+        narrowed by origin is answered from `regional`, which names nothing unless a test scripts it."""
         self.asked.append((media, dict(params), page))
-        pages = self.pages.get(media, [[]])
+        pages = (self.regional if "with_origin_country" in params else self.pages).get(media, [[]])
         rows = pages[page - 1] if page - 1 < len(pages) else []
         return ([{"id": value} if isinstance(value, int) else {"id": value[0], "vote_count": value[1]}
                  for value in rows], page, len(pages))
@@ -187,8 +189,9 @@ class Discover(Staged):
         rows = worklist.universe(context(self.out, mode="discover"), "movie", client)
         self.assertEqual(len(rows), worklist.DISCOVER_COUNT)
         self.assertEqual(rows[0]["tmdbId"], 1)
-        # It asked for three pages and stopped: the fourth would be past the count.
-        self.assertEqual([page for _media, _params, page in client.asked], [1, 2, 3])
+        # It asked for three pages and stopped: the fourth would be past the count. Then the regional
+        # query, which names nothing here, for its one page.
+        self.assertEqual([page for _media, _params, page in client.asked], [1, 2, 3, 1])
 
     def test_it_asks_for_the_highest_vote_titles_above_the_pinned_floor(self):
         client = FakeTMDB({"movie": [[1]]})
@@ -208,13 +211,24 @@ class Discover(Staged):
 
     def test_a_row_tmdb_stated_no_count_for_carries_none_rather_than_zero(self):
         """Zero is below every floor, so writing it would turn "the page said nothing" into "TMDB refused
-        this title" — and the gate would never read the detail call's count instead."""
+        this title" — and the gate would then never judge it on its Wikipedia count alone."""
         client = FakeTMDB({"movie": [[7]]})
         rows = worklist.universe(context(self.out, mode="discover"), "movie", client)
-        self.assertEqual(rows, [{"tmdbId": 7, "mediaType": "movie"}])
+        self.assertEqual(rows, [{"tmdbId": 7, "mediaType": "movie", "regional": False}])
 
-    def test_an_export_row_carries_no_count_because_the_dump_states_none(self):
-        """TMDB's daily dump states popularity, not votes."""
+    def test_a_row_is_regional_when_the_query_narrowed_to_the_regional_origins_names_it(self):
+        """What picks the admission tier (`pipeline/floors.py`). A film's `/discover` row names no origin, so
+        the same query is asked again with `with_origin_country` and every regional origin OR-ed."""
+        client = FakeTMDB({"movie": [[(1, 40), (2, 40)]]}, regional={"movie": [[(2, 40)]]})
+        rows = worklist.universe(context(self.out, mode="discover"), "movie", client)
+        self.assertEqual([(r["tmdbId"], r["regional"]) for r in rows], [(1, False), (2, True)])
+        narrowed = [params for _media, params, _page in client.asked if "with_origin_country" in params]
+        self.assertEqual(narrowed[0]["with_origin_country"], "|".join(sorted(floors.REGIONAL_ORIGINS)))
+        self.assertEqual({k: v for k, v in narrowed[0].items() if k != "with_origin_country"},
+                         client.asked[0][1], "the same query, narrowed and nothing else")
+
+    def test_an_export_row_carries_no_count_and_no_tier_because_the_dump_states_neither(self):
+        """TMDB's daily dump states popularity, not votes or origins."""
         rows = worklist.universe(context(self.out, mode="export"), "movie")
         self.assertEqual([sorted(row) for row in rows], [["mediaType", "tmdbId"]] * 2)
 

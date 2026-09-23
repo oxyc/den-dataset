@@ -72,7 +72,7 @@ class Fixture(unittest.TestCase):
     gated titles plus the ones under test; a golden set over them; floors recorded on the curated file.
 
     movie:1 is labelled, movie:2 is curated with neither subgenres nor moods, movie:3 is new (and animated
-    per TMDB), movie:4 is about another work, movie:5 has no article, movie:6's article changed since
+    per its batch row), movie:4 is about another work, movie:5 has no article, movie:6's article changed since
     classify, movie:7 is new with no enrichment row, tv:8 is new.
     """
 
@@ -95,10 +95,10 @@ class Fixture(unittest.TestCase):
                                      "article": f"T {tmdb_id}", "language": "en", "year": 1990,
                                      "plotSections": ["Plot"], "text": text}) + "\n")
         with open(os.path.join(self.out, "enriched", "batch-1.json"), "w", encoding="utf-8") as fh:
-            json.dump([{"mediaType": "movie", "tmdbId": 2, "genreIDs": []},
-                       {"mediaType": "movie", "tmdbId": 3, "genreIDs": [16]},
-                       {"mediaType": "movie", "tmdbId": 9, "genreIDs": []},
-                       {"mediaType": "tv", "tmdbId": 8, "genreIDs": [35, 18]}], fh)
+            json.dump([{"mediaType": "movie", "tmdbId": 2, "animated": False},
+                       {"mediaType": "movie", "tmdbId": 3, "animated": True},
+                       {"mediaType": "movie", "tmdbId": 9, "animated": False},
+                       {"mediaType": "tv", "tmdbId": 8, "animated": False}], fh)
 
         # Two labels per family over 30 gated titles, so that both clear the eval's 10-positive support
         # floor: a label the golden set has fewer than ten of is dropped before scoring, and a wrong
@@ -234,7 +234,7 @@ class Derive(Fixture):
         super().setUp()
         self.run_stage(spend=True)
 
-    def test_a_new_title_is_derived_with_its_tmdb_animation_flag(self):
+    def test_a_new_title_is_derived_with_its_batch_rows_animation_flag(self):
         titles = self.derived()["titles"]
         self.assertEqual(titles["movie:3"], {
             "animated": True, "primaryGenre": "Crime", "primaryGenreSource": "jev-v3", "source": "jev-v3",

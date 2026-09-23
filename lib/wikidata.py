@@ -562,6 +562,29 @@ def languages(ids, media, cache=None, excluded=None):
     return parsed
 
 
+def origin_query(ids, media, excluded=None):
+    """The SPARQL that names one batch of TMDB ids' countries of origin: P495, resolved to ISO 3166-1
+    alpha-2 through P297 — the code the admission tiers are written in (`pipeline/floors.py`)."""
+    values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
+    return (f"SELECT ?tmdb ?code WHERE {{\n"
+            f"  VALUES ?tmdb {{ {values} }}\n"
+            f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"{exclusion(ids, excluded)}"
+            f"  ?film wdt:P495 ?v .\n"
+            f"  ?v wdt:P297 ?code .\n"
+            f"}}\n"
+            f"ORDER BY ?tmdb ?code")
+
+
+def origins(ids, media, cache=None, excluded=None):
+    """`tmdbId -> [ISO 3166-1 alpha-2 code]`, upper-cased and sorted, for one batch of one media type, from
+    disk where the same batch was asked before. An id Wikidata states no country for is absent."""
+    if not ids:
+        return {}
+    found = _asked(origin_query(ids, media, excluded), "sparql-origin", parse_languages, cache)
+    return {tmdb_id: sorted(code.upper() for code in codes) for tmdb_id, codes in found.items()}
+
+
 #: What makes a P144 work a SCREEN work: an instance of film, television program or web series, or of any
 #: subclass of them (`television series`, `anime film`, `miniseries`, `silent short film`). A class walk
 #: rather than `lib/wikidata_facts.SOURCE_KIND_BY_TYPE`'s label list, which names `film` and `television
@@ -759,39 +782,31 @@ def parse_claimants(payload):
 
 
 def evidence_query(qids, media):
-    """What tells two claimants of one TMDB id apart: each item's IMDb ids, its years, every TMDB id of this
-    media it states, and its English Wikipedia article. A UNION, so the multi-valued properties concatenate
-    rather than multiply."""
+    """What tells two claimants of one TMDB id apart: every TMDB id of this media each item states, and its
+    English Wikipedia article. A UNION, so the multi-valued properties concatenate rather than multiply."""
     values = " ".join(f"wd:{qid}" for qid in sorted(set(qids)))
-    start = " UNION { ?film wdt:P580 ?date . }" if media == "tv" else ""
-    return (f"SELECT ?film ?imdb ?claim ?date ?article WHERE {{\n"
+    return (f"SELECT ?film ?claim ?article WHERE {{\n"
             f"  VALUES ?film {{ {values} }}\n"
-            f"  {{ ?film wdt:P345 ?imdb . }} UNION {{ ?film wdt:{ID_PROPERTY[media]} ?claim . }}"
-            f" UNION {{ ?film wdt:P577 ?date . }}{start}\n"
+            f"  {{ ?film wdt:{ID_PROPERTY[media]} ?claim . }}\n"
             f"  UNION {{ ?article schema:about ?film ; schema:isPartOf <https://en.wikipedia.org/> . }}\n"
             f"}}\n"
             f"ORDER BY ?film")
 
 
 def parse_evidence(payload):
-    """`Q-id -> {"imdb": [tt…], "years": [int], "claims": [tmdbId], "articles": [title]}`, every list sorted."""
+    """`Q-id -> {"claims": [tmdbId], "articles": [title]}`, every list sorted."""
     out = {}
     for binding in _bindings(payload):
         film = _cell(binding, "film")
         qid = _item(film) if film else None
         if qid is None:
             continue
-        entry = out.setdefault(qid, {"imdb": set(), "years": set(), "claims": set(), "articles": set()})
-        imdb, claim, article = _cell(binding, "imdb"), _cell(binding, "claim"), _cell(binding, "article")
-        if imdb and imdb.startswith("tt"):
-            entry["imdb"].add(imdb)
+        entry = out.setdefault(qid, {"claims": set(), "articles": set()})
+        claim, article = _cell(binding, "claim"), _cell(binding, "article")
         if claim and _INTEGER.fullmatch(claim):
             entry["claims"].add(int(claim))
         if article and article_title(article):
             entry["articles"].add(article_title(article))
-        found = _DATE_YEAR.match(_cell(binding, "date") or "")
-        if found:
-            entry["years"].add(int(found.group(1)))
     return {qid: {name: sorted(values) for name, values in entry.items()} for qid, entry in out.items()}
 
 
@@ -834,28 +849,28 @@ def item_evidence(qids, media, cache=None):
 
 
 #: The order the evidence is weighed in. Each rule NARROWS the claimants to those it holds for, where it
-#: holds for any; the first that leaves one decides. `imdb`: the item's P345 is the IMDb id TMDB itself
-#: names for the title. `year`: a year the item states is TMDB's release or first-air year. `sole-claim`: the
-#: item states no other TMDB id — an item carrying two is usually one work with a second work's id pasted on.
-#: `article`: the item has an English Wikipedia article — the other is most often a stub, a season or a part
-#: of the work (`FLCL, season 1`, `Olympia Part One`, an unlabelled duplicate) sharing its IMDb id and year.
-#: Measured on series 2559: "Bonn" states 2559 and 215780 and carries Boon's 1986 start date, so the year
-#: alone would have picked it; TMDB's IMDb id (Boon's tt0090400) is what settles it, which is why it is first.
-RULES = ("imdb", "year", "sole-claim", "article")
+#: holds for any; the first that leaves one decides. `sole-claim`: the item states no other TMDB id — an item
+#: carrying two is usually one work with a second work's id pasted on. `article`: the item has an English
+#: Wikipedia article — the other is most often a stub, a season or a part of the work (`FLCL, season 1`,
+#: `Olympia Part One`, an unlabelled duplicate).
+#:
+#: Two rules came first once, `imdb` and `year`: the item whose P345 or date matched the IMDb id and year
+#: TMDB's detail record names. They were TMDB's facts deciding what a published row says, so they are gone
+#: (oxyc/den-dataset#53). Over the 76 contested corpus titles no committed decision covered, the two rules
+#: here pick the same item for 41; for the other 35 (27 left ambiguous, 8 choosing the other item) the
+#: choice the old rules made is committed in `DECISIONS`.
+RULES = ("sole-claim", "article")
 
 
-def choose(candidates, evidence, tmdb):
+def choose(candidates, evidence):
     """`(Q-id, rule)`: the one claimant the evidence singles out, or `(None, "ambiguous")`.
 
-    `evidence` is `item_evidence`'s; `tmdb` is `{"imdb", "year"}` from TMDB's own record of the title, either
-    of them None when TMDB states none. The candidates are sorted first, so neither the order WDQS returned
-    them in nor the order the rows arrived decides anything. Nothing that singles one out is an answer too:
-    None, and the caller drops what it would otherwise have had to merge from two works.
+    `evidence` is `item_evidence`'s. The candidates are sorted first, so neither the order WDQS returned them
+    in nor the order the rows arrived decides anything. Nothing that singles one out is an answer too: None,
+    and the caller drops what it would otherwise have had to merge from two works.
     """
     pool = sorted(set(candidates), key=lambda q: (len(q), q))
-    tests = {"imdb": lambda q: tmdb.get("imdb") is not None and tmdb["imdb"] in evidence.get(q, {}).get("imdb", ()),
-             "year": lambda q: tmdb.get("year") is not None and tmdb["year"] in evidence.get(q, {}).get("years", ()),
-             "sole-claim": lambda q: len(evidence.get(q, {}).get("claims", ())) == 1,
+    tests = {"sole-claim": lambda q: len(evidence.get(q, {}).get("claims", ())) == 1,
              "article": lambda q: bool(evidence.get(q, {}).get("articles"))}
     if len(pool) == 1:
         return pool[0], None
@@ -888,16 +903,15 @@ def load_decisions(path=DECISIONS):
     return {(row["mediaType"], int(row["tmdbId"])): row["item"] for row in rows}
 
 
-def resolve(ids, media, cache=None, tmdb=None, decisions=None):
+def resolve(ids, media, cache=None, decisions=None):
     """`tmdbId -> {"item", "candidates", "rule"}` for every id an item states: which ONE item every
     per-title query answers from.
 
     An uncontested id is `{"item": Q}`. A contested one also carries its sorted `candidates` and the `rule`
     that chose: `decision` when `data/wikidata-item-decisions.json` names the item, else the first of
-    `RULES` that singles one out, else `ambiguous` with `item` None. `tmdb(tmdb_id)` returns TMDB's
-    `{"imdb", "year"}` for a title and is asked only about contested ids no decision covers. `decisions`
-    is `load_decisions()`'s map, read from the committed file when not given. Raises `DecisionError` for a
-    decision about an id among `ids` that it no longer fits.
+    `RULES` that singles one out, else `ambiguous` with `item` None. `decisions` is `load_decisions()`'s
+    map, read from the committed file when not given. Raises `DecisionError` for a decision about an id
+    among `ids` that it no longer fits.
     """
     decisions = load_decisions() if decisions is None else decisions
     claimed = {tmdb_id: sorted(set(qids), key=lambda q: (len(q), q))
@@ -922,7 +936,7 @@ def resolve(ids, media, cache=None, tmdb=None, decisions=None):
         elif tmdb_id not in undecided:
             out[tmdb_id] = {"item": decisions[(media, tmdb_id)], "candidates": qids, "rule": "decision"}
         else:
-            chosen, rule = choose(qids, evidence, (tmdb(tmdb_id) if tmdb else None) or {})
+            chosen, rule = choose(qids, evidence)
             out[tmdb_id] = {"item": chosen, "candidates": qids, "rule": rule}
     return out
 

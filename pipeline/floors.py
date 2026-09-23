@@ -48,26 +48,28 @@ not scale. At 10 the tail admitted is ~3,600 clearly notable titles; a sample of
 titles held nothing at 5 or above anyway. The regional floor stays at the median 3, where the regional
 tier's own TMDB floor of 15 already admits most of what matters (Rederiet, Beck, Kvarteret Skatan).
 
-**The tier is read off TMDB's `origin_country`, and that is a measured decision, not an oversight.**
-oxyc/den-dataset#53 is taking TMDB out of the title path, and Wikidata's P495 (country of origin) is the
-obvious replacement — the facts sidecar already carries it for 99.3% of the corpus. Measured over the
-47,548 enriched titles that corpus holds: swapping the tier to P495 moves 2,570 of them. 1,739 JOIN the
-regional tier, which only ever admits more; 831 LEAVE it and are judged at 50 TMDB votes instead of 15,
-and **272 of those then cleared no floor at all** — below 50 on TMDB, below 2,000 on IMDb (the other half
-of the gate then), out of the corpus. 239 of the 272 are co-productions TMDB files under several origins and Wikidata under one
-(`Doll & Em`: TMDB GB, P495 US), and 33 have no P495 at all. Those are precisely the regional titles the
-15 exists for, and a below-floor verdict holds only for the day, so they would not fail — they would be
-re-fetched and re-refused every day, silently. The tier therefore stays on TMDB's origins until
-something states a co-production's countries as fully as TMDB does. It is the one field keeping the
-per-title detail call alive.
+**The tier is TMDB's origin where the worklist states it, and Wikidata's P495 where it does not.** Both
+come off the title's worklist row or Wikidata; nothing asks TMDB about one title (oxyc/den-dataset#53).
+A `discover` or `delta` row says whether `/discover` names it under a regional origin
+(`pipeline/worklist`), which is the question the TMDB floors were set against, so for those rows the gate
+is what it was. P495 alone does not reproduce it: judged by today's floors over the 47,548 corpus titles
+with a facts row, swapping every title's tier to P495 moves 2,706 — 1,728 JOIN the regional tier, which
+only admits more, and 978 LEAVE it, of which **381 then clear no floor at all** (below 50 TMDB votes and
+below 10 Wikipedias). Most are co-productions TMDB files under several origins and Wikidata under one
+(`Family Tree`: TMDB GB+US, P495 US), and 227 of the 978 have no P495. P495 is therefore only the
+fallback, for a row whose worklist has no TMDB answer to give: an `export` row, or a hand-made list.
 
 **Where each count comes from.** The TMDB count is the one on the title's WORKLIST row — `/discover`
-stated it when the universe was built, and it is the number that query selected on, so the gate does not
-ask TMDB for it again per title (oxyc/den-dataset#53). An export row carries none, because the daily dump
-states popularity; those fall back to the detail call while it is still made. A title nothing states a
-TMDB count for is judged on its Wikipedia count alone, and a worklist row that stated no count is written
-without one rather than with a zero, which would be below every floor and refuse a title the detail call
-admits. The Wikipedia count is asked of Wikidata only for the titles TMDB's count leaves short.
+stated it when the universe was built, and it is the number that query selected on. An export row carries
+none, because the daily dump states popularity, and nothing else is asked: a title nothing states a TMDB
+count for is judged on its Wikipedia count alone. A worklist row that stated no count is written without
+one rather than with a zero, which would be below every floor. The Wikipedia count is asked of Wikidata
+only for the titles TMDB's count leaves short.
+
+That makes a list of ids a narrower gate than a `/discover` universe: replayed over 200 corpus titles, an
+id-only worklist refused 61 that TMDB's count had admitted (`Loose Change`, `The Answer Man`, `Casi
+divas`). A list of titles already enriched — `scripts/build-worklist.py`'s, or a re-fetch plan — is not a
+question of admission, and is drained with both Wikipedia floors at 0, which admits every title.
 """
 from dataclasses import dataclass
 
@@ -88,13 +90,14 @@ class Floors:
     def of(self, record):
         """`(tmdb_floor, wikipedia_floor)` for one title — the lowest of each among the tiers it belongs to.
 
-        Every title is in the worldwide tier; a title whose TMDB origin is regional is in both. A title
-        with no origin at all is judged worldwide, since nothing says it is regional.
-
-        `originCountry` is TMDB's, deliberately — the module docstring has the measurement that kept it
-        there, and it is the last per-title TMDB field the admission path reads.
+        Every title is in the worldwide tier; a regional title is in both. `regional` is the worklist's
+        answer, from `/discover`, and decides when present; otherwise `originCountry` — Wikidata's P495 —
+        does. A title with neither is judged worldwide, since nothing says it is regional.
         """
-        if REGIONAL_ORIGINS & set(record.get("originCountry") or ()):
+        regional = record.get("regional")
+        if regional is None:
+            regional = bool(REGIONAL_ORIGINS & set(record.get("originCountry") or ()))
+        if regional:
             return (min(self.tmdb, self.regional_tmdb),
                     min(self.wikipedias, self.regional_wikipedias))
         return self.tmdb, self.wikipedias

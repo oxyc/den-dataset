@@ -6,27 +6,28 @@
                                [--exclude-anime]
 
 The drain (`pipeline/fetch.py`) runs this until nothing remains; the daily delta runs it once per media
-and reports what is left. Per id: one TMDB detail+keywords+credits call; per media in the batch: one
-Wikidata SPARQL mapping the survivors to their articles, one for their languages and one for whether the
-works they are based on are films or series; per title: a live Wikipedia plot, which becomes
+and reports what is left. Per media in the batch: Wikidata SPARQL choosing each title's item, counting
+its Wikipedias, naming what it is (P136/P31), mapping the survivors to their articles, their languages and
+whether the works they are based on are films or series; per title: a live Wikipedia plot, which becomes
 the record's `overview`. Every one of those goes through `lib/`, so the responses already on disk under
 `.cache/` answer a re-run.
 
-**Admission is decided before any of the expensive work**, on TMDB's vote count OR how many Wikipedias
-have an article on the title — see `pipeline/floors.py` for the floors and why there are four. TMDB's
-count comes off the WORKLIST row, which `/discover` stated when the universe was built; only an export
-universe, whose dump states popularity and not votes, falls back to the detail call's. A title TMDB's count
-leaves short costs one more thing: its Wikipedia count, one Wikidata SPARQL per media for all of them
-together.
+**TMDB is asked nothing here** (oxyc/den-dataset#53). A title arrives as its worklist row — the TMDB id,
+and for a `discover` or `delta` universe the vote count and regional tier `/discover` stated — and every
+field the batch row carries is Wikidata's or Wikipedia's. The per-title detail call this used to make is
+gone, and so is every field it supplied: `animated` is read off Wikidata's genres and types where it was
+TMDB's genre 16, the tier falls back to Wikidata's P495 where it was TMDB's `origin_country`, and a row
+with no count on the worklist is judged on its Wikipedia count where it fell back to TMDB's.
 
-**TMDB's prose never enters the record.** `lib/tmdb.title_record` keeps none of the overview, and a
-title with no Wikipedia plot is written `hasWikiPlot: false` with an empty `overview` — nothing downstream
-may ground it on anything else.
+**Admission is decided before any of the expensive work**, on TMDB's vote count OR how many Wikipedias
+have an article on the title — see `pipeline/floors.py` for the floors and why there are four. A title
+TMDB's count leaves short costs its Wikipedia count, one Wikidata SPARQL per media for all of them
+together.
 
 **The batch file is read by `articles`, `embed`, `genres-moods`, `scripts/backfill-plot-provenance.py` and
 the census**, and it is written in the Swift encoder's exact layout (`swift_json`), so a batch this writes
-and one the Swift pass wrote diff as data rather than as formatting. Its TMDB fields are the few those
-readers need — see `lib/tmdb.title_record` and `written`.
+and one the Swift pass wrote diff as data rather than as formatting. It holds no TMDB field — see
+`written`.
 """
 import argparse
 import concurrent.futures
@@ -38,7 +39,7 @@ import sys
 import threading
 
 from lib import cache as caching
-from lib import enterprise, http, plot, tmdb as tmdb_api, wikidata, wikipedia
+from lib import enterprise, http, plot, wikidata, wikipedia
 
 from . import floors as floor_rules
 from .contract import StageError
@@ -69,8 +70,8 @@ ANIME = "anime"
 #: from its animation rule for the same reason.
 NOT_ANIME = "anime-influenced animation"
 
-#: In-flight TMDB detail calls, and titles grounding at once — the second gentle on the public API.
-TMDB_WORKERS, WIKI_WORKERS = 8, 4
+#: Titles grounding at once — gentle on the public API.
+WIKI_WORKERS = 4
 
 _BATCH = re.compile(r"^batch-([0-9]+)\.json$")
 _log_lock = threading.Lock()
@@ -136,8 +137,8 @@ def compact(value):
 
 
 def log(out_dir, message):
-    """One line of `enrich-log.txt`. `lib/http` errors name the URL without its query, so the TMDB key —
-    which rides in the query string — cannot reach this file."""
+    """One line of `enrich-log.txt`. `lib/http` errors name the URL without its query, so a credential in
+    a query string cannot reach this file."""
     with _log_lock:
         os.makedirs(out_dir, exist_ok=True)
         with open(os.path.join(out_dir, "enrich-log.txt"), "a", encoding="utf-8") as handle:
@@ -167,7 +168,9 @@ def read_checkpoint(path):
 
 
 #: `noOverview` is gone with the stub check that counted it — see `run`. A checkpoint that carries one is
-#: read without it; the counter counted a rule that no longer exists.
+#: read without it; the counter counted a rule that no longer exists. `failures` counted ids TMDB's detail
+#: call answered 404 for; with the call gone nothing adds to it, and it is kept for the totals checkpoints
+#: already hold, which `pipeline/finalize` reports.
 TOTALS = ("anime", "belowFloor", "failures")
 
 
@@ -187,15 +190,15 @@ def standing(judged, today, floors, worklist_votes):
     """The keys whose below-floor verdict still holds for this batch, and so are not asked about again.
 
     A below-floor verdict is about one day's counts. A vote count only climbs, so it must be judged again
-    later — checkpointing it as processed made the rejection permanent, and a 180-day cached detail record
-    widened that to months. But left entirely unrecorded it was asked again by every batch of the same
-    drain, `remaining` never reached 0, and a universe holding one below-floor title could never drain.
+    later — checkpointing it as processed made the rejection permanent. But left entirely unrecorded it was
+    asked again by every batch of the same drain, `remaining` never reached 0, and a universe holding one
+    below-floor title could never drain.
 
     So a verdict holds only while nothing it was judged on can have moved: it was made TODAY (the Wikipedia
     count is asked once a day, and `/discover`'s counts are daily), by the SAME floors (a run that lowers
     one re-judges at once — and a verdict recorded under the IMDb floors this gate once had matches no
     floors today), and on the TMDB count the worklist row still states (a row that states none — an export
-    row — is judged on the detail call's count, which the date covers). Any of those changing re-asks the
+    row — was judged on its Wikipedia count, which the date covers). Any of those changing re-asks the
     title, and a title that now clears a floor is admitted like any other.
     """
     return {label for label, held in judged.items()
@@ -216,30 +219,31 @@ def is_anime(labels):
     return any(ANIME in label.lower() and label.lower() != NOT_ANIME for label in labels)
 
 
-def is_transient(error):
-    """429/408/5xx, or no answer at all. A 404 on a deleted id is an ANSWER, and retrying it forever would
-    keep a dead title pending for good."""
-    return isinstance(error, http.HTTPError) and (error.status == 0 or http.is_transient(error.status))
+#: A live-action film with animated sequences is not what someone hiding animation means —
+#: `lib/wikidata_facts.genre_map` sets the same label aside from its animation rule. Wikidata spells it both
+#: ways.
+LIVE_ACTION_ANIMATED = frozenset({"live-action/animated", "live action/animated"})
 
 
-def fetch_title(client, media, tmdb_id):
-    """`(verdict, record-or-reason)` for one worklist id. Raises `StageError` when TMDB refuses the KEY.
+def is_animated(labels):
+    """Whether Wikidata's P136 genres and P31 types say this title is animated: a label naming animation
+    (`animated film`, `adult animated television series`, `stop-motion animated`, `original video
+    animation`) or anime, other than the live-action hybrid.
 
-    A 401 or 403 is not an answer about the title. Read as a per-title failure it was checkpointed: one
-    batch reported 150 of 150 as failures with `remaining` falling, so a revoked key marched the drain
-    through the whole universe marking every title dead.
+    TMDB's genre 16 said it before, and `./den genres-moods` takes a new title's `animated` flag from here.
+    Measured over the 47,548 corpus titles with a facts row, on the facts' own P136/P31 labels: the two
+    agree on 98.9%. 518 are TMDB's alone — live-action hybrids (`Who Framed Roger Rabbit`, `Looney Tunes:
+    Back in Action`) and films whose Wikidata genres and types name no animation (`The Iron Giant`) — and 7
+    Wikidata's alone.
     """
-    try:
-        body = client.get(f"/{media}/{tmdb_id}", {"append_to_response": tmdb_api.APPEND})
-        return "ok", tmdb_api.title_record(body, tmdb_id, media)
-    except http.HTTPError as error:
-        if error.status in (401, 403):
-            raise StageError(f"enrich: TMDB answered HTTP {error.status} for {error.url} — TMDB_API_KEY is "
-                             f"revoked or wrong. Nothing from this batch was written or checkpointed; fix the "
-                             f"key and run again.") from error
-        return ("deferred" if is_transient(error) else "failure"), str(error)
-    except ValueError as error:
-        return "failure", f"undecodable detail body: {error}"
+    return any(("animat" in label.lower() or ANIME in label.lower()) and label.lower() not in LIVE_ACTION_ANIMATED
+               for label in labels)
+
+
+def is_transient(error):
+    """429/408/5xx, or no answer at all. A 404 on a deleted page is an ANSWER, and retrying it forever would
+    keep a title pending for good."""
+    return isinstance(error, http.HTTPError) and (error.status == 0 or http.is_transient(error.status))
 
 
 def grounded(record, found, article, role):
@@ -389,19 +393,17 @@ def reground(record, facts, cache, token):
     return "grounded", grounded(record, found, article, role), found.get("source")
 
 
-#: TMDB fields no reader of a batch wants, left out of every row written (oxyc/den-dataset#53). `voteCount`
-#: and `originCountry` are still on the record `lib/tmdb.title_record` builds, because admission reads them
-#: here — the count for an export row (`tmdb_votes`), the origin for the tier (`pipeline/floors.py`) — and
-#: after the gate nothing does. The rest are what older batches carry, and a record copied forward from one
-#: of those (`pipeline/refresh`) sheds them here. Batches already on disk keep theirs, and no reader minds
-#: either way.
-UNREAD_TMDB = frozenset({"voteCount", "originCountry", "originalLanguage", "title", "year", "genres", "keywords",
-                         "keywordIDs", "director", "topCast"})
+#: Fields a batch row never carries (oxyc/den-dataset#53): every one TMDB's detail call supplied, which
+#: older batches still hold, and the two admission reads in memory. `regional` is the worklist's TMDB tier
+#: and `originCountry` Wikidata's P495, read to pick the floors (`pipeline/floors.py`); after the gate
+#: nothing does. Batches already on disk keep theirs; nothing that reads a batch reads these.
+NOT_WRITTEN = frozenset({"voteCount", "originCountry", "regional", "originalLanguage", "title", "year", "genres",
+                         "genreIDs", "keywords", "keywordIDs", "director", "topCast"})
 
 
 def written(record):
     """The record as the batch carries it. An unknown is an ABSENT key, as the Swift encoder wrote it."""
-    return {name: value for name, value in record.items() if value is not None and name not in UNREAD_TMDB}
+    return {name: value for name, value in record.items() if value is not None and name not in NOT_WRITTEN}
 
 
 def recovered(out_dir, batch_id, survivors):
@@ -454,7 +456,7 @@ def read_worklist(path):
 
     The counts are the TMDB votes `/discover` stated when the universe was built (`pipeline/worklist.entry`)
     — what the admission gate judges by. A row that states none is absent from the map, never zero: the
-    export dump carries no count, and zero is below every floor.
+    export dump carries no count, and zero is below every floor. `regional` rides the same way.
     """
     try:
         with open(path, encoding="utf-8") as handle:
@@ -462,41 +464,24 @@ def read_worklist(path):
         entries = [("tv" if row["mediaType"] == "tv" else "movie", int(row["tmdbId"])) for row in rows]
         votes = {key(*pair): int(row["voteCount"]) for pair, row in zip(entries, rows)
                  if row.get("voteCount") is not None}
-        return entries, votes
+        tiers = {key(*pair): bool(row["regional"]) for pair, row in zip(entries, rows)
+                 if row.get("regional") is not None}
+        return entries, votes, tiers
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise StageError(f"enrich: {path} is not a worklist of {{tmdbId, mediaType}} rows ({error})")
 
 
-def tmdb_votes(label, record, worklist_votes):
-    """The TMDB count the gate judges one title by, or None when nothing states one.
-
-    The WORKLIST's count first: `/discover` answered it when the universe was built, and it is the number
-    the query selected on. Only an `export` row has none — the daily dump states popularity — and those
-    fall back to the detail call's count while that call is still made (oxyc/den-dataset#53).
-
-    None where nothing states one, and the caller compares nothing rather than a number: a title neither
-    names a count for is judged on its Wikipedia count alone. The worklist is where the distinction is load-bearing — a row written with a
-    zero would refuse a title the detail call admits (`pipeline/worklist.entry`).
-    """
-    if label in worklist_votes:
-        return worklist_votes[label]
-    return record.get("voteCount")
-
-
-def identities(records, client, cache):
+def identities(records, cache):
     """`(key -> resolution, media -> items to leave out)`: which ONE Wikidata item answers for each title
     (`lib/wikidata.resolve`), and the claimants every Wikidata query of this batch must set aside.
 
     Two items can state one TMDB id, and every query here is keyed by that id, so without this a title's
-    fields came from both: series 2559 shipped Boon's IMDb id under Bonn's name. TMDB's own IMDb id and year
-    are what choose, read from the detail call this batch has just made — a series asks it once more with
-    `external_ids`, since its record names no IMDb id otherwise — and only for the contested titles.
+    fields came from both: series 2559 shipped Boon's IMDb id under Bonn's name.
     """
     found, excluded = {}, {}
     for media in sorted({record["mediaType"] for record in records}):
         ids = [record["tmdbId"] for record in records if record["mediaType"] == media]
-        resolved = wikidata.resolve(ids, media, cache,
-                                    lambda tmdb_id, media=media: tmdb_api.title_identity(client, media, tmdb_id))
+        resolved = wikidata.resolve(ids, media, cache)
         found.update({key(media, tmdb_id): value for tmdb_id, value in resolved.items()})
         excluded[media] = wikidata.set_aside(resolved)
     return found, excluded
@@ -506,18 +491,30 @@ def admit(records, floors, today, cache, worklist_votes=None, excluded=None):
     """`(admitted, from_worklist)`: key → which count admitted it (`TMDB` or `WIKIPEDIAS`), and how many
     titles were judged on a count their worklist row carried.
 
-    A key absent from `admitted` is below every floor its tiers set. The Wikipedia count is asked only of
-    the titles TMDB's count leaves short, in one request per media, and a title Wikidata has no item for
-    counts none. Raises what that lookup raises — the caller aborts on it, as it does on the mapping, which
-    asks the same service.
+    A key absent from `admitted` is below every floor its tiers set. A record whose worklist stated no tier
+    (`regional`) and whose count does not clear every tier's TMDB floor is given Wikidata's P495 as its
+    `originCountry` first, since the tier then decides. The Wikipedia count is asked only of the titles
+    TMDB's count leaves short. Each lookup is one request per media, and a title Wikidata has no item for
+    has no origin and counts no Wikipedias. Raises what those lookups raise — the caller aborts on it, as it
+    does on the mapping, which asks the same service.
     """
     worklist_votes, excluded = worklist_votes or {}, excluded or {}
+
+    def votes(record):
+        return worklist_votes.get(key(record["mediaType"], record["tmdbId"]))
+
+    untiered = [r for r in records if r.get("regional") is None and (votes(r) or 0) < floors.tmdb]
+    for media in sorted({record["mediaType"] for record in untiered}):
+        found = wikidata.origins([r["tmdbId"] for r in untiered if r["mediaType"] == media], media, cache,
+                                 excluded=excluded.get(media))
+        for record in untiered:
+            if record["mediaType"] == media:
+                record["originCountry"] = found.get(record["tmdbId"], [])
     admitted, from_worklist, short = {}, 0, []
     for record in records:
         label = key(record["mediaType"], record["tmdbId"])
-        votes = tmdb_votes(label, record, worklist_votes)
         from_worklist += label in worklist_votes
-        if votes is not None and votes >= floors.of(record)[0]:
+        if votes(record) is not None and votes(record) >= floors.of(record)[0]:
             admitted[label] = TMDB
         else:
             short.append(record)
@@ -552,14 +549,13 @@ def candidates(titles, cache, excluded):
     return facts
 
 
-def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude_anime=False, client=None,
-        cache=None, token=None, today=None):
+def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude_anime=False, cache=None,
+        token=None, today=None):
     """One batch. Returns the report the drain reads by key.
 
-    `client` is a `lib/tmdb.TMDB`, built from the environment when not given — and only once there is
-    something to fetch, so a drained worklist needs no key. `cache` is the `wiki` cache, from the
-    environment when not given; `token` the Enterprise bearer, None for the free action API. `today` is
-    the UTC date a below-floor verdict is recorded under (see `standing`), today's when not given.
+    `cache` is the `wiki` cache, from the environment when not given; `token` the Enterprise bearer, None
+    for the free action API. `today` is the UTC date a below-floor verdict is recorded under (see
+    `standing`), today's when not given.
 
     A batch that admits no title writes no batch file and takes no batch number: an empty `batch-N.json`
     holds nothing any reader wants, and each one moved the numbering on.
@@ -580,7 +576,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     if token:
         # Read now, so a malformed reserve refuses the run instead of being swallowed as a failed fast path.
         enterprise.gate.headroom()
-    worklist, worklist_votes = read_worklist(worklist_path)
+    worklist, worklist_votes, worklist_tiers = read_worklist(worklist_path)
     ck_path = checkpoint_path(out_dir)
     present = os.path.exists(ck_path)
     checkpoint = read_checkpoint(ck_path)
@@ -600,26 +596,18 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     if not pending:
         return {"remaining": 0, "count": 0}
 
-    client = client or tmdb_api.TMDB()
     cache = wikipedia.cache_for() if cache is None else cache
     counts = dict.fromkeys(TOTALS, 0)
-    records, titles, deferred, below = [], [], set(), set()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=TMDB_WORKERS) as pool:
-        verdicts = pool.map(lambda entry: fetch_title(client, *entry), pending)
-        for (media, tmdb_id), (verdict, found) in zip(pending, verdicts):
-            label = key(media, tmdb_id)
-            if verdict == "deferred":
-                # Transient: NOT checkpointed, so a blip cannot drop a title for good.
-                deferred.add(label)
-                log(out_dir, f"fetch-deferred id={label} (transient: {found})")
-            elif verdict == "failure":
-                counts["failures"] += 1
-                log(out_dir, f"fetch-failure id={label} {found}")
-            else:
-                records.append(found)
+    titles, deferred, below = [], set(), set()
+    # A title is its worklist row: nothing is asked of TMDB, and the tier rides along where `/discover`
+    # stated one.
+    records = [dict({"tmdbId": tmdb_id, "mediaType": media},
+                    **({"regional": worklist_tiers[key(media, tmdb_id)]} if key(media, tmdb_id) in worklist_tiers
+                       else {}))
+               for media, tmdb_id in pending]
 
     try:
-        resolved, excluded = identities(records, client, cache)
+        resolved, excluded = identities(records, cache)
     except wikidata.DecisionError as stale:
         raise StageError(f"enrich: {stale}") from None
     except (http.HTTPError, wikidata.WikidataError) as error:
@@ -628,21 +616,19 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     try:
         admitted, from_worklist = admit(records, floors, today, cache, worklist_votes, excluded)
     except (http.HTTPError, wikidata.WikidataError) as error:
-        raise Aborted(f"Wikidata Wikipedia-count lookup failed for batch {batch_id} after retries ({error}); "
-                      f"nothing written — re-run to retry this batch") from error
-    # What each admitted title IS, for the anime rule — and ONLY when a run asked to exclude anime, since
-    # the flag is opt-in and this is a whole extra query per media otherwise.
+        raise Aborted(f"Wikidata origin or Wikipedia-count lookup failed for batch {batch_id} after retries "
+                      f"({error}); nothing written — re-run to retry this batch") from error
+    # What each admitted title IS: the `animated` flag every row carries, and the opt-in anime rule.
     kinds = {}
-    if exclude_anime:
-        admitted_records = [r for r in records if key(r["mediaType"], r["tmdbId"]) in admitted]
-        try:
-            for media in sorted({record["mediaType"] for record in admitted_records}):
-                ids = [r["tmdbId"] for r in admitted_records if r["mediaType"] == media]
-                for tmdb_id, labels in wikidata.kinds(ids, media, cache, excluded=excluded.get(media)).items():
-                    kinds[key(media, tmdb_id)] = labels
-        except (http.HTTPError, wikidata.WikidataError) as error:
-            raise Aborted(f"Wikidata genre/type lookup failed for batch {batch_id} after retries ({error}); "
-                          f"nothing written — re-run to retry this batch") from error
+    admitted_records = [r for r in records if key(r["mediaType"], r["tmdbId"]) in admitted]
+    try:
+        for media in sorted({record["mediaType"] for record in admitted_records}):
+            ids = [r["tmdbId"] for r in admitted_records if r["mediaType"] == media]
+            for tmdb_id, labels in wikidata.kinds(ids, media, cache, excluded=excluded.get(media)).items():
+                kinds[key(media, tmdb_id)] = labels
+    except (http.HTTPError, wikidata.WikidataError) as error:
+        raise Aborted(f"Wikidata genre/type lookup failed for batch {batch_id} after retries ({error}); "
+                      f"nothing written — re-run to retry this batch") from error
     for found in records:
         label = key(found["mediaType"], found["tmdbId"])
         if label not in admitted:
@@ -650,18 +636,15 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
             # `standing`. The cache makes the re-judging nearly free.
             counts["belowFloor"] += 1
             below.add(label)
-            judged[label] = below_floor(tmdb_votes(label, found, worklist_votes), floors, today)
+            judged[label] = below_floor(worklist_votes.get(label), floors, today)
         elif exclude_anime and is_anime(kinds.get(label, ())):
             # Opt-IN: excluding anime by default silently cost the corpus 1,498 titles, the entire
             # Ghibli catalogue among them.
             counts["anime"] += 1
         else:
-            # No stub check here any more. It dropped a title whose TMDB overview was under 20 characters,
-            # judged on a length `lib/tmdb.title_record` carried across the boundary for that one reader.
-            # `overview` holds a Wikipedia plot or nothing, so the length said nothing about what this
-            # title would be grounded on, and every admitted title is grounded on Wikipedia or written
-            # plotless regardless: over the whole repass it refused 3 titles out of 59,209.
-            titles.append(dict(found, **wikidata.provenance(resolved.get(label))))
+            # `animated` is unknown — absent — for a title Wikidata states no genre or type for.
+            animated = is_animated(kinds[label]) if label in kinds else None
+            titles.append(dict(found, animated=animated, **wikidata.provenance(resolved.get(label))))
 
     try:
         facts = candidates(titles, cache, excluded)
@@ -727,8 +710,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     # two record different things (the Enterprise path names no revision and cannot see a redirect).
     settled = processed | held | below
     report = {"count": len(survivors), "belowFloor": counts["belowFloor"],
-              "anime": counts["anime"], "failures": counts["failures"],
-              "deferred": len(deferred), "remaining": sum(key(*e) not in settled for e in worklist),
+              "anime": counts["anime"], "deferred": len(deferred), "remaining": sum(key(*e) not in settled for e in worklist),
               "wikiPlot": with_plot, "tagsOnly": len(survivors) - with_plot,
               "plotsFromEnterprise": from_enterprise, "plotsFromActionApi": with_plot - from_enterprise,
               "enterpriseRequests": enterprise.gate.sent_this_run - requests_before,
@@ -736,9 +718,9 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
               # left short — its Wikipedia count.
               "admittedByTmdb": sum(v == TMDB for v in admitted.values()),
               "admittedByWikipedias": sum(v == WIKIPEDIAS for v in admitted.values()),
-              # How many titles were judged on the count their worklist row carried rather than on the
-              # detail call's. It is the whole batch for a discover or delta universe, and none of it for
-              # an export one — so this is what says how much of the gate still depends on that call.
+              # How many titles had a TMDB count to be judged on at all. It is the whole batch for a discover
+              # or delta universe, and none of it for an export one, whose titles only their Wikipedia
+              # count can admit.
               "votesFromWorklist": from_worklist}
     if survivors:
         report.update(batchId=batch_id, batch=path)
@@ -775,7 +757,7 @@ def main(argv=None):
                                    args.regional_wikipedia_floor)
         report = run(args.worklist, args.out_dir, floors, args.limit, args.exclude_anime,
                      token=os.environ.get("WIKIMEDIA_ENTERPRISE_TOKEN") or None)
-    except (StageError, Aborted, tmdb_api.TMDBError, OSError, ValueError) as error:
+    except (StageError, Aborted, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     print(compact(report))

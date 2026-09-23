@@ -201,7 +201,8 @@ def merge(work, model, web=False, accept_drop=False, curated=gm.CURATED, golden=
         f"Hand enrichment by {model} labelling agents" + (" with web search" if web else "") +
         " (`./den genres-moods`, scripts/genres-moods-enrich.SPEC.md), assembled at 0.55 subgenre / 0.50 "
         "theme / 0.55 mood, top 3." + (" The pages read per title are in its `webSources`." if web else "") +
-        " `animated` is TMDB's genre 16 for a title the file did not have, and kept otherwise.")}
+        " `animated` is the enriched batch row's, read off Wikidata's genres and types, for a title the file"
+        " did not have, and kept otherwise.")}
     head["count"] = len(titles)
 
     fd, candidate = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(curated)), prefix=".tmp-",

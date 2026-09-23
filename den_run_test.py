@@ -5,16 +5,15 @@ Every stage has its own suite; this is the one that runs them in ORDER, so the s
 tested too: what one stage writes is what the next one reads, with nothing hand-built in between except
 the seeds named below. It is oxyc/den-dataset#27's acceptance item 1.
 
-**Nothing leaves the machine.** `lib/http.request` is replaced by `Upstreams`, which answers TMDB,
-Wikipedia and Wikidata out of `pipeline/fixture-corpus/upstream/` and refuses any request it
-has no answer for. den-embed is a stand-in on a local port, reached over a real socket, with a canary made
+**Nothing leaves the machine.** `lib/http.request` is replaced by `Upstreams`, which answers Wikipedia
+and Wikidata out of `pipeline/fixture-corpus/upstream/` and refuses any request it has no answer for —
+TMDB above all, which an `export` run asks nothing (oxyc/den-dataset#53). den-embed is a stand-in on a local port, reached over a real socket, with a canary made
 for it. A socket guard refuses every non-loopback connection this process opens, so a client that stopped
 going through `lib/http` fails here rather than reaching the internet.
 
 The upstream answers are hand-written in each service's wire shape. The titles, people and plots are
-invented: there is no TMDB text in them (no overview, no tagline — TMDB's terms), no Wikipedia prose
-(CC BY-SA), and no credential. `TMDB_API_KEY` is set to a
-string that is not one, because the fetch stage refuses to start without some value.
+invented: there is no Wikipedia prose (CC BY-SA) and no credential. With no TMDB count on an export
+row, the fixture's Wikipedia sitelinks are what admit its titles.
 
 **What is seeded, and why.** Two kinds of input are copied into the out-dir before the run, each in its
 own directory under `seeds/` so the kind is visible from the path:
@@ -68,7 +67,7 @@ sys.path.insert(0, HERE)
 
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
-from pipeline import artifacts, audit_combined, genres_moods  # noqa: E402
+from pipeline import artifacts, audit_combined, enrich, genres_moods  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 
 V2 = os.path.join(HERE, "scripts", "v2")
@@ -281,6 +280,10 @@ class Wikidata:
             return rows
         if head == "SELECT ?tmdb ?vLabel" and "UNION" not in query:
             return [{"vLabel": self.label(item)} for item in self.claims(qid, prop(r"\?film wdt:(P\d+) \?v \."))]
+        if head == "SELECT ?tmdb ?vLabel":
+            # `kind_query`: the labels of every genre and type, one UNION branch each.
+            return [{"vLabel": self.label(item)} for p in re.findall(r"\?film wdt:(P\d+) \?v \.", query)
+                    for item in self.claims(qid, p)]
         if head == "SELECT ?tmdb ?v ?prec":
             return [{"v": stated["time"], "prec": str(stated["precision"])}
                     for stated in self.claims(qid, prop(r"p:(P\d+) \?st"))]
@@ -349,7 +352,6 @@ class Upstreams:
 
     def __init__(self, local_request):
         self.local = local_request
-        self.tmdb = read_json(os.path.join(UPSTREAM, "tmdb.json"))
         self.pages = read_json(os.path.join(UPSTREAM, "wikipedia.json"))
         self.wikidata = Wikidata(read_json(os.path.join(UPSTREAM, "wikidata.json")))
         self.hosts = set()
@@ -361,12 +363,6 @@ class Upstreams:
                               **_transport)
         self.hosts.add(host)
         params = params or {}
-        if host == tmdb_api.HOST:
-            media, tmdb_id = path.split("/")[-2:]
-            found = self.tmdb.get(f"{media}:{tmdb_id}")
-            if found is None:
-                raise http.HTTPError(404, f"https://{host}{path}", b'{"status_code":34}')
-            return json.dumps(found).encode()
         if host.endswith(".wikipedia.org") and path == wikipedia.API_PATH:
             assert {k: v for k, v in params.items() if k != "page"} == wikipedia.PARSE_QUERY, params
             page = self.pages.get(host.split(".")[0], {}).get(params["page"])
@@ -474,7 +470,7 @@ class DenRun(unittest.TestCase):
         canary = os.path.join(cls.tmp, "canary.json")
         cls.canary = cls.embed.canary(canary)
         env = {k: v for k, v in os.environ.items() if not k.startswith("WIKIMEDIA_ENTERPRISE")}
-        env.update({"TMDB_API_KEY": "fixture-not-a-key", "DEN_CACHE_DIR": os.path.join(cls.tmp, "cache"),
+        env.update({"DEN_CACHE_DIR": os.path.join(cls.tmp, "cache"),
                     "DEN_EMBED_URL": cls.embed.url, "DEN_EMBED_CANARY": canary})
         cls.upstreams = Upstreams(http.request)
         den = load_den()
@@ -737,15 +733,23 @@ class DenRun(unittest.TestCase):
         self.assertIn("tv:900006", store_keys)
 
     def test_the_overview_is_wikipedias_or_nothing(self):
-        """TMDB's text never enters a record: the fixture carries none, and `overview` is the plot the
-        Wikipedia fetch read."""
-        for key, body in read_json(os.path.join(UPSTREAM, "tmdb.json")).items():
-            self.assertFalse({"overview", "tagline"} & set(body), f"{key}: the fixture must carry no TMDB text")
+        """`overview` is the plot the Wikipedia fetch read, or empty."""
         self.assertTrue(self.enriched("movie:900001")["overview"].startswith("On a storm-bound island"))
         self.assertEqual(self.enriched("movie:900003")["overview"], "")
 
+    def test_an_export_run_asks_tmdb_nothing_and_writes_no_tmdb_field(self):
+        """oxyc/den-dataset#53: every field a batch row carries is Wikidata's or Wikipedia's. `animated` is
+        read off the fixture's genres and types — the Tokyo series is typed an anime television series."""
+        self.assertNotIn(tmdb_api.HOST, self.upstreams.hosts)
+        enriched = os.path.join(self.out, artifacts.ENRICHED.filename)
+        rows = [row for name in sorted(os.listdir(enriched)) for row in read_json(os.path.join(enriched, name))]
+        self.assertEqual({field for row in rows for field in row} & set(enrich.NOT_WRITTEN), set())
+        self.assertEqual({f"{r['mediaType']}:{r['tmdbId']}": r["animated"] for r in rows},
+                         {"movie:900001": False, "movie:900002": False, "movie:900003": False,
+                          "tv:900001": False, "tv:900005": True})
+
     def test_only_the_recorded_upstreams_were_asked(self):
-        self.assertEqual(self.upstreams.hosts, {tmdb_api.HOST, "query.wikidata.org",
+        self.assertEqual(self.upstreams.hosts, {"query.wikidata.org",
                                                 "en.wikipedia.org", "fr.wikipedia.org", "ja.wikipedia.org"})
 
 

@@ -165,12 +165,11 @@ class Dispatch(unittest.TestCase):
         read files, so they are given files: a one-row TMDB dump apiece, and an enriched batch naming a
         grounded title plus an `articles.jsonl` row for it, because a row already in the dump's output is
         a row it resumes past rather than fetches. `fetch` drains in-process, so it gets a checkpoint that
-        already holds both universes, with credentials in the environment so the drain does not go hunting
-        for a `den.env` this checkout has no reason to own. Nothing here reaches TMDB.
+        already holds both universes, with a bearer in the environment so the drain does not go hunting
+        for a `den.env` this checkout has no reason to own. Nothing here reaches the network.
         """
         with tempfile.TemporaryDirectory() as out:
-            for name, value in (("TMDB_API_KEY", "stub-key-nothing-here-calls-tmdb"),
-                                ("WIKIMEDIA_ENTERPRISE_TOKEN", "stub-bearer")):
+            for name, value in (("WIKIMEDIA_ENTERPRISE_TOKEN", "stub-bearer"),):
                 previous = os.environ.get(name)
                 os.environ[name] = value
                 self.addCleanup(os.environ.__setitem__, name, previous or "")
@@ -185,8 +184,7 @@ class Dispatch(unittest.TestCase):
                             "hasWikiPlot": True, "plotArticle": "Star Wars (film)"}], fh)
             with open(os.path.join(out, "articles.jsonl"), "w", encoding="utf-8") as fh:
                 fh.write('{"mediaType":"movie","tmdbId":11,"text":"prose"}\n')
-            # Both universes already drained, so the in-process drain returns before it builds a TMDB
-            # client. Without it the drain asked TMDB about id 11 with the stub key.
+            # Both universes already drained, so the in-process drain returns before it asks anything.
             with open(os.path.join(out, "enrich-checkpoint.json"), "w", encoding="utf-8") as fh:
                 json.dump({"processed": ["movie:11", "tv:11"], "nextBatch": 2}, fh)
             run = ("run", "--out-dir", out, "--mode", "export")

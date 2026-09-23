@@ -24,10 +24,11 @@ on a quiet day, so refusing it there would fail the daily pass for doing its job
 silence is checked one line finer: the ids written against the dump's own line count, because a dump that
 arrived half-written parses to half a catalogue, and half a catalogue looks like a catalogue.
 
-**A `discover` or `delta` row carries the vote count `/discover` stated.** The admission gate needs it
-(`pipeline/floors.py`), and this stage is where TMDB already answered the question — so `enrich` judges a
-title by the count on its worklist row rather than asking TMDB for the same number again per title. An
-`export` row has none: the daily dump states popularity, not votes.
+**A `discover` or `delta` row carries the vote count `/discover` stated, and whether it is regional.**
+The admission gate needs both (`pipeline/floors.py`), and this stage is where TMDB answers them — `enrich`
+asks TMDB nothing (oxyc/den-dataset#53). `regional` is whether the same query, narrowed to the regional
+origins, names the title too: one more paged query per media rather than a question per title. An
+`export` row has neither: the daily dump states popularity, not votes or origins.
 
 **A delta writes the same two filenames as a full run**, which is why `scripts/delta-run.sh` keeps its
 lists in `$OUT_DIR/delta/`. Point the two outputs there with `--set` rather than moving the whole out-dir,
@@ -109,14 +110,13 @@ def mode(ctx):
 
 
 def entry(tmdb_id, media, votes=None):
-    """One row of a worklist. `enrich` refuses a list that mixes media, so the type rides on every row.
+    """One row of a worklist. The type rides on every row, since a worklist may hold both media.
 
     `voteCount` is TMDB's count as `/discover` stated it when this universe was built — the number the
-    admission gate judges the title by (`pipeline/floors.py`). It rides here because `/discover` already
-    answered it: reading it back off a per-title detail call asks TMDB the same question a second time,
-    which is the call oxyc/den-dataset#53 is emptying. A row built from the daily export dump carries no
-    count, because the dump states popularity and not votes; the key is then ABSENT rather than zero,
-    since zero is below every floor and would read as a title TMDB refused.
+    admission gate judges the title by (`pipeline/floors.py`); `discovered` adds `regional` beside it. A
+    row built from the daily export dump carries neither, because the dump states popularity; the keys are
+    then ABSENT rather than zero or false, since zero is below every floor and false would put a French film
+    in the worldwide tier.
     """
     row = {"tmdbId": int(tmdb_id), "mediaType": media}
     if votes is not None:
@@ -187,6 +187,20 @@ def collect(client, media, params, limit=None):
     return rows[:limit] if limit is not None else rows
 
 
+def discovered(client, media, limit=None, **query):
+    """`collect` over `discover_params(media, **query)`, each row marked with whether the same query
+    narrowed to `floors.REGIONAL_ORIGINS` names it.
+
+    The regional query is sorted and bounded as the whole one is, so every regional title the whole query
+    returns ranks inside it too. TMDB's `origin_country` on a series' row would answer it as well, but a
+    film's row carries none, and one rule for both media is one rule to get right.
+    """
+    rows = collect(client, media, tmdb_api.discover_params(media, **query), limit)
+    narrowed = tmdb_api.discover_params(media, origin_countries=floor_rules.REGIONAL_ORIGINS, **query)
+    regional = {row["tmdbId"] for row in collect(client, media, narrowed, limit)}
+    return [dict(row, regional=row["tmdbId"] in regional) for row in rows]
+
+
 def universe(ctx, media, client=None):
     """The rows for one media, in the mode this run asked for."""
     chosen = mode(ctx)
@@ -209,8 +223,7 @@ def universe(ctx, media, client=None):
     except tmdb_api.TMDBError as refusal:
         raise StageError(f"worklist: {refusal}") from None
     if chosen == DISCOVER:
-        params = tmdb_api.discover_params(media, vote_count_gte=VOTE_FLOOR, sort_by=SORT_BY)
-        return collect(client, media, params, limit=DISCOVER_COUNT)
+        return discovered(client, media, limit=DISCOVER_COUNT, vote_count_gte=VOTE_FLOOR, sort_by=SORT_BY)
 
     if not ctx.since:
         raise StageError("worklist: --mode delta needs --since YYYY-MM-DD — the window it collects titles "
@@ -222,9 +235,9 @@ def universe(ctx, media, client=None):
     # calls. The trade: a re-release or a late metadata fix on an OLD title is not picked up — acceptable,
     # because a periodic full pass covers drift and paying per id daily does not scale.
     known = known_ids(ctx.require(BOUND[artifacts.GENRES_MOODS.name].artifact), media)
-    params = tmdb_api.discover_params(media, vote_count_gte=VOTE_FLOOR, release_date_gte=ctx.since,
+    return [row for row in discovered(client, media, vote_count_gte=VOTE_FLOOR, release_date_gte=ctx.since,
                                       sort_by=SORT_BY)
-    return [row for row in collect(client, media, params) if row["tmdbId"] not in known]
+            if row["tmdbId"] not in known]
 
 
 def write(path, rows):

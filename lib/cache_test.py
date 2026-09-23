@@ -6,9 +6,9 @@ whole corpus, and looks like a slow first run; and `scripts/backfill-plot-proven
 reconstructs the same key to replay grounding decisions out of those bodies, reports every row
 unrecoverable instead of erroring.
 
-The two digests below are not invented. Each one names a file that exists under `.cache/` in the main
-checkout, written by the Swift pass that built the shipped corpus — so this test is the derivation held
-against real evidence rather than against itself.
+The digest below is not invented. It names a file that exists under `.cache/` in the main checkout,
+written by the Swift pass that built the shipped corpus — so this test is the derivation held against real
+evidence rather than against itself.
 """
 import json
 import os
@@ -28,19 +28,11 @@ WIKI_QUERY = {"action": "parse", "prop": "wikitext|revid", "format": "json",
 WIKI_DIGEST = "da9f30f7d87e9687f88315085805043bfd5cf19cfc6873463b178e925e234972"
 WIKI_HOST_PATH = "en.wikipedia.org/w/api.php"
 
-#: `/movie/11` with the sub-resources `enrich` appends. Present as `.cache/tmdb/33/333e08….json` — the
-#: entry the enrichment wrote, which the Python port of it has to find under the same name.
-TMDB_DIGEST = "333e08246e09fd6059b081f999aa20f43bcf156ca165f6d189519efd982e1800"
-
 
 class Key(unittest.TestCase):
     def test_a_wikipedia_request_hashes_to_the_file_the_swift_pass_wrote(self):
         cache = caching.ResponseCache("wiki", "/nowhere", 1)
         self.assertEqual(cache.key("en.wikipedia.org/w/api.php", WIKI_QUERY), WIKI_DIGEST)
-
-    def test_a_tmdb_detail_request_hashes_to_the_file_the_swift_pass_wrote(self):
-        cache = caching.ResponseCache("tmdb", "/nowhere", 1)
-        self.assertEqual(cache.key("/movie/11", {"append_to_response": "keywords,credits"}), TMDB_DIGEST)
 
     def test_the_host_is_part_of_a_wikipedia_key(self):
         """Leaving it out was a silent correctness bug rather than a missed hit: every Wikipedia serves
@@ -180,28 +172,16 @@ class Configuration(unittest.TestCase):
     def test_a_source_can_be_switched_off_on_its_own_or_with_everything(self):
         self.assertIsNone(caching.configured("wiki", 180, {"DEN_CACHE": "0"}))
         self.assertIsNone(caching.configured("wiki", 180, {"WIKI_CACHE": "off"}))
-        self.assertIsNotNone(caching.configured("wiki", 180, {"TMDB_CACHE": "0"}))
+        self.assertIsNotNone(caching.configured("wiki", 180, {"OTHER_CACHE": "0"}))
 
     def test_a_zero_ttl_is_off_rather_than_a_write_only_cache(self):
         """Every read would miss and every fetch would still be written — which is never what someone
         reaching for "0" wants."""
         self.assertIsNone(caching.configured("wiki", 180, {"WIKI_CACHE_TTL_DAYS": "0"}))
 
-    def test_the_ttl_is_the_one_both_sources_share(self):
-        """180 days, deliberately the same number for both so they age out together. For TMDB it is a
-        COMPLIANCE boundary — their terms allow caching for a limited period, not indefinitely."""
+    def test_the_ttl_is_180_days(self):
         self.assertEqual(caching.TTL_DAYS, 180)
-        self.assertEqual(caching.tmdb({}).ttl_seconds, 180 * caching.DAY_SECONDS)
         self.assertEqual(caching.wiki({}).ttl_seconds, 180 * caching.DAY_SECONDS)
-
-    def test_discover_is_not_cacheable_and_a_title_detail_is(self):
-        """`/discover` exists to surface what is new or has newly crossed the vote floor, so serving it
-        from disk hides exactly what it is asked for."""
-        self.assertTrue(caching.tmdb_is_cacheable("/movie/278"))
-        self.assertTrue(caching.tmdb_is_cacheable("/tv/1396"))
-        self.assertFalse(caching.tmdb_is_cacheable("/discover/movie"))
-        self.assertFalse(caching.tmdb_is_cacheable("/movie/popular"))
-        self.assertFalse(caching.tmdb_is_cacheable("/movie/278/credits"))
 
 
 if __name__ == "__main__":

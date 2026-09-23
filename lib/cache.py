@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The on-disk cache of upstream responses — and the key derivation, which is a CONTRACT.
 
-The pipeline re-reads the whole corpus often. A full re-enrich is ~60k TMDB detail calls plus ~80k
-Wikipedia requests, and the run that motivated the cache spent most of its ~10h re-fetching material that
+The pipeline re-reads the whole corpus often. A full re-enrich is ~80k Wikipedia requests and a few
+thousand Wikidata queries, and the run that motivated the cache spent most of its ~10h re-fetching material that
 had not changed. WHAT is safe to keep differs per source, so each caller decides that; this module only
 knows how to store a body under a key, honestly and atomically.
 
@@ -159,34 +159,19 @@ def configured(namespace, default_ttl_days, env=None):
     return ResponseCache(namespace, root(env), days * DAY_SECONDS)
 
 
-#: 180 days for both sources, deliberately the same number so they age out together.
+#: 180 days. A short expiry looks prudent for Wikipedia and is not: measured over ten weeks, 38% of plots
+#: differed in some way but only ~4% moved the embedding far enough to matter, so expiry cannot tell those
+#: apart and pays full price for the answer. Freshness is a decision taken two other ways: `WIKI_CACHE=0`
+#: re-reads everything, and each grounded title stores the revision it was read from so a refresh can ask
+#: for current revids in bulk.
 #:
-#: For TMDB it is a COMPLIANCE boundary rather than a staleness estimate — their terms allow caching for a
-#: limited period, not indefinitely — and it is also why a cached body may hold TMDB prose while the
-#: datasets built from it may not. For Wikipedia a short expiry looks prudent and is not: measured over ten
-#: weeks, 38% of plots differed in some way but only ~4% moved the embedding far enough to matter, so
-#: expiry cannot tell those apart and pays full price for the answer. Freshness is a decision taken two
-#: other ways: `WIKI_CACHE=0` re-reads everything, and each grounded title stores the revision it was read
-#: from so a refresh can ask for current revids in bulk.
+#: TMDB has no namespace any more: nothing in the pipeline asks it for a title (oxyc/den-dataset#53), and
+#: `/discover`, the one call left, is never cached. The `.cache/tmdb` bodies earlier passes wrote are read
+#: by nothing and age out.
 TTL_DAYS = 180
 
-TMDB_NAMESPACE = "tmdb"
 WIKI_NAMESPACE = "wiki"
-
-
-def tmdb(env=None):
-    return configured(TMDB_NAMESPACE, TTL_DAYS, env)
 
 
 def wiki(env=None):
     return configured(WIKI_NAMESPACE, TTL_DAYS, env)
-
-
-def tmdb_is_cacheable(path):
-    """True for the per-title detail endpoints.
-
-    `/discover` is deliberately excluded: its whole job is to surface titles that are new or have newly
-    crossed the vote floor, so serving it from disk would hide exactly what it is asked for.
-    """
-    parts = [part for part in path.split("/") if part]
-    return len(parts) == 2 and parts[0] in ("movie", "tv") and parts[1].isdigit()

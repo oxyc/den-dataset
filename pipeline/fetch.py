@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """The FETCH pass — enrichment — as a stage: drain a worklist into enriched batches.
 
-One batch is `pipeline/enrich.py`: the next N un-enriched ids, one TMDB detail+keywords+credits call each,
-one Wikidata SPARQL per media type, then a live Wikipedia plot that becomes the record's `overview`. What
-this stage owns is which worklist it is handed, the credentials it runs under, and the loop.
+One batch is `pipeline/enrich.py`: the next N un-enriched ids, a few Wikidata SPARQL queries per media
+type, then a live Wikipedia plot that becomes the record's `overview`. What this stage owns is which
+worklist it is handed, the credentials it runs under, and the loop.
 
 **It is a loop, and the loop is the stage's.** The corpus is ~120 batches. The driver that ran them —
 `scripts/enrich-all.sh` — decided when to stop by `sed`-ing `belowFloor` out of a JSON line, off a
@@ -11,7 +11,8 @@ stream it was also teeing to a log. Its stopping rules were each bought by a run
 (see `drain`), and they are here because a resumed, partially-complete run is easier to reason about when
 ONE thing decides what "done" means and that thing is the same thing that declares the artifacts.
 
-**Every batch costs TMDB quota**, which is why nothing here re-runs a batch that succeeded.
+**Every batch costs Wikidata and Wikipedia requests**, which is why nothing here re-runs a batch that
+succeeded.
 `--exclude-anime` is never asked for: it is opt-IN because excluding anime by default silently cost the
 corpus 1,498 titles, and a stage that asked for it unprompted would reinstate exactly that.
 """
@@ -23,7 +24,7 @@ import time
 
 from . import artifacts, enrich, floors as floor_rules, refresh
 from .contract import REPO, StageError, bind
-from lib import enterprise, tmdb as tmdb_api
+from lib import enterprise
 
 NAME = "fetch"
 
@@ -32,10 +33,10 @@ PRODUCER = "pipeline/enrich.py"
 #: What an operator types to rebuild the enriched batches. Not one `pipeline/enrich.py`: that is one
 #: batch, and what builds this artifact is the drain.
 HOW = "./den stage fetch"
-#: Writes into the out-dir and nowhere else. Expensive to repeat in TMDB quota and in hours, and resumable,
+#: Writes into the out-dir and nowhere else. Expensive to repeat in requests and in hours, and resumable,
 #: which is a different thing from reversible.
 PUBLISHES = False
-#: TMDB's own API and live Wikipedia, neither of them billed. The cost is quota and hours, not money.
+#: Wikidata and live Wikipedia, neither of them billed. The cost is quota and hours, not money.
 SPENDS = False
 
 #: A full drain is both media, one universe file each — the worklist stage writes them apart.
@@ -66,18 +67,17 @@ BATCH = 500
 ABORTS = 6
 STALLS = 6
 
-#: The credential bootstrap, over `scripts/lib/den-env.sh`. Two INDEPENDENT steps, and the split matters:
-#: `den_load_env` reads a `den.env` FILE and fails without one, while `enterprise_login` mints a 24h
-#: Wikimedia bearer from environment credentials. They arrive together on a workstation and apart
-#: everywhere else — GitHub Actions puts both in the environment as secrets with no file to read, so a
-#: bootstrap that insisted on `den.env` would fail there before fetching anything.
+#: The credential bootstrap, over `scripts/lib/den-env.sh`: the only credential a batch uses is a 24h
+#: Wikimedia Enterprise bearer, minted by `enterprise_login` from the Enterprise username and password. A
+#: batch asks TMDB nothing (oxyc/den-dataset#53), so no TMDB key is needed here. The Enterprise credentials
+#: come from the environment when it holds them — GitHub Actions puts them there as secrets, with no file to
+#: read — and from `den.env` otherwise, when there is one.
 #:
-#: The values come back NUL-separated on a pipe this process owns; they never reach an argv, a log or a
-#: file. The shell's own messages go to stderr, where an operator sees them as they happen.
-LOAD_AND_LOGIN = ('. scripts/lib/den-env.sh; den_load_env >&2 || exit 1; enterprise_login; '
-                  'printf "%s\\0%s\\0" "$TMDB_API_KEY" "${WIKIMEDIA_ENTERPRISE_TOKEN:-}"')
-LOGIN_ONLY = ('. scripts/lib/den-env.sh; enterprise_login; '
-              'printf "%s\\0%s\\0" "$TMDB_API_KEY" "${WIKIMEDIA_ENTERPRISE_TOKEN:-}"')
+#: The bearer comes back on a pipe this process owns; it never reaches an argv, a log or a file. The
+#: shell's own messages go to stderr, where an operator sees them as they happen.
+LOAD_AND_LOGIN = ('. scripts/lib/den-env.sh; if [ -f den.env ]; then den_load_env >&2 || exit 1; fi; '
+                  'enterprise_login; printf "%s" "${WIKIMEDIA_ENTERPRISE_TOKEN:-}"')
+LOGIN_ONLY = '. scripts/lib/den-env.sh; enterprise_login; printf "%s" "${WIKIMEDIA_ENTERPRISE_TOKEN:-}"'
 
 
 def media_types(ctx):
@@ -91,28 +91,22 @@ def media_types(ctx):
 
 
 def credentials(environ=None):
-    """`(tmdb_key, enterprise_bearer_or_None)`, asked about SEPARATELY.
+    """The Enterprise bearer, or None for the free action API.
 
-    `TMDB_API_KEY` says nothing about the Wikimedia ones. Keying the whole bootstrap on it meant an operator
-    who exported it by hand skipped `enterprise_login` too, and silently fetched every plot from the free
-    action API — a run that differs from the box's in what it RECORDS, since the Enterprise path reports no
-    revision id and no resolved article and so cannot see a redirect.
-
-    So `den.env` is read only when the TMDB key is missing, and the Enterprise login runs whenever no bearer
-    is already held. Asked per batch, as the driver did, because a bearer lasts a day and a drain can
-    outlast one.
+    The login runs whenever no bearer is already held — a run on the free API differs from the box's in
+    what it RECORDS, since the Enterprise path reports no revision id and no resolved article and so cannot
+    see a redirect. `den.env` is read only when the environment holds no Enterprise username. Asked per
+    batch, as the driver did, because a bearer lasts a day and a drain can outlast one.
     """
     environ = os.environ if environ is None else environ
-    key, bearer = environ.get("TMDB_API_KEY"), environ.get("WIKIMEDIA_ENTERPRISE_TOKEN")
-    if key and bearer:
-        return key, bearer
-    script = LOGIN_ONLY if key else LOAD_AND_LOGIN
+    if environ.get("WIKIMEDIA_ENTERPRISE_TOKEN"):
+        return environ["WIKIMEDIA_ENTERPRISE_TOKEN"]
+    script = LOGIN_ONLY if environ.get("WIKIMEDIA_ENTERPRISE_USERNAME") else LOAD_AND_LOGIN
     minted = subprocess.run(["bash", "-c", script], cwd=REPO, env=dict(environ), stdout=subprocess.PIPE)
     if minted.returncode != 0:
-        raise StageError("fetch: no TMDB_API_KEY in the environment and none loaded from den.env — see the "
-                         "message above. Waiting will not create one, so this is not retried.")
-    loaded, token = (minted.stdout.decode("utf-8").split("\0") + ["", ""])[:2]
-    return key or loaded, token or None
+        raise StageError("fetch: den.env is there and could not be loaded — see the message above. Waiting "
+                         "will not fix it, so this is not retried.")
+    return minted.stdout.decode("utf-8") or None
 
 
 def pause(seconds):
@@ -149,11 +143,11 @@ def announce_prose_source(media, served):
 
 def batch(ctx, media):
     """One batch of `media`'s worklist, under freshly asked credentials. Returns its report."""
-    key, token = credentials()
+    token = credentials()
     floors = floor_rules.given(ctx.vote_floor, ctx.regional_vote_floor, ctx.wikipedia_floor,
                                ctx.regional_wikipedia_floor)
     return enrich.run(ctx.require(bind(UNIVERSES[media]).artifact), ctx.out_dir, floors=floors,
-                      limit=BATCH, client=tmdb_api.TMDB(key), token=token)
+                      limit=BATCH, token=token)
 
 
 def drain(ctx, media):
@@ -163,7 +157,7 @@ def drain(ctx, media):
 
       * **an aborted batch is retried, not fatal.** A transient Wikidata outage that outlived the retries
         used to kill a twelve-hour drain. Only an abort is retried: a refusal — an unreadable checkpoint, a
-        batch file that would be overwritten, no TMDB key — says the same thing on every attempt, and the
+        batch file that would be overwritten, a den.env that will not load — says the same thing on every attempt, and the
         Swift driver spent six backoffs finding that out.
       * **a batch that finishes having moved nothing is a stall.** Ids that fail transiently are
         deliberately not checkpointed, so during an upstream outage every id defers and `remaining` does
