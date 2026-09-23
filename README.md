@@ -78,12 +78,13 @@ a day with no error anywhere. They are still built as the store's inputs; the pu
 
 - `den` — the entry point: `./den stages`, `./den stage <name>`, `./den run`.
 - `pipeline/` — one module per stage, in the order `pipeline/__init__.py` gives, each declaring what it
-  reads and writes.
+  reads and writes; beside them the passes and tools those stages run: the classify and delta passes,
+  their auditor, the corpus join, the embed box kit.
 - `store/` — the store writer, one module per section group of den-spec's `wire/store-v1.md`.
-- `lib/` — HTTP, the response cache, and the TMDB, Wikidata and Wikipedia clients.
+- `lib/` — HTTP, the response cache, and the TMDB, Wikidata, Wikipedia and Jev clients.
 - `data/` — committed inputs. `guards/` — CI checks on the tree itself.
-- `scripts/` — the publisher and its guards, the classify pass's runner, and tools not yet moved into a
-  stage (oxyc/den-dataset#73).
+- `scripts/` — the store writer's command line, the publisher and its guards, the shell runners, and tools
+  not yet moved into a package (oxyc/den-dataset#73).
 
 ## Build / test
 

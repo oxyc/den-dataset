@@ -32,7 +32,7 @@
         "sha256": "111838f1a29685a594b59f51de868fc085598aa466f9028845e30bb717392ee8",
         "commit": "eff1457",
         "supersededBy": "the commit that converted the vocabulary to JSON (oxyc/den-dataset#27)",
-        "why": "#27 converted the vocabulary from Swift source to data/genres-moods-vocabulary.json, so `taxonomy()` parses JSON instead of Swift string-array literals and the hand-written Swift parser is gone. What it returns is the same `{version, family: [label, …]}` for the same labels, which the questions are built from unchanged: the questions the pass asks still hash to globalQuestionsSha256 8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964 and the label mapping to 06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577, the two digests combined-v1-r2.jsonl.manifest.json records. `scripts/v2/test_combined.py` pins both, so a vocabulary edit hiding behind this entry fails there."
+        "why": "#27 converted the vocabulary from Swift source to data/genres-moods-vocabulary.json, so `taxonomy()` parses JSON instead of Swift string-array literals and the hand-written Swift parser is gone. What it returns is the same `{version, family: [label, …]}` for the same labels, which the questions are built from unchanged: the questions the pass asks still hash to globalQuestionsSha256 8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964 and the label mapping to 06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577, the two digests combined-v1-r2.jsonl.manifest.json records. `scripts/v2/test_combined.py` (pipeline/run_combined_test.py since #73) pins both, so a vocabulary edit hiding behind this entry fails there."
       },
       {
         "sha256": "6d6d0d469f3e25cff64d53ccc107f17adfcbc14f262703951b17e020c679453e",
@@ -64,7 +64,7 @@
         "commit": "eff1457",
         "supersededBy": "the commit that converted the vocabulary to JSON (oxyc/den-dataset#27)",
         "why": "The genres & moods vocabulary is now data/genres-moods-vocabulary.json instead of Swift source nothing compiled. Reformatting a file necessarily changes its digest, and this one is pinned by every shard manifest as taxonomySha256 — but the LABELS and the version are the same, name for name: the file was generated from what the Swift parser returned and checked field by field against it before the Swift was deleted.",
-        "evidence": "The questions are the equality that matters, because they are what the pass bought answers to. Built from this JSON they still hash to globalQuestionsSha256 8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964 and labelQuestionMappingSha256 06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577 — the digests combined-v1-r2.jsonl.manifest.json records, and the ones `scripts/v2/test_combined.py` pins. Regional labels are the one part no question is built from, so they were compared directly instead."
+        "evidence": "The questions are the equality that matters, because they are what the pass bought answers to. Built from this JSON they still hash to globalQuestionsSha256 8812611c5690e50914e31918dfc3734d7d9c4b1802f5b8fdfa3a77c5f13b5964 and labelQuestionMappingSha256 06ca2b871550e6ffb197afc17c0192da6a5a6c6e1eb3a5d011010f85964fc577 — the digests combined-v1-r2.jsonl.manifest.json records, and the ones `scripts/v2/test_combined.py` (pipeline/run_combined_test.py since #73) pins. Regional labels are the one part no question is built from, so they were compared directly instead."
       }
     ]
   }
