@@ -103,11 +103,12 @@ def run(args, inputs, prose_check, provenance_check):
     print(f"  iconic studios: {len(studio_list.kept)} of {len(studio_list.curated)} in "
           f"data/iconic-studios.json are credited by the corpus", file=sys.stderr)
 
-    award_columns = awards.Awards(entity_table)
+    award_columns = awards.Awards(entity_table, *awards.load_merges())
     award_columns.resolve(keys, rows)
     award_columns.intern(strings)
-    print(f"  awards: {award_columns.titles} titles at {len(award_columns.ceremonies)} ceremonies",
-          file=sys.stderr)
+    print(f"  awards: {award_columns.titles} titles at {len(award_columns.ceremonies)} ceremonies; "
+          f"{award_columns.record['applied']} merges in data/award-ceremony-merges.json applied, "
+          f"{len(award_columns.record['stale'])} name a ceremony no title does", file=sys.stderr)
 
     ordered_strings = strings.freeze()
     prose_complaint = prose_check(ordered_strings)
@@ -226,6 +227,9 @@ def run(args, inputs, prose_check, provenance_check):
         meta["aliasDecisions"] = alias_record
         # Same shape rule; `check-wikidata-items.py --gate` refuses while `ambiguous` names a title.
         meta["wikidataItems"] = item_record
+        # Same shape rule; `check-award-merges.py --gate` refuses while a merge is stale or the list
+        # applied is not the committed one.
+        meta["awardMerges"] = award_columns.record
         with open(args.stamp_meta, "w") as fh:
             json.dump(meta, fh, indent=1)
             fh.write("\n")

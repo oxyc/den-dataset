@@ -1083,6 +1083,57 @@ class SearchFactsShip(StoreFixture, unittest.TestCase):
             self.build(out, titles=titles)
         self.assertIn("both awardsWonAt and awardsNominatedAt", str(caught.exception))
 
+    def test_a_body_split_across_two_items_is_one_ceremony_and_a_win_at_either_counts(self):
+        """The Silver Bear files under the Berlin festival (data/award-ceremony-merges.json). A title
+        nominated at the festival and winning a Silver Bear is at Berlin once, as won; the stamped record
+        names the committed list, and every merge whose ceremony this corpus lacks as stale."""
+        titles = [dict(self.TITLES[0], facts=dict(self.TITLES[0]["facts"], awardsWonAt=["Q708135"],
+                                                  awardsNominatedAt=["Q130871"])),
+                  dict(self.TITLES[1], facts=dict(self.TITLES[1]["facts"], awardsNominatedAt=["Q708135"]))]
+        with tempfile.TemporaryDirectory() as out:
+            meta = os.path.join(out, "dataset.meta.json")
+            with open(meta, "w") as fh:
+                json.dump({"datasetVersion": "test"}, fh)
+            store, _ = self.build(out, titles=titles, stamp=meta)
+            with open(meta) as fh:
+                record = json.load(fh)["awardMerges"]
+        self.assertEqual(store.ints("ceremony_qid"), [130871])
+        won, offsets = store.ints("award_w", "B", 1), store.ints("award_o")
+        self.assertEqual([(self.span(store, "award", r), won[offsets[r]:offsets[r + 1]]) for r in (0, 1)],
+                         [([0], [1]), ([0], [0])])
+        with open(os.path.join(HERE, "..", "..", "data", "award-ceremony-merges.json"), "rb") as fh:
+            self.assertEqual(record["sha256"], hashlib.sha256(fh.read()).hexdigest())
+        self.assertEqual(record["applied"], 1)
+        self.assertNotIn("Q708135", record["stale"])
+        self.assertIn("Q81565646", record["stale"], "NBR Awards is named by no title here")
+
+    def test_the_committed_merge_list_is_well_formed_and_keeps_the_emmys_apart(self):
+        build_store_module()
+        from store import awards
+        merges, _ = awards.load_merges()
+        self.assertEqual(merges[708135], 130871, "the Silver Bear files under the Berlin festival")
+        emmys = {1044427, 1179189, 10354837, 123737}
+        self.assertFalse(emmys & (set(merges) | set(merges.values())), "the Emmys are separate ceremonies")
+
+    def test_a_malformed_merge_list_is_refused(self):
+        build_store_module()
+        from store import awards
+        for merges, complaint in (
+                ([{"from": "Q1", "into": "Q2"}], "needs a why"),
+                ([{"from": "Q1", "into": "Q1", "why": "x"}], "merged into itself"),
+                ([{"from": "Q1", "into": "Q2", "why": "x"}, {"from": "Q1", "into": "Q3", "why": "x"}],
+                 "merged twice"),
+                ([{"from": "Q1", "into": "Q2", "why": "x"}, {"from": "Q2", "into": "Q3", "why": "x"}],
+                 "merge into the last one directly"),
+                ([{"from": "1", "into": "Q2", "why": "x"}], "not a Wikidata item id")):
+            with self.subTest(complaint=complaint), tempfile.TemporaryDirectory() as out:
+                path = os.path.join(out, "merges.json")
+                with open(path, "w") as fh:
+                    json.dump({"merges": merges}, fh)
+                with self.assertRaises(SystemExit) as caught:
+                    awards.load_merges(path)
+                self.assertIn(complaint, str(caught.exception))
+
     def test_a_corpus_with_no_awards_writes_the_sections_empty(self):
         with tempfile.TemporaryDirectory() as out:
             store, _ = self.build(out)
