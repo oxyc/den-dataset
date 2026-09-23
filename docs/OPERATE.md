@@ -155,6 +155,18 @@ its vector and belongs here. On `out-repass` on 2026-09-22 this was 79 ids. A ba
 whole and the merge refuses a pass that skipped one; `pipeline/facts-run.sh out` loops until nothing is
 skipped.
 
+The per-batch queries (each property, and the titles hop) fall back to QLever's Wikidata endpoint
+(`https://qlever.dev/api/wikidata`) when WDQS answers 429, 5xx or times out. WDQS is then asked once rather
+than retried, because its `Retry-After` is two minutes. `DEN_SPARQL_PREFER=qlever` asks QLever first and
+WDQS only when QLever fails — use it while WDQS is throttling, when a pass would otherwise take a day. QLever
+indexes the weekly dump, so an edit from the last few days may be missing. The answer is cached under the
+WDQS query text either way. Entity names, person traits, IMDb ids, franchises, awards and source kinds stay
+on WDQS. Each progress line and the pass's closing JSON (`answeredBy`) count which endpoint answered.
+
+```
+DEN_SPARQL_PREFER=qlever pipeline/facts-run.sh out
+```
+
 About one title in 560 has its TMDB id claimed by two Wikidata items (series 2559: "Boon" and "Bonn").
 Every stage that asks Wikidata by TMDB id — enrich, articles, docfacts, facts — answers from ONE of them,
 chosen by `lib/wikidata.resolve`: first `data/wikidata-item-decisions.json`, then the item stating no other

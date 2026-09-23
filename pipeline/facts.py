@@ -188,6 +188,11 @@ def identities(types, cache):
     return found, excluded
 
 
+def answered():
+    """How many live requests each SPARQL endpoint has answered this run, e.g. `wdqs=3 qlever=120`."""
+    return " ".join(f"{name}={count}" for name, count in sorted(wd.ANSWERED.items())) or "none yet"
+
+
 def scrape_batches(fields, types, cache, pace, checkpointed, resolved=None, excluded=None):
     """Fill `fields` batch by batch, calling `checkpointed` after each. Returns how many ids it skipped.
 
@@ -235,7 +240,7 @@ def scrape_batches(fields, types, cache, pace, checkpointed, resolved=None, excl
                 continue
             done += len(batch)
             checkpointed()
-            say(f"facts {done}/{total}…")
+            say(f"facts {done}/{total}… answered by {answered()}")
     return skipped
 
 
@@ -542,7 +547,7 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE):
             f"and re-run; the publish refuses until then: {', '.join(ambiguous)}")
     say(json.dumps({"facts": len(records), "entities": len(entities), "genreMap": len(genre_map),
                     "path": out, "skippedAfterFailure": skipped, "hasVector": int(has_vector),
-                    "ambiguousItems": len(ambiguous)}))
+                    "ambiguousItems": len(ambiguous), "answeredBy": dict(sorted(wd.ANSWERED.items()))}))
     return skipped
 
 
