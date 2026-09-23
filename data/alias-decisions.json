@@ -283,6 +283,12 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 56992,
+      "alias": "The Out-Laws",
+      "why": "The Flemish series Clan has no English release title: TMDB records no alternative title for it at all, and Wikidata Q2701903 carries this only as an en skos:altLabel. The Out-Laws is the unrelated 2023 US film (movie:921636)."
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 64434,
       "alias": "Frankenstein",
       "why": "names a different work entirely"
@@ -3951,6 +3957,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 987578,
+      "alias": "La Pietà",
+      "why": "It is this film's French and German title: Wikidata Q108751848's fr and de rdfs:label, not only an altLabel. It meets Kim Ki-duk's Pietà (movie:123377) because matching drops the leading article."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 994138,
       "alias": "Dark Woods",
       "why": "reviewed: a real alternate or translated title"
@@ -4626,6 +4638,12 @@
       "tmdbId": 271309,
       "alias": "Treasure Island",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 286255,
+      "alias": "The Forsyte Saga",
+      "why": "TMDB records it as this series' US title; the 2025 adaptation of Galsworthy's novels shares the name of the 2002 series (tv:19077)"
     },
     {
       "mediaType": "tv",
