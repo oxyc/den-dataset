@@ -21,7 +21,7 @@ and is judged by the lowest floor among them.
 Wikipedia count of the titles sitting at the TMDB floor, over the 59,209 enriched titles of 2026-09-22.
 
     tier        TMDB floor   at it   median   within ±10%   median   quartiles   chosen floor
-    worldwide   50           105     5        1,329         5        2 / 5 / 9   5
+    worldwide   50           105     5        1,329         5        2 / 5 / 9   10 (see below)
     regional    15           917     3        2,034         3        1 / 3 / 5   3
 
 **What the worldwide floor admits was measured below the TMDB floor**, where it matters: the enriched
@@ -41,6 +41,12 @@ television TMDB barely rates (`Superboy`, `The Courtship of Eddie's Father`, `A.
 Flower`) — 30 sampled at random were all real, documented works. What it drops of IMDb's are mostly
 single-country television with an article on one to four wikis (`F Troop`, `Amen`, `Afsos`). The cost is
 a plot fetch and, later, a classification for each of the ~12,900.
+
+**The worldwide floor is set to 10, not the median 5**, because every admitted title also needs premise
+tags, which are labelled by hand-run model batches rather than by the paid pass — the part that does
+not scale. At 10 the tail admitted is ~3,600 clearly notable titles; a sample of American 15–49-vote
+titles held nothing at 5 or above anyway. The regional floor stays at the median 3, where the regional
+tier's own TMDB floor of 15 already admits most of what matters (Rederiet, Beck, Kvarteret Skatan).
 
 **The tier is read off TMDB's `origin_country`, and that is a measured decision, not an oversight.**
 oxyc/den-dataset#53 is taking TMDB out of the title path, and Wikidata's P495 (country of origin) is the
@@ -76,7 +82,7 @@ class Floors:
     """The four floors: TMDB votes and Wikipedia articles, for the worldwide tier and the regional one."""
     tmdb: int = 50
     regional_tmdb: int = 15
-    wikipedias: int = 5
+    wikipedias: int = 10
     regional_wikipedias: int = 3
 
     def of(self, record):
