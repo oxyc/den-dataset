@@ -31,7 +31,8 @@ being covered by the ownership guard, and this record is what `check_producers.p
 
 Plot facets pass the FACETS-V2 publication gates before they reach a section — see `store/facets.py`.
 The corpus collects every answer with its full distribution; this file decides which of them the one
-published artifact asserts. `--stamp-meta` records what each gate withheld, as `facetGates`.
+published artifact asserts, and which uncertain answers ship beside them as the tentative tier.
+`--stamp-meta` records what each gate withheld and how many went tentative, as `facetGates`.
 """
 import argparse
 import os
@@ -40,15 +41,15 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from store import build  # noqa: E402
 from store.cards import display_title, release_year  # noqa: E402  — re-exported; see below
-from store.facets import FACET_AXES, publishable, row_applicability  # noqa: E402
+from store.facets import FACET_AXES, publishable, row_applicability, tentative  # noqa: E402
 from store.facts import title_imdb_id  # noqa: E402
 from store.inputs import (INPUT_ARGS, build_inputs, input_digest,  # noqa: E402
                           labels_by_key)
 
-# `display_title`, `release_year`, `title_imdb_id`, `publishable`, `row_applicability`, `FACET_AXES`,
-# `INPUT_ARGS`, `input_digest` and `labels_by_key` are imported so that this file's module namespace is
-# the whole surface the pipeline addresses the writer through: `pipeline/check_producers.py` and
-# `pipeline/migrate_vector_blob.py` load it by path, and `build_store_test.py` exercises the helpers
+# `display_title`, `release_year`, `title_imdb_id`, `publishable`, `tentative`, `row_applicability`,
+# `FACET_AXES`, `INPUT_ARGS`, `input_digest` and `labels_by_key` are imported so that this file's module
+# namespace is the whole surface the pipeline addresses the writer through: `pipeline/check_producers.py`
+# and `pipeline/migrate_vector_blob.py` load it by path, and `build_store_test.py` exercises the helpers
 # against it. Each one's implementation is in the `store/` module named for its section group.
 
 # ---- where every section's bytes come from ---------------------------------------------------------
@@ -94,6 +95,7 @@ PROVENANCE = {
     "mood_v": "llm", "mood_c": "llm", "mood_o": "llm",
     "animated": "llm",
     "facet_v": "llm", "facet_c": "llm",
+    "facet_tv": "llm", "facet_tp": "llm",
     "score_intensity": "llm", "score_humour": "llm",
     "score_weight": "llm", "score_complexity": "llm",
     "world": "llm",
