@@ -856,9 +856,9 @@ def item_evidence(qids, media, cache=None):
 #:
 #: Two rules came first once, `imdb` and `year`: the item whose P345 or date matched the IMDb id and year
 #: TMDB's detail record names. They were TMDB's facts deciding what a published row says, so they are gone
-#: (oxyc/den-dataset#53). Over the 76 contested corpus titles no committed decision covered, the two rules
-#: here pick the same item for 41; for the other 35 (27 left ambiguous, 8 choosing the other item) the
-#: choice the old rules made is committed in `DECISIONS`.
+#: (oxyc/den-dataset#53). Over the 81 contested titles in the enriched corpus no committed decision covered,
+#: the two rules here pick the same item for 44; for the other 37 (29 left ambiguous, 8 choosing the other
+#: item) the choice the old rules made is committed in `DECISIONS`.
 RULES = ("sole-claim", "article")
 
 
