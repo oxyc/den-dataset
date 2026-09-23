@@ -47,7 +47,7 @@ from pipeline.contract import Context, StageError  # noqa: E402
 
 CURATED = os.path.join(REPO, "data", "genres-moods-curated.json")
 DEFINITIONS = os.path.join(REPO, "data", "genres-moods-definitions.json")
-SPEC_TEMPLATE = os.path.join(HERE, "genres-moods-enrich.SPEC.md")
+SPEC_TEMPLATE = os.path.join(REPO, "data", "genres-moods-enrich.SPEC.md")
 #: A section is premise when the classify pass's story-premise and theme-subject probabilities sum to this.
 PREMISE_P = 0.5
 VALID = "correct-screen-work"

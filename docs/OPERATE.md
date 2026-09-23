@@ -85,7 +85,7 @@ cp den.env.example den.env        # TMDB_API_KEY (worklist discover/delta); Ente
 #    One batch by hand, credentials already in the environment:
 python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --limit 150
 
-# 3a. Classify — the one step that buys ($20.47 for 47,529 titles). --plan first. scripts/v2/FACETS-V2.md.
+# 3a. Classify — the one step that buys ($20.47 for 47,529 titles). --plan first. docs/FACETS-V2.md.
 ./den stage articles --out-dir out
 ./den stage classify --out-dir out --plan
 ./den stage classify --out-dir out
