@@ -83,6 +83,17 @@ BOUND = {bind(entry).name: bind(entry) for entry in INPUTS}
 #: Where each pass keeps its three checkpoints, relative to the out-dir.
 CHECKPOINTS = {True: "", False: "facts-delta"}
 
+#: Properties added to `wd.SPECS` after checkpoints were already on disk. A row scraped before them lacks
+#: the key, and so does a row that was asked and has no value, so for these alone a row that was asked
+#: records `[]`: `backfill_properties` asks every checkpointed row with no entry, and the record as it
+#: ships drops the empty list.
+BACKFILLED = ("awardsWon", "awardsNominated")
+#: Ids per backfill request. Far more than `BATCH`: the backfill asks one property of every checkpointed
+#: row, and a WDQS request's cost is the request, not its size — measured on the corpus while WDQS was
+#: throttling this client, 25 ids took 22 s and 500 took 5.4 s. At 25 the 47,618-title corpus was ~15 s a
+#: batch, 3,800 batches.
+BACKFILL_BATCH = 500
+
 _ID = re.compile(r"[+-]?\d+")
 
 
@@ -197,6 +208,13 @@ def scrape_batches(fields, types, cache, pace, checkpointed, resolved=None, excl
                         fields.setdefault(f"{kind}:{tmdb_id}", {})[item.key] = value
                     if live and pace:
                         time.sleep(pace)
+                # Asked, so the backfill must not ask again. Only rows Wikidata answered for: a title with
+                # no item is left out of the checkpoint so the next run asks for it, as it always was.
+                for tmdb_id in batch:
+                    row = fields.get(f"{kind}:{tmdb_id}")
+                    if row is not None:
+                        for key in BACKFILLED:
+                            row.setdefault(key, [])
                 # The languages were fetched above; the original title is chosen in one of them.
                 languages = {i: (fields.get(f"{kind}:{i}") or {}).get("languages") or [] for i in batch}
                 for tmdb_id, found in wd.titles(batch, media, languages, excluded=excluded.get(kind)).items():
@@ -249,6 +267,32 @@ def refresh_collapsed_franchises(fields, cache, checkpointed, excluded=None):
         say(f"franchise: re-asked P179 for {sum(len(ids) for ids in stale.values())} collapsed rows")
 
 
+def backfill_properties(fields, cache, checkpointed, pace=PACE, excluded=None):
+    """Ask the `BACKFILLED` properties for every checkpointed row that has no entry for them — each row a
+    scrape finished before they joined `wd.SPECS`. Batched by media type in id order, so a re-run over the
+    same checkpoint asks the same queries and is answered from the cache. A contested title is asked about
+    its chosen item alone, as every other property is (`excluded`)."""
+    excluded = excluded or {}
+    for item in (item for item in wd.SPECS if item.key in BACKFILLED):
+        stale = by_type(key for key, row in fields.items() if item.key not in row)
+        for kind, ids in stale.items():
+            media = "tv" if kind == "tv" else "movie"
+            ids = sorted(ids)
+            for start in range(0, len(ids), BACKFILL_BATCH):
+                batch = ids[start:start + BACKFILL_BATCH]
+                try:
+                    got, live = wd.fetch_facts(batch, media, item, cache, excluded=excluded.get(kind))
+                except (wikidata.WikidataError, http.HTTPError) as failure:
+                    raise StageError(f"facts: asking {item.prop} for {len(batch)} {kind} rows failed "
+                                     f"({failure}). The rest is checkpointed; re-run.") from None
+                for tmdb_id in batch:
+                    fields[f"{kind}:{tmdb_id}"][item.key] = got.get(tmdb_id, [])
+                checkpointed()
+                if live and pace:
+                    time.sleep(pace)
+            say(f"{item.key}: asked {item.prop} for {len(ids)} checkpointed {kind} rows")
+
+
 def resolve_franchises(fields, cache):
     """Keep a title's P179 targets only where they are a series (`wd.SERIES_CLASSES`), most specific first,
     and drop the field where none is. Runs before the entities are named, so a rejected list is not named
@@ -274,14 +318,51 @@ def resolve_franchises(fields, cache):
         f"{kept} titles keep one, {dropped} had only lists and the like")
 
 
-def resolve_entities(fields, path):
+def resolve_awards(fields, cache):
+    """File each award a title won or was nominated for under its ceremony (`wd.ceremony`): `awardsWonAt`
+    is every ceremony it won something at, `awardsNominatedAt` every other one it was nominated at. An
+    award no ceremony is found for is left out of both. Derived, like `franchise`: the checkpoint keeps the
+    award items, so the rule can change without a re-scrape."""
+    items = set()
+    for row in fields.values():
+        for key in BACKFILLED:
+            items.update(row.get(key) or [])
+    links = wd.award_links(sorted(items), cache)
+    ceremonies = {q: wd.ceremony(links.get(q) or {}) for q in items}
+
+    def at(qids):
+        return {ceremonies[q] for q in qids or [] if ceremonies.get(q)}
+
+    titles = 0
+    for row in fields.values():
+        won = at(row.get("awardsWon"))
+        nominated = at(row.get("awardsNominated")) - won
+        for key, found in (("awardsWonAt", won), ("awardsNominatedAt", nominated)):
+            if found:
+                row[key] = sorted(found, key=lambda q: int(q[1:]))
+            else:
+                row.pop(key, None)
+        titles += bool(won or nominated)
+    grouped = sum(1 for q in items if ceremonies[q])
+    say(f"awards: {grouped} of {len(items)} award items file under a ceremony "
+        f"({len(set(ceremonies.values()) - {None})} ceremonies); {titles} titles have one")
+
+
+def resolve_entities(fields, path, cache):
     """Every Q-id a record names, resolved once and remembered: a resumed run that re-resolved all of them
     spent its whole life here at 16,500 titles and never reached a new batch. A single Q-id is walked too:
-    `franchise` was one, and a harvest that walked only lists left all 3,019 of them unnamed."""
+    `franchise` was one, and a harvest that walked only lists left all 3,019 of them unnamed.
+
+    Then each entity's IMDb person id (P345), for every entry not yet asked — the ones just named and the
+    ones a checkpoint named before this was asked at all. `""` records "asked, has none"."""
     names = checkpoint(path)
     qids = set()
     for row in fields.values():
-        for value in row.values():
+        # The award items themselves are not named: what ships by name is their ceremony
+        # (`awardsWonAt`/`awardsNominatedAt`), and naming every category would add thousands of entities.
+        for name, value in row.items():
+            if name in BACKFILLED:
+                continue
             if isinstance(value, list):
                 qids.update(item for item in value if isinstance(item, str) and item.startswith("Q"))
             elif isinstance(value, str) and value.startswith("Q"):
@@ -302,6 +383,13 @@ def resolve_entities(fields, path):
             if entry:
                 names[qid] = entry
         save(path, names)
+    unasked = sorted(qid for qid, entry in names.items() if "imdbId" not in entry)
+    if unasked:
+        found = wd.imdb_ids(unasked, cache)
+        for qid in unasked:
+            names[qid]["imdbId"] = found.get(qid, "")
+        save(path, names)
+        say(f"imdb ids: {len(unasked)} entities asked, {sum(1 for q in unasked if q in found)} have one")
     return names
 
 
@@ -356,7 +444,7 @@ def shipped_entities(names, fields):
 
 
 def entity_out(entry):
-    out = {key: entry[key] for key in ("en", "tmdbPersonId") if key in entry}
+    out = {key: entry[key] for key in ("en", "tmdbPersonId", "imdbId") if entry.get(key)}
     aliases = [part for part in (entry.get("aliases") or "").split("\x1f") if part]
     if aliases:
         out["aliases"] = aliases
@@ -397,9 +485,11 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, client=N
         types = {kind: [i for i in ids if f"{kind}:{i}" not in fields] for kind, ids in types.items()}
     skipped = scrape_batches(fields, types, cache, pace, lambda: save(fields_path, fields), resolved, excluded)
     refresh_collapsed_franchises(fields, cache, lambda: save(fields_path, fields), excluded)
+    backfill_properties(fields, cache, lambda: save(fields_path, fields), pace, excluded)
 
     resolve_franchises(fields, cache)
-    names = resolve_entities(fields, os.path.join(directory, "facts-entities.json"))
+    resolve_awards(fields, cache)
+    names = resolve_entities(fields, os.path.join(directory, "facts-entities.json"), cache)
     resolve_sources(fields, os.path.join(directory, "facts-source-types.json"))
     entities = shipped_entities(names, fields)
     # Built over EVERY entity, not only the Q-ids some record names as a genre — the Swift's rule, kept. So
@@ -416,7 +506,8 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, client=N
     records = []
     for key in sorted(set(requested) & set(fields)):
         media, tmdb_id = key.split(":")
-        records.append({**fields[key], "mediaType": media, "tmdbId": int(tmdb_id), "hasVector": has_vector})
+        row = {name: value for name, value in fields[key].items() if not (name in BACKFILLED and not value)}
+        records.append({**row, "mediaType": media, "tmdbId": int(tmdb_id), "hasVector": has_vector})
     save(out, {"schema": 1, "datasetVersion": version, "genreMap": genre_map,
                "entities": {qid: entity_out(entry) for qid, entry in entities.items()}, "records": records})
     ambiguous = ambiguous_keys(records)

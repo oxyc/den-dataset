@@ -313,6 +313,27 @@ class Wikidata:
             return [{"alias": alias} for alias in (self.items.get(qid) or {}).get("aliases") or []]
         if "?typeLabel" in head:
             return [{"type": ENTITY + kind, "typeLabel": self.label(kind)} for kind in self.claims(qid, "P31")]
+        if head == "SELECT ?item ?id":
+            return [{"id": imdb_id} for imdb_id in self.claims(qid, "P345")]
+        if head == "SELECT ?item ?p ?t ?group":
+            group = re.search(r"wdt:P279\* wd:(Q\d+)", query).group(1)
+
+            def is_group(item):
+                seen, frontier = set(), list(self.claims(item, "P31"))
+                while frontier:
+                    kind = frontier.pop()
+                    if kind not in seen:
+                        seen.add(kind)
+                        frontier += self.claims(kind, "P279")
+                return group in seen
+
+            rows = [{"p": f"http://www.wikidata.org/prop/direct/{prop}", "t": ENTITY + target,
+                     "group": "true" if is_group(target) else "false"}
+                    for prop in re.findall(r"wdt:(P\d+)", re.search(r"VALUES \?p \{([^}]*)\}", query).group(1))
+                    for target in self.claims(qid, prop)]
+            if is_group(qid):
+                rows.append({"p": "self", "t": ENTITY + qid, "group": "true"})
+            return rows
         raise AssertionError(f"the fixture's Wikidata does not know this item query: {head}")
 
 
@@ -617,6 +638,24 @@ class DenRun(unittest.TestCase):
         offsets, values = store.column("franchise_o", "I", 4), store.column("franchise_v", "I", 4)
         row = store.keys().index("movie:900001")
         self.assertEqual(values[offsets[row]:offsets[row + 1]], [98000001])
+
+    def test_awards_reach_the_store_by_ceremony(self):
+        """movie:900001 won a category of the Harbour Film Awards (P361), was nominated for another (P31)
+        and for a festival prize that names only its festival (P1027). Won at the Harbour Film Awards,
+        nominated at the Skerry Film Festival, and the ceremonies are named in the store."""
+        record = next(r for r in self.facts()["records"] if r["mediaType"] == "movie" and r["tmdbId"] == 900001)
+        self.assertEqual(record["awardsWonAt"], ["Q99000010"])
+        self.assertEqual(record["awardsNominatedAt"], ["Q99000020"])
+        self.assertNotIn("Q99000001", self.facts()["entities"], "a category is not named")
+        store = Store(self.path(artifacts.STORE))
+        ceremonies = store.column("ceremony_qid", "I", 4)
+        self.assertEqual(ceremonies, [99000010, 99000020])
+        offsets = store.column("award_o", "I", 4)
+        values, won = store.column("award_v", "I", 4), store.column("award_w", "B", 1)
+        row = store.keys().index("movie:900001")
+        self.assertEqual(list(zip(values[offsets[row]:offsets[row + 1]], won[offsets[row]:offsets[row + 1]])),
+                         [(0, 1), (1, 0)])
+        self.assertEqual(self.facts()["entities"]["Q91000001"]["imdbId"], "nm9000001")
 
     def test_every_shipped_title_has_a_vector_and_says_which(self):
         store = Store(self.path(artifacts.STORE))

@@ -107,6 +107,9 @@ PROVENANCE = {
     "depicts": "llm", "depicts_names": "ours",
     "audience": "llm", "audience_names": "ours",
     "makers_v": "wikidata", "makers_o": "wikidata",
+    "directors_v": "wikidata", "directors_o": "wikidata",
+    "creators_v": "wikidata", "creators_o": "wikidata",
+    "writers_v": "wikidata", "writers_o": "wikidata",
     "cast_v": "wikidata", "cast_o": "wikidata",
     "broadcasters_v": "wikidata", "broadcasters_o": "wikidata",
     "composers_v": "wikidata", "composers_o": "wikidata",
@@ -139,11 +142,16 @@ PROVENANCE = {
     "ent_tmdb": "identifier",
     "ent_credits": "ours",
     "ent_alias_v": "wikidata", "ent_alias_o": "wikidata",
+    # IMDb's person id as Wikidata states it (P345): an id, not IMDb's dataset content.
+    "ent_imdb": "identifier",
     "maker_ent": "wikidata",
     "maker_rows_v": "ours", "maker_rows_o": "ours",
     # `data/iconic-studios.json`: which studios, their names and their items are a judgement kept by hand.
     "studio_qid": "ours", "studio_name": "ours",
     "studio_ent_v": "ours", "studio_ent_o": "ours",
+    # P166/P1411, each award filed under its ceremony by Wikidata's own P361/P31/P1027.
+    "ceremony_qid": "wikidata", "ceremony_name": "wikidata",
+    "award_v": "wikidata", "award_w": "wikidata", "award_o": "wikidata",
     # Embeddings of the article's plot text, and of the premise tags a model wrote from it.
     "vec_plot": "wikipedia",
     "vec_premise": "llm",

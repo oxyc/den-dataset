@@ -1041,6 +1041,113 @@ class IconicStudiosShip(StoreFixture, unittest.TestCase):
         self.assertIn("Q1 is listed twice", str(caught.exception))
 
 
+class SearchFactsShip(StoreFixture, unittest.TestCase):
+    """Roles, awards and people's IMDb ids (oxyc/den#135): the optional sections Search filters on."""
+
+    def span(self, store, name, row):
+        offsets = store.ints(f"{name}_o")
+        return store.ints(f"{name}_v")[offsets[row]:offsets[row + 1]]
+
+    def test_each_role_keeps_its_own_credits(self):
+        """`makers` is the union and cannot say which is which; the role lists can."""
+        titles = [dict(self.TITLES[0], facts=dict(self.TITLES[0]["facts"], screenwriters=["Q103", "Q100"],
+                                                  creators=["Q104"]))] + self.TITLES[1:]
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, titles=titles)
+        ent_qid = store.ints("ent_qid")
+        roles = {name: [ent_qid[e] for e in self.span(store, name, 0)]
+                 for name in ("directors", "creators", "writers")}
+        self.assertEqual(roles, {"directors": [100], "creators": [104], "writers": [103, 100]})
+        self.assertEqual([ent_qid[e] for e in self.span(store, "makers", 0)], [100, 104, 103])
+        self.assertEqual(self.span(store, "writers", 1), [])
+
+    def test_awards_ship_by_ceremony_with_a_win_marked(self):
+        titles = [dict(self.TITLES[0], facts=dict(self.TITLES[0]["facts"], awardsWonAt=["Q19020"],
+                                                  awardsNominatedAt=["Q1011547"])),
+                  dict(self.TITLES[1], facts=dict(self.TITLES[1]["facts"], awardsNominatedAt=["Q19020"]))]
+        with tempfile.TemporaryDirectory() as out:
+            store, stderr = self.build(out, titles=titles)
+        self.assertEqual(store.ints("ceremony_qid"), [19020, 1011547])
+        # Neither ceremony is in this fixture's entity table, so each is named by its Q-id.
+        self.assertEqual([store.text(i) for i in store.ints("ceremony_name")], ["Q19020", "Q1011547"])
+        won = store.ints("award_w", "B", 1)
+        offsets = store.ints("award_o")
+        self.assertEqual(list(zip(self.span(store, "award", 0), won[offsets[0]:offsets[1]])), [(0, 1), (1, 0)])
+        self.assertEqual(list(zip(self.span(store, "award", 1), won[offsets[1]:offsets[2]])), [(0, 0)])
+        self.assertIn("awards: 2 titles at 2 ceremonies", stderr)
+
+    def test_a_ceremony_both_won_and_only_nominated_is_refused(self):
+        titles = [dict(self.TITLES[0], facts=dict(self.TITLES[0]["facts"], awardsWonAt=["Q19020"],
+                                                  awardsNominatedAt=["Q19020"]))] + self.TITLES[1:]
+        with tempfile.TemporaryDirectory() as out, self.assertRaises(AssertionError) as caught:
+            self.build(out, titles=titles)
+        self.assertIn("both awardsWonAt and awardsNominatedAt", str(caught.exception))
+
+    def test_a_body_split_across_two_items_is_one_ceremony_and_a_win_at_either_counts(self):
+        """The Silver Bear files under the Berlin festival (data/award-ceremony-merges.json). A title
+        nominated at the festival and winning a Silver Bear is at Berlin once, as won; the stamped record
+        names the committed list, and every merge whose ceremony this corpus lacks as stale."""
+        titles = [dict(self.TITLES[0], facts=dict(self.TITLES[0]["facts"], awardsWonAt=["Q708135"],
+                                                  awardsNominatedAt=["Q130871"])),
+                  dict(self.TITLES[1], facts=dict(self.TITLES[1]["facts"], awardsNominatedAt=["Q708135"]))]
+        with tempfile.TemporaryDirectory() as out:
+            meta = os.path.join(out, "dataset.meta.json")
+            with open(meta, "w") as fh:
+                json.dump({"datasetVersion": "test"}, fh)
+            store, _ = self.build(out, titles=titles, stamp=meta)
+            with open(meta) as fh:
+                record = json.load(fh)["awardMerges"]
+        self.assertEqual(store.ints("ceremony_qid"), [130871])
+        won, offsets = store.ints("award_w", "B", 1), store.ints("award_o")
+        self.assertEqual([(self.span(store, "award", r), won[offsets[r]:offsets[r + 1]]) for r in (0, 1)],
+                         [([0], [1]), ([0], [0])])
+        with open(os.path.join(HERE, "..", "..", "data", "award-ceremony-merges.json"), "rb") as fh:
+            self.assertEqual(record["sha256"], hashlib.sha256(fh.read()).hexdigest())
+        self.assertEqual(record["applied"], 1)
+        self.assertNotIn("Q708135", record["stale"])
+        self.assertIn("Q81565646", record["stale"], "NBR Awards is named by no title here")
+
+    def test_the_committed_merge_list_is_well_formed_and_keeps_the_emmys_apart(self):
+        build_store_module()
+        from store import awards
+        merges, _ = awards.load_merges()
+        self.assertEqual(merges[708135], 130871, "the Silver Bear files under the Berlin festival")
+        emmys = {1044427, 1179189, 10354837, 123737}
+        self.assertFalse(emmys & (set(merges) | set(merges.values())), "the Emmys are separate ceremonies")
+
+    def test_a_malformed_merge_list_is_refused(self):
+        build_store_module()
+        from store import awards
+        for merges, complaint in (
+                ([{"from": "Q1", "into": "Q2"}], "needs a why"),
+                ([{"from": "Q1", "into": "Q1", "why": "x"}], "merged into itself"),
+                ([{"from": "Q1", "into": "Q2", "why": "x"}, {"from": "Q1", "into": "Q3", "why": "x"}],
+                 "merged twice"),
+                ([{"from": "Q1", "into": "Q2", "why": "x"}, {"from": "Q2", "into": "Q3", "why": "x"}],
+                 "merge into the last one directly"),
+                ([{"from": "1", "into": "Q2", "why": "x"}], "not a Wikidata item id")):
+            with self.subTest(complaint=complaint), tempfile.TemporaryDirectory() as out:
+                path = os.path.join(out, "merges.json")
+                with open(path, "w") as fh:
+                    json.dump({"merges": merges}, fh)
+                with self.assertRaises(SystemExit) as caught:
+                    awards.load_merges(path)
+                self.assertIn(complaint, str(caught.exception))
+
+    def test_a_corpus_with_no_awards_writes_the_sections_empty(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out)
+        self.assertEqual(store.ints("ceremony_qid"), [])
+        self.assertEqual(store.ints("award_o"), [0, 0, 0])
+
+    def test_only_a_persons_imdb_id_reaches_ent_imdb(self):
+        build_store_module()
+        from store import entities
+        self.assertEqual(entities.person_imdb_id("nm0000100"), "nm0000100")
+        for raw in ("co0000107", "tt0000001", "nm", "nm12x", None, ["nm1"]):
+            self.assertIsNone(entities.person_imdb_id(raw), raw)
+
+
 class OnlyATitleIdReachesTheImdbColumn(unittest.TestCase):
     """IMDb's id space is namespaced by prefix and Wikidata's P345 is not checked against it.
 

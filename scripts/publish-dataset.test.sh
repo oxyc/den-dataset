@@ -122,9 +122,9 @@ with open(path, "wb") as fh:
 MKSTORE
   store_sha="$(shasum -a 256 "$DIR/den-$version.store" | cut -d' ' -f1)"
   python3 - "$DIR/dataset.meta.json" "$version" "$labels_sha" "$store_sha" "$labels_records" "$extra" \
-    "$HERE/../data/alias-decisions.json" <<'PY'
+    "$HERE/../data/alias-decisions.json" "$HERE/../data/award-ceremony-merges.json" <<'PY'
 import hashlib, json, sys
-path, version, labels_sha, store_sha, records, extra, decisions = sys.argv[1:8]
+path, version, labels_sha, store_sha, records, extra, decisions, merges = sys.argv[1:9]
 meta = {
     "datasetVersion": version,
     "taxonomyVersion": "t02",
@@ -141,6 +141,9 @@ meta = {
                        "dropped": 0, "undecided": 0},
     # And every title several Wikidata items claim has its item chosen.
     "wikidataItems": {"ambiguous": []},
+    # And the committed award ceremony merges, none stale.
+    "awardMerges": {"sha256": hashlib.sha256(open(merges, "rb").read()).hexdigest(),
+                    "applied": 7, "stale": []},
 }
 if extra:
     meta.update(json.loads(extra))
@@ -774,6 +777,66 @@ if run_publish; then
 else
   grep -q "records no wikidataItems" "$WORK/err.log" \
     && ok "a store that does not say how many titles lack an item is refused" \
+    || bad "refused, but not for the missing record: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
+# --- award ceremony merges: a stale entry, another list, no record -----------------------------------------
+#
+# data/award-ceremony-merges.json joins bodies Wikidata splits across an organisation and its "Awards"
+# group. An entry whose ceremony no title names any more fixes a split that has moved.
+
+# `$1` is merged into the stamped awardMerges record; `null` removes it.
+set_merge_record() {
+  python3 - "$DIR/dataset.meta.json" "$1" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+record = json.loads(sys.argv[2])
+if record is None:
+    meta.pop("awardMerges")
+else:
+    meta["awardMerges"].update(record)
+json.dump(meta, open(sys.argv[1], "w"))
+PY
+}
+
+setup
+write_meta
+publish_baseline
+set_merge_record '{"stale": ["Q81565646"]}'
+if run_publish; then
+  bad "a store with a stale award ceremony merge published anyway"
+else
+  grep -q "1 merge(s) in .*award-ceremony-merges.json name a ceremony no title does" "$WORK/err.log" \
+    && grep -q "Q81565646" "$WORK/err.log" \
+    && ok "a stale award ceremony merge is refused, naming it" \
+    || bad "refused, but not for the stale merge: $(tail -3 "$WORK/err.log")"
+fi
+[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
+teardown
+
+setup
+write_meta
+publish_baseline
+set_merge_record '{"sha256": "0000"}'
+if run_publish; then
+  bad "a store built from another award merge list published anyway"
+else
+  grep -q "merges other than the committed" "$WORK/err.log" \
+    && ok "a store built from another award merge list is refused" \
+    || bad "refused, but not for the list: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
+setup
+write_meta
+publish_baseline
+set_merge_record null
+if run_publish; then
+  bad "a store with no awardMerges record published anyway"
+else
+  grep -q "records no awardMerges" "$WORK/err.log" \
+    && ok "a store that does not say which award merges it applied is refused" \
     || bad "refused, but not for the missing record: $(tail -3 "$WORK/err.log")"
 fi
 teardown

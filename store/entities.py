@@ -34,6 +34,16 @@ def intern(strings, table):
         if isinstance(ent, dict):
             for alias in ent.get("aliases") or []:
                 strings.add(alias)
+            strings.add(person_imdb_id(ent.get("imdbId")))
+
+
+def person_imdb_id(raw):
+    """The `nm…` id, or `None` — the person counterpart of `facts.title_imdb_id`. The facts stage keeps
+    only `nm` ids already; this refuses anything else a hand-edited table might carry, because the column
+    is a join key and a wrong-namespace id is a join that silently never matches."""
+    if not isinstance(raw, str):
+        return None
+    return raw if raw.startswith("nm") and raw[2:].isdigit() else None
 
 
 class Entities:
@@ -77,7 +87,7 @@ class Entities:
         for row in cast:
             for i in row:
                 credits[i] += 1
-        ent_name, ent_tmdb, ent_alias = [], [], []
+        ent_name, ent_tmdb, ent_alias, ent_imdb = [], [], [], []
         by_num = {int(q[1:]): q for q in self.table if q.startswith("Q") and q[1:].isdigit()}
         for num in self.qids:
             # An entity the table does not describe: referenced by a record but with no entry. Its Q-id
@@ -97,9 +107,13 @@ class Entities:
             # exactly the drift this format exists to prevent. They land in the shared dictionary, so the
             # repeats cost nothing, and the reader drops them once its index is built.
             ent_alias.append([strings.id(a) for a in (ent.get("aliases") or []) if a])
+            # IMDb's person id (Wikidata P345), for joining IMDb's own principals at run time. A join key
+            # only: the Q-id stays the id anything public addresses an entity by.
+            ent_imdb.append(strings.id(person_imdb_id(ent.get("imdbId"))))
         count = len(self.qids)
         sec.put("ent_qid", "I", self.qids, 4, expect=count)
         sec.put("ent_name", "I", ent_name, 4, expect=count)
         sec.put("ent_tmdb", "I", ent_tmdb, 4, expect=count)
         sec.put("ent_credits", "I", credits, 4, expect=count)
         sec.put_list("ent_alias", "I", 4, ent_alias, expect_rows=count)
+        sec.put("ent_imdb", "I", ent_imdb, 4, expect=count)

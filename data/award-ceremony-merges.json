@@ -1,0 +1,12 @@
+{
+  "_": "Award ceremonies that are one body split across two Wikidata items: Wikidata files some of the body's prizes under its organisation (P1027, conferred by) and others under its 'Awards' group, so the facts stage finds both. The store build files `from` under `into` before building the ceremony table. A festival merges into the festival; an academy whose one ceremony is a prize merges into the prize, the name a viewer searches for. The Emmys (Primetime, Daytime, International) are separate ceremonies and stay apart. See store/awards.py.",
+  "merges": [
+    {"from": "Q81565646", "into": "Q1133614", "why": "National Board of Review Awards is the National Board of Review's own awards group; its prizes are filed half under each (138 and 768 titles)"},
+    {"from": "Q108773780", "into": "Q49024", "why": "Venice Film Festival Awards are the Venice Film Festival's prizes (79 and 87 titles)"},
+    {"from": "Q708135", "into": "Q130871", "why": "the Silver Bear is a Berlin International Film Festival prize; the Golden Bear already files under the festival (78 and 106 titles)"},
+    {"from": "Q28444913", "into": "Q42369", "why": "Cannes Film Festival Awards are the Cannes Film Festival's prizes; a few are filed under the festival itself (203 and 4 titles)"},
+    {"from": "Q279820", "into": "Q448715", "why": "the Gouden Kalf is the Netherlands Film Festival's prize, which files the rest of its awards under the festival (22 and 33 titles)"},
+    {"from": "Q2822372", "into": "Q212828", "why": "the Spanish film academy's one ceremony is the Goya Awards (1 and 118 titles)"},
+    {"from": "Q8186514", "into": "Q3117505", "why": "the Catalan film academy's one ceremony is the Gaudí Awards (10 and 42 titles)"}
+  ]
+}

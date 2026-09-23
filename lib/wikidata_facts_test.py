@@ -129,6 +129,62 @@ class Series(unittest.TestCase):
         self.assertEqual((first, second, len(asked)), ({self.SERIES: 4}, {self.SERIES: 4}, 1))
 
 
+PROP = "http://www.wikidata.org/prop/direct/"
+
+
+class Awards(unittest.TestCase):
+    """What the Academy Award for Best Picture and its neighbours actually carry on Wikidata."""
+
+    def test_part_of_a_group_beats_an_instance_of_one_and_both_beat_the_awarding_body(self):
+        self.assertEqual(wd.ceremony({"P361": [("Q19020", True)], "P31": [("Q96474687", False)],
+                                      "P1027": [("Q212329", False)]}), "Q19020")
+        # A BAFTA category is an instance of the ceremony and of "class of award", which is no group.
+        self.assertEqual(wd.ceremony({"P31": [("Q732997", True), ("Q38033430", False)],
+                                      "P1027": [("Q159661", False)]}), "Q732997")
+
+    def test_a_group_credited_outright_is_its_own_ceremony(self):
+        self.assertEqual(wd.ceremony({"P31": [("Q107655869", False)], "self": [("Q1011547", True)]}),
+                         "Q1011547")
+
+    def test_the_awarding_body_stands_in_only_when_no_group_is_found(self):
+        self.assertEqual(wd.ceremony({"P31": [("Q4220917", False)], "P1027": [("Q42", False), ("Q7", False)]}),
+                         "Q7", "the lowest Q-id number, whatever order the rows came in")
+        self.assertIsNone(wd.ceremony({"P31": [("Q107467117", False)]}), "an order of chivalry is no ceremony")
+
+    def test_the_answer_parses_every_link_and_the_group_flag(self):
+        got = wd.parse_awards(body(
+            {"item": ENTITY + "Q102427", "p": PROP + "P361", "t": ENTITY + "Q19020", "group": "true"},
+            {"item": ENTITY + "Q102427", "p": PROP + "P31", "t": ENTITY + "Q96474687", "group": "false"},
+            {"item": ENTITY + "Q19020", "p": "self", "t": ENTITY + "Q19020", "group": "true"}))
+        self.assertEqual(got, {"Q102427": {"P361": [("Q19020", True)], "P31": [("Q96474687", False)]},
+                               "Q19020": {"self": [("Q19020", True)]}})
+
+    def test_the_query_asks_the_three_links_and_the_group_class(self):
+        query = wd.award_query(["Q2", "Q1", "Q2"])
+        self.assertIn("VALUES ?item { wd:Q1 wd:Q2 }", query)
+        self.assertIn("VALUES ?p { wdt:P361 wdt:P31 wdt:P1027 }", query)
+        self.assertIn("wdt:P31/wdt:P279* wd:Q107655869", query)
+
+
+class ImdbIds(unittest.TestCase):
+    def test_only_a_persons_id_is_kept_and_the_lowest_of_two(self):
+        got = wd.parse_imdb(body({"item": ENTITY + "Q1", "id": "nm0000200"},
+                                 {"item": ENTITY + "Q1", "id": "nm0000100"},
+                                 {"item": ENTITY + "Q2", "id": "co0000001"},
+                                 {"item": ENTITY + "Q3", "id": "ch0000001"}))
+        self.assertEqual(got, {"Q1": "nm0000100"})
+
+    def test_an_answer_is_cached_per_batch(self):
+        asked = []
+        payload = body({"item": ENTITY + "Q1", "id": "nm1"})
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(wd, "_sparql", lambda query: asked.append(query) or payload):
+            cache = caching.ResponseCache("wiki", directory, 3600)
+            first = wd.imdb_ids(["Q1", "Q2"], cache)
+            second = wd.imdb_ids(["Q2", "Q1"], cache)
+        self.assertEqual((first, second, len(asked)), ({"Q1": "nm1"}, {"Q1": "nm1"}, 1))
+
+
 class Fetch(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

@@ -404,6 +404,12 @@ python3 "$(dirname "$0")/check-alias-collisions.py" --gate "$meta" \
 python3 "$(dirname "$0")/check-wikidata-items.py" --gate "$meta" \
   || { echo "       Nothing uploaded." >&2; exit 1; }
 
+# AWARD MERGE GATE. Some awarding bodies reach the corpus as two ceremonies (an organisation and its
+# "Awards" group), and data/award-ceremony-merges.json joins each pair by hand. This refuses a store built
+# from another list, or with an entry whose ceremony no title names any more.
+python3 "$(dirname "$0")/check-award-merges.py" --gate "$meta" \
+  || { echo "       Nothing uploaded." >&2; exit 1; }
+
 # SHAPE GUARD. A producer can exist, be committed, be run correctly — and still emit a shape its consumer
 # cannot read. One entity carrying `"aliases": "Adrian Anthony Lester"` where atlas types Vec<String> made a
 # 27 MB facts file unparseable at its first entity; atlas does not partially load one, so it dropped the
