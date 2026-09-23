@@ -92,6 +92,9 @@ python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --li
 # 4. The document's director and genre clauses (Wikidata, ~770 SPARQL requests, resumable).
 ./den stage docfacts --out-dir out
 
+# 4a. English translations of the plots that are not in English (optional; tools/translate/README.md).
+#     The embed stage reads out/plot-translations.jsonl when it is there, or --set plot_translations=<path>.
+
 # 5. Embed. DEN_EMBED_URL picks the service (default http://localhost:8791).
 ./den stage embed --out-dir out
 

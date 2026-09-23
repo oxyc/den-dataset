@@ -97,5 +97,62 @@ class Batches(unittest.TestCase):
             self.assertEqual([doc for _, _, doc in docs], ["Plot:", "Plot:"])
 
 
+class Translations(unittest.TestCase):
+    """A plot not in English is embedded as the translation made from exactly that plot (#89)."""
+
+    PLOT = "  Ein Anwalt feiert seine Verlobung. Dann geschieht ein Mord.\n"
+    ENGLISH = "A lawyer celebrates his engagement. Then a murder happens."
+
+    def compose(self, translations):
+        with tempfile.TemporaryDirectory() as out:
+            with open(os.path.join(out, "batch-1.json"), "w", encoding="utf-8") as fh:
+                json.dump([{"tmdbId": 1, "mediaType": "movie", "overview": self.PLOT, "hasWikiPlot": True,
+                            "plotLanguage": "de", "createdBy": ["A B"]}], fh)
+            label = {"subgenres": [{"label": "Legal"}], "moods": []}
+            [(_, _, doc)] = compose.documents(out, {"movie:1": label}, {"movie:1": {"genres": ["drama"]}},
+                                              set(), 3500, {}, translations)
+            return doc
+
+    def source_sha(self):
+        return compose.plot_sha(compose.source_plot({"overview": self.PLOT, "hasWikiPlot": True}, 3500))
+
+    def test_the_source_hash_is_of_the_text_after_plot(self):
+        doc = self.compose(None)
+        self.assertEqual(self.source_sha(), compose.plot_sha(doc[doc.index("Plot: ") + len("Plot: "):]))
+
+    def test_a_matching_translation_is_embedded(self):
+        doc = self.compose({("movie:1", self.source_sha()): self.ENGLISH})
+        self.assertEqual(doc, "Created by A B. Genres: drama. Themes: Legal. Plot: " + self.ENGLISH)
+
+    def test_a_translation_of_another_plot_is_ignored(self):
+        stale = compose.plot_sha("Ein Anwalt feiert seine Verlobung.")
+        self.assertEqual(self.compose({("movie:1", stale): self.ENGLISH}), self.compose(None))
+
+    def test_the_prefix_is_byte_identical(self):
+        original = self.compose(None)
+        translated = self.compose({("movie:1", self.source_sha()): self.ENGLISH})
+        cut = original.index("Plot: ") + len("Plot: ")
+        self.assertEqual(translated[:cut].encode(), original[:cut].encode())
+        self.assertNotEqual(translated, original)
+
+    def test_the_translation_is_capped_like_any_plot(self):
+        long = "A sentence. " * 400
+        doc = self.compose({("movie:1", self.source_sha()): long})
+        self.assertEqual(doc[doc.index("Plot: ") + len("Plot: "):], compose.capped_plot(long, 3500).strip())
+
+    def test_the_cache_reads_last_line_wins_and_skips_a_torn_tail(self):
+        rows = [{"key": "movie:1", "source_sha256": "a", "english": "old"},
+                {"key": "movie:1", "source_sha256": "a", "english": "new"}]
+        with tempfile.TemporaryDirectory() as out:
+            path = os.path.join(out, "t.jsonl")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("".join(json.dumps(r) + "\n" for r in rows) + '{"key": "movie:2", "sour')
+            self.assertEqual(compose.read_translations(path), {("movie:1", "a"): "new"})
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('{"key": "movie:2"\n' + json.dumps(rows[0]) + "\n")
+            with self.assertRaisesRegex(Exception, "is not a translation row"):
+                compose.read_translations(path)
+
+
 if __name__ == "__main__":
     unittest.main()

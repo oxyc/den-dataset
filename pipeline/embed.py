@@ -2,8 +2,9 @@
 """The EMBED pass — one document per title, through den-embed, into two append-only stores.
 
 The document is composed in `pipeline/compose.py` (Wikidata's genres, the creators, our own tags and the
-capped Wikipedia plot) and embedded by the service `DEN_EMBED_URL` names. The vectors land in
-`index/labels.jsonl` + `index/vectors.jsonl`, line for line, which `finalize` turns into the shipped blob.
+capped Wikipedia plot, or its English translation) and embedded by the service `DEN_EMBED_URL` names.
+The vectors land in `index/labels.jsonl` + `index/vectors.jsonl`, line for line, which `finalize` turns into
+the shipped blob.
 
 **The composition is not a set of options.** `{"docShape":"lean","dropDirector":true,"plotCap":3500}` is what
 the shipped index was built with, and anything else is a different vector space in the same file. The
@@ -83,6 +84,7 @@ INPUTS = (
     artifacts.GENRES_MOODS,
     artifacts.ENRICHED.called("enriched_dir"),
     artifacts.DOC_FACTS,
+    artifacts.PLOT_TRANSLATIONS,
 )
 
 #: The two append-only stores, and the three records that say which space and which document shape the
@@ -300,10 +302,10 @@ def last_rows(labels_path, vectors_path):
     return found
 
 
-def embedded_docs(rows, keys, rebuild, enriched, doc_facts):
+def embedded_docs(rows, keys, rebuild, enriched, doc_facts, translations):
     """For each of `keys` in the store, the hash of the document its vector was made from, where known: the
     recorded `docSha256`, or, for a row without one and when `rebuild` holds, the document rebuilt from the
-    tags on that row with today's plot and facts."""
+    tags on that row with today's plot, translation and facts."""
     known, hashless = {}, {}
     for key in keys:
         if key not in rows:
@@ -315,7 +317,7 @@ def embedded_docs(rows, keys, rebuild, enriched, doc_facts):
             hashless[key] = record
     if hashless:
         for key, _, document in compose.documents(enriched, hashless, doc_facts, set(),
-                                                  SHIPPED_COMPOSITION["plotCap"], {}):
+                                                  SHIPPED_COMPOSITION["plotCap"], {}, translations):
             known[key] = doc_sha(document)
     return known
 
@@ -328,13 +330,18 @@ def counted(groups, stored, tally):
 
 
 def inputs(ctx):
-    """The genres & moods per key, the doc facts, and the enriched dir — every input, required."""
+    """The genres & moods per key, the doc facts and the enriched dir, which are required, and the plot
+    translations, which are not."""
     labels = genres_moods.read(ctx.require(artifacts.GENRES_MOODS))
     enriched = ctx.require(BOUND[artifacts.ENRICHED.name].artifact)
     # Without doc facts the document is not the CC0 shape at all, so the file is required, not optional.
     with open(ctx.require(artifacts.DOC_FACTS), encoding="utf-8") as handle:
         doc_facts = json.load(handle)
-    return labels, enriched, doc_facts
+    translated = ctx.require(artifacts.PLOT_TRANSLATIONS)
+    translations = compose.read_translations(translated) if translated else {}
+    say(f"plot translations: {len(translations)} from {translated}" if translated else
+        "plot translations: none — every plot embeds in its own language")
+    return labels, enriched, doc_facts, translations
 
 
 def embed_into(stores, url, stamp, pause_ms, flushes):
@@ -381,7 +388,7 @@ def run(ctx):
     """Embed what the stores do not hold yet, and re-embed what the run was asked to. Returns the vectors
     store — or, with `--dump-docs`, the documents file."""
     os.makedirs(os.path.abspath(ctx.out_dir), exist_ok=True)
-    labels, enriched, doc_facts = inputs(ctx)
+    labels, enriched, doc_facts, translations = inputs(ctx)
     listed = listed_keys(ctx.reembed_keys) if ctx.reembed_keys else set()
     unlabelled = listed - labels.keys()
     if unlabelled:
@@ -414,11 +421,11 @@ def run(ctx):
     if candidates:
         rows = last_rows(labels_store, vectors_store)
         # A listed key is forced: only a recorded hash, never a rebuilt one, lets it be skipped.
-        embedded = embedded_docs(rows, candidates - listed, True, enriched, doc_facts)
-        embedded.update(embedded_docs(rows, candidates & listed, False, enriched, doc_facts))
+        embedded = embedded_docs(rows, candidates - listed, True, enriched, doc_facts, translations)
+        embedded.update(embedded_docs(rows, candidates & listed, False, enriched, doc_facts, translations))
     tally = {}
     docs = compose.documents(enriched, labels, doc_facts, done - candidates, SHIPPED_COMPOSITION["plotCap"],
-                             tally)
+                             tally, translations)
     docs = (item for item in docs if item[0] not in candidates or embedded.get(item[0]) != doc_sha(item[2]))
     groups = counted(chunks(docs, CHUNK, ctx.limit), done, tally)
     if ctx.plan:
