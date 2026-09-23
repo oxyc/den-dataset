@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Embed composed documents on whichever den-embed serves live queries, and write the index store.
 
-  scripts/v2/embed_docs.py --docs docs.jsonl --out-dir out --url http://den-embed:8080 \
+  pipeline/embed_docs.py --docs docs.jsonl --out-dir out --url http://den-embed:8080 \
       --canary data/embed-canary.json
 
 Input is `./den stage embed --dump-docs` output: one `{"key": "movie:11", "doc": "…"}` per line. Output is
@@ -57,6 +57,8 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
+# A flat import of the file beside this one, not `pipeline.embed_canary`: on the box the two are copied into
+# a bare container on their own (`docs/OPERATE.md`), with no package around them.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import embed_canary  # noqa: E402
 

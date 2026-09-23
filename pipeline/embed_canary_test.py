@@ -6,11 +6,9 @@ canary exists to remove, and the one it could most easily reproduce.
 import copy
 import json
 import os
-import sys
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import embed_canary  # noqa: E402
+from . import embed_canary
 
 HEALTH = {"status": "ok", "model": "bge-m3", "dims": 1024, "vector_epoch": 1,
           "runtime": "den-embed/5.1.2", "max_tokens": 1024}

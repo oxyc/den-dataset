@@ -4,7 +4,7 @@
   "scripts/facts-run.sh": "reruns the facts stage until no WDQS batch was skipped, which one attempt at the full corpus never manages",
   "scripts/recluster-run.sh": "the re-cluster report a person reads before a taxonomy bump; no timer runs it, so it is run by hand",
   "scripts/v2/derive_doc_facts.py": "doc-facts.json from an existing facts sidecar instead of ~770 SPARQL requests",
-  "scripts/v2/embed_docs.py": "embeds `den stage embed --dump-docs` output on the serving box, behind the canary",
+  "pipeline/embed_docs.py":"embeds `den stage embed --dump-docs` output on the serving box, behind the canary",
   "scripts/v2/import_box_vectors.py": "joins embed_docs.py's box output back into an index store finalize reads",
   "scripts/v2/merge_classify_labels.py": "folds a classification phase directory into labels-t02.json without losing a title",
   "scripts/v2/embed_premise_v2.py": "builds the premise vector blob, reusing only base vectors the live embedder reproduces byte for byte",

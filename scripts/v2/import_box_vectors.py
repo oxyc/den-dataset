@@ -43,9 +43,8 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-import embed_canary  # noqa: E402
+from pipeline import embed_canary  # noqa: E402
 from pipeline import genres_moods  # noqa: E402  — the one reader of genres-moods.json's shape
 from pipeline.contract import StageError  # noqa: E402
 
