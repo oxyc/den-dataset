@@ -58,7 +58,7 @@ BATCH = 500
 #: over from the old grounding (a `plotArticle` on a title that lost its plot) would be a lie about the new
 #: one. Older batches carry TMDB fields no reader wants any more (oxyc/den-dataset#53); they are not copied,
 #: and a record only given its backfilled revision sheds them through `enrich.written` too.
-KEPT = ("tmdbId", "mediaType", "genreIDs", "originCountry", "wikidataItem", "wikidataCandidates")
+KEPT = ("tmdbId", "mediaType", "genreIDs", "wikidataItem", "wikidataCandidates")
 
 UNCHANGED, MOVED, GONE, UNKNOWN = "unchanged", "moved", "gone", "unknown"
 

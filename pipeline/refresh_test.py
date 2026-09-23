@@ -222,11 +222,11 @@ class Run(Refresh):
 
     def test_a_backfilled_record_sheds_the_tmdb_fields_no_reader_wants(self):
         """Only its revision is new, but it is written into a new batch, and an old row's TMDB title, cast,
-        vote count and language are not copied forward into it (oxyc/den-dataset#53)."""
+        vote count, language and origin are not copied forward into it (oxyc/den-dataset#53)."""
         self.refreshed()
         row = self.latest()["movie:5"]
-        self.assertEqual({"title", "topCast", "voteCount", "originalLanguage"} & set(row), set())
-        self.assertEqual((row["overview"], row["genreIDs"], row["originCountry"]), (PLOT.strip(), [18], ["US"]))
+        self.assertEqual({"title", "topCast", "voteCount", "originalLanguage", "originCountry"} & set(row), set())
+        self.assertEqual((row["overview"], row["genreIDs"]), (PLOT.strip(), [18]))
 
     def test_a_second_refresh_finds_nothing_left_but_the_failure(self):
         self.refreshed()
@@ -250,8 +250,8 @@ class Run(Refresh):
     def test_a_refreshed_record_keeps_its_tmdb_half_and_item_and_drops_legacy_fields(self):
         self.refreshed()
         row = self.latest()["movie:1"]
-        self.assertEqual((row["genreIDs"], row["originCountry"]), ([18], ["US"]))
-        self.assertEqual({"title", "keywords", "voteCount", "originalLanguage"} & set(row), set())
+        self.assertEqual(row["genreIDs"], [18])
+        self.assertEqual({"title", "keywords", "voteCount", "originalLanguage", "originCountry"} & set(row), set())
         self.assertEqual(self.latest()["movie:6"]["wikidataItem"], "Q1")
         self.assertIn(({"movie": {6: ["Q2"]}}), [excluded for _ids, excluded in self.candidate_calls],
                       "the item set aside at enrichment stays set aside")

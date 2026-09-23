@@ -390,12 +390,13 @@ def reground(record, facts, cache, token):
 
 
 #: TMDB fields no reader of a batch wants, left out of every row written (oxyc/den-dataset#53). `voteCount`
-#: is still on the record `lib/tmdb.title_record` builds, because admission reads it (`tmdb_votes`); after
-#: the gate nothing does. The rest are what older batches carry, and a record copied forward from one of
-#: those (`pipeline/refresh`) sheds them here. Batches already on disk keep theirs, and no reader minds
+#: and `originCountry` are still on the record `lib/tmdb.title_record` builds, because admission reads them
+#: here — the count for an export row (`tmdb_votes`), the origin for the tier (`pipeline/floors.py`) — and
+#: after the gate nothing does. The rest are what older batches carry, and a record copied forward from one
+#: of those (`pipeline/refresh`) sheds them here. Batches already on disk keep theirs, and no reader minds
 #: either way.
-UNREAD_TMDB = frozenset({"voteCount", "originalLanguage", "title", "year", "genres", "keywords", "keywordIDs",
-                         "director", "topCast"})
+UNREAD_TMDB = frozenset({"voteCount", "originCountry", "originalLanguage", "title", "year", "genres", "keywords",
+                         "keywordIDs", "director", "topCast"})
 
 
 def written(record):

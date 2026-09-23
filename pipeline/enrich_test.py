@@ -212,10 +212,10 @@ class Batch(unittest.TestCase):
                          "not even the TMDB overview's LENGTH is carried any more")
 
     def test_a_batch_row_carries_only_the_tmdb_fields_a_reader_needs(self):
-        """oxyc/den-dataset#53. `genreIDs` stays for `./den genres-moods`' `animated` flag and `originCountry`
-        for the admission tier; the title, year, genre names, keywords, director, cast and original language
-        were written for readers that are gone. `voteCount` admitted this export row — its worklist row states
-        no count — and is still not written: nothing after the gate reads it."""
+        """oxyc/den-dataset#53. `genreIDs` stays for `./den genres-moods`' `animated` flag; the title, year,
+        genre names, keywords, director, cast and original language were written for readers that are gone.
+        `voteCount` admitted this export row — its worklist row states no count — and `originCountry` chose
+        its tier, and neither is written: nothing after the gate reads them."""
         self.mapping[("movie", 1)] = {"article": "One"}
         self.plots[("One", "en")] = found("W" * 200)
         body = detail(1, release_date="1994-09-23", genres=[{"id": 16, "name": "Animation"}],
@@ -228,8 +228,8 @@ class Batch(unittest.TestCase):
         row = self.rows()["movie:1"]
         tmdb_sourced = {"title", "year", "genres", "keywords", "keywordIDs", "director", "topCast",
                         "originalLanguage", "voteCount", "genreIDs", "originCountry"}
-        self.assertEqual(tmdb_sourced & set(row), {"genreIDs", "originCountry"})
-        self.assertEqual((row["genreIDs"], row["originCountry"]), ([16], ["JP"]))
+        self.assertEqual(tmdb_sourced & set(row), {"genreIDs"})
+        self.assertEqual(row["genreIDs"], [16])
 
     def test_creators_are_wikidatas_or_none_never_tmdbs(self):
         """`createdBy` is composed into the embedding document. With no Wikidata P170 it is EMPTY — TMDB's
@@ -609,6 +609,19 @@ class Batch(unittest.TestCase):
             (5, 5, ["US"], 10))          # worldwide, 10 ≥ 10
         self.assertEqual(written, {"movie:1", "movie:3", "movie:5"})
         self.assertEqual(report["belowFloor"], 2)
+
+    def test_the_tier_is_judged_on_the_origin_the_batch_does_not_write(self):
+        """oxyc/den-dataset#53. `originCountry` is read in memory to pick the tier and left out of the row.
+        An export row (no count on the worklist, the detail call's instead) and a delta row (the worklist's
+        count) at 20 votes each: a French one clears the regional 15, an American one misses the worldwide 50."""
+        bodies = {f"/movie/{n}": detail(n, votes=votes, origin_country=origin)
+                  for n, votes, origin in ((1, 20, ["FR"]), (2, 20, ["US"]), (3, 500, ["FR"]), (4, 500, ["US"]))}
+        report = self.run_batch(bodies, [("movie", n) for n in (1, 2, 3, 4)],
+                                votes={("movie", 3): 20, ("movie", 4): 20})
+        rows = self.rows()
+        self.assertEqual(set(rows), {"movie:1", "movie:3"})
+        self.assertEqual((report["admittedByTmdb"], report["belowFloor"], report["votesFromWorklist"]), (2, 2, 2))
+        self.assertEqual([key for key, row in rows.items() if "originCountry" in row], [])
 
     def test_the_floors_a_run_names_are_the_ones_it_judges_by(self):
         bodies = {"/movie/1": detail(1, votes=30, origin_country=["US"])}
