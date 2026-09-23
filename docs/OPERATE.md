@@ -74,9 +74,11 @@ cp den.env.example den.env        # TMDB_API_KEY (worklist discover/delta); Ente
 #    Keep a delta's lists under delta/: written over the full ones, they END the enrich run.
 #    To re-embed exactly what ships instead, `python3 scripts/build-worklist.py` writes
 #    out/worklist-{movie,tv}.json, and step 3 drains those with --set universe_movie=… universe_tv=….
-#    Those rows state no TMDB count; a shipped title keeps its admission regardless. Re-fetching titles
-#    that were enriched and never shipped (plotless ones) needs --wikipedia-floor 0
-#    --regional-wikipedia-floor 0, or they are judged again as new (pipeline/floors.py).
+#    Those rows state no TMDB count, and say "admitted": true, so each keeps the admission an earlier
+#    build gave it. A re-fetch or re-ground plan built from an out-dir must write "admitted": true on every
+#    row that out-dir enriched — the plotless titles among them are in no catalogue — or those rows are
+#    judged again as new (pipeline/floors.py). A plan without it is a list nothing records as admitted:
+#    --wikipedia-floor 0 --regional-wikipedia-floor 0 admits every title on it.
 
 # 3. Fetch — Wikidata and the live Wikipedia plot per title, resumable. Asks TMDB nothing.
 ./den stage fetch --out-dir out

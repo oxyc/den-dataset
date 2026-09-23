@@ -171,10 +171,11 @@ class Batch(unittest.TestCase):
             answer = dict(answer, resolvedArticle=article)
         return answer
 
-    def worklist(self, *entries, votes=None, tiers=None):
+    def worklist(self, *entries, votes=None, tiers=None, planned=()):
         """A worklist whose rows state `VOTES` TMDB votes — the shape `/discover` and the delta write —
         unless `votes` names another count per `(media, id)`; None there is an export row, which states
-        none. `tiers` names a row's `regional` answer; a row it does not name states none."""
+        none. `tiers` names a row's `regional` answer; a row it does not name states none. A row `planned`
+        names says `"admitted": true`, as a plan built from an earlier out-dir writes it."""
         path = os.path.join(self.out, "worklist.json")
         rows = []
         for media, tmdb_id in entries:
@@ -184,13 +185,16 @@ class Batch(unittest.TestCase):
                 row["voteCount"] = count
             if tiers and (media, tmdb_id) in tiers:
                 row["regional"] = tiers[(media, tmdb_id)]
+            if (media, tmdb_id) in planned:
+                row["admitted"] = True
             rows.append(row)
         with open(path, "w") as fh:
             json.dump(rows, fh)
         return path
 
-    def run_batch(self, entries, votes=None, tiers=None, **kwargs):
-        return enrich.run(self.worklist(*entries, votes=votes, tiers=tiers), self.out, cache=self.cache, **kwargs)
+    def run_batch(self, entries, votes=None, tiers=None, planned=(), **kwargs):
+        return enrich.run(self.worklist(*entries, votes=votes, tiers=tiers, planned=planned), self.out,
+                          cache=self.cache, **kwargs)
 
     def rows(self, batch_id=1):
         with open(enrich.batch_path(self.out, batch_id)) as fh:
@@ -676,6 +680,26 @@ class Batch(unittest.TestCase):
         self.assertEqual((report["admittedAsShipped"], report["belowFloor"]), (1, 2))
         self.assertEqual(self.wiki_calls[0][:2], ("movie", [2, 3]), "a shipped title is not asked about")
         self.assertEqual(self.origin_calls, [("movie", [2])])
+
+    def test_a_plan_row_that_says_it_was_admitted_keeps_its_admission(self):
+        """A title enriched once and never shipped — plotless — is not in the catalogue. The plan that
+        re-fetches it knows it was admitted, and says so on the row; the same row without it is judged
+        again as new. A plan row with a count is judged on the count."""
+        self.wikis.update({("movie", 1): 1, ("movie", 2): 1, ("movie", 3): 1})
+        report = self.run_batch([("movie", 1), ("movie", 2), ("movie", 3)],
+                                votes={("movie", 1): None, ("movie", 2): None, ("movie", 3): 10},
+                                tiers={("movie", 3): False}, planned={("movie", 1), ("movie", 3)})
+        self.assertEqual(set(self.rows()), {"movie:1"})
+        self.assertEqual((report["admittedByPlan"], report["admittedAsShipped"], report["belowFloor"]), (1, 0, 2))
+        self.assertNotIn("admitted", self.rows()["movie:1"], "the plan's word is read, not written")
+
+    def test_only_a_literal_true_says_admitted(self):
+        """A hand-edited plan's `"admitted": "no"` is not a yes."""
+        path = os.path.join(self.out, "plan.json")
+        put(path, json.dumps([{"tmdbId": 1, "mediaType": "movie", "admitted": True},
+                              {"tmdbId": 2, "mediaType": "movie", "admitted": "no"},
+                              {"tmdbId": 3, "mediaType": "movie"}]))
+        self.assertEqual(enrich.read_worklist(path)[3], frozenset({"movie:1"}))
 
     def test_an_unreadable_catalogue_is_a_refusal_not_an_empty_one(self):
         """Read as empty, it would judge every shipped title on a list of ids again, silently."""
