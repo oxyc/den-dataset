@@ -19,7 +19,7 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from store import vector_blob  # noqa: E402
 
-ROOT = '/Users/cindy/Projects/Personal/den-dataset/out-t02'
+ROOT = os.environ.get('DEN_T02_DIR', 'out-t02')  # the July generation's out-dir: DEN_T02_DIR, else ./out-t02
 
 
 def read_blob(path):

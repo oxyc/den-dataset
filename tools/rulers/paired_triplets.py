@@ -31,7 +31,7 @@ from index_io import load_plot_index, load_premise_v1_index  # noqa: E402
 from score_triplets import load_extra, restrict  # noqa: E402
 from split import half  # noqa: E402
 
-V2 = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'
+V2 = os.path.join(os.environ.get('DEN_T02_DIR', 'out-t02'), 'v2')  # the July generation's out-dir: DEN_T02_DIR, else ./out-t02
 
 
 def outcomes(index, triplets):

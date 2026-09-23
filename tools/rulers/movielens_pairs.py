@@ -36,7 +36,7 @@ import sys
 import numpy as np
 from scipy.sparse import csr_matrix
 
-ROOT = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'
+ROOT = os.path.join(os.environ.get('DEN_T02_DIR', 'out-t02'), 'v2')  # the July generation's out-dir: DEN_T02_DIR, else ./out-t02
 ML = os.path.join(ROOT, 'movielens', 'ml-32m')
 JOIN = os.path.join(ROOT, 'movielens', 'join.json')
 OUT_DIR = os.path.join(ROOT, 'eval')
