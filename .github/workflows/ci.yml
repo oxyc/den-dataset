@@ -52,7 +52,7 @@ jobs:
       # The embed path, which runs from a container on the box with nothing installed: these must stay
       # importable on a bare python3, because a syntax error there surfaces as a failed corpus run hours in.
       - name: The embed path compiles
-        run: python3 -m py_compile pipeline/embed_canary.py pipeline/embed_docs.py scripts/v2/embed_premise_v2.py scripts/v2/import_box_vectors.py
+        run: python3 -m py_compile pipeline/embed_canary.py pipeline/embed_docs.py scripts/v2/embed_premise_v2.py pipeline/import_box_vectors.py
       - name: Jev facet contracts
         run: |
           python3 -m py_compile pipeline/run_facets.py pipeline/run_combined.py pipeline/run_delta.py pipeline/audit_combined.py pipeline/consolidate_corpus.py

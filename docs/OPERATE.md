@@ -104,7 +104,7 @@ ssh root@pve 'incus exec den -- podman run --rm --network den \
     -v /tmp/embed-canary.json:/canary.json:ro -v /tmp/box:/w:z \
     docker.io/library/python:3.12-slim python /embed_docs.py \
         --docs /w/docs.jsonl --out-dir /w/out --url http://den-embed:8080 --canary /canary.json'
-python3 scripts/v2/import_box_vectors.py --vectors box/vectors.jsonl --labels out/genres-moods.json \
+python3 pipeline/import_box_vectors.py --vectors box/vectors.jsonl --labels out/genres-moods.json \
     --out-dir out/index --embed-space box/embedding-space.json \
     --embedder-health '{"model":"bge-m3","dims":1024,"vector_epoch":1,"runtime":"…","max_tokens":1024}'
 
