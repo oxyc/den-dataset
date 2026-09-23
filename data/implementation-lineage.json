@@ -1,6 +1,14 @@
 {
   "note": "Superseded digests of the files run_combined.py hashes into every shard's manifest. A shard bought on an older version of the pass is still auditable ONLY if somebody wrote down why that version's rows mean the same thing; re-stamping the manifest instead would erase the provenance of a paid run to make a checker quiet. So the check stays strict and the exceptions are here, each naming the commit that superseded it and what that commit did. An unlisted digest is a refusal. Add an entry only after reading the diff: `git diff <commit>^ <commit> -- <file>`. An entry written BY the commit that supersedes it cannot name that commit's own hash, so `supersededBy` names the change instead, and a later commit fills the hash in; `git log --follow -- data/implementation-lineage.json` finds it. `superseded` is the four SOURCE files (`implementationSha256`); `supersededInputs` is the committed DATA files the same config pins by digest — the prompt and the vocabulary — which are a different thing and are not filed under a source file's name.",
   "superseded": {
+    "article_sections.py": [
+      {
+        "sha256": "d32d59db2d6c48ef11ee3ae7a946fb11f2f95ed1978b9c47c2fc6faa42add845",
+        "commit": "640f456",
+        "supersededBy": "the change that gives the classify state a work's other names (requestedTarget.alsoKnownAs)",
+        "why": "`target()` now adds `alsoKnownAs` to requestedTarget when the article row carries a non-empty one: the work's P1476 titles and its label in the article's language, so an article headed by a local release title is judged against a name it uses. A row without the field — every row dumped before the articles stage wrote it, which is every row a shard on this digest read — builds the same state byte for byte, so a row bought on this digest is the row this file would still produce, and the auditor's reconstructed stateSha256 still matches. Section parsing, grouping and selection are untouched."
+      }
+    ],
     "run_combined.py": [
       {
         "sha256": "031e9f1431f33a912b036454be7e793f8a66c9e0103d7f7cb8bd64cc289808f3",

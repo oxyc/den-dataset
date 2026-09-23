@@ -59,6 +59,7 @@ class Staged(unittest.TestCase):
         # Wikidata's name for each title: `(media, id) -> {"title", "year"}`, a default for any other id, or
         # an exception to raise.
         self.named, self.named_calls, self.naming, self.named_excluded = {}, [], None, []
+        self.named_languages = []
         self.original_targets = articles.wikidata.targets
         articles.wikidata.targets = self.targets_stub
 
@@ -67,9 +68,10 @@ class Staged(unittest.TestCase):
         articles.wikidata.targets = self.original_targets
         self.directory.cleanup()
 
-    def targets_stub(self, ids, media, cache=None, excluded=None):
+    def targets_stub(self, ids, media, cache=None, excluded=None, languages=()):
         self.named_calls.append((media, list(ids)))
         self.named_excluded.append((media, excluded))
+        self.named_languages.append((media, sorted(languages)))
         if self.naming is not None:
             raise self.naming
         return {i: self.named.get((media, i), {"title": f"Wikidata {i}", "year": 2001}) for i in ids
@@ -249,13 +251,40 @@ class Output(Staged):
         self.assertEqual((targets[8]["title"], targets[8]["year"]), ("", None),
                          "unknown stays unknown rather than falling back to TMDB's")
 
+    def test_the_classify_state_carries_the_works_other_names_only_when_it_has_some(self):
+        """A row dumped before `alsoKnownAs` existed, or with none, must build the state it always built:
+        the auditor rebuilds every shipped shard's state and holds it to the recorded digest."""
+        from pipeline import article_sections
+        base = {"mediaType": "movie", "tmdbId": 7, "title": "Room 205", "year": 2007}
+        self.assertEqual(article_sections.target(dict(base, alsoKnownAs=["Kollegiet"]))["alsoKnownAs"],
+                         ["Kollegiet"])
+        old = {"mediaType": "film", "title": "Room 205", "year": 2007, "tmdbId": 7}
+        self.assertEqual(article_sections.target(base), old)
+        self.assertEqual(article_sections.target(dict(base, alsoKnownAs=[])), old)
+
     def test_a_target_wikidata_does_not_know_is_null_and_never_omitted(self):
         self.batch(1, [record(7)])
         self.named[("movie", 7)] = None
         articles.run(self.context())
         with open(os.path.join(self.out, "articles.jsonl"), encoding="utf-8") as fh:
             raw = fh.readline()
-        self.assertIn('"title":null,"year":null,"targetSource":"wikidata"', raw)
+        self.assertIn('"title":null,"year":null,"alsoKnownAs":[],"targetSource":"wikidata"', raw)
+
+    def test_the_works_other_names_are_its_titles_and_its_label_in_the_articles_language(self):
+        """What lets the classify pass see that a French article headed "Il était une fois, une fois" is
+        about the film Wikidata calls "The Belgian Job" in English. The English name is not repeated, and a
+        label in a language the article is not in is not the article's name."""
+        self.batch(1, [record(7, plotLanguage="fr"), record(8)])
+        self.named[("movie", 7)] = {"title": "The Belgian Job", "year": 2012,
+                                    "originals": ["The Belgian Job", "Il était une fois, une fois"],
+                                    "labels": {"fr": "Il était une fois, une fois", "de": "Kein Titel"}}
+        self.named[("movie", 8)] = {"title": "Solaris", "year": 1972, "originals": ["Solaris"], "labels": {}}
+        articles.run(self.context())
+        rows = {row["tmdbId"]: row for row in self.dumped()}
+        self.assertEqual(rows[7]["alsoKnownAs"], ["Il était une fois, une fois"])
+        self.assertEqual(rows[8]["alsoKnownAs"], [])
+        self.assertEqual(self.named_languages, [("movie", ["en", "fr"])],
+                         "each batch asks for the labels in the languages its articles are in")
 
     def test_each_media_is_named_apart_in_fixed_batches(self):
         """Movie 95 and series 95 are different works, and batch membership is part of the cache key."""
@@ -313,7 +342,7 @@ class Output(Staged):
         self.named[("movie", 7)] = {"title": "AC/DC: Let There Be Rock", "year": 1980}
         articles.run(self.context())
         golden = ('{"mediaType":"movie","tmdbId":7,"title":"AC\\/DC: Let There Be Rock","year":1980,'
-                  '"targetSource":"wikidata","article":"AC\\/DC: Let There Be Rock","language":"en",'
+                  '"alsoKnownAs":[],"targetSource":"wikidata","article":"AC\\/DC: Let There Be Rock","language":"en",'
                   '"resolvedArticle":"AC\\/DC: Let There Be Rock","revId":900,"extractorArticleRevId":null,'
                   '"sections":["Plot"],"plotSections":["Plot"],"chars":12,"text":"Café AC\\/DC."}\n')
         with open(os.path.join(self.out, "articles.jsonl"), "rb") as fh:

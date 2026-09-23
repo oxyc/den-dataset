@@ -159,10 +159,14 @@ def targets(records, cache):
     Named from the item the enrichment chose, where several claim the title's TMDB id: the row records its
     `wikidataCandidates` and `wikidataItem`, and the others are left out of the lookup. Otherwise the plot
     comes from one work and the name it is judged against from another.
+
+    Each batch also asks for the item's labels in the languages its titles' articles are in, which is what
+    `also_known_as` picks the article's own name for the work from.
     """
-    ids, excluded = {}, {}
+    ids, excluded, language = {}, {}, {}
     for record in records:
         ids.setdefault(record["mediaType"], set()).add(record["tmdbId"])
+        language[key(record)] = record.get("plotLanguage") or "en"
         others = [q for q in record.get("wikidataCandidates") or () if q != record.get("wikidataItem")]
         if others:
             excluded.setdefault(record["mediaType"], {})[record["tmdbId"]] = others
@@ -170,14 +174,30 @@ def targets(records, cache):
     for media in sorted(ids):
         ordered = sorted(ids[media])
         for start in range(0, len(ordered), TARGET_BATCH):
+            chunk = ordered[start:start + TARGET_BATCH]
             try:
-                found = wikidata.targets(ordered[start:start + TARGET_BATCH], media, cache,
-                                         excluded=excluded.get(media))
+                found = wikidata.targets(chunk, media, cache, excluded=excluded.get(media),
+                                         languages={language[f"{media}:{tmdb_id}"] for tmdb_id in chunk})
             except (http.HTTPError, wikidata.WikidataError) as error:
                 raise StageError(f"articles: the Wikidata lookup that names each title failed ({error}). "
                                  f"Nothing was written; re-run once Wikidata answers.") from None
             out.update({f"{media}:{tmdb_id}": target for tmdb_id, target in found.items()})
     return out
+
+
+def also_known_as(target, language):
+    """The work's other names on Wikidata: its P1476 titles and its label in the article's language,
+    without the name `title` already gives, sorted.
+
+    The classify pass judges whether the article is about the work it names, and names it by Wikidata's
+    English label. An article in another language is headed by that language's title, so without these
+    it reads "The Belgian Job" against "Il était une fois, une fois" and calls it a different work.
+    """
+    names = set(target.get("originals") or ())
+    if (label := (target.get("labels") or {}).get(language)):
+        names.add(label)
+    names.discard(target.get("title"))
+    return sorted(names)
 
 
 def row(record, found, target):
@@ -187,7 +207,7 @@ def row(record, found, target):
 
     `title` and `year` are Wikidata's (`target`), never the enriched record's, which are TMDB's. Both are
     written even when unknown: `run_combined.py` fills an ABSENT `year` from the enriched batches — TMDB's
-    year again.
+    year again. `alsoKnownAs` is Wikidata's too; see `also_known_as`.
 
     A field the enrichment did not record is written as an explicit `null`, never left out — and for
     `extractorArticleRevId` that is a decision, not a serialiser default. `run_combined.py` and
@@ -202,6 +222,7 @@ def row(record, found, target):
         "tmdbId": record["tmdbId"],
         "title": target.get("title"),
         "year": target.get("year"),
+        "alsoKnownAs": also_known_as(target, record.get("plotLanguage") or "en"),
         "targetSource": TARGET_SOURCE,
         "article": record["plotArticle"],
         "language": record.get("plotLanguage") or "en",

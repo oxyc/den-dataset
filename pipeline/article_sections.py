@@ -49,12 +49,20 @@ def parse_sections(text, extractor_headings=()):
 
 
 def target(rec):
-    return {
+    """The work the classify pass asks about. `alsoKnownAs` (the work's other names on Wikidata, among them
+    the one the article's language uses) is there only when the row has some: an article in another
+    language is headed by its own title, not the English one. A row without it — every row dumped before
+    it existed — gives the state it always gave, so a shipped shard still reconstructs to what it recorded.
+    """
+    requested = {
         "mediaType": "film" if rec["mediaType"] == "movie" else "television program",
         "title": rec.get("title") or "",
         "year": rec.get("year"),
         "tmdbId": rec["tmdbId"],
     }
+    if rec.get("alsoKnownAs"):
+        requested["alsoKnownAs"] = rec["alsoKnownAs"]
+    return requested
 
 
 def state_for(rec, sections):

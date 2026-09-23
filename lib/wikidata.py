@@ -662,17 +662,28 @@ def sources(ids, media, cache=None, excluded=None):
     return parsed
 
 
-def target_query(ids, media, excluded=None):
+def target_query(ids, media, excluded=None, languages=()):
     """The SPARQL that names one batch of TMDB ids: the item's label and its publication dates (P577),
-    plus its start time (P580) for a series, whose first air date is what a series' year means."""
+    plus its start time (P580) for a series, whose first air date is what a series' year means.
+
+    Also the item's other names: its title (P1476, which editors fill in the work's own language and
+    sometimes in translations) and its labels in `languages`, the languages of the articles the batch was
+    grounded on. A German article about a film Wikidata labels "Room 205" in English is headed
+    "Kollegiet"; these are what say that both names are the same work."""
     values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
     start = "  OPTIONAL { ?film wdt:P580 ?start . }\n" if media == "tv" else ""
-    return (f"SELECT ?tmdb ?filmLabel ?released ?start WHERE {{\n"
+    wanted = sorted(set(languages) - {"en"})
+    local = ("  OPTIONAL { ?film rdfs:label ?local . BIND(LANG(?local) AS ?localLang)\n"
+             f"             FILTER(?localLang IN ({', '.join(json.dumps(code) for code in wanted)})) }}\n"
+             if wanted else "")
+    return (f"SELECT ?tmdb ?filmLabel ?released ?start ?original ?local ?localLang WHERE {{\n"
             f"  VALUES ?tmdb {{ {values} }}\n"
             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
             f"{exclusion(ids, excluded)}"
             f"  OPTIONAL {{ ?film wdt:P577 ?released . }}\n"
             f"{start}"
+            f"  OPTIONAL {{ ?film wdt:P1476 ?original . }}\n"
+            f"{local}"
             f'  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul". }}\n'
             f"}}\n"
             f"ORDER BY ?tmdb ?filmLabel")
@@ -682,12 +693,14 @@ _DATE_YEAR = re.compile(r"^\+?([0-9]{1,4})-")
 
 
 def parse_targets(payload):
-    """`tmdbId -> {"title", "year"}` for one SPARQL body. RAISES on a body that is not a SPARQL result.
+    """`tmdbId -> {"title", "year", "originals", "labels"}` for one SPARQL body. RAISES on a body that is
+    not a SPARQL result.
 
     The title is the first label in the query's order; a bare Q-id is the label service finding none, and
     is None rather than a name. The year is the EARLIEST — a festival premiere before a wide release, the
     original before a restoration — and a series' start time wins over any publication date. An id with
-    neither is present with both None: Wikidata answered, and said nothing.
+    neither is present with both None: Wikidata answered, and said nothing. `originals` is every P1476
+    title, sorted; `labels` is `{language: label}` for the languages the query asked for.
     """
     try:
         bindings = json.loads(payload.decode("utf-8"))["results"]["bindings"]
@@ -700,7 +713,8 @@ def parse_targets(payload):
         raw = _cell(binding, "tmdb")
         if raw is None or not _INTEGER.fullmatch(raw):
             continue
-        entry = seen.setdefault(int(raw), {"title": None, "released": set(), "start": set()})
+        entry = seen.setdefault(int(raw), {"title": None, "released": set(), "start": set(),
+                                           "originals": set(), "labels": {}})
         label = _cell(binding, "filmLabel")
         if entry["title"] is None and label and not QID.match(label):
             entry["title"] = label
@@ -708,18 +722,24 @@ def parse_targets(payload):
             found = _DATE_YEAR.match(_cell(binding, name) or "")
             if found:
                 entry[name].add(int(found.group(1)))
+        if original := _cell(binding, "original"):
+            entry["originals"].add(original)
+        local, language = _cell(binding, "local"), _cell(binding, "localLang")
+        if local and language:
+            entry["labels"][language] = local
     return {tmdb_id: {"title": entry["title"],
-                      "year": min(entry["start"] or entry["released"], default=None)}
+                      "year": min(entry["start"] or entry["released"], default=None),
+                      "originals": sorted(entry["originals"]), "labels": entry["labels"]}
             for tmdb_id, entry in seen.items()}
 
 
-def targets(ids, media, cache=None, excluded=None):
-    """`tmdbId -> {"title", "year"}` for one batch of one media type, from disk where the same batch was
-    asked before. What names a title to anything that asks whether an article is about it — Wikidata's,
-    CC0, rather than TMDB's."""
+def targets(ids, media, cache=None, excluded=None, languages=()):
+    """`tmdbId -> {"title", "year", "originals", "labels"}` for one batch of one media type, from disk where
+    the same batch was asked before. What names a title to anything that asks whether an article is about
+    it — Wikidata's, CC0, rather than TMDB's."""
     if not ids:
         return {}
-    query = target_query(ids, media, excluded)
+    query = target_query(ids, media, excluded, languages)
     key = None
     if cache is not None:
         key = cache.key("sparql-target", {"q": query})
