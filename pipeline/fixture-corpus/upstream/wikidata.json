@@ -8,6 +8,7 @@
       "P495": ["Q96000001"], "P364": ["Q95000001"], "P272": ["Q91000008"], "P750": ["Q91000007"],
       "P86": ["Q91000005"], "P344": ["Q91000006"], "P2047": ["104"], "P179": ["Q98000000", "Q98000001"],
       "P921": ["Q91000010"], "P144": ["Q93000001"], "P840": ["Q91000009"],
+      "P166": ["Q99000001"], "P1411": ["Q99000002", "Q99000003"],
       "P1476": [{"text": "The Lighthouse Ledger", "lang": "en"}]
     }
   },
@@ -57,7 +58,7 @@
     }
   },
 
-  "Q91000001": {"label": "Mara Voss", "aliases": ["M. Voss"], "claims": {"P4985": ["5550001"]}},
+  "Q91000001": {"label": "Mara Voss", "aliases": ["M. Voss"], "claims": {"P4985": ["5550001"], "P345": ["nm9000001"]}},
   "Q91000002": {"label": "Idris Thale"},
   "Q91000003": {"label": "Juno Park"},
   "Q91000004": {"label": "Tomas Reyes"},
@@ -92,5 +93,11 @@
   "Q97000007": {"label": "Wikimedia list article"},
   "Q24856": {"label": "film series"},
   "Q98000000": {"label": "Critics' 100 Greatest Films", "claims": {"P31": ["Q97000007"]}},
-  "Q98000001": {"label": "Ledger trilogy", "claims": {"P31": ["Q97000006"]}}
+  "Q98000001": {"label": "Ledger trilogy", "claims": {"P31": ["Q97000006"]}},
+  "Q99000001": {"label": "Harbour Award for Best Film", "claims": {"P361": ["Q99000010"], "P1027": ["Q99000020"]}},
+  "Q99000002": {"label": "Harbour Award for Best Director", "claims": {"P31": ["Q99000010"]}},
+  "Q99000003": {"label": "Golden Skerry", "claims": {"P1027": ["Q99000020"]}},
+  "Q99000010": {"label": "Harbour Film Awards", "claims": {"P31": ["Q107655869"]}},
+  "Q99000020": {"label": "Skerry Film Festival"},
+  "Q107655869": {"label": "group of awards"}
 }

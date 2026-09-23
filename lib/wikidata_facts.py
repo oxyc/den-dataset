@@ -12,8 +12,8 @@ entity and source-work lookups were never cached; the scrape checkpoints what th
 
 Everything an entity is carried as is a Q-id; names live in a shared entity map, resolved once per build.
 The coverage figures beside each spec were measured on this corpus, and they are why several
-obvious-looking properties are absent: P1080 narrative universe scored 0%, P155/P156 sequel order 8%,
-P166 awards 11%.
+obvious-looking properties are absent: P1080 narrative universe scored 0%, P155/P156 sequel order 8%.
+Awards (P166, P1411) were left out at an earlier 11% and are in now, at 17.2% (oxyc/den#135).
 """
 import collections
 import json
@@ -65,6 +65,9 @@ SPECS = (
     spec("narrativeLocations", "P840", "entity"),            # 47%
     spec("seasons", "P2437", "literal", tv_only=True, single=True, numeric=True),
     spec("episodes", "P1113", "literal", tv_only=True, single=True, numeric=True),
+    # Award items (Best Picture, not the Academy Awards); `ceremony` files them. 17.2% have either.
+    spec("awardsWon", "P166", "entity"),                     # 10.6% won something
+    spec("awardsNominated", "P1411", "entity"),
 )
 
 #: `wikibase:timePrecision` → the name the sidecar carries. Coarser than a year is not useful for ordering.
@@ -455,6 +458,131 @@ def entity_details(qids, batch=200):
             row = out.setdefault(_qid(uri), {"name": None, "tmdbPersonId": None, "aliases": []})
             if alias not in row["aliases"]:
                 row["aliases"].append(alias)
+    return out
+
+
+#: What a ceremony is on Wikidata: "group of awards". The Academy Awards and the Golden Globe Awards are
+#: instances of it, and each of their categories points at it by P361 (part of) or P31 (instance of).
+AWARD_GROUP = "Q107655869"
+#: The ways an award item names what it belongs to, in the order they are trusted. `self` is an award item
+#: that is a group itself — a title credited with "Academy Awards" outright.
+AWARD_LINKS = ("P361", "P31", "P1027")
+AWARD_CACHE_PATH = "sparql-awards"
+
+
+def award_query(qids):
+    values = " ".join(f"wd:{q}" for q in sorted(set(qids)))
+    links = " ".join(f"wdt:{p}" for p in AWARD_LINKS)
+    return ("SELECT ?item ?p ?t ?group WHERE {\n"
+            f"  VALUES ?item {{ {values} }}\n"
+            f"  {{ VALUES ?p {{ {links} }} ?item ?p ?t .\n"
+            f"    BIND(EXISTS {{ ?t wdt:P31/wdt:P279* wd:{AWARD_GROUP} }} AS ?group) }}\n"
+            f"  UNION {{ ?item wdt:P31/wdt:P279* wd:{AWARD_GROUP} . BIND(?item AS ?t) BIND(\"self\" AS ?p)\n"
+            "    BIND(true AS ?group) }\n"
+            "}")
+
+
+def parse_awards(payload):
+    """`award Q-id -> {link: [(target, is a group)]}`, `link` a property id or `self`."""
+    out = {}
+    for binding in bindings(payload):
+        uri, link, target = _value(binding, "item"), _value(binding, "p"), _value(binding, "t")
+        if uri is None or link is None or target is None:
+            continue
+        link = link if link == "self" else _qid(link)
+        group = _value(binding, "group") in ("true", "1")
+        found = out.setdefault(_qid(uri), {}).setdefault(link, [])
+        if (_qid(target), group) not in found:
+            found.append((_qid(target), group))
+    return out
+
+
+def award_links(qids, cache=None, batch=200):
+    """What each award item says it belongs to, cached per batch like `series`."""
+    out = {}
+    ordered = sorted(set(qids))
+    for start in range(0, len(ordered), batch):
+        query = award_query(ordered[start:start + batch])
+        key = cache.key(AWARD_CACHE_PATH, {"q": query}) if cache is not None else None
+        hit = cache.read(key) if key is not None else None
+        if hit is not None:
+            try:
+                out.update(parse_awards(hit))
+                continue
+            except WikidataError:
+                pass
+        payload = _sparql(query)
+        out.update(parse_awards(payload))
+        if key is not None:
+            cache.write(key, payload)
+    return out
+
+
+def ceremony(links):
+    """The ceremony an award item belongs to, from `award_links`' answer for it, or `None`.
+
+    A group of awards reached by P361, then by P31 — Best Picture is part of the Academy Awards; a BAFTA
+    category is an instance of the British Academy Film Awards; then the item itself when it is a group.
+    Several candidates at one step take the lowest Q-id number, so the answer does not depend on the order
+    WDQS returns rows in. Only when no group is found at all does the awarding body (P1027) stand in: a
+    festival prize names its festival that way and nothing else."""
+    def lowest(qids):
+        return min(qids, key=lambda q: (_int(q[1:]) or 0, q)) if qids else None
+
+    for link in ("P361", "P31", "self"):
+        found = lowest([target for target, group in links.get(link) or [] if group])
+        if found:
+            return found
+    return lowest([target for target, _ in links.get("P1027") or []])
+
+
+#: The person IMDb id requests' cache path.
+IMDB_CACHE_PATH = "sparql-imdb"
+_NCONST = re.compile(r"nm\d+")
+
+
+def imdb_query(qids):
+    values = " ".join(f"wd:{q}" for q in sorted(set(qids)))
+    return f"SELECT ?item ?id WHERE {{\n  VALUES ?item {{ {values} }}\n  ?item wdt:P345 ?id .\n}}"
+
+
+def parse_imdb(payload):
+    """`Q-id -> nconst`. P345 is one property for every IMDb namespace, so a company (`co…`) or a
+    character (`ch…`) comes back too, and only a person's `nm…` is kept. An item carrying two (a merged
+    duplicate on IMDb's side) keeps the lowest, by the rule `entity_details` applies to TMDB person ids."""
+    out = {}
+    for binding in bindings(payload):
+        uri, nconst = _value(binding, "item"), _value(binding, "id")
+        if uri is None or nconst is None or not _NCONST.fullmatch(nconst):
+            continue
+        qid = _qid(uri)
+        if qid not in out or (len(nconst), nconst) < (len(out[qid]), out[qid]):
+            out[qid] = nconst
+    return out
+
+
+def imdb_ids(qids, cache=None, batch=500):
+    """`Q-id -> nconst` for the `qids` Wikidata gives an IMDb person id. A join key for IMDb's own
+    principals at run time — never the public id, which stays the Q-id. Cached per batch like `series`.
+
+    500 a batch: the first run asks it of every entity (162,812 on the published facts), and a request
+    costs the same at 200 as at 500 (`pipeline/facts.py` `BACKFILL_BATCH`)."""
+    out = {}
+    ordered = sorted(set(qids))
+    for start in range(0, len(ordered), batch):
+        query = imdb_query(ordered[start:start + batch])
+        key = cache.key(IMDB_CACHE_PATH, {"q": query}) if cache is not None else None
+        hit = cache.read(key) if key is not None else None
+        if hit is not None:
+            try:
+                out.update(parse_imdb(hit))
+                continue
+            except WikidataError:
+                pass
+        payload = _sparql(query)
+        out.update(parse_imdb(payload))
+        if key is not None:
+            cache.write(key, payload)
     return out
 
 

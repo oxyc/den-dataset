@@ -32,6 +32,10 @@ ENTITY_LISTS = {
 #: months: 67.2% coverage feeding the rail's heaviest weight.
 MAKER_FIELDS = ("directors", "creators", "screenwriters")
 
+#: The same three credits kept apart, so a reader can tell a director from a writer — `makers` cannot
+#: (oxyc/den#135). den-spec's optional role sections, written after `makers`: corpus field -> section.
+ROLE_LISTS = {"directors": "directors", "creators": "creators", "screenwriters": "writers"}
+
 EPOCH = date(1970, 1, 1)
 PRECISION = {"day": 0, "month": 1, "year": 2, "decade": 3, "century": 4}
 PRECISION_NONE = 0xFF
@@ -100,6 +104,7 @@ class Facts:
     def __init__(self, genre_map):
         self.genre_map = genre_map
         self.makers = []
+        self.roles = {field: [] for field in ROLE_LISTS}
         self.entity_lists = {field: [] for field in ENTITY_LISTS}
         self.based_kind = []
         self.genres = []
@@ -141,6 +146,12 @@ class Facts:
                     seen.add(i)
                     row_makers.append(i)
         self.makers.append(row_makers)
+        for field in ROLE_LISTS:
+            row_role = []
+            for i in (ent.id(q) for q in facts.get(field) or []):
+                if i is not None and i not in row_role:
+                    row_role.append(i)
+            self.roles[field].append(row_role)
         row_genres = []
         for q in facts.get("genres") or []:
             if not isinstance(q, str):
@@ -238,6 +249,10 @@ class Facts:
     def put(self, sec, rows):
         """Everything up to `facts_has_vec`. The applicability columns follow, then `put_trailing`."""
         sec.put_list("makers", "I", 4, self.makers)
+        # May be empty: a corpus with no series has no creators. A role field missing from the source cannot
+        # hide here, because `makers` is built from the same three fields and is refused empty.
+        for field, section in ROLE_LISTS.items():
+            sec.put_list(section, "I", 4, self.roles[field], allow_empty=True)
         for field, section in ENTITY_LISTS.items():
             sec.put_list(section, "I", 4, self.entity_lists[field])
         sec.put_list("based_kind", "I", 4, self.based_kind)

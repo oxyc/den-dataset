@@ -1041,6 +1041,62 @@ class IconicStudiosShip(StoreFixture, unittest.TestCase):
         self.assertIn("Q1 is listed twice", str(caught.exception))
 
 
+class SearchFactsShip(StoreFixture, unittest.TestCase):
+    """Roles, awards and people's IMDb ids (oxyc/den#135): the optional sections Search filters on."""
+
+    def span(self, store, name, row):
+        offsets = store.ints(f"{name}_o")
+        return store.ints(f"{name}_v")[offsets[row]:offsets[row + 1]]
+
+    def test_each_role_keeps_its_own_credits(self):
+        """`makers` is the union and cannot say which is which; the role lists can."""
+        titles = [dict(self.TITLES[0], facts=dict(self.TITLES[0]["facts"], screenwriters=["Q103", "Q100"],
+                                                  creators=["Q104"]))] + self.TITLES[1:]
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, titles=titles)
+        ent_qid = store.ints("ent_qid")
+        roles = {name: [ent_qid[e] for e in self.span(store, name, 0)]
+                 for name in ("directors", "creators", "writers")}
+        self.assertEqual(roles, {"directors": [100], "creators": [104], "writers": [103, 100]})
+        self.assertEqual([ent_qid[e] for e in self.span(store, "makers", 0)], [100, 104, 103])
+        self.assertEqual(self.span(store, "writers", 1), [])
+
+    def test_awards_ship_by_ceremony_with_a_win_marked(self):
+        titles = [dict(self.TITLES[0], facts=dict(self.TITLES[0]["facts"], awardsWonAt=["Q19020"],
+                                                  awardsNominatedAt=["Q1011547"])),
+                  dict(self.TITLES[1], facts=dict(self.TITLES[1]["facts"], awardsNominatedAt=["Q19020"]))]
+        with tempfile.TemporaryDirectory() as out:
+            store, stderr = self.build(out, titles=titles)
+        self.assertEqual(store.ints("ceremony_qid"), [19020, 1011547])
+        # Neither ceremony is in this fixture's entity table, so each is named by its Q-id.
+        self.assertEqual([store.text(i) for i in store.ints("ceremony_name")], ["Q19020", "Q1011547"])
+        won = store.ints("award_w", "B", 1)
+        offsets = store.ints("award_o")
+        self.assertEqual(list(zip(self.span(store, "award", 0), won[offsets[0]:offsets[1]])), [(0, 1), (1, 0)])
+        self.assertEqual(list(zip(self.span(store, "award", 1), won[offsets[1]:offsets[2]])), [(0, 0)])
+        self.assertIn("awards: 2 titles at 2 ceremonies", stderr)
+
+    def test_a_ceremony_both_won_and_only_nominated_is_refused(self):
+        titles = [dict(self.TITLES[0], facts=dict(self.TITLES[0]["facts"], awardsWonAt=["Q19020"],
+                                                  awardsNominatedAt=["Q19020"]))] + self.TITLES[1:]
+        with tempfile.TemporaryDirectory() as out, self.assertRaises(AssertionError) as caught:
+            self.build(out, titles=titles)
+        self.assertIn("both awardsWonAt and awardsNominatedAt", str(caught.exception))
+
+    def test_a_corpus_with_no_awards_writes_the_sections_empty(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out)
+        self.assertEqual(store.ints("ceremony_qid"), [])
+        self.assertEqual(store.ints("award_o"), [0, 0, 0])
+
+    def test_only_a_persons_imdb_id_reaches_ent_imdb(self):
+        build_store_module()
+        from store import entities
+        self.assertEqual(entities.person_imdb_id("nm0000100"), "nm0000100")
+        for raw in ("co0000107", "tt0000001", "nm", "nm12x", None, ["nm1"]):
+            self.assertIsNone(entities.person_imdb_id(raw), raw)
+
+
 class OnlyATitleIdReachesTheImdbColumn(unittest.TestCase):
     """IMDb's id space is namespaced by prefix and Wikidata's P345 is not checked against it.
 

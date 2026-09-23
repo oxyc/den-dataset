@@ -39,7 +39,10 @@ class Wikidata:
         self.names = {}         # qid -> entity details
         self.types = {}         # qid -> [P31 labels]
         self.members = {}       # qid -> P179 member count, for the targets that are a series
-        self.asked = {"facts": [], "titles": [], "names": [], "types": [], "series": []}
+        self.nconst = {}        # qid -> IMDb person id
+        self.links = {}         # award qid -> what it belongs to, as `wd.award_links` answers
+        self.asked = {"facts": [], "titles": [], "names": [], "types": [], "series": [], "imdb": [],
+                      "awards": []}
         self.failing = set()    # (media, tmdbId) whose batch raises
         self.languages = []     # (media, the languages the titles hop was told) per call
         self.live = False       # answered from the cache, so nothing is paced
@@ -106,6 +109,14 @@ class Wikidata:
         self.asked["series"].append(tuple(qids))
         return {q: self.members[q] for q in qids if q in self.members}
 
+    def award_links(self, qids, cache=None):
+        self.asked["awards"].append(tuple(qids))
+        return {q: self.links[q] for q in qids if q in self.links}
+
+    def imdb_ids(self, qids, cache=None):
+        self.asked["imdb"].append(tuple(qids))
+        return {q: self.nconst[q] for q in qids if q in self.nconst}
+
 
 class Staged(unittest.TestCase):
     def setUp(self):
@@ -115,7 +126,8 @@ class Staged(unittest.TestCase):
         self.wd = Wikidata()
         for name, stub in (("fetch_facts", self.wd.fetch_facts), ("titles", self.wd.titles_of),
                            ("entity_details", self.wd.entity_details), ("instance_of", self.wd.instance_of),
-                           ("series", self.wd.series)):
+                           ("series", self.wd.series), ("imdb_ids", self.wd.imdb_ids),
+                           ("award_links", self.wd.award_links)):
             original = getattr(facts.wd, name)
             setattr(facts.wd, name, stub)
             self.addCleanup(setattr, facts.wd, name, original)
@@ -316,6 +328,81 @@ class Franchise(Staged):
         self.assertEqual(self.wd.asked["facts"][asked:], [("movie", (1,), "franchise")])
         self.assertEqual(self.read("facts-fields.json")["movie:1"]["franchise"], [self.LIST, self.SERIES])
         self.assertEqual(self.shipped()[("movie", 1)]["franchise"], [self.SERIES])
+
+
+class Backfill(Staged):
+    """Properties added after a checkpoint was written (oxyc/den#135): awards, and people's IMDb ids."""
+
+    def test_a_row_scraped_before_the_awards_is_asked_for_them_once(self):
+        self.wd.facts[("movie", 1)]["awardsWon"] = ["Q900"]
+        self.run_stage()
+        fields = self.read("facts-fields.json")
+        self.assertEqual(fields["tv:1"]["awardsWon"], [], "asked, and has none")
+        for row in fields.values():
+            for key in facts.BACKFILLED:
+                del row[key]
+        with open(os.path.join(self.out, "facts-fields.json"), "w", encoding="utf-8") as fh:
+            json.dump(fields, fh)
+        asked = len(self.wd.asked["facts"])
+        self.run_stage()
+        self.assertEqual(sorted(self.wd.asked["facts"][asked:]),
+                         [("movie", (1,), "awardsNominated"), ("movie", (1,), "awardsWon"),
+                          ("tv", (1,), "awardsNominated"), ("tv", (1,), "awardsWon")])
+        self.assertEqual(self.read("facts-fields.json")["movie:1"]["awardsWon"], ["Q900"])
+        asked = len(self.wd.asked["facts"])
+        self.run_stage()
+        self.assertEqual(self.wd.asked["facts"][asked:], [], "a row that was asked is not asked again")
+
+    def test_awards_ship_by_ceremony_and_a_win_outranks_a_nomination(self):
+        """Won Best Picture, nominated for Best Director at the same ceremony and for a Golden Globe: the
+        record says won at the Academy Awards and nominated only at the Globes. The ceremonies are named;
+        the categories are not, and an award no ceremony is found for ships under neither."""
+        self.wd.facts[("movie", 1)].update(awardsWon=["Q102427"],
+                                           awardsNominated=["Q103360", "Q1011547", "Q193622"])
+        self.wd.links = {"Q102427": {"P361": [("Q19020", True)]}, "Q103360": {"P361": [("Q19020", True)]},
+                         "Q1011547": {"self": [("Q1011547", True)]}, "Q193622": {"P31": [("Q1", False)]}}
+        self.wd.names.update({"Q19020": {"name": "Academy Awards", "tmdbPersonId": None, "aliases": []},
+                              "Q1011547": {"name": "Golden Globe Awards", "tmdbPersonId": None,
+                                           "aliases": []}})
+        self.run_stage()
+        shipped = self.read(f"facts-{VERSION}.pre-merge.json")
+        record = next(r for r in shipped["records"] if r["mediaType"] == "movie")
+        self.assertEqual(record["awardsWonAt"], ["Q19020"])
+        self.assertEqual(record["awardsNominatedAt"], ["Q1011547"])
+        self.assertEqual(record["awardsWon"], ["Q102427"], "the award items ship too")
+        self.assertEqual(shipped["entities"]["Q19020"], {"en": "Academy Awards"})
+        self.assertNotIn("Q102427", shipped["entities"])
+        self.assertNotIn(("Q102427",), self.wd.asked["names"])
+        self.assertNotIn("awardsWonAt", self.read("facts-fields.json")["movie:1"], "derived, not checkpointed")
+
+    def test_an_empty_award_list_does_not_ship(self):
+        """`[]` is the checkpoint's "asked, has none"; a record carries the field only when it has awards."""
+        self.run_stage()
+        for record in self.read(f"facts-{VERSION}.pre-merge.json")["records"]:
+            for key in facts.BACKFILLED:
+                self.assertNotIn(key, record)
+
+    def test_a_person_imdb_id_ships_and_is_asked_once(self):
+        self.wd.nconst = {"Q10": "nm0000010"}
+        self.run_stage()
+        shipped = self.read(f"facts-{VERSION}.pre-merge.json")["entities"]
+        self.assertEqual(shipped["Q10"]["imdbId"], "nm0000010")
+        self.assertNotIn("imdbId", shipped["Q50"])
+        self.assertEqual(self.read("facts-entities.json")["Q50"]["imdbId"], "", "asked, has none")
+        asked = len(self.wd.asked["imdb"])
+        self.run_stage()
+        self.assertEqual(self.wd.asked["imdb"][asked:], [], "an entity that was asked is not asked again")
+
+    def test_an_entity_named_before_imdb_ids_existed_is_asked(self):
+        self.run_stage()
+        names = self.read("facts-entities.json")
+        for entry in names.values():
+            del entry["imdbId"]
+        with open(os.path.join(self.out, "facts-entities.json"), "w", encoding="utf-8") as fh:
+            json.dump(names, fh)
+        self.wd.nconst = {"Q10": "nm0000010"}
+        self.run_stage()
+        self.assertEqual(self.read("facts-entities.json")["Q10"]["imdbId"], "nm0000010")
 
 
 class Resume(Staged):
