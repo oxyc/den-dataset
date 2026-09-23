@@ -11,10 +11,10 @@ The translator is kept out of `pipeline/`, which is stdlib-only: it needs torch 
 
 ## Languages
 
-`models.json` pins one model per language, by commit. A plot language with no `opus-mt-<lang>-en` model is
-left untranslated and listed as `untranslated` in the run's summary. As of 2026-09 that is Portuguese: there
-is no `opus-mt-pt-en` (the multi-source `opus-mt-ROMANCE-en` and `opus-mt-mul-en` exist but were not measured
-by the pilot). To add a language, add its model with the commit from
+`models.json` pins one model per language, by commit. A plot language with no model there is left
+untranslated and listed as `untranslated` in the run's summary. Portuguese has no `opus-mt-pt-en`, so it uses
+the multi-source `opus-mt-ROMANCE-en`, whose only target is English. To add a language, add its model with the
+commit from
 `https://huggingface.co/api/models/Helsinki-NLP/opus-mt-<lang>-en` (`sha`).
 
 The models are Apache-2.0, except `opus-mt-ru-en` (CC BY 4.0). Wikipedia's plots are CC BY-SA 4.0, and so are
