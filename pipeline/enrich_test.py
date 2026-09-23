@@ -592,16 +592,16 @@ class Batch(unittest.TestCase):
         self.assertEqual(checkpoint["processed"], [])
         self.assertEqual(sorted(checkpoint["judgedBelow"]), ["movie:1"])
         self.assertEqual(checkpoint["judgedBelow"]["movie:1"],
-                         {"on": checkpoint["judgedBelow"]["movie:1"]["on"], "votes": 49, "floors": [50, 15, 5, 3]})
+                         {"on": checkpoint["judgedBelow"]["movie:1"]["on"], "votes": 49, "floors": [50, 15, 10, 3]})
 
     def test_each_tier_has_its_own_floors(self):
-        """A regional origin clears at 15 TMDB votes or 3 Wikipedias; any other origin needs 50 or 5."""
+        """A regional origin clears at 15 TMDB votes or 3 Wikipedias; any other origin needs 50 or 10."""
         report, written = self.admission(
             (1, 20, ["FR"], 0),          # regional, TMDB 20 ≥ 15
             (2, 20, ["US"], None),       # worldwide, TMDB 20 < 50, no Wikidata item
             (3, 5, ["BR"], 3),           # regional, 3 Wikipedias ≥ 3
-            (4, 5, ["US"], 4),           # worldwide, 4 < 5
-            (5, 5, ["US"], 5))           # worldwide, 5 ≥ 5
+            (4, 5, ["US"], 9),           # worldwide, 9 < 10
+            (5, 5, ["US"], 10))          # worldwide, 10 ≥ 10
         self.assertEqual(written, {"movie:1", "movie:3", "movie:5"})
         self.assertEqual(report["belowFloor"], 2)
 
@@ -631,7 +631,7 @@ class Batch(unittest.TestCase):
         """A title neither the worklist nor the record names a count for is judged on its Wikipedia count
         alone — not compared against a floor it has no number for."""
         record = dict(tmdb_record(1), voteCount=None, originCountry=["US"])
-        self.wikis[("movie", 1)] = 9
+        self.wikis[("movie", 1)] = 12
         admitted, from_worklist = enrich.admit([record], enrich.floor_rules.DEFAULT, "2026-09-22", self.cache, {})
         self.assertEqual((admitted, from_worklist), ({"movie:1": enrich.WIKIPEDIAS}, 0))
 
@@ -685,7 +685,7 @@ class Batch(unittest.TestCase):
         """The verdict is about the day's counts, and by the next day a title can have gained the
         Wikipedia articles that carry it over the floor."""
         self.below()
-        report, asked = self.below(wikis=6, today=self.NEXT_DAY)
+        report, asked = self.below(wikis=12, today=self.NEXT_DAY)
         self.assertEqual(asked, ["/movie/1"])
         self.assertEqual((report["admittedByWikipedias"], report["belowFloor"], report["batchId"]), (1, 0, 1))
         self.assertEqual(set(self.rows()), {"movie:1"})
@@ -714,7 +714,7 @@ class Batch(unittest.TestCase):
         `[50, 15, 2000, 500]` and an `imdb` flag. Those floors are not today's, so the title is asked again."""
         put(enrich.checkpoint_path(self.out), json.dumps({"processed": [], "judgedBelow": {
             "movie:1": {"on": self.DAY, "votes": 10, "floors": [50, 15, 2000, 500], "imdb": True}}}))
-        report, asked = self.below(wikis=6)
+        report, asked = self.below(wikis=12)
         self.assertEqual((asked, report["admittedByWikipedias"]), (["/movie/1"], 1))
 
     def test_a_batch_that_admits_nothing_writes_no_batch_and_keeps_its_number(self):
@@ -723,7 +723,7 @@ class Batch(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.out, "enriched")))
         self.assertNotIn("batchId", report)
         self.assertEqual(self.checkpoint()["nextBatch"], 1)
-        report, _asked = self.below(wikis=6, today=self.NEXT_DAY)
+        report, _asked = self.below(wikis=12, today=self.NEXT_DAY)
         self.assertEqual(report["batchId"], 1)
         self.assertEqual(self.checkpoint()["nextBatch"], 2)
 
