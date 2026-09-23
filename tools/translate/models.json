@@ -8,6 +8,7 @@
   "ko": {"model": "Helsinki-NLP/opus-mt-ko-en", "revision": "e42d1f41b66194e6d10512f8a27bebc1f4f5097e"},
   "nl": {"model": "Helsinki-NLP/opus-mt-nl-en", "revision": "48af999f2c59b10c05ca6e008dcedc07677a9b15"},
   "pl": {"model": "Helsinki-NLP/opus-mt-pl-en", "revision": "7f2bb874fdfb6139f9842b91a9b75c4a6c93401c"},
+  "pt": {"model": "Helsinki-NLP/opus-mt-ROMANCE-en", "revision": "e9ca9975e3972afd80732f08ce01d3a1339f47f8"},
   "ru": {"model": "Helsinki-NLP/opus-mt-ru-en", "revision": "fbd6dc73284f95536648512cc21d57f19191961a"},
   "sv": {"model": "Helsinki-NLP/opus-mt-sv-en", "revision": "202cf6240046bd8b6d08c207ee751ffd630d7ba8"}
 }

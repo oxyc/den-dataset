@@ -37,8 +37,10 @@ class Rules(unittest.TestCase):
         self.assertEqual(translate.PLOT_CAP, embed.SHIPPED_COMPOSITION["plotCap"])
 
     def test_every_model_is_pinned_to_a_commit(self):
+        # Portuguese has no opus-mt-pt-en; the multi-source Romance model has English as its only target.
+        multi_source = {"pt": "Helsinki-NLP/opus-mt-ROMANCE-en"}
         for lang, spec in translate.read_models().items():
-            self.assertEqual(spec["model"], f"Helsinki-NLP/opus-mt-{lang}-en")
+            self.assertEqual(spec["model"], multi_source.get(lang, f"Helsinki-NLP/opus-mt-{lang}-en"))
             self.assertRegex(spec["revision"], r"^[0-9a-f]{40}$")
 
     def test_sentences(self):
