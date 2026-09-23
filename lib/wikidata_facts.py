@@ -269,10 +269,16 @@ def fetch_facts(ids, media, item, cache=None, excluded=None):
 
 
 #: What a P179 ("part of the series") target must be an instance of, through P279*, to count as a
-#: franchise: a film series, a television series or a media franchise. P179 is also where editors file a
-#: title into critics' and editors' lists — WALL-E is part of "BBC's 100 Greatest Films of the 21st Century"
-#: (a Wikimedia list article) — and taken as a franchise, one list linked 97 unrelated films together.
-SERIES_CLASSES = ("Q24856", "Q5398426", "Q196600")
+#: franchise: a film series, a television series, a media franchise, or a portrayal of a subject on film.
+#: P179 is also where editors file a title into critics' and editors' lists — WALL-E is part of "BBC's 100
+#: Greatest Films of the 21st Century" (a Wikimedia list article) — and taken as a franchise, one list linked
+#: 97 unrelated films together.
+#:
+#: The last class came in September 2026, when Wikidata retyped "Superman in film" (Q2158362) and "Spider-Man
+#: in film" (Q2307877) from film series to "portrayal of subject on film" (Q138337574), and 24 films lost
+#: their franchise. A portrayal that gathers unrelated films (a figure's biopics) is let through too; atlas
+#: scores every series by what its members share (`series.rs`), and such a group scores nothing.
+SERIES_CLASSES = ("Q24856", "Q5398426", "Q196600", "Q138337574")
 #: The class requests' cache path — their own, beside the per-property ones.
 SERIES_CACHE_PATH = "sparql-series"
 

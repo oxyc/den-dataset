@@ -112,11 +112,11 @@ class Series(unittest.TestCase):
                 self.assertEqual(wd.franchises(targets, members), ["Q10", self.SERIES, self.CATALOG])
         self.assertEqual(wd.franchises([self.LIST], members), [])
 
-    def test_the_query_walks_the_class_hierarchy_for_the_three_kinds(self):
+    def test_the_query_walks_the_class_hierarchy_for_the_four_kinds(self):
         query = wd.series_query([self.SERIES, self.LIST, self.SERIES])
         self.assertIn(f"VALUES ?item {{ wd:{self.LIST} wd:{self.SERIES} }}", query)
         self.assertIn("?item wdt:P31/wdt:P279* ?class", query)
-        self.assertIn("VALUES ?class { wd:Q24856 wd:Q5398426 wd:Q196600 }", query)
+        self.assertIn("VALUES ?class { wd:Q24856 wd:Q5398426 wd:Q196600 wd:Q138337574 }", query)
 
     def test_an_answer_is_cached_per_batch(self):
         asked = []
