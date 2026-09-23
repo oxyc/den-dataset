@@ -119,6 +119,22 @@ class Request(unittest.TestCase):
         self.assertIn("3600s", str(refused.exception))
         self.assertIn(f"{transport.MAX_RETRY_AFTER}s", str(refused.exception))
 
+    def test_a_maxlag_refusal_is_a_200_that_is_waited_out(self):
+        """MediaWiki refuses a `maxlag` request with a 200 whose body is an error. Returned as a body it
+        reads as an answer about the pages; it is a throttle, and its `Retry-After` is the wait."""
+        lagged = (200, {"MediaWiki-API-Error": "maxlag", "Retry-After": "5"})
+        self.assertEqual(self.ask(lagged, (200, {})), b'{"ok":1}')
+        self.assertEqual(len(Server.seen), 2)
+        self.assertEqual(self.sleeps, [5.0])
+
+    def test_a_lag_that_outlasts_the_attempts_is_no_answer(self):
+        """Status 0, which every caller already treats as transient — never the 200 it arrived as."""
+        with self.assertRaises(transport.HTTPError) as refused:
+            self.ask(*[(200, {"MediaWiki-API-Error": "maxlag", "Retry-After": "5"})] * 4)
+        self.assertEqual(refused.exception.status, 0)
+        self.assertEqual(len(Server.seen), 4)
+        self.assertIn("maxlag", str(refused.exception))
+
     def test_every_request_identifies_itself_and_has_a_timeout(self):
         """The Wikimedia APIs refuse unidentified traffic with a 403 that reads like a dead article, and
         `urlopen`'s default of no timeout lets one hung socket stall a twelve-hour drain."""

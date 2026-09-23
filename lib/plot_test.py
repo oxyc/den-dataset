@@ -257,5 +257,43 @@ class OtherLanguages(unittest.TestCase):
         self.assertEqual(query.count("<https://en.wikipedia.org/>"), 2, "the own and source articles only")
 
 
+class Cached(unittest.TestCase):
+    """The plot the body on disk yields, for a revision backfill — which must never ask the network, since
+    a live read would name today's revision rather than the one the stored text came from."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.cache = caching.ResponseCache("wiki", directory.name, 3600)
+        patch = mock.patch.object(http, "request", side_effect=AssertionError("no request"))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def put(self, article, language, body):
+        self.cache.write(self.cache.key(f"{language}.wikipedia.org/w/api.php",
+                                        dict(plot.wikipedia.PARSE_QUERY, page=article)),
+                         json.dumps(body).encode())
+
+    def test_the_cached_body_gives_the_plot_and_the_revision_it_was_read_at(self):
+        self.put("Alien (film)", "en", {"parse": {"title": "Alien (film)", "revid": 41,
+                                                  "wikitext": "Lead.\n== Plot ==\nThe crew wakes."}})
+        self.put("Schachnovelle", "de", {"parse": {"title": "Schachnovelle", "revid": 42,
+                                                   "wikitext": "Lead.\n== Handlung ==\nEr spielt."}})
+        english = plot.cached_plot("Alien (film)", "en", self.cache)
+        german = plot.cached_plot("Schachnovelle", "de", self.cache)
+        self.assertEqual((english["text"], english["revId"]), ("The crew wakes.", 41))
+        self.assertEqual((german["text"], german["revId"]), ("Er spielt.", 42))
+
+    def test_nothing_on_disk_is_none_not_a_fetch(self):
+        self.assertIsNone(plot.cached_plot("Alien (film)", "en", self.cache))
+        self.assertIsNone(plot.cached_plot("Alien (film)", "en", None))
+
+    def test_a_cached_error_or_a_body_with_no_plot_is_none(self):
+        self.put("Gone", "en", {"error": {"code": "missingtitle"}})
+        self.put("Stub", "en", {"parse": {"title": "Stub", "revid": 3, "wikitext": "Lead only."}})
+        self.assertIsNone(plot.cached_plot("Gone", "en", self.cache))
+        self.assertIsNone(plot.cached_plot("Stub", "en", self.cache))
+
+
 if __name__ == "__main__":
     unittest.main()

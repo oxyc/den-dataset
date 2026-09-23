@@ -168,6 +168,18 @@ ENRICH_CHECKPOINT = Artifact(
     required=False,
 )
 
+#: What each `fetch --refresh` found, one directory per run named by its UTC start: `changed.txt` (titles
+#: whose plot text is different now — what `embed --reembed-keys` and a supersede classify run take),
+#: `plotless.txt` (titles that lost their plot — what `consolidate_corpus.py withdraw --keys` takes) and
+#: `report.json`. A directory per run rather than one file, so a second refresh cannot overwrite the lists
+#: of a first one nothing has consumed yet. See `pipeline/refresh.py`.
+REFRESH = Artifact(
+    name="refresh",
+    filename="refresh",
+    dedicated=False,
+    required=False,
+)
+
 #: Wikidata's director (P57) and genre (P136) per title: the two clauses of the lean document that used to
 #: come from TMDB. Scraped separately from the embed pass because it is ~770 SPARQL requests.
 DOC_FACTS = Artifact(
@@ -342,7 +354,7 @@ RELEASE = Artifact(
 
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
              COMBINED_MANIFEST, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST, GENRES_MOODS,
-             DELTA, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, DOC_FACTS, EMBED_LABELS,
+             DELTA, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH, DOC_FACTS, EMBED_LABELS,
              EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
              DELTA_IDS, DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, FINALIZE_REPORT,
              PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)

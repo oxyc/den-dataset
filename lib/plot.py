@@ -226,6 +226,11 @@ def _parsed(article, language, cache):
         body = wikipedia.fetch_parse(article, language, cache)
     except ValueError:
         return None
+    return _parse_object(body, article, language)
+
+
+def _parse_object(body, article, language):
+    """The `parse` object out of one `action=parse` body, or None. Raises `NoPage`."""
     error = body.get("error") if isinstance(body, dict) else None
     if isinstance(error, dict) and error.get("code") in NO_PAGE:
         raise NoPage(f"{language}.wikipedia.org has no page {article!r} ({error['code']})")
@@ -252,8 +257,10 @@ def action_api_plot(article, cache=None):
     rate-limited API, for an article that arrives in one.
     """
     parsed = _parsed(article, "en", cache)
-    if parsed is None:
-        return None
+    return None if parsed is None else _english(parsed, article)
+
+
+def _english(parsed, article):
     text, sections = describing_prose(parsed["wikitext"])
     return _found(text, sections, parsed, article, "en") if text else None
 
@@ -264,12 +271,14 @@ def other_language_plot(article, language, cache=None):
     A language with no heading list is None rather than a guess: a wrong list yields production prose that
     reads like a plot to anyone who cannot check it.
     """
-    headings = HEADINGS_BY_LANGUAGE.get(language)
-    if headings is None:
+    if language not in HEADINGS_BY_LANGUAGE:
         return None
     parsed = _parsed(article, language, cache)
-    if parsed is None:
-        return None
+    return None if parsed is None else _other_language(parsed, article, language)
+
+
+def _other_language(parsed, article, language):
+    headings = HEADINGS_BY_LANGUAGE[language]
     kept = []
     for heading, _level, body in wikipedia.split_sections(parsed["wikitext"]):
         name = compared(heading)
@@ -282,6 +291,30 @@ def other_language_plot(article, language, cache=None):
         return None
     return _found("\n\n".join(prose for _name, prose in kept), [name for name, _prose in kept], parsed,
                   article, language)
+
+
+def cached_plot(article, language, cache):
+    """The plot the action-API body ALREADY ON DISK for this article yields, or None — never a request.
+
+    What a revision backfill needs: a title grounded before its revision was recorded can only be tied to
+    one by the body it was read from, and a live read would answer with today's revision instead. None
+    when there is no cache, no body, or a body with nothing in it — the caller has learnt nothing.
+    """
+    if cache is None:
+        return None
+    hit = cache.read(cache.key(f"{language}.wikipedia.org{wikipedia.API_PATH}",
+                               dict(wikipedia.PARSE_QUERY, page=article)))
+    if hit is None:
+        return None
+    try:
+        parsed = _parse_object(json.loads(hit.decode("utf-8")), article, language)
+    except (ValueError, NoPage):
+        return None
+    if parsed is None:
+        return None
+    if language == "en":
+        return _english(parsed, article)
+    return _other_language(parsed, article, language) if language in HEADINGS_BY_LANGUAGE else None
 
 
 def _section(value):

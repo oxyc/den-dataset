@@ -110,6 +110,12 @@ def _retry_after(response):
     return seconds if seconds >= 0 else None
 
 
+def _lagged(response):
+    """Whether a MediaWiki answer is the `maxlag` refusal, which arrives as a 200 (measured on enwiki:
+    status 200, `MediaWiki-API-Error: maxlag`, `Retry-After: 5`)."""
+    return response.getheader("MediaWiki-API-Error") == "maxlag"
+
+
 def request(host, path, params=None, method="GET", body=None, headers=None, timeout=TIMEOUT,
             attempts=ATTEMPTS, scheme="https"):
     """One request, retried while the failure is transient. Returns the response body as bytes.
@@ -145,9 +151,17 @@ def request(host, path, params=None, method="GET", body=None, headers=None, time
                 raise HTTPError(0, url) from transport
             wait = None
         else:
-            if 200 <= response.status <= 299:
+            lagged = _lagged(response)
+            if 200 <= response.status <= 299 and not lagged:
                 return payload
-            if last or not is_transient(response.status):
+            if lagged:
+                # A request that sent `maxlag` and found the replicas further behind than that: a 200 whose
+                # body is an error, with the wait in `Retry-After`. It is a throttle, so it is retried like
+                # one, and one that outlasts the attempts is status 0 — no usable answer — which every
+                # caller already treats as transient.
+                if last:
+                    raise HTTPError(0, url, payload, "the wiki's replicas stayed lagged past maxlag")
+            elif last or not is_transient(response.status):
                 raise HTTPError(response.status, url, payload)
             wait = _retry_after(response)
             if wait is not None and wait > MAX_RETRY_AFTER:

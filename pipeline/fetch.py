@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 
-from . import artifacts, enrich, floors as floor_rules
+from . import artifacts, enrich, floors as floor_rules, refresh
 from .contract import REPO, StageError, bind
 from lib import enterprise, tmdb as tmdb_api
 
@@ -50,7 +50,10 @@ INPUTS = (UNIVERSES["movie"], UNIVERSES["tv"])
 #: batches would leave the resume state owned by nobody — and an absent checkpoint is not an empty one:
 #: `enrich` re-derives the next batch number from the directory precisely because a missing file once
 #: restarted the numbering and overwrote two batches.
-OUTPUTS = (artifacts.ENRICHED, artifacts.ENRICH_CHECKPOINT)
+#:
+#: And, with `--refresh`, what the refresh re-fetched (`pipeline/refresh.py`). The refresh is this stage's
+#: rather than one of its own because what it writes is more enriched batches, and one stage owns those.
+OUTPUTS = (artifacts.ENRICHED, artifacts.ENRICH_CHECKPOINT, artifacts.REFRESH)
 
 #: Ids per batch — the size `enrich-all.sh` drained a full run at. The batch is the unit of resume: the
 #: checkpoint is written once per batch, so a smaller one buys only more checkpoint writes and a larger one
@@ -215,7 +218,7 @@ def check_outputs(ctx):
     splits the batches from the state that says which ids they cover, and the next run then re-enriches
     everything the missing checkpoint no longer accounts for.
     """
-    for entry in (bind(e) for e in OUTPUTS):
+    for entry in (bind(e) for e in OUTPUTS if ctx.refresh or e is not artifacts.REFRESH):
         path = ctx.path(entry.artifact)
         if not os.path.exists(path):
             raise StageError(f"fetch: the run finished and wrote no {entry.name} at {path}. An empty "
@@ -229,9 +232,19 @@ def run(ctx):
 
     Resumable: a re-run against the same out-dir takes only ids the checkpoint does not hold, and one that
     finds everything enriched runs a single batch, fetches nothing and exits clean.
+
+    `--refresh` runs the refresh after the drain, so the titles the drain just enriched are asked about
+    along with the rest and answer "unchanged". `--refresh --plan` runs no drain: a plan fetches nothing.
     """
     os.makedirs(os.path.abspath(ctx.out_dir), exist_ok=True)
+    if ctx.refresh and ctx.plan:
+        report = refresh.run(ctx)
+        return f"planned only — {report['toFetch']} of {report['grounded']} grounded titles would be re-fetched"
     ran = {media: drain(ctx, media) for media in media_types(ctx)}
+    refreshed = refresh.run(ctx) if ctx.refresh else None
     check_outputs(ctx)
     batches = ", ".join(f"{count} {media} batch(es)" for media, count in ran.items())
+    if refreshed is not None:
+        batches += (f"; refreshed {refreshed['changed']} changed, {refreshed['plotless']} lost their plot "
+                    f"-> {refreshed['run']}")
     return f"{ctx.path(artifacts.ENRICHED)} ({batches})"

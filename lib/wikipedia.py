@@ -189,6 +189,54 @@ def article_prose(article, language="en", cache=None):
             "sections": headings, "language": language}
 
 
+#: The action API's ceiling on `titles` per request for a client without the `apihighlimits` right.
+REVISION_BATCH = 50
+
+#: The current revision of up to `REVISION_BATCH` pages in one request. `prop=info` answers `lastrevid`
+#: without sending any content. `maxlag=5` is the etiquette Wikimedia asks of a bulk client: when the
+#: replicas are more than five seconds behind, the request is refused and retried after `Retry-After`
+#: (`lib/http`) rather than adding load to a lagging cluster. Never cached: the answer is only worth
+#: having fresh.
+REVISION_QUERY = {"action": "query", "prop": "info", "format": "json", "formatversion": "2",
+                  "redirects": "1", "maxlag": "5"}
+
+
+def revisions(titles, language="en", attempts=8):
+    """`{title: revid or None}` — the current revision of each page, asked `REVISION_BATCH` at a time.
+
+    The answer is keyed by the title ASKED. The action API reports under the page it landed on, after
+    normalising the spelling and following a redirect, so each asked title is walked through `normalized`
+    and `redirects` to its page. A redirect answers with its target's revision, which is what a changed
+    target should look like: a stored article that has since become a redirect is a different page. None
+    is a page that is not there (`missing`, `invalid`).
+
+    `attempts` is higher than the default because a lagged replica asks for 5 seconds at a time.
+    """
+    out = {}
+    ordered = list(dict.fromkeys(titles))
+    for start in range(0, len(ordered), REVISION_BATCH):
+        chunk = ordered[start:start + REVISION_BATCH]
+        payload = http.request(f"{language}.wikipedia.org", API_PATH,
+                               dict(REVISION_QUERY, titles="|".join(chunk)), attempts=attempts)
+        body = json.loads(payload.decode("utf-8"))
+        query = body.get("query") if isinstance(body, dict) else None
+        if not isinstance(query, dict):
+            raise ValueError(f"{language}.wikipedia.org answered a revision query with no `query`: "
+                             f"{str(body)[:200]}")
+        moved = {step["from"]: step["to"] for key in ("normalized", "redirects")
+                 for step in query.get(key) or ()}
+        pages = {page.get("title"): page for page in query.get("pages") or ()}
+        for title in chunk:
+            landed, seen = title, set()
+            while landed in moved and landed not in seen:
+                seen.add(landed)
+                landed = moved[landed]
+            page = pages.get(landed) or {}
+            revid = page.get("lastrevid")
+            out[title] = revid if isinstance(revid, int) and not isinstance(revid, bool) else None
+    return out
+
+
 def cache_for(env=None):
     """The `wiki` namespace, or None when it is switched off."""
     return caching.wiki(env)

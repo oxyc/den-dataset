@@ -27,7 +27,8 @@ Options (both run forms):
     --regional-wikipedia-floor N   the same, for the regional tier
     --plan                         the classify and genres & moods passes validate and report, and buy
                                    nothing; the embed pass reports what it would embed and how long
-                                   that would take, and embeds nothing
+                                   that would take, and embeds nothing; `fetch --refresh` reports what
+                                   it would re-fetch, and fetches nothing
     --spend                        buy from the paid provider: `run` includes the classify pass, and the
                                    genres & moods stage asks Jev before it derives
     --dump-docs PATH               the embed pass writes its documents here and embeds nothing
@@ -35,6 +36,10 @@ Options (both run forms):
                                    although the stores hold a vector for them
     --reembed-changed              the embed pass re-embeds every title whose document differs from the
                                    one its vector was made from
+    --refresh                      after its drain, the fetch stage re-fetches every grounded title whose
+                                   Wikipedia article changed since the revision it records, and lists the
+                                   titles whose plot changed or went under out/refresh/<stamp>/. With
+                                   --plan it reports the counts and fetches nothing
     --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
                                    NAME to name every shard of a set
 
@@ -105,7 +110,8 @@ def context(args):
                             wikipedia_floor=args.wikipedia_floor,
                             regional_wikipedia_floor=args.regional_wikipedia_floor, plan=args.plan,
                             spend=args.spend, dump_docs=args.dump_docs or "",
-                            reembed_keys=args.reembed_keys or "", reembed_changed=args.reembed_changed)
+                            reembed_keys=args.reembed_keys or "", reembed_changed=args.reembed_changed,
+                            refresh=args.refresh)
 
 
 def execute(module, ctx):
@@ -157,6 +163,9 @@ def main(argv=None):
         sub.add_argument("--reembed-changed", action="store_true",
                          help="the embed pass re-embeds every title whose document changed since it was "
                               "embedded")
+        sub.add_argument("--refresh", action="store_true",
+                         help="the fetch stage re-fetches every grounded title whose Wikipedia article "
+                              "changed since its recorded revision; with --plan it only counts them")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
         return sub
 
