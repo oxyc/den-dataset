@@ -211,15 +211,11 @@ votes.
 
 ## Reading an enrich report
 
-A title is admitted when its TMDB vote count clears its TMDB floor **or** its IMDb count clears its IMDb
-floor, per tier (`pipeline/floors.py`; European, South American and AU/NZ origins get the lower tier).
-Reports count `admittedByTmdb` / `admittedByImdb` / `admittedByBoth`, and `imdbGate` says how IMDb took part:
-
-- `downloaded` / `unchanged` — today's `title.ratings` dump judged the batch.
-- `stale: …` — an older dump judged it; it can only under-admit, since counts only climb.
-- `off: …` — no dump; the batch ran on TMDB floors alone, and titles only IMDb would admit stay pending.
-
-IMDb counts never leave the process (the licence is non-transferable); the dump lives under `.cache/imdb/`.
+A title is admitted when its TMDB vote count clears its TMDB floor **or** the number of Wikipedias with an
+article on it (Wikidata's sitelinks) clears its Wikipedia floor, per tier (`pipeline/floors.py`; European,
+South American and AU/NZ origins get the lower tier). Reports count `admittedByTmdb` and
+`admittedByWikipedias`. The Wikipedia count is asked only for titles TMDB's count leaves short, and a failed
+lookup aborts the batch like a failed mapping. IMDb's datasets are not used (`LICENSES.md`).
 
 ## Wikimedia Enterprise plots (optional)
 

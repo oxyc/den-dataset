@@ -101,8 +101,8 @@ class Declaration(unittest.TestCase):
         self.assertEqual(sorted(worklist.MEDIA), ["movie", "tv"])
 
     def test_discovery_enumerates_at_the_lowest_floor_any_tier_admits_at(self):
-        """At 50, discovery never listed a title the regional tier's 15 would admit, nor one IMDb admits
-        that TMDB undercounts — the port from Swift lost the 15 exactly that way. The number is pinned as
+        """At 50, discovery never listed a title the regional tier's 15 would admit, nor one its Wikipedia
+        count admits that TMDB undercounts — the port from Swift lost the 15 exactly that way. The number is pinned as
         well as derived: a floors change that moves what discovery pays for should be a visible edit."""
         self.assertEqual(worklist.VOTE_FLOOR, 15)
         self.assertEqual(worklist.VOTE_FLOOR, min(floors.DEFAULT.tmdb, floors.DEFAULT.regional_tmdb))
@@ -208,7 +208,7 @@ class Discover(Staged):
 
     def test_a_row_tmdb_stated_no_count_for_carries_none_rather_than_zero(self):
         """Zero is below every floor, so writing it would turn "the page said nothing" into "TMDB refused
-        this title" — and the gate would never ask IMDb about it."""
+        this title" — and the gate would never read the detail call's count instead."""
         client = FakeTMDB({"movie": [[7]]})
         rows = worklist.universe(context(self.out, mode="discover"), "movie", client)
         self.assertEqual(rows, [{"tmdbId": 7, "mediaType": "movie"}])

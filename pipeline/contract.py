@@ -173,11 +173,11 @@ class Context:
     #: the low-vote tail for a full-catalogue pass. A below-floor verdict holds for the day it was made and
     #: for the floors it was made by, so lowering this re-judges those titles at once.
     vote_floor: int | None = None
-    #: The other three admission floors (`pipeline/floors.py`): the regional tier's TMDB floor, and the IMDb
-    #: floor of each tier. None keeps the measured default.
+    #: The other three admission floors (`pipeline/floors.py`): the regional tier's TMDB floor, and the
+    #: Wikipedia floor of each tier. None keeps the measured default.
     regional_vote_floor: int | None = None
-    imdb_floor: int | None = None
-    regional_imdb_floor: int | None = None
+    wikipedia_floor: int | None = None
+    regional_wikipedia_floor: int | None = None
     #: Where the embed pass writes the documents it composes INSTEAD of embedding them, so they can be
     #: embedded on the den-embed that will serve them. Empty embeds as usual. A path rather than a switch:
     #: the documents travel, so the operator names where they go.

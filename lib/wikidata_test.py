@@ -268,38 +268,53 @@ class Mapping(unittest.TestCase):
         self.assertEqual(sent.call_count, 1, "a real answer is served from disk the second time")
 
 
-class ImdbIds(unittest.TestCase):
-    """The admission gate's lookup: the IMDb id of each title TMDB's count leaves short."""
+class Wikipedias(unittest.TestCase):
+    """The admission gate's lookup: how many Wikipedias have an article on each title TMDB's count leaves
+    short."""
 
-    def test_the_query_matches_the_media_and_asks_for_p345_only(self):
-        query = wikidata.imdb_query([12, 11, 11], "tv")
+    def test_the_query_matches_the_media_and_counts_wikipedia_sitelinks_only(self):
+        query = wikidata.wikipedias_query([12, 11, 11], "tv")
         self.assertIn('VALUES ?tmdb { "11" "12" }', query, "sorted and unique, so one set is one key")
         self.assertIn("wdt:P4983 ?tmdb", query)
-        self.assertIn("wdt:P345 ?imdb", query)
-        self.assertNotIn("OPTIONAL", query, "a title with no IMDb id has no row, which is the answer")
+        self.assertIn("COUNT(DISTINCT ?article)", query)
+        self.assertIn('".wikipedia.org/"', query, "Commons, Wikiquote and Wikisource are not Wikipedias")
+        self.assertIn("OPTIONAL", query, "an item with no article is a row counting 0, not a missing row")
 
-    def test_only_a_title_id_counts_and_the_first_in_order_wins(self):
-        payload = rows({"tmdb": cell("1"), "imdb": cell("nm0000001")}, {"tmdb": cell("1"), "imdb": cell("tt02")},
-                       {"tmdb": cell("1"), "imdb": cell("tt03")}, {"tmdb": cell("2"), "imdb": cell("co1")})
-        self.assertEqual(wikidata.parse_imdb(payload), {1: "tt02"})
+    def test_the_count_is_read_per_title_and_a_malformed_one_is_refused(self):
+        self.assertEqual(wikidata.parse_wikipedias(rows({"tmdb": cell("1"), "wikis": cell("22")},
+                                                        {"tmdb": cell("2"), "wikis": cell("0")})), {1: 22, 2: 0})
+        with self.assertRaises(wikidata.WikidataError):
+            wikidata.parse_wikipedias(rows({"tmdb": cell("1"), "wikis": cell("many")}))
 
     def test_a_body_that_is_not_a_result_is_refused_and_not_kept(self):
         """Read as no bindings, a WDQS maintenance page would judge the whole batch on TMDB alone."""
         with tempfile.TemporaryDirectory() as directory:
             cache = caching.ResponseCache("wiki", directory, 3600)
+            key = cache.key("sparql-wikipedias", {"q": wikidata.wikipedias_query([1], "movie"), "day": "d1"})
             with mock.patch.object(wikidata.http, "request", return_value=b"<html>busy</html>"):
                 with self.assertRaises(wikidata.WikidataError):
-                    wikidata.imdb_ids([1], "movie", cache)
-            self.assertIsNone(cache.read(cache.key("sparql-imdb", {"q": wikidata.imdb_query([1], "movie")})))
-            answer = rows({"tmdb": cell("1"), "imdb": cell("tt01")})
+                    wikidata.wikipedias([1], "movie", "d1", cache)
+            self.assertIsNone(cache.read(key))
+            answer = rows({"tmdb": cell("1"), "wikis": cell("7")})
             with mock.patch.object(wikidata.http, "request", return_value=answer) as sent:
-                self.assertEqual(wikidata.imdb_ids([1], "movie", cache), {1: "tt01"})
-                self.assertEqual(wikidata.imdb_ids([1], "movie", cache), {1: "tt01"})
-            self.assertEqual(sent.call_count, 1, "a real answer is served from disk the second time")
+                self.assertEqual(wikidata.wikipedias([1], "movie", "d1", cache), {1: 7})
+                self.assertEqual(wikidata.wikipedias([1], "movie", "d1", cache), {1: 7})
+            self.assertEqual(sent.call_count, 1, "a real answer is served from disk the same day")
+
+    def test_the_next_day_asks_again(self):
+        """The count moves, and a below-floor title is judged again daily in a batch much like yesterday's,
+        so a cache keyed on the query alone would answer it with the same count for 180 days."""
+        with tempfile.TemporaryDirectory() as directory:
+            cache = caching.ResponseCache("wiki", directory, 3600)
+            with mock.patch.object(wikidata.http, "request",
+                                   return_value=rows({"tmdb": cell("1"), "wikis": cell("4")})) as sent:
+                wikidata.wikipedias([1], "movie", "d1", cache)
+                wikidata.wikipedias([1], "movie", "d2", cache)
+            self.assertEqual(sent.call_count, 2)
 
     def test_no_ids_asks_nothing(self):
         with mock.patch.object(wikidata.http, "request") as sent:
-            self.assertEqual(wikidata.imdb_ids([], "movie"), {})
+            self.assertEqual(wikidata.wikipedias([], "movie", "d1"), {})
         sent.assert_not_called()
 
 
@@ -622,7 +637,8 @@ class OneItemPerTitle(unittest.TestCase):
         minus = '  MINUS { VALUES (?tmdb ?film) { ("2559" wd:Q116226000) } }'
         for query in (wikidata.query_text([2559, 3], "tv", "P57", excluded),
                       wikidata.mapping_query([2559, 3], "tv", LANGUAGES, excluded),
-                      wikidata.imdb_query([2559, 3], "tv", excluded), wikidata.kind_query([2559, 3], "tv", excluded),
+                      wikidata.wikipedias_query([2559, 3], "tv", excluded),
+                      wikidata.kind_query([2559, 3], "tv", excluded),
                       wikidata.language_query([2559, 3], "tv", excluded),
                       wikidata.source_query([2559, 3], "tv", excluded), wikidata.target_query([2559, 3], "tv", excluded)):
             self.assertIn("?film wdt:P4983 ?tmdb .\n" + minus + "\n", query)
@@ -631,7 +647,7 @@ class OneItemPerTitle(unittest.TestCase):
         """The query text is the cache key; a batch the choice does not touch must not be asked again."""
         for build in (lambda e: wikidata.query_text([3], "tv", "P57", e),
                       lambda e: wikidata.mapping_query([3], "tv", LANGUAGES, e),
-                      lambda e: wikidata.imdb_query([3], "tv", e), lambda e: wikidata.kind_query([3], "tv", e),
+                      lambda e: wikidata.wikipedias_query([3], "tv", e), lambda e: wikidata.kind_query([3], "tv", e),
                       lambda e: wikidata.language_query([3], "tv", e), lambda e: wikidata.source_query([3], "tv", e),
                       lambda e: wikidata.target_query([3], "tv", e)):
             self.assertEqual(build({2559: [BONN]}), build(None))

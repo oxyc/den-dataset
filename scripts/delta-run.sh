@@ -32,7 +32,7 @@ cd "$(dirname "$0")/.." || exit 1
 DAYS_BACK="${1:-14}"
 OUT_DIR="${2:-out-t02}"
 # The worldwide tier's TMDB floor, passed to `enrich`, which admits per title on it, the regional tier's
-# floor, or IMDb's count (`pipeline/floors.py`). The WORKLIST enumerates lower — at the lowest floor any
+# floor, or its Wikipedia count (`pipeline/floors.py`). The WORKLIST enumerates lower — at the lowest floor any
 # tier uses, pinned in `pipeline/worklist.py` — so the universe a delta collects does not move with an
 # environment variable. `worklist_test.py` holds this default to `pipeline/floors.py`'s.
 VOTE_FLOOR="${VOTE_FLOOR:-50}"

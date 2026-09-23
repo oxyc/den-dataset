@@ -61,9 +61,10 @@ DISCOVER, EXPORT, DELTA = "discover", "export", "delta"
 MODES = (DISCOVER, EXPORT, DELTA)
 
 #: The TMDB count `/discover` enumerates at: the LOWEST floor any admission tier uses (`pipeline/floors.py`),
-#: not the worldwide 50. Discovery only enumerates; `enrich` admits, on TMDB's count or IMDb's. A title
-#: enumerated at 50 could never reach the regional tier's 15, nor be admitted on an IMDb count TMDB
-#: undercounts — `Elkürtük` has 44 TMDB votes and 40,939 on IMDb. Below this nothing is looked at at all:
+#: not the worldwide 50. Discovery only enumerates; `enrich` admits, on TMDB's count or the number of
+#: Wikipedias with an article. A title enumerated at 50 could never reach the regional tier's 15, nor be
+#: admitted on a Wikipedia count TMDB's undercounts — `Chang` (1927) has 25 TMDB votes and articles on 22
+#: Wikipedias. Below this nothing is looked at at all:
 #: a brand-new release with no votes has no plot worth classifying, and every id listed costs a detail call
 #: each day it stays below the floors, since below-floor ids are never checkpointed.
 VOTE_FLOOR = floor_rules.DEFAULT.lowest_tmdb

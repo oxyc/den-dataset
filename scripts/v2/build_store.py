@@ -73,9 +73,9 @@ from store.inputs import (INPUT_ARGS, build_inputs, input_digest,  # noqa: E402
 #:   ours       — this pipeline's own bookkeeping: offsets, indices, counts, controlled vocabularies
 #:   identifier — an id rather than content: the TMDB key, the IMDb id, a TMDB person id
 #:   tmdb       — TMDB CONTENT, which is what #118 is removing
-#:   imdb       — IMDb's dataset CONTENT: vote counts, ratings. The enrichment admits titles on the counts
-#:                (`pipeline/floors.py`), and IMDb's licence is non-transferable, so they may never ship.
-#:                Not the `imdb` SECTION, which is the id — an `identifier`.
+#:   imdb       — IMDb's dataset CONTENT: vote counts, ratings. Nothing here reads them, and IMDb's
+#:                licence rules out a public database, so they may never ship. Not the `imdb` SECTION,
+#:                which is the id (Wikidata's P345) — an `identifier`.
 SOURCES = {"wikidata", "wikipedia", "llm", "ours", "identifier", "tmdb", "imdb"}
 
 #: Every section, and its source. Asserted at assembly as `set(PROVENANCE) == set(sec.order)`, which

@@ -110,22 +110,14 @@ def _retry_after(response):
     return seconds if seconds >= 0 else None
 
 
-#: The request headers that make a GET conditional. A 304 is the answer to one of them, not an error.
-CONDITIONAL = ("If-None-Match", "If-Modified-Since")
-
-
 def request(host, path, params=None, method="GET", body=None, headers=None, timeout=TIMEOUT,
-            attempts=ATTEMPTS, received=None, scheme="https"):
+            attempts=ATTEMPTS, scheme="https"):
     """One request, retried while the failure is transient. Returns the response body as bytes.
 
     `params` is encoded with `quote_via=quote`, so a `+` in an article title stays a plus. `urlencode`'s
     default turns it into a form-encoded space, and every title carrying one ("Knife+Heart", "X+Y",
     "Survive Style 5+") came back `missingtitle` — a title that simply does not exist, as far as anything
     downstream could tell.
-
-    `received`, when given, is a dict filled with the answer's `status`, `etag` and `last-modified`. A
-    request that sent one of the `CONDITIONAL` headers returns an empty body on a 304, and `received` is
-    how the caller tells "unchanged" from an empty file.
 
     `scheme` is `http` only for den-embed, which is self-hosted on the LAN or a container port and speaks
     no TLS. `host` may carry a port.
@@ -153,11 +145,7 @@ def request(host, path, params=None, method="GET", body=None, headers=None, time
                 raise HTTPError(0, url) from transport
             wait = None
         else:
-            unchanged = response.status == 304 and any(name in sent for name in CONDITIONAL)
-            if 200 <= response.status <= 299 or unchanged:
-                if received is not None:
-                    received.update({"status": response.status, "etag": response.getheader("ETag"),
-                                     "last-modified": response.getheader("Last-Modified")})
+            if 200 <= response.status <= 299:
                 return payload
             if last or not is_transient(response.status):
                 raise HTTPError(response.status, url, payload)

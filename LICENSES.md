@@ -54,7 +54,7 @@ Wikidata"`:
 |---|---|---|
 | `card_title` | TMDB, with a Wikidata label as fallback | Wikidata (`facts.titles`) |
 | `card_year` | TMDB | Wikidata (`facts.released`) |
-| `votes` | TMDB `vote_count` | gone; den-atlas orders by IMDb's public ratings dump, joined at run time and never stored |
+| `votes` | TMDB `vote_count` | gone; a reader that orders by popularity asks TMDB at run time and never stores it |
 | `card_poster` | a TMDB poster path | gone; posters are not fetched from TMDB at all |
 
 `build_store.py` is where that is enforced rather than asserted: `PROVENANCE` names the source of every
@@ -79,13 +79,14 @@ oxyc/den#118 removed it.
 
 ## IMDb, and popularity
 
-IMDb grants a *"non-transferable, non-sublicenseable license to access and make personal and non-commercial
-use"*, so its data cannot live in a public artifact either. What the store ships is the **IMDb id**
-(99.96% of rows) — an identifier, and a join key. For personal, non-commercial use, join IMDb's own daily
-`title.ratings.tsv.gz` (`tconst  averageRating  numVotes`, ~8.6 MB) on the store's `imdb` column: it
-matched 47,562 of 47,618 rows on 2026-09-21. You hold your own copy under your own use, and nothing licensed
-passes through this repo. den-atlas does the same join at run time. Read
-[IMDb's terms](https://www.imdb.com/conditions) before relying on it.
+IMDb's [non-commercial datasets](https://developer.imdb.com/non-commercial-datasets/) are licensed for
+personal, non-commercial use only and must not be used to build a database, and IMDb's help pages say that
+does not extend to public websites. Den publishes this dataset and serves a public site, so **this
+pipeline uses none of them** — admission is TMDB's count or Wikidata's Wikipedia count
+(`pipeline/floors.py`) — and den-atlas's run-time join of `title.ratings` is being removed on the same
+grounds. What the store ships is the
+**IMDb id** (99.96% of rows), and it ships as a Wikidata fact — P345, CC0 — like every other identifier
+here. Popularity, where a reader needs it, comes from TMDB at run time under TMDB's caching terms.
 
 ## The derived signals
 

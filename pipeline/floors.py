@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""The admission floors: which vote counts a title must clear before it is worth grounding and classifying.
+"""The admission floors: what a title must clear before it is worth grounding and classifying.
 
 **Admission is a union** (oxyc/den-dataset#27): a title is admitted when its TMDB vote count clears its
-TMDB floor OR its IMDb vote count clears its IMDb floor. Each source undercounts a different set of titles
-— TMDB under-represents older and non-Anglo-American work (`Elkürtük`: 40,939 IMDb votes against 44 on
-TMDB), IMDb under-represents non-English television (`El Señor de los Cielos`: 3,650 TMDB, 1,648 IMDb) — so
-either one alone drops titles the other rightly admits, and nothing the TMDB floor admitted is ever lost.
+TMDB floor OR the number of Wikipedias with an article on it clears its Wikipedia floor. TMDB's count
+under-represents older and non-Anglo-American work, and the Wikipedia count is Wikidata's (CC0), so it
+can decide what a public dataset holds. Nothing the TMDB floor admits is ever lost.
+
+This half used to be IMDb's vote count. IMDb's datasets are licensed for personal, non-commercial use and
+not for building a database or a public site, so it is gone; the Wikipedia count replaced it, measured
+below.
 
 **The floors are per tier, not one number.** The shipped corpus was built from two discover passes: every
 origin at 50 TMDB votes, and a foreign-depth pass at 15 for European, South American and Australian/New
@@ -14,21 +17,38 @@ Zealand origins, which is where regional titles live. 46.6% of the corpus has on
 worklist kept the 50 and lost the 15, so this restores it: a title belongs to every tier its origin matches
 and is judged by the lowest floor among them.
 
-**The IMDb floors are matched to the TMDB ones, measured over the corpus** (47,548 titles with an enriched
-record, IMDb's `title.ratings` of 2026-09-22): the median IMDb count of the titles sitting AT the TMDB
-floor.
+**The Wikipedia floors are matched to the TMDB ones**, the way the IMDb floors were: the median
+Wikipedia count of the titles sitting at the TMDB floor, over the 59,209 enriched titles of 2026-09-22.
 
-    tier        TMDB floor   titles at it        median IMDb   within ±10%   chosen IMDb floor
-    worldwide   50           72 (non-regional)   2,110         2,302         2,000
-    regional    15           469                 457           490           500
+    tier        TMDB floor   at it   median   within ±10%   median   quartiles   chosen floor
+    worldwide   50           105     5        1,329         5        2 / 5 / 9   5
+    regional    15           917     3        2,034         3        1 / 3 / 5   3
+
+**What the worldwide floor admits was measured below the TMDB floor**, where it matters: the enriched
+titles hold 35 there (the corpus was discovered at 50 for these origins), so 1,906 titles were sampled from
+`/discover` at 15–49 TMDB votes, by decade (43,130 films and 8,188 series sit in that band). 1,305 are in
+the worldwide tier, which the TMDB floor refuses — about 33,600 titles weighted up. Of those:
+
+    Wikipedia floor   admitted   weighted   of IMDb's 267 at 2,000   IMDb did not
+    3                 972        ~20,000    237                      735
+    5                 725        ~12,900    208                      517
+    8                 426        ~6,300     146                      280
+    10                276        ~3,600     96                       180
+
+At 5 it keeps 78% of what the IMDb half admitted and adds more than it drops: silent and studio-era
+films (`Chang` 1927, `Camille` 1921, `Born Reckless` 1930, `Frisco Jenny` 1933, `Soviet Toys` 1924),
+television TMDB barely rates (`Superboy`, `The Courtship of Eddie's Father`, `A.D. Police`, `Money
+Flower`) — 30 sampled at random were all real, documented works. What it drops of IMDb's are mostly
+single-country television with an article on one to four wikis (`F Troop`, `Amen`, `Afsos`). The cost is
+a plot fetch and, later, a classification for each of the ~12,900.
 
 **The tier is read off TMDB's `origin_country`, and that is a measured decision, not an oversight.**
 oxyc/den-dataset#53 is taking TMDB out of the title path, and Wikidata's P495 (country of origin) is the
 obvious replacement — the facts sidecar already carries it for 99.3% of the corpus. Measured over the
 47,548 enriched titles that corpus holds: swapping the tier to P495 moves 2,570 of them. 1,739 JOIN the
 regional tier, which only ever admits more; 831 LEAVE it and are judged at 50 TMDB votes instead of 15,
-and **272 of those then clear no floor at all** — below 50 on TMDB, below 2,000 on IMDb, out of the
-corpus. 239 of the 272 are co-productions TMDB files under several origins and Wikidata under one
+and **272 of those then cleared no floor at all** — below 50 on TMDB, below 2,000 on IMDb (the other half
+of the gate then), out of the corpus. 239 of the 272 are co-productions TMDB files under several origins and Wikidata under one
 (`Doll & Em`: TMDB GB, P495 US), and 33 have no P495 at all. Those are precisely the regional titles the
 15 exists for, and a below-floor verdict holds only for the day, so they would not fail — they would be
 re-fetched and re-refused every day, silently. The tier therefore stays on TMDB's origins until
@@ -39,16 +59,9 @@ per-title detail call alive.
 stated it when the universe was built, and it is the number that query selected on, so the gate does not
 ask TMDB for it again per title (oxyc/den-dataset#53). An export row carries none, because the daily dump
 states popularity; those fall back to the detail call while it is still made. A title nothing states a
-TMDB count for is judged on IMDb's count alone — the half of the union that exists for the titles TMDB
-undercounts — and a worklist row that stated no count is written without one rather than with a zero,
-which would be below every floor and refuse a title the detail call admits.
-
-2,000 is also the whole corpus's ±10% median at 50 (1,992), the figure the decision was made on. Rounded
-DOWN for the worldwide tier, since the union only ever adds: a floor a little low admits a few more titles
-IMDb rates, and costs a TMDB detail call and a plot fetch each, while a floor a little high silently keeps
-out exactly the titles the IMDb half exists for. Judged by these floors, every corpus title the TMDB floor
-admits stays admitted; 42,561 (89.5%) clear both, 4,964 (10.4%) TMDB only — 18.2% of non-English titles
-against 4.7% of English — which is why IMDb cannot be the gate alone.
+TMDB count for is judged on its Wikipedia count alone, and a worklist row that stated no count is written
+without one rather than with a zero, which would be below every floor and refuse a title the detail call
+admits. The Wikipedia count is asked of Wikidata only for the titles TMDB's count leaves short.
 """
 from dataclasses import dataclass
 
@@ -60,14 +73,14 @@ REGIONAL_ORIGINS = frozenset(
 
 @dataclass(frozen=True)
 class Floors:
-    """The four floors: TMDB and IMDb, for the worldwide tier and the regional one."""
+    """The four floors: TMDB votes and Wikipedia articles, for the worldwide tier and the regional one."""
     tmdb: int = 50
     regional_tmdb: int = 15
-    imdb: int = 2000
-    regional_imdb: int = 500
+    wikipedias: int = 5
+    regional_wikipedias: int = 3
 
     def of(self, record):
-        """`(tmdb_floor, imdb_floor)` for one title — the lowest of each among the tiers it belongs to.
+        """`(tmdb_floor, wikipedia_floor)` for one title — the lowest of each among the tiers it belongs to.
 
         Every title is in the worldwide tier; a title whose TMDB origin is regional is in both. A title
         with no origin at all is judged worldwide, since nothing says it is regional.
@@ -76,25 +89,22 @@ class Floors:
         there, and it is the last per-title TMDB field the admission path reads.
         """
         if REGIONAL_ORIGINS & set(record.get("originCountry") or ()):
-            return min(self.tmdb, self.regional_tmdb), min(self.imdb, self.regional_imdb)
-        return self.tmdb, self.imdb
+            return (min(self.tmdb, self.regional_tmdb),
+                    min(self.wikipedias, self.regional_wikipedias))
+        return self.tmdb, self.wikipedias
 
     @property
     def lowest_tmdb(self):
-        """What discovery enumerates at: a title below every TMDB floor can still be admitted on IMDb's
-        count only if something enumerated it, so this is the lowest floor any tier uses."""
+        """What discovery enumerates at: a title below every TMDB floor can still be admitted on its
+        Wikipedia count only if something enumerated it, so this is the lowest floor any tier uses."""
         return min(self.tmdb, self.regional_tmdb)
-
-    @property
-    def lowest_imdb(self):
-        """The lowest IMDb floor — the dump is read only above it."""
-        return min(self.imdb, self.regional_imdb)
 
 
 DEFAULT = Floors()
 
 
-def given(tmdb=None, regional_tmdb=None, imdb=None, regional_imdb=None):
+def given(tmdb=None, regional_tmdb=None, wikipedias=None, regional_wikipedias=None):
     """The defaults, with whichever floors a run named replaced."""
-    named = {"tmdb": tmdb, "regional_tmdb": regional_tmdb, "imdb": imdb, "regional_imdb": regional_imdb}
+    named = {"tmdb": tmdb, "regional_tmdb": regional_tmdb, "wikipedias": wikipedias,
+             "regional_wikipedias": regional_wikipedias}
     return Floors(**{name: value for name, value in named.items() if value is not None})
