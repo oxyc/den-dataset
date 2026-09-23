@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Refuse a module under `pipeline/`, `store/` or `lib/`, or a script, that nothing reaches.
 
-`scripts/` and `scripts/v2/` are two generations of one pipeline side by side, 83 Python files of which
-17 are reachable from CI. Nobody chose that. It happened because "delete what is not used" was a habit
+`scripts/` and `scripts/v2/` were two generations of one pipeline side by side, 83 Python files of which
+17 were reachable from CI. Nobody chose that. It happened because "delete what is not used" was a habit
 rather than a check, and a habit loses to a branch someone might come back to.
 
 So the rule has teeth here: **existence means reachability**. A file under a guarded package is either
@@ -15,8 +15,8 @@ packages are entered differently, so they name their roots differently:
   pipeline/  the modules in `STAGES`, passed in. A stage that leaves the list stops being a root, and
              everything only it reached surfaces here on the next run: the removal and the cleanup are
              one commit rather than two years apart. The passes moved in from `scripts/` are entered
-             the way scripts are — executed by the path a stage's `PRODUCER` spells, imported by a
-             script still outside, run by hand — so `reached_from` widens the closure by those, and
+             the way scripts are — executed by the path a stage's `PRODUCER` or a shell script spells,
+             imported by a tool outside, run by hand — so `reached_from` widens the closure by those, and
              still not by prose.
   store/     whatever `pipeline/build_store.py` imports, read off that file by `roots()`. Nothing
              imports `store/` from inside the repo's own import graph — the store stage runs the writer
@@ -176,14 +176,14 @@ def orphan_tests(package_dir):
 
 # --- scripts -------------------------------------------------------------------------------------------
 #
-# A script — any file under `scripts/` or `tools/`, and a shell script anywhere under the packages — is not
-# in a package, so its reachability cannot be an import closure alone. A script is entered three ways —
+# A script — any file under `tools/`, and a shell script anywhere under the packages — is not in a package,
+# so its reachability cannot be an import closure alone. A script is entered three ways —
 # imported off a `sys.path` entry, executed by a path a stage or another script spells out, or typed by an
 # operator — and the rule has to see all three without seeing prose:
 #
 #   * A Python file refers to a script by IMPORTING it (a tool's directory is on `sys.path` when it runs, so
 #     its siblings import by bare name) or by a string in its CODE that names the file: a stage's `PRODUCER`, an
-#     `os.path.join(REPO, "scripts", "merge-facts.py")`, a subprocess argv, an error message telling the
+#     `os.path.join(REPO, "pipeline", "merge_facts.py")`, a subprocess argv, an error message telling the
 #     operator what to run. Docstrings and comments are not code and are skipped — a file that only prose
 #     names is exactly the dead file this exists to find.
 #   * A shell script refers to a script by naming it outside a comment.
@@ -208,13 +208,23 @@ _SCRIPT_EXTENSIONS = (".py", ".sh")
 
 #: The trees entered by path rather than by import, where every file is a script: `tools/` holds standalone
 #: tools with dependencies of their own, which is why they are not in a package.
-SCRIPT_TREES = ("scripts", "tools")
+SCRIPT_TREES = ("tools",)
 #: The packages, where only a shell script is a script — a module there is held to its package's rule above.
 SCRIPT_PACKAGES = ("pipeline", "store", "lib")
+#: Where a Python or shell file may live, each under one of the rules in this file — plus `guards/`, which
+#: is these rules. A file anywhere else is asked nothing, which is how `scripts/` grew.
+HOMES = SCRIPT_PACKAGES + SCRIPT_TREES + ("guards",)
 
 
 def _is_test(name):
     return name.startswith("test_") or name.endswith(TEST_SUFFIX) or name.endswith(".test.sh")
+
+
+def homeless(paths):
+    """The Python and shell files among `paths` (repo-relative) that no rule here would ever ask about: outside
+    every home, and not a test at the top level (`den` itself has no extension and is a root)."""
+    return sorted(path for path in paths if path.endswith(_SCRIPT_EXTENSIONS)
+                  and path.split("/")[0] not in HOMES and not ("/" not in path and _is_test(path)))
 
 
 def script_files(repo):
