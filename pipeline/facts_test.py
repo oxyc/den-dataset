@@ -316,6 +316,28 @@ class Franchise(Staged):
                 self.rescrape(targets)
                 self.assertEqual(self.shipped()[("movie", 1)]["franchise"], [self.SERIES, self.CATALOG])
 
+    def test_a_title_that_is_a_series_its_siblings_name_belongs_to_it(self):
+        """The Beck television series is the item its films are "part of the series" of, and nothing states
+        P179 from an item to itself: the series joins its own franchise, so it shares one with its films.
+        Derived, like the rest of the franchise, so the checkpoint is unchanged. A title whose own item is
+        a list, or is nobody's target, gains nothing."""
+        self.wd.members = {self.SERIES: 27}
+        self.wd.facts[("movie", 1)]["franchise"] = [self.SERIES]
+        self.wd.claimants[("tv", 1)] = [self.SERIES]
+        self.wd.by_item[self.SERIES] = {"imdbId": "tt9", "broadcaster": ["Q50"]}
+        self.run_stage()
+        self.assertEqual(self.shipped()[("tv", 1)]["franchise"], [self.SERIES])
+        self.assertEqual(self.shipped()[("movie", 1)]["franchise"], [self.SERIES])
+        self.assertNotIn("franchise", self.read("facts-fields.json")["tv:1"])
+        for own in (self.LIST, "Q9999"):
+            with self.subTest(own=own):
+                os.remove(os.path.join(self.out, "facts-fields.json"))
+                self.wd.facts[("movie", 1)]["franchise"] = [self.SERIES, self.LIST]
+                self.wd.claimants[("tv", 1)] = [own]
+                self.wd.by_item[own] = {"imdbId": "tt9"}
+                self.run_stage()
+                self.assertNotIn("franchise", self.shipped()[("tv", 1)])
+
     def test_a_row_an_older_scrape_collapsed_is_asked_again(self):
         """The older scrape kept only the least Q-id — the list — so the series was never checkpointed."""
         self.wd.members = {self.SERIES: 4}
