@@ -73,15 +73,15 @@ cp den.env.example den.env        # TMDB_API_KEY (worklist discover/delta); Ente
     --set universe_movie=out/delta/universe-movie.json --set universe_tv=out/delta/universe-tv.json
 #    Keep a delta's lists under delta/: written over the full ones, they END the enrich run.
 #    To re-embed exactly what ships instead, `python3 scripts/build-worklist.py` writes
-#    out/worklist-{movie,tv}.json, and step 3 drains those with --set universe_movie=… universe_tv=…
-#    and --wikipedia-floor 0 --regional-wikipedia-floor 0: those rows state no TMDB count, and the
-#    titles are already admitted (pipeline/floors.py).
+#    out/worklist-{movie,tv}.json, and step 3 drains those with --set universe_movie=… universe_tv=….
+#    Those rows state no TMDB count; a shipped title keeps its admission regardless. Re-fetching titles
+#    that were enriched and never shipped (plotless ones) needs --wikipedia-floor 0
+#    --regional-wikipedia-floor 0, or they are judged again as new (pipeline/floors.py).
 
 # 3. Fetch — Wikidata and the live Wikipedia plot per title, resumable. Asks TMDB nothing.
 ./den stage fetch --out-dir out
 #    One batch by hand, credentials already in the environment:
-python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --limit 150 \
-    --wikipedia-floor 0 --regional-wikipedia-floor 0
+python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --limit 150
 
 # 3a. Classify — the one step that buys ($20.47 for 47,529 titles). --plan first. scripts/v2/FACETS-V2.md.
 ./den stage articles --out-dir out

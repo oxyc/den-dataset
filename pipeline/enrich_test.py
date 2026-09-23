@@ -114,6 +114,11 @@ class Batch(unittest.TestCase):
         patch = mock.patch.object(enrich.wikidata, "load_decisions", lambda path=None: {})
         patch.start()
         self.addCleanup(patch.stop)
+        # The shipped catalogue names real ids (movie:2 among them); a test names the ones it means.
+        self.catalogue, self.real_shipped = set(), enrich.shipped
+        patch = mock.patch.object(enrich, "shipped", lambda path=None: frozenset(self.catalogue))
+        patch.start()
+        self.addCleanup(patch.stop)
         # Every upstream is behind a stub above. A request that reaches the wire — TMDB above all — fails.
         patch = mock.patch.object(http, "request", side_effect=AssertionError("an unstubbed upstream was asked"))
         patch.start()
@@ -656,6 +661,30 @@ class Batch(unittest.TestCase):
         self.assertEqual((report["votesFromWorklist"], report["admittedByWikipedias"], report["belowFloor"]),
                          (0, 1, 1))
         self.assertEqual(self.checkpoint()["judgedBelow"]["movie:2"]["votes"], None)
+
+    def test_a_shipped_title_on_a_list_of_ids_keeps_its_admission_and_a_new_one_does_not(self):
+        """A re-fetch plan or `scripts/build-worklist.py` list names titles an earlier build admitted, and
+        carries no TMDB count. Judged on its Wikipedia count alone a shipped title with few articles was
+        refused — 61 of 200 in a replay — unless someone remembered the floor flags. A new title with the
+        same count is judged as any other, and a shipped title whose row states a count is judged on it."""
+        self.catalogue.update({"movie:1", "movie:3"})
+        self.wikis.update({("movie", 1): 1, ("movie", 2): 1, ("movie", 3): 1})
+        report = self.run_batch([("movie", 1), ("movie", 2), ("movie", 3)],
+                                votes={("movie", 1): None, ("movie", 2): None, ("movie", 3): 10},
+                                tiers={("movie", 3): False})
+        self.assertEqual(set(self.rows()), {"movie:1"})
+        self.assertEqual((report["admittedAsShipped"], report["belowFloor"]), (1, 2))
+        self.assertEqual(self.wiki_calls[0][:2], ("movie", [2, 3]), "a shipped title is not asked about")
+        self.assertEqual(self.origin_calls, [("movie", [2])])
+
+    def test_an_unreadable_catalogue_is_a_refusal_not_an_empty_one(self):
+        """Read as empty, it would judge every shipped title on a list of ids again, silently."""
+        with tempfile.TemporaryDirectory() as directory:
+            broken = os.path.join(directory, "catalogue.json")
+            put(broken, '{"titles": ')
+            with self.assertRaises(StageError):
+                self.real_shipped(broken)
+        self.assertIn("movie:2", self.real_shipped(enrich.CATALOGUE), "the committed catalogue is the shipped one")
 
     def test_the_gate_is_decided_before_the_expensive_work(self):
         """A refused title is never mapped to its articles and no plot is fetched for it: extra candidates

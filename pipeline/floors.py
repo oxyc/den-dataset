@@ -66,10 +66,14 @@ count for is judged on its Wikipedia count alone. A worklist row that stated no 
 one rather than with a zero, which would be below every floor. The Wikipedia count is asked of Wikidata
 only for the titles TMDB's count leaves short.
 
-That makes a list of ids a narrower gate than a `/discover` universe: replayed over 200 corpus titles, an
+That made a list of ids a narrower gate than a `/discover` universe: replayed over 200 corpus titles, an
 id-only worklist refused 61 that TMDB's count had admitted (`Loose Change`, `The Answer Man`, `Casi
-divas`). A list of titles already enriched — `scripts/build-worklist.py`'s, or a re-fetch plan — is not a
-question of admission, and is drained with both Wikipedia floors at 0, which admits every title.
+divas`). So a title the shipped catalogue (`data/genres-moods-curated.json`) names, on a row that states no
+count, keeps the admission an earlier build gave it (`pipeline/enrich.admit`): a re-fetch plan or
+`scripts/build-worklist.py`'s list needs no flag. The same replay then admitted 172 of the 200. The other
+28 were enriched once and never shipped, every one of them plotless, and nothing a fresh out-dir can read
+says they were admitted: a list of those is drained with both Wikipedia floors at 0, which admits every
+title. A new title, and any row that states a count, is judged as above.
 """
 from dataclasses import dataclass
 

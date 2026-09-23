@@ -42,12 +42,28 @@ from lib import cache as caching
 from lib import enterprise, http, plot, wikidata, wikipedia
 
 from . import floors as floor_rules
-from .contract import StageError
+from .contract import REPO, StageError
 
 LIMIT = 150
 
-#: Which count admitted a title, for the report.
-TMDB, WIKIPEDIAS = "tmdb", "wikipedias"
+#: What admitted a title, for the report: TMDB's count, the Wikipedia count, or an earlier build.
+TMDB, WIKIPEDIAS, SHIPPED = "tmdb", "wikipedias", "shipped"
+
+#: The shipped catalogue: every title the published dataset carries, keyed `mediaType:tmdbId`. The one
+#: record of what an earlier build admitted that every out-dir can see — a fresh re-fetch out-dir holds no
+#: labels, facts or batches of its own — and the genres & moods stage keeps it in step with what ships.
+CATALOGUE = os.path.join(REPO, "data", "genres-moods-curated.json")
+
+
+def shipped(path=CATALOGUE):
+    """The keys of every title the shipped catalogue names. A refusal when it cannot be read: read as
+    empty, it would re-judge every shipped title a worklist names, silently."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return frozenset(json.load(handle)["titles"])
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise StageError(f"enrich: the shipped catalogue {path} cannot be read ({error}); without it every "
+                         f"shipped title on a list of ids is judged again as if new") from None
 
 #: Minimum plot length to ground on, in characters. Was 200, justified as "a one-line logline adds little
 #: over the TMDB overview it would replace" — but that comparison is gone: `overview` holds a Wikipedia plot
@@ -487,9 +503,14 @@ def identities(records, cache):
     return found, excluded
 
 
-def admit(records, floors, today, cache, worklist_votes=None, excluded=None):
-    """`(admitted, from_worklist)`: key → which count admitted it (`TMDB` or `WIKIPEDIAS`), and how many
+def admit(records, floors, today, cache, worklist_votes=None, excluded=None, catalogue=frozenset()):
+    """`(admitted, from_worklist)`: key → what admitted it (`TMDB`, `WIKIPEDIAS` or `SHIPPED`), and how many
     titles were judged on a count their worklist row carried.
+
+    A title the shipped `catalogue` names whose worklist row states no TMDB count keeps its admission:
+    an earlier build admitted it, and a list of ids — a re-fetch plan, `scripts/build-worklist.py`'s —
+    carries nothing TMDB's half of the gate could judge it by. Judged on its Wikipedia count alone, 61 of
+    200 corpus titles in a replay were refused. A row that states a count is judged on it, shipped or not.
 
     A key absent from `admitted` is below every floor its tiers set. A record whose worklist stated no tier
     (`regional`) and whose count does not clear every tier's TMDB floor is given Wikidata's P495 as its
@@ -503,6 +524,9 @@ def admit(records, floors, today, cache, worklist_votes=None, excluded=None):
     def votes(record):
         return worklist_votes.get(key(record["mediaType"], record["tmdbId"]))
 
+    kept = {key(r["mediaType"], r["tmdbId"]) for r in records
+            if votes(r) is None and key(r["mediaType"], r["tmdbId"]) in catalogue}
+    records = [r for r in records if key(r["mediaType"], r["tmdbId"]) not in kept]
     untiered = [r for r in records if r.get("regional") is None and (votes(r) or 0) < floors.tmdb]
     for media in sorted({record["mediaType"] for record in untiered}):
         found = wikidata.origins([r["tmdbId"] for r in untiered if r["mediaType"] == media], media, cache,
@@ -510,7 +534,7 @@ def admit(records, floors, today, cache, worklist_votes=None, excluded=None):
         for record in untiered:
             if record["mediaType"] == media:
                 record["originCountry"] = found.get(record["tmdbId"], [])
-    admitted, from_worklist, short = {}, 0, []
+    admitted, from_worklist, short = dict.fromkeys(kept, SHIPPED), 0, []
     for record in records:
         label = key(record["mediaType"], record["tmdbId"])
         from_worklist += label in worklist_votes
@@ -614,7 +638,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
         raise Aborted(f"choosing each title's Wikidata item failed for batch {batch_id} after retries ({error}); "
                       f"nothing written — re-run to retry this batch") from error
     try:
-        admitted, from_worklist = admit(records, floors, today, cache, worklist_votes, excluded)
+        admitted, from_worklist = admit(records, floors, today, cache, worklist_votes, excluded, shipped())
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise Aborted(f"Wikidata origin or Wikipedia-count lookup failed for batch {batch_id} after retries "
                       f"({error}); nothing written — re-run to retry this batch") from error
@@ -718,6 +742,8 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
               # left short — its Wikipedia count.
               "admittedByTmdb": sum(v == TMDB for v in admitted.values()),
               "admittedByWikipedias": sum(v == WIKIPEDIAS for v in admitted.values()),
+              # Titles the shipped catalogue names whose row stated no count: admitted by an earlier build.
+              "admittedAsShipped": sum(v == SHIPPED for v in admitted.values()),
               # How many titles had a TMDB count to be judged on at all. It is the whole batch for a discover
               # or delta universe, and none of it for an export one, whose titles only their Wikipedia
               # count can admit.
