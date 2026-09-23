@@ -33,7 +33,9 @@ STORE_PRODUCER = pipeline.stage("store").PRODUCER
 STORE_ENTRY = os.path.join(REPO, STORE_PRODUCER)
 
 
-CI = ".github/workflows/ci.yml"
+#: Every workflow runs what it names, so each is a root.
+WORKFLOWS = sorted(os.path.join(".github", "workflows", name)
+                   for name in os.listdir(os.path.join(REPO, ".github", "workflows")) if name.endswith(".yml"))
 
 
 def operator_tools_in(package_dir):
@@ -44,35 +46,36 @@ def operator_tools_in(package_dir):
 
 
 def scripts_entering(tools):
-    """The scripts under `scripts/` (held live by their own guard below), without the operator tools among
-    them when `tools` is false."""
-    scripts, _ = reachable.script_files(os.path.join(REPO, "scripts"))
+    """The scripts (held live by their own guard below), without the operator tools among them when `tools`
+    is false."""
+    scripts, _ = reachable.script_files(REPO)
     declared = reachable.operator_tools()
     return [script for script in scripts if tools or script not in declared]
 
 
 def pipeline_reach(tools=True):
-    """What runs reaches under `pipeline/`: the stages and what they import, and what `den`, CI, the scripts
-    under `scripts/` and the operator tools import or name — a stage's `PRODUCER` included, which is how a
-    pass the stage executes is entered. `tools=False` leaves every operator tool out, which is what the
+    """What runs reaches under `pipeline/`: the stages and what they import, and what `den`, the workflows,
+    `store/`, the scripts and the operator tools import or name — a stage's `PRODUCER` included, which is how
+    a pass the stage executes is entered. `tools=False` leaves every operator tool out, which is what the
     operator-tool list is checked against."""
     base = list(pipeline.STAGES) + (operator_tools_in(PIPELINE) if tools else [])
-    return reachable.reached_from(REPO, PIPELINE, base, ["den", CI] + scripts_entering(tools))
+    stores = [f"store/{name}.py" for name in reachable.modules(STORE)]
+    return reachable.reached_from(REPO, PIPELINE, base, ["den"] + WORKFLOWS + stores + scripts_entering(tools))
 
 
 def lib_reach(tools=True):
     """What runs reaches under `lib/`: what the reached pipeline modules import, and what `den`, the scripts
-    under `scripts/` and the operator tools import or name."""
+    and the operator tools import or name."""
     stages = [f"pipeline/{name}.py" for name in sorted(pipeline_reach(tools))]
     base = operator_tools_in(LIB) if tools else []
     return reachable.reached_from(REPO, LIB, base, ["den"] + stages + scripts_entering(tools))
 
 
 def script_roots():
-    """Everything that runs and can name a script: `den`, CI, the stages and what they reach. The operator
-    tools are not among them — they reach what they name as `extra` roots, which is what lets the list
-    be held to naming only what nothing else runs."""
-    return (["den", CI]
+    """Everything that runs and can name a script: `den`, the workflows, the stages and what they reach. The
+    operator tools are not among them — they reach what they name as `extra` roots, which is what lets the
+    list be held to naming only what nothing else runs."""
+    return (["den"] + WORKFLOWS
             + [f"pipeline/{name}.py" for name in sorted(pipeline_reach(tools=False))]
             + [f"store/{name}.py" for name in reachable.modules(STORE)]
             + [f"lib/{name}.py" for name in reachable.modules(LIB)])
@@ -277,12 +280,13 @@ class ThisRepo(unittest.TestCase):
                                        f"stage needs from outside the machine — delete it, or import it "
                                        f"from the stage that needs it.")
 
-    def test_nothing_under_scripts_is_unreachable(self):
-        """What runs is `den`, CI, the stages `STAGES` reaches and the `store/` and `lib/` code above; what an
-        operator runs by hand is `guards/operator-tools.json`. A script none of those reach is deleted."""
+    def test_no_script_is_unreachable(self):
+        """What runs is `den`, the workflows, the stages `STAGES` reaches and the `store/` and `lib/` code
+        above; what an operator runs by hand is `guards/operator-tools.json`. A script none of those reach is
+        deleted."""
         dead, orphans = reachable.unreachable_scripts(REPO, script_roots(), extra=reachable.operator_tools())
-        self.assertEqual(dead, [], f"unreachable under scripts/: {dead}. Nothing that runs reaches these — "
-                                   f"not a stage, `den`, CI, or a script one of those runs. Delete them, "
+        self.assertEqual(dead, [], f"unreachable scripts: {dead}. Nothing that runs reaches these — "
+                                   f"not a stage, `den`, a workflow, or a script one of those runs. Delete them, "
                                    f"after recording any result they produced in the issue it answered; "
                                    f"or, if a person runs one by hand, add it to "
                                    f"guards/operator-tools.json with the reason.")
@@ -291,7 +295,7 @@ class ThisRepo(unittest.TestCase):
     def test_every_operator_tool_is_a_script_nothing_else_runs(self):
         """The list is a declaration, so it is held to the tree: a stale entry would keep nothing alive and
         read as if it did, and a redundant one would survive the day the thing that runs it stops."""
-        code, _ = reachable.script_files(os.path.join(REPO, "scripts"))
+        code, _ = reachable.script_files(REPO)
         run = reachable.reached_scripts(REPO, script_roots(), code)
         run |= {f"pipeline/{name}.py" for name in pipeline_reach(tools=False)}
         run |= {f"lib/{name}.py" for name in lib_reach(tools=False)}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refuse a module under `pipeline/`, `store/` or `lib/`, or a script under `scripts/`, that nothing reaches.
+"""Refuse a module under `pipeline/`, `store/` or `lib/`, or a script, that nothing reaches.
 
 `scripts/` and `scripts/v2/` are two generations of one pipeline side by side, 83 Python files of which
 17 are reachable from CI. Nobody chose that. It happened because "delete what is not used" was a habit
@@ -174,23 +174,24 @@ def orphan_tests(package_dir):
                   if entry.endswith(TEST_SUFFIX) and entry[:-len(TEST_SUFFIX)] not in present)
 
 
-# --- scripts/ ------------------------------------------------------------------------------------------
+# --- scripts -------------------------------------------------------------------------------------------
 #
-# `scripts/` is not a package, so reachability there cannot be an import closure alone. A script is entered
-# three ways — imported off a `sys.path` entry, executed by a path a stage or another script spells out, or
-# typed by an operator — and the rule has to see all three without seeing prose:
+# A script — any file under `scripts/` or `tools/`, and a shell script anywhere under the packages — is not
+# in a package, so its reachability cannot be an import closure alone. A script is entered three ways —
+# imported off a `sys.path` entry, executed by a path a stage or another script spells out, or typed by an
+# operator — and the rule has to see all three without seeing prose:
 #
-#   * A Python file refers to a script by IMPORTING it (`scripts/` and `scripts/v2/` are put on `sys.path`
-#     by the files that use them) or by a string in its CODE that names the file: a stage's `PRODUCER`, an
+#   * A Python file refers to a script by IMPORTING it (a tool's directory is on `sys.path` when it runs, so
+#     its siblings import by bare name) or by a string in its CODE that names the file: a stage's `PRODUCER`, an
 #     `os.path.join(REPO, "scripts", "merge-facts.py")`, a subprocess argv, an error message telling the
 #     operator what to run. Docstrings and comments are not code and are skipped — a file that only prose
 #     names is exactly the dead file this exists to find.
 #   * A shell script refers to a script by naming it outside a comment.
-#   * CI refers to one by running it. A `py_compile` line compiles a file; it does not run it, and does not
-#     count.
+#   * A workflow refers to one by running it. A `py_compile` line compiles a file; it does not run it, and
+#     does not count.
 #
 # The roots are what actually runs: `den`, every module under `pipeline/` a stage reaches, `store/` and
-# `lib/` (which the guards above hold to the same rule), CI, and `OPERATOR_TOOLS` — the scripts a person
+# `lib/` (which the guards above hold to the same rule), the workflows, and `OPERATOR_TOOLS` — the scripts a person
 # runs by hand, each with its reason. From those, reachability is transitive: a script a live script names
 # is live.
 #
@@ -205,21 +206,28 @@ OPERATOR_TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "opera
 
 _SCRIPT_EXTENSIONS = (".py", ".sh")
 
+#: The trees entered by path rather than by import, where every file is a script: `tools/` holds standalone
+#: tools with dependencies of their own, which is why they are not in a package.
+SCRIPT_TREES = ("scripts", "tools")
+#: The packages, where only a shell script is a script — a module there is held to its package's rule above.
+SCRIPT_PACKAGES = ("pipeline", "store", "lib")
+
 
 def _is_test(name):
     return name.startswith("test_") or name.endswith(TEST_SUFFIX) or name.endswith(".test.sh")
 
 
-def script_files(scripts_dir):
-    """Every script under `scripts_dir`, repo-relative to its parent, split into (code, tests)."""
-    root = os.path.dirname(os.path.abspath(scripts_dir))
+def script_files(repo):
+    """Every script in the repo, repo-relative, split into (code, tests)."""
     code, tests = [], []
-    for dirpath, dirnames, filenames in os.walk(scripts_dir):
-        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
-        for name in filenames:
-            if name.endswith(_SCRIPT_EXTENSIONS):
-                path = os.path.relpath(os.path.join(dirpath, name), root)
-                (tests if _is_test(name) else code).append(path)
+    for tree in SCRIPT_TREES + SCRIPT_PACKAGES:
+        extensions = _SCRIPT_EXTENSIONS if tree in SCRIPT_TREES else (".sh",)
+        for dirpath, dirnames, filenames in os.walk(os.path.join(repo, tree)):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            for name in filenames:
+                if name.endswith(extensions):
+                    path = os.path.relpath(os.path.join(dirpath, name), repo)
+                    (tests if _is_test(name) else code).append(path)
     return sorted(code), sorted(tests)
 
 
@@ -293,11 +301,11 @@ def reached_scripts(repo, roots, scripts):
 
 
 def unreachable_scripts(repo, roots, extra=()):
-    """The code under `scripts/` nothing that runs reaches, and the tests that reach nothing live.
+    """The scripts nothing that runs reaches, and the tests that reach nothing live.
 
     `extra` are scripts reachable by declaration — the operator tools — and are roots themselves.
     """
-    code, tests = script_files(os.path.join(repo, "scripts"))
+    code, tests = script_files(repo)
     live = reached_scripts(repo, list(roots) + list(extra), code) | set(extra)
     dead = set(code) - live
     orphans = sorted(test for test in tests if references(os.path.join(repo, test), code) & dead)
