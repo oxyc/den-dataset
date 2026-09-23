@@ -87,6 +87,10 @@ jobs:
       # was checked by anything.
       - name: The ranking metrics
         run: python3 -m unittest scripts/v2/test_reco_metrics.py
+      # Appending a premise generation run to the committed `data/premise-tags-v2.json`: the repairs apply,
+      # a key already there is refused, and the file's metadata and formatting survive.
+      - name: The premise tags merge
+        run: python3 -m unittest scripts/v2/test_merge_premise_tags.py
       # The pipeline skeleton (oxyc/den-dataset#27): the stage contract, the artifact catalogue, the
       # producer registry derived from the stage order, the corpus, embed and store stages against the
       # rules they wrap, and `den`.
