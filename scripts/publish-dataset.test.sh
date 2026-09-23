@@ -109,16 +109,30 @@ MKLABELS
   # A REAL store-v1 header. `manifest-counts.py` reads `row_count` from the file rather than trusting
   # `storeRecords` beside it, and `MUST_COUNT` turns an unreadable store into a refusal — so a store that
   # is just some bytes fails every case for the wrong reason.
-  python3 - "$DIR/den-$version.store" "$labels_records" <<'MKSTORE'
+  #
+  # Its rows are movie:1..N with the `keys` and `vec_plot_has` sections the plot-vector gate reads; every
+  # row has a vector unless `$NO_PLOT_VEC` (comma-separated tmdb ids) says otherwise.
+  python3 - "$DIR/den-$version.store" "$labels_records" "${NO_PLOT_VEC:-}" <<'MKSTORE'
 import struct, sys
 path, rows = sys.argv[1], int(sys.argv[2])
+no_vec = {int(i) for i in sys.argv[3].split(",") if i}
+keys = list(range(1, rows + 1))
+sections = [("keys", struct.pack(f"<{rows}Q", *keys), 8),
+            ("vec_plot_has", bytes(0 if k in no_vec else 1 for k in keys), 1)]
 head = bytearray(64)
 head[0:8] = b"DENSTOR1"
 struct.pack_into("<I", head, 8, 1)            # format_version
 struct.pack_into("<I", head, 12, 0x01020304)  # endianness
+struct.pack_into("<I", head, 24, len(sections))
 struct.pack_into("<I", head, 28, rows)        # row_count
+table, body, at = b"", b"", 64 + 32 * len(sections)
+for name, block, width in sections:
+    pad = (-at) % 8
+    body, at = body + b"\0" * pad, at + pad
+    table += struct.pack("<16sQII", name.encode(), at, len(block), width)
+    body, at = body + block, at + len(block)
 with open(path, "wb") as fh:
-    fh.write(head)
+    fh.write(bytes(head) + table + body)
 MKSTORE
   store_sha="$(shasum -a 256 "$DIR/den-$version.store" | cut -d' ' -f1)"
   python3 - "$DIR/dataset.meta.json" "$version" "$labels_sha" "$store_sha" "$labels_records" "$extra" \
@@ -594,8 +608,37 @@ if run_publish; then
   grep -q "another title : 2" "$WORK/out.log" \
     && ok "the standing violation is censused on every publish rather than staying invisible" \
     || bad "the census did not run: $(tail -5 "$WORK/out.log")"
+  grep -q "plot-vector gate: all 2 titles" "$WORK/out.log" \
+    && ok "the plot-vector gate read the store and passed it" \
+    || bad "the plot-vector gate did not run: $(tail -5 "$WORK/out.log")"
 else
   bad "a standing violation blocked the publish: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
+# --- plot vectors: a title with a plot must have a vector (oxyc/den-dataset#10) -----------------------
+#
+# Spirited Away, One Piece, Bleach, Pokémon, Re:Zero and Off Campus shipped with a plot and no vector, so no
+# More Like This, and nothing noticed. movie:2 has a plot in the enriched tree and no `vec_plot_has` in the
+# store; the gate has no override.
+setup
+NO_PLOT_VEC=2 write_meta
+write_enriched 2
+publish_baseline
+if run_publish; then
+  bad "a title with a plot and no vector published anyway"
+else
+  if grep -q "have NO plot vector" "$WORK/err.log" && grep -q "Nothing uploaded" "$WORK/err.log"; then
+    ok "a title with a plot and no plot vector is refused before anything is uploaded"
+  else
+    bad "refused, but not for the missing vector: $(tail -3 "$WORK/err.log")"
+  fi
+  grep -q "movie:2 .*'Wuthering Heights 1'" "$WORK/err.log" \
+    && ok "the refusal names the title" \
+    || bad "the refusal did not name the title: $(tail -5 "$WORK/err.log")"
+  [ ! -s "$UPLOADS" ] \
+    && ok "and nothing reached the release" \
+    || bad "a refused publish still uploaded $(tr '\n' ' ' < "$UPLOADS")"
 fi
 teardown
 

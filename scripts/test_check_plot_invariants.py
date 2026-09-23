@@ -402,5 +402,84 @@ class Scope(unittest.TestCase):
             self.assertIn("another title : 0", out)
 
 
+def write_store(dir, vectors, sections=("keys", "vec_plot_has")):
+    """A store with `keys` and `vec_plot_has` for `{key: has_vector}`, written by the real section writer."""
+    import sys
+    sys.path.insert(0, os.path.dirname(HERE))
+    sys.path.insert(0, os.path.join(HERE, "v2"))
+    from store import format
+    import vector_blob
+    keys = list(vectors)
+    sec = format.Sections(len(keys))
+    if "keys" in sections:
+        sec.put("keys", "Q", [vector_blob.pack_key(k) for k in keys], 8)
+    if "vec_plot_has" in sections:
+        sec.put("vec_plot_has", "B", [1 if vectors[k] else 0 for k in keys], 1)
+    path = os.path.join(dir, "den-abc.store")
+    format.write(path, sec, len(keys), "abc")
+    return path
+
+
+class PlotVectorGate(unittest.TestCase):
+    """oxyc/den-dataset#10: a title the store ships with a plot must have a plot vector.
+
+    Spirited Away, One Piece, Bleach, Pokémon, Re:Zero and Off Campus shipped with a plot and none, and the
+    check that would have seen it only warned. Every case here fails on the tree before `--store` existed.
+    """
+
+    def gate(self, rows_by_batch, vectors, extra=(), **store_kw):
+        with tempfile.TemporaryDirectory() as dir:
+            e, labels = write_case(dir, rows_by_batch)
+            store = write_store(dir, vectors, **store_kw)
+            return run(["--enriched-dir", e, "--labels", labels, "--store", store, *extra])
+
+    def test_a_plot_with_no_vector_is_refused_and_named(self):
+        code, _, err = self.gate({1: [enriched(129, title="Spirited Away", plotArticle="Spirited Away"),
+                                      enriched(2, plotArticle="Solaris")]},
+                                 {"movie:129": False, "movie:2": True})
+        self.assertEqual(code, 3)
+        self.assertIn("1 of the 2 titles", err)
+        self.assertIn("movie:129", err)
+        self.assertIn("'Spirited Away'", err, "the refusal names the title, not just the id")
+
+    def test_every_plot_with_a_vector_passes(self):
+        code, out, _ = self.gate({1: [enriched(1, plotArticle="A"), enriched(2, plotArticle="B")]},
+                                 {"movie:1": True, "movie:2": True})
+        self.assertEqual(code, 0)
+        self.assertIn("plot-vector gate: all 2 titles", out)
+
+    def test_a_title_without_a_plot_needs_no_vector(self):
+        code, _, _ = self.gate({1: [enriched(1, hasWikiPlot=False)]}, {"movie:1": False})
+        self.assertEqual(code, 0)
+
+    def test_the_newest_batch_decides_whether_there_is_a_plot(self):
+        """A later re-enrich that found no plot supersedes the older row that had one."""
+        code, _, _ = self.gate({1: [enriched(1)], 2: [enriched(1, hasWikiPlot=False)]}, {"movie:1": False})
+        self.assertEqual(code, 0)
+        code, _, _ = self.gate({1: [enriched(1, hasWikiPlot=False)], 2: [enriched(1)]}, {"movie:1": False})
+        self.assertEqual(code, 3, "and a plot that arrived later counts — that is how four of the six got in")
+
+    def test_a_title_the_store_does_not_ship_is_out_of_scope(self):
+        code, _, _ = self.gate({1: [enriched(1, plotArticle="A"), enriched(2, plotArticle="B")]},
+                               {"movie:1": True})
+        self.assertEqual(code, 0, "movie:2 is not in the store: an admission question, not a missing vector")
+
+    def test_a_batch_past_max_batch_id_is_not_read(self):
+        code, _, _ = self.gate({1: [enriched(1, hasWikiPlot=False)], 2: [enriched(1)]}, {"movie:1": False},
+                               extra=("--max-batch-id", "1"))
+        self.assertEqual(code, 0)
+
+    def test_a_store_that_cannot_say_is_refused(self):
+        code, _, err = self.gate({1: [enriched(1)]}, {"movie:1": True}, sections=("keys",))
+        self.assertEqual(code, 3, "no vec_plot_has section is not a pass")
+        self.assertIn("vec_plot_has", err)
+
+    def test_it_wins_over_the_shared_article_ratchet(self):
+        """2 has an override in the publisher (`DEN_ALLOW_SHARED_PLOTS`); this must not ride on it."""
+        code, _, _ = self.gate({1: [enriched(1), enriched(2)]}, {"movie:1": False, "movie:2": True},
+                               extra=("--shared-plot-baseline", "0"))
+        self.assertEqual(code, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

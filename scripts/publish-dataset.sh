@@ -306,6 +306,11 @@ python3 "$(dirname "$0")/manifest-counts.py" --stamp "$meta" "$DIR"
 #
 # `maxBatchId` is stamped just above, so the census is bounded to the batches this publish can actually see
 # rather than to a live directory that keeps growing.
+#
+# PLOT-VECTOR GATE (oxyc/den-dataset#10), in the same call: `--store` REFUSES (exit 3) when a title the store
+# ships has a plot in the enriched tree and no plot vector in the store, naming each one. Spirited Away, One
+# Piece, Bleach, Pokémon, Re:Zero and Off Campus shipped that way with nothing noticing. It has no override:
+# the fix is to classify and embed the title, and 0 titles fail on the shipped generation.
 plot_guard=0
 if [ -d "$DIR/enriched" ]; then
   plot_labels="$DIR/labels-$(python3 -c '
@@ -322,7 +327,12 @@ import json, sys
 print(json.load(open(sys.argv[1])).get("sharedPlotArticleTitles", ""))
 ' "$published_meta")"
     fi
-    plot_args=(--enriched-dir "$DIR/enriched" --labels "$plot_labels" --stamp-meta "$meta")
+    store_name="$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1])).get("storeFile") or "")
+' "$meta")"
+    plot_args=(--enriched-dir "$DIR/enriched" --labels "$plot_labels" --stamp-meta "$meta"
+               --store "$DIR/$store_name")
     max_batch="$(python3 -c '
 import json, sys
 print(json.load(open(sys.argv[1])).get("maxBatchId", ""))
@@ -330,7 +340,12 @@ print(json.load(open(sys.argv[1])).get("maxBatchId", ""))
     [ -n "$max_batch" ] && plot_args+=(--max-batch-id "$max_batch")
     [ -n "$baseline" ] && plot_args+=(--shared-plot-baseline "$baseline")
     python3 "$(dirname "$0")/check-plot-invariants.py" "${plot_args[@]}" || plot_guard=$?
-    # 2 is the regression; 1 is the pre-existing plot/labels mismatch this script has always reported.
+    # 3 is a title with a plot and no vector; 2 is the regression; 1 is the pre-existing plot/labels
+    # mismatch this script has always reported.
+    if [ "$plot_guard" -eq 3 ]; then
+      echo "       Nothing uploaded." >&2
+      exit 1
+    fi
     if [ "$plot_guard" -eq 2 ]; then
       if [ -n "${DEN_ALLOW_SHARED_PLOTS:-}" ]; then
         echo "shared-article grounding regressed deliberately: ${DEN_ALLOW_SHARED_PLOTS}"
@@ -351,10 +366,12 @@ PY
   else
     echo "grounding guard: SKIPPED — $plot_labels is not in $DIR. The labels are no longer published, but" >&2
     echo "                 they are still the store's input and scope the census to what shipped." >&2
+    echo "                 The plot-vector gate runs in the same call, so it is skipped too." >&2
   fi
 else
   echo "grounding guard: SKIPPED — no $DIR/enriched. plotArticle lives only in the enriched batches, so" >&2
   echo "                 the census cannot be taken from a publish dir that does not carry them." >&2
+  echo "                 Nor can the plot-vector gate: which titles have a plot is recorded only there." >&2
 fi
 
 # OWNERSHIP GUARD. Every published artifact must have a producer committed in this repo. The record-count
