@@ -5,7 +5,7 @@ derived from sources with their own terms. A single repository licence would mis
 
 | asset | licence | why |
 |---|---|---|
-| everything in `pipeline/`, `lib/`, `store/`, `guards/`, `tools/`, `scripts/` | MIT | ours |
+| everything in `pipeline/`, `lib/`, `store/`, `guards/`, `tools/` | MIT | ours |
 | `data/genres-moods-vocabulary.json` — the genres & moods vocabulary | MIT | ours; a controlled vocabulary we wrote |
 | the rest of `data/*.json` — premise tags, eval rulers, corpus ids, alias decisions | MIT — but read the note below on the premise tags | LLM output and our own derivations over text we do not redistribute |
 | `data/eval/reco-cases.json` | **MovieLens terms** — research, non-commercial, redistributable only under the same conditions; cite Harper & Konstan 2015, https://doi.org/10.1145/2827872 | a transformation of ml-32m (GroupLens); eval data, never in a release |

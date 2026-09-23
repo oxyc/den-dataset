@@ -206,7 +206,7 @@ class Bytes(Staged):
 
     def test_the_precompressed_labels_are_not_written(self):
         """`labels-t02.json.gz` was the copy den-atlas served to clients asking for gzip. The blobs were
-        retired for the store, `prune-manifest.py` drops every `*GzFile` key, and nothing in this repo, in
+        retired for the store, `prune_manifest.py` drops every `*GzFile` key, and nothing in this repo, in
         den-atlas or in the box's sync has looked for the file since — it was 11 MB a run for nobody."""
         lay_down(self.out)
         self.run_stage()

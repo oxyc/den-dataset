@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The publish stage — that it is the publisher's invocation, and nothing else.
 
-`scripts/publish-dataset.sh` clobbers a public, moving release, and every guard standing in front of that
+`pipeline/publish-dataset.sh` clobbers a public, moving release, and every guard standing in front of that
 — the store-identity guard, the ownership guard, the manifest prune, the grounding ratchet, the per-asset
 upload retries — was bought by a failure that had already shipped. So the stage adds nothing: it resolves
 no input, re-checks no hash and pre-empts no refusal. The script already refuses a missing manifest ("run
@@ -13,7 +13,7 @@ writes the bytes the hand-typed command writes" settles it; this one's output is
 no bytes to compare. What can be pinned is the INVOCATION, and three parts of it are both load-bearing and
 easy to get wrong:
 
-  * the WORKING DIRECTORY. The ownership guard resolves producer paths (`pipeline/…`, `scripts/…`) and
+  * the WORKING DIRECTORY. The ownership guard resolves producer paths (`pipeline/…`) and
     `git ls-files` against it, so the script only works from the repo root. The stage runs it there
     whatever directory `den` was typed in — and therefore hands it an ABSOLUTE publish dir, or moving the
     invocation would move which directory gets published.
@@ -24,7 +24,7 @@ easy to get wrong:
   * the EXIT CODE. A guard that stops firing because a wrapper swallowed a non-zero exit is the whole risk
     of this port.
 
-The guards themselves are tested where they live, and `scripts/publish-dataset.test.sh` runs all of its
+The guards themselves are tested where they live, and `pipeline/publish-dataset.test.sh` runs all of its
 cases a second time through `den stage publish` (`DEN_PUBLISH_VIA=stage`). That, rather than anything
 here, is the evidence that a refusal through the stage is the refusal through the script.
 """
@@ -160,7 +160,7 @@ class Invocation(unittest.TestCase):
     """
 
     def documented(self, script, publish_dir):
-        """`scripts/publish-dataset.sh <dir>`, run from the repo root, as `docs/OPERATE.md` step 8 says.
+        """`pipeline/publish-dataset.sh <dir>`, run from the repo root, as `docs/OPERATE.md` step 8 says.
 
         The publisher itself is swapped for the recorder: running the real one would clobber a public
         release, which is the one thing no test in this repo may do.

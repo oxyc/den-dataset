@@ -79,17 +79,16 @@ a day with no error anywhere. They are still built as the store's inputs; the pu
 - `den` — the entry point: `./den stages`, `./den stage <name>`, `./den run`.
 - `pipeline/` — one module per stage, in the order `pipeline/__init__.py` gives, each declaring what it
   reads and writes; beside them the passes and tools those stages run: the classify and delta passes,
-  their auditor, the corpus join, the embed box kit.
-- `store/` — the store writer, one module per section group of den-spec's `wire/store-v1.md`.
-- `lib/` — HTTP, the response cache, and the TMDB, Wikidata, Wikipedia and Jev clients.
+  their auditor, the corpus join, the store writer's command line, the publisher and its guards, the
+  embed box kit, the shell runners and the hand-run tools.
+- `store/` — the store format, one module per section group of den-spec's `wire/store-v1.md`.
+- `lib/` — HTTP, the response cache, the TMDB, Wikidata, Wikipedia and Jev clients, and `den-env.sh`.
 - `data/` — committed inputs. `guards/` — CI checks on the tree itself.
 - `tools/` — standalone tools with dependencies the pipeline does not take: the plot translator (torch) and
   the recommendation-quality rulers (numpy, scipy).
-- `scripts/` — the publisher and its guards, the shell runners, and tools not yet moved into a package
-  (oxyc/den-dataset#73).
 
 ## Build / test
 
 Nothing to build. The tests are the steps in `.github/workflows/ci.yml` — `python3 -m unittest` over each
-suite it names, and `bash scripts/publish-dataset.test.sh` — on Python 3.12. The stages need 3.11 or newer;
+suite it names, and `bash pipeline/publish-dataset.test.sh` — on Python 3.12. The stages need 3.11 or newer;
 `./den` refuses older.

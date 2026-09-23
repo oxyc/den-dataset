@@ -60,9 +60,7 @@ if sys.version_info < (3, 11):
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pipeline  # noqa: E402
-
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
-import genres_moods_enrich  # noqa: E402
+from pipeline import genres_moods_enrich  # noqa: E402
 
 
 def describe():

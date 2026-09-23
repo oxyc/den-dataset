@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The PUBLISH, behind the stage contract.
 
-The rule lives in `scripts/publish-dataset.sh`: the store-identity guard (`DEN_STORE_REBUILD`, which
+The rule lives in `pipeline/publish-dataset.sh`: the store-identity guard (`DEN_STORE_REBUILD`, which
 caught a silent overwrite the first time it ran), the ownership guard, the manifest prune, the record-count
 and coverage guards, the grounding ratchet, the dead-generation check, the alias gate, and the per-asset
 upload retries that exist because a single multi-file `gh release upload` is all-or-nothing. Every one of
@@ -17,7 +17,7 @@ So what the stage contributes is the declaration below and the INVOCATION — wh
 a formality:
 
   * it runs from the REPO ROOT, whatever directory `den` was typed in. The ownership guard resolves
-    producer paths (`pipeline/…`, `scripts/…`) and `git ls-files` against the working directory, so run
+    producer paths (`pipeline/…`) and `git ls-files` against the working directory, so run
     from anywhere else it looks for producers that are not there. That used to be a comment asking the
     operator to remember; it is now a property of running the stage.
   * the publish dir is therefore made ABSOLUTE first, or moving the working directory to the repo root
@@ -39,8 +39,8 @@ NAME = "publish"
 
 #: The rule this stage runs, repo-relative — the one spelling. For this stage the spelling is the whole
 #: command: there are no flags to get wrong, only which file is allowed to clobber `data-latest`.
-PRODUCER = "scripts/publish-dataset.sh"
-HOW = "scripts/publish-dataset.sh <out-dir>"
+PRODUCER = "pipeline/publish-dataset.sh"
+HOW = "pipeline/publish-dataset.sh <out-dir>"
 #: Uploads to the moving `data-latest` release, so `den run` skips it unless asked with --publish.
 #: The only stage whose effect leaves this machine, and the only one a repeat run cannot undo.
 PUBLISHES = True

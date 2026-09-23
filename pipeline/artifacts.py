@@ -2,7 +2,7 @@
 """Every file the pipeline reads or writes, declared once.
 
 One entry per artifact, naming the file. A stage references the entries it reads and writes; nothing
-re-spells a path. `scripts/check-producers.py` reads its registry off the stages that name these, so an
+re-spells a path. `pipeline/check_producers.py` reads its registry off the stages that name these, so an
 artifact reached by nobody cannot exist — being declared IS being owned.
 
 **An entry names a producer only while nothing here builds it.** Once a stage writes it, that stage is
@@ -25,21 +25,21 @@ ARTICLES = Artifact(
 
 #: TMDB's daily ID export, one per media — the universe `worklist --mode export` parses. A public static
 #: file (no API key), and the only input to the full run's universe that comes from outside this repo.
-#: `scripts/build-worklist.py`'s `fetch_export` is what fetches it, under exactly these names, and leaves it
+#: `pipeline/build_worklist.py`'s `fetch_export` is what fetches it, under exactly these names, and leaves it
 #: GZIPPED; the worklist stage's parse takes text, so the decompression it does not do is part of the `how`.
 EXPORT_MOVIE = Artifact(
     name="export_movie",
     filename="movie_ids.json",
-    producer="scripts/build-worklist.py",
-    how="python3 scripts/build-worklist.py, then gunzip out/movie_ids.json.gz",
+    producer="pipeline/build_worklist.py",
+    how="python3 pipeline/build_worklist.py, then gunzip out/movie_ids.json.gz",
     dedicated=False,
 )
 
 EXPORT_TV = Artifact(
     name="export_tv",
     filename="tv_series_ids.json",
-    producer="scripts/build-worklist.py",
-    how="python3 scripts/build-worklist.py, then gunzip out/tv_series_ids.json.gz",
+    producer="pipeline/build_worklist.py",
+    how="python3 pipeline/build_worklist.py, then gunzip out/tv_series_ids.json.gz",
     dedicated=False,
 )
 
@@ -48,7 +48,7 @@ EXPORT_TV = Artifact(
 #: set, map and query in `pipeline/enrich.py` is keyed by `mediaType:tmdbId` for that reason.
 #:
 #: Named UNIVERSE, not worklist, because two different tools wrote `worklist-<media>.json` and they do not
-#: build the same list. `scripts/build-worklist.py` enumerates the ids Den already SHIPS, ordered by
+#: build the same list. `pipeline/build_worklist.py` enumerates the ids Den already SHIPS, ordered by
 #: popularity, so a re-embed covers the current catalogue; this command enumerates everything TMDB has —
 #: 1,246,659 movie ids against a corpus of 47,618. Sharing a filename meant whichever ran last decided
 #: which universe the next enrich billed for, and nothing downstream could tell them apart.

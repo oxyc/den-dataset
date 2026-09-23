@@ -181,7 +181,7 @@ def targets(records, cache):
 
 
 def row(record, found, target):
-    """One output line. The key order is the reader's: `scripts/v2/` joins this file by `mediaType` and
+    """One output line. The key order is the reader's: the classify pass joins this file by `mediaType` and
     `tmdbId`, and `extractorArticleRevId` is what says whether the article moved since the plot was
     taken.
 
@@ -211,7 +211,7 @@ def row(record, found, target):
         "sections": found["sections"],
         "plotSections": record.get("plotSections") or [],
         # CODE POINTS, which is what every consumer of this number already counts:
-        # `scripts/v2/run_combined.py` records `articleChars` as `len(rec["text"])` and
+        # `pipeline/run_combined.py` records `articleChars` as `len(rec["text"])` and
         # `audit_combined.py` — the only thing between a corrupted bundle and a published dataset —
         # refuses a row whose recorded count does not equal that. The Swift dumper counted GRAPHEME
         # CLUSTERS instead, so its number disagreed with the auditor's on any article carrying a

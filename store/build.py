@@ -42,7 +42,7 @@ def run(args, inputs, prose_check, provenance_check):
           f"{alias_record['undecided']} naming another title with no decision", file=sys.stderr)
     # Titles several Wikidata items claim with nothing chosen between them: the facts stage wrote them
     # with no Wikidata fields rather than mixing two works, so they have no card.
-    # `check-wikidata-items.py --gate` refuses the publish while any is listed.
+    # `check_wikidata_items.py --gate` refuses the publish while any is listed.
     item_record = {"ambiguous": sorted(key for key, row in rows.items()
                                        if (row.get("facts") or {}).get("wikidataCandidates")
                                        and not (row.get("facts") or {}).get("wikidataItem"))}
@@ -212,23 +212,23 @@ def run(args, inputs, prose_check, provenance_check):
         # three repos, for a fact no reader of the store wants. In a sidecar it would be an undeclared
         # file in the out-dir, which is the exact class of artifact every guard here exists to refuse.
         # The manifest already travels with the store, is already stamped from here, and already survives
-        # `prune-manifest.py` (`storeInputs` is not shaped like a per-blob claim).
+        # `prune_manifest.py` (`storeInputs` is not shaped like a per-blob claim).
         #
         # It is NOT a blob claim and must never become one: no `storeInputsFile`/`Sha256`/`Bytes`, or the
         # prune's keep-list would drop it and the publisher would stop seeing it.
         meta["storeInputs"] = inputs
         # And what the publication gates withheld. Same reasoning as `storeInputs`: it describes the
-        # dataset rather than a file, so `prune-manifest.py` carries it forward, and it must never be
+        # dataset rather than a file, so `prune_manifest.py` carries it forward, and it must never be
         # given a `File`/`Sha256`/`Bytes` name or the prune's keep-list would drop it. Without this the
         # only record of a 42% `ending` drop is a build log nobody kept.
         meta["facetGates"] = gate_report
         # Which alias decisions this store applied, and how many colliding aliases it ships undecided.
-        # `check-alias-collisions.py --gate` refuses the publish unless the hash is the committed file's
+        # `check_alias_collisions.py --gate` refuses the publish unless the hash is the committed file's
         # and the count is zero. Same shape rule as the two above: no `File`/`Sha256`/`Bytes` name.
         meta["aliasDecisions"] = alias_record
-        # Same shape rule; `check-wikidata-items.py --gate` refuses while `ambiguous` names a title.
+        # Same shape rule; `check_wikidata_items.py --gate` refuses while `ambiguous` names a title.
         meta["wikidataItems"] = item_record
-        # Same shape rule; `check-award-merges.py --gate` refuses while a merge is stale or the list
+        # Same shape rule; `check_award_merges.py --gate` refuses while a merge is stale or the list
         # applied is not the committed one.
         meta["awardMerges"] = award_columns.record
         with open(args.stamp_meta, "w") as fh:

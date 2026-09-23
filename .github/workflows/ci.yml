@@ -34,7 +34,7 @@ jobs:
           path: den-spec-checkout
       - name: Parse under dash
         run: |
-          for f in scripts/*.sh scripts/lib/*.sh; do
+          for f in pipeline/*.sh lib/*.sh; do
             head -1 "$f" | grep -q bash && sh="bash" || sh="dash"
             "$sh" -n "$f" || exit 1
             echo "ok  $f ($sh)"
@@ -43,12 +43,13 @@ jobs:
       # moment CI fires, and the `actions` dependabot group below can bump a pinned SHA but not a branch.
       - uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38  # v2.0.0
         with:
-          scandir: ./scripts
+          scandir: .
+          ignore_paths: den-spec-checkout
           severity: warning
       - name: Python worklist builder
         run: |
-          python3 -m py_compile scripts/build-worklist.py
-          python3 -m unittest scripts/test_build_worklist.py
+          python3 -m py_compile pipeline/build_worklist.py
+          python3 -m unittest pipeline/build_worklist_test.py
       # The embed path, which runs from a container on the box with nothing installed: these must stay
       # importable on a bare python3, because a syntax error there surfaces as a failed corpus run hours in.
       - name: The embed path compiles
@@ -60,14 +61,14 @@ jobs:
           # and a published dataset, and the pass it audits cost $20.47 and will not be run again.
           python3 -m unittest pipeline/run_facets_test.py pipeline/run_combined_test.py pipeline/audit_combined_test.py pipeline/run_delta_test.py lib/typesafe_client_test.py
       # The committed genres & moods (`data/genres-moods-curated.json`) and the one-off that seeded them. The
-      # file itself is gated against the baseline by `scripts/test_eval_taxonomy.py` below.
+      # file itself is gated against the baseline by `pipeline/eval_taxonomy_test.py` below.
       - name: Genres & moods seed
         run: python3 -m unittest pipeline/seed_genres_moods_curated_test.py
       # The hand enrichment that writes into that file (`./den genres-moods prepare|merge`): what it selects,
       # the batches and validator the agents get, July's assemble thresholds, and that a merge keeps the
       # file's bytes, refuses a result past the tolerance and never lowers the baseline on its own.
       - name: Genres & moods enrichment
-        run: python3 -m unittest scripts/test_genres_moods_enrich.py
+        run: python3 -m unittest pipeline/genres_moods_enrich_test.py
       # The publish path. Nothing tested any of it until now, and it is the half that decides what the box
       # is allowed to serve: the store writer against den-spec's fixture, and the record-count guard that
       # refuses a silent shrink.
@@ -77,7 +78,7 @@ jobs:
       # digests, and that its cases still cover a query, a non-Latin text, the corpus document shape and
       # a text past the token cap.
       - name: The publisher's guards
-        run: python3 -m unittest pipeline/build_store_test.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py scripts/test_prune_manifest.py scripts/test_sign_manifest.py pipeline/consolidate_corpus_test.py scripts/test_eval_taxonomy.py pipeline/embed_canary_test.py scripts/test_check_plot_invariants.py scripts/test_backfill_plot_provenance.py pipeline/recluster_test.py
+        run: python3 -m unittest pipeline/build_store_test.py pipeline/manifest_counts_test.py pipeline/check_filename_version_test.py pipeline/check_producers_test.py pipeline/prune_manifest_test.py pipeline/sign_manifest_test.py pipeline/consolidate_corpus_test.py pipeline/eval_taxonomy_test.py pipeline/embed_canary_test.py pipeline/check_plot_invariants_test.py pipeline/backfill_plot_provenance_test.py pipeline/recluster_test.py
         env:
           DEN_SPEC_DIR: ${{ github.workspace }}/den-spec-checkout
       # The ranking metrics. `tools/rulers/reco_metrics.py` is what `score_reco.py` scores a ranking change
@@ -125,11 +126,12 @@ jobs:
       # store that passes every structural guard and quietly rounds the values it ships, which is the loss
       # that already shipped once — so the refusal itself has to be asserted, not just the layout.
       #
-      # `guards/reachable_test.py` is the one that matters over time. `scripts/v2/` exists because
+      # `guards/reachable_test.py` is the one that matters over time. `scripts/v2/` existed because
       # "delete what nothing runs" was a habit, and a habit loses to a branch someone might come back
       # to; this fails the build on a module under `pipeline/` that no stage reaches, on one under
-      # `store/` that the writer the store stage runs does not reach, and on a script under `scripts/`
-      # that nothing that runs reaches and `guards/operator-tools.json` does not declare.
+      # `store/` that the writer the store stage runs does not reach, on a tool under `tools/` or a shell
+      # script that nothing that runs reaches and `guards/operator-tools.json` does not declare, and on a
+      # Python or shell file anywhere else.
       - name: The pipeline
         run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/refresh_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/genres_moods_test.py pipeline/docfacts_test.py pipeline/compose_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py store/format_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/wikidata_facts_test.py lib/plot_test.py lib/enterprise_test.py lib/denembed_test.py guards/reachable_test.py den_test.py
       # The stages above are tested one at a time; this runs them IN ORDER, so what one writes is what the
@@ -150,12 +152,12 @@ jobs:
       # hash, a missing blob, a dropped key, a shrunk count and a blob from a dead generation, and that
       # the happy path still publishes blobs before the meta.
       - name: The publisher itself
-        run: bash scripts/publish-dataset.test.sh
+        run: bash pipeline/publish-dataset.test.sh
       # And the same cases again through `den stage publish`. The publish stage's output is a release, so
       # there is no artifact to diff it against the hand-typed command the way the corpus and store stages
       # are diffed; running every refusal through the wrapper is what proves it did not swallow one.
       - name: The publisher, through the stage
-        run: DEN_PUBLISH_VIA=stage bash scripts/publish-dataset.test.sh
+        run: DEN_PUBLISH_VIA=stage bash pipeline/publish-dataset.test.sh
 
   ci-ok:
     # One required status check. `always()` so a skipped job does not fail branch protection.

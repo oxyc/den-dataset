@@ -13,7 +13,7 @@ a form no checksum would catch.
 
 ## Keying
 
-`build-premise-tags.py` recovers a title's mediaType POSITIONALLY, because the v1 batches carry a bare
+`build_premise_tags.py` recovers a title's mediaType POSITIONALLY, because the v1 batches carry a bare
 tmdbId and 1,097 ids in this corpus are both a film and a series. This run's batches carry `movie:123` /
 `tv:123` keys directly, so there is nothing to recover and nothing to guess. The merge refuses any key it
 cannot parse rather than falling back to a bare id.

@@ -8,19 +8,14 @@ are the committed ones, so a change to any of them reaches these tests.
 import json
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 from unittest import mock
 
-import pipeline
-
 from . import artifacts, genres_moods
+from . import genres_moods_merge as gmm
 from .article_sections import parse_sections
 from .contract import Context, StageError
-
-sys.path.insert(0, os.path.join(pipeline.contract.REPO, "scripts"))
-import genres_moods_merge as gmm  # noqa: E402
 
 TEXT = "{t} is a film.\n\n== Plot ==\nA thief plans one last job.\n\n== Reception ==\nCritics were kind.\n"
 #: What the stand-in answers: everything else is 0.05, under every threshold in the rule.

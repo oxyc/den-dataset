@@ -7,7 +7,7 @@ are. This stage labels the rest with Jev, the automated labeller chosen in oxyc/
 
 **Ask** (paid, only with `--spend`). Titles the curated file lacks, and curated titles with neither
 subgenres nor moods, are sent the lead plus every section the classify pass rated story-premise or
-theme-subject — the selection `scripts/genres_moods_enrich.py` makes for the hand enrichment — with the v3
+theme-subject — the selection `pipeline/genres_moods_enrich.py` makes for the hand enrichment — with the v3
 question set below. A title classify judged not about the requested work, with no article, or whose article
 changed since classify read it, is not asked. The call, validation, resume, lock and manifest are
 `run_combined`'s, imported unchanged, as `run_delta.py` does. Answers go to one shard per article dump, and a
@@ -19,7 +19,7 @@ and moods keep each label whose Noul clears its own threshold, strongest first, 
 family's "most defining" pick added when it reaches the rule's `pick`. A curated title with neither
 subgenres nor moods gets the derived ones and keeps its primary genre. A title classify now judges not
 about the requested work gets nothing. The result must clear the quality baseline
-(`scripts/eval-taxonomy.py --gate`) or nothing is written.
+(`pipeline/eval_taxonomy.py --gate`) or nothing is written.
 
 The rule's digest is recorded in the output rather than in the answers' manifest: the manifest decides
 whether a shard can be resumed, and a new rule must not make bought answers unresumable.
@@ -32,13 +32,11 @@ import sys
 import tempfile
 
 from . import artifacts, finalize
+from . import genres_moods_enrich as gm
+from . import genres_moods_merge as gmm
 from . import run_combined as rc
 from .combined_questions import PINNED_MODEL, slug, taxonomy
 from .contract import REPO, StageError
-
-sys.path.insert(0, os.path.join(REPO, "scripts"))
-import genres_moods_enrich as gm  # noqa: E402
-import genres_moods_merge as gmm  # noqa: E402
 
 NAME = "genres_moods"
 PRODUCER = "pipeline/genres_moods.py"

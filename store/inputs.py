@@ -10,9 +10,9 @@ import os
 import sys
 
 #: Every argument that names a file or directory this READS. The record below is built from it, and
-#: `check-producers.py` maps each entry to the producer that builds it — so adding an input here is what
+#: `check_producers.py` maps each entry to the producer that builds it — so adding an input here is what
 #: makes the new input owned and checked. `build_store_test.py` asserts this covers the parser's inputs
-#: and `test_check_producers.py` asserts every one of them has a producer.
+#: and `check_producers_test.py` asserts every one of them has a producer.
 #:
 #: `metadata` is gone from here because it is gone from the parser: the TMDB sidecar supplied the title,
 #: the year and the poster path, and the store now takes the first two from Wikidata and publishes no
@@ -44,13 +44,13 @@ def build_inputs(args):
     """What this build READ: path, hash, size and mtime for every input argument.
 
     The store's inputs stopped being published artifacts when `data-latest` went store-only
-    (oxyc/den#113), and the ownership guard went with them: `check-producers.py` walks the keys the
+    (oxyc/den#113), and the ownership guard went with them: `check_producers.py` walks the keys the
     MANIFEST names, so once the manifest named only the store, a store built from a labels file its
     producer had outgrown published perfectly clean. Every guard passed and none of them was looking at
     the thing that was stale.
 
     Recording it here is what puts them back in reach. `--stamp-meta` writes this into the manifest, so
-    the publisher can re-hash each input against the tree and ask `check-producers.py` about its
+    the publisher can re-hash each input against the tree and ask `check_producers.py` about its
     producer — and the mtime is recorded rather than read, so the producer question is still answerable
     in a publish dir holding nothing but the store and the manifest.
     """

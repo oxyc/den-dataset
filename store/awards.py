@@ -12,7 +12,7 @@ title recognised at both is recognised once, won if it won at either.
 
 A merge whose `from` no title names any more is stale: the facts have moved on and the entry now says
 nothing. It is recorded, not refused, because a small corpus (a fixture, a partial run) legitimately names
-none of these bodies; `--stamp-meta` writes the record as `awardMerges`, and `check-award-merges.py --gate`
+none of these bodies; `--stamp-meta` writes the record as `awardMerges`, and `check_award_merges.py --gate`
 refuses to publish a store built with a stale one.
 
 A ceremony's name is its entry in the entity table the facts stage wrote; one Wikidata has no label for is

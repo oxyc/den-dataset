@@ -10,15 +10,16 @@ prose somewhere that can go stale without anything failing.
 | What builds an artifact? | The stage that declares it in `OUTPUTS`. For one nothing here builds yet, `pipeline/artifacts.py`. Or the producer column of `./den stages`. |
 | What does a store section mean? | den-spec `wire/store-v1.md`, then the `store/` module named for its heading. |
 | What order are the store's sections written in? | `store/build.py`, and `PROVENANCE` declares the same order. |
-| Why was a publish refused? | `scripts/publish-dataset.sh` and the checks it runs under `scripts/`. `pipeline/publish.py` runs it and adds no guard of its own. |
+| Why was a publish refused? | `pipeline/publish-dataset.sh` and the `pipeline/check_*.py` guards it runs beside it. `pipeline/publish.py` runs it and adds no guard of its own. |
 | How do I run it? | `docs/OPERATE.md`. `./den run` runs every stage; it skips the paid classify pass without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. |
 
 ## The part that is still being rebuilt
 
 `pipeline/` holds **twelve** stages — `./den stages` lists them. What is left outside the order are the side passes
 no stage runs but the corpus join and the store read — the delta question pass (`pipeline/run_delta.py`) and the
-premise tags — and each still answers for itself in `pipeline/artifacts.py` until it lands. Emptying
-`scripts/` into the packages is oxyc/den-dataset#73.
+premise tags — and each still answers for itself in `pipeline/artifacts.py` until it lands. Beside the
+stages sit the tools an operator runs by hand, each declared in `guards/operator-tools.json`; a tool with
+dependencies the pipeline does not take lives under `tools/` instead.
 
 `lib/` is what a stage needs from OUTSIDE the machine — HTTP with one retry policy, the response cache,
 and the upstream clients. It is held to the same reachability rule, entered from the stages that import
@@ -26,9 +27,10 @@ it. Its cache key is a contract with ~2.1 GB of bodies already on disk: see `lib
 
 Three rules keep it from becoming `scripts/v3/`, and all three are enforced rather than written down:
 
-- **Existence means reachability.** A module under `pipeline/`, `store/` or `lib/` that nothing reaches is
-  deleted. `guards/reachable.py` fails CI on one.
-- **Declare an artifact once.** `scripts/check-producers.py` reads its registry off the stage
+- **Existence means reachability.** A module under `pipeline/`, `store/` or `lib/`, a tool under `tools/`
+  or a shell script that nothing reaches is deleted, and a Python or shell file anywhere else is refused.
+  `guards/reachable.py` fails CI on either.
+- **Declare an artifact once.** `pipeline/check_producers.py` reads its registry off the stage
   declarations. There is no second list, because the second list is what drifted.
 - **The stage that writes an artifact owns it.** Its entry in `pipeline/artifacts.py` names no producer;
   the stage names the rule it runs, once, and runs that. An entry that still carries a producer is an
@@ -68,5 +70,5 @@ again, so enriching one by hand is what overrides it.
 5. Read the summary it prints: titles added and changed, how many titles each label gained or lost, and ten
    before/after examples. If it looks right, commit `data/genres-moods-curated.json` and
    `data/eval/quality-floors.json` together. For a deliberate drop, rerun step 4 with `--accept-drop`, then
-   run `scripts/eval-taxonomy.py data/genres-moods-curated.json --record --accept-drop` and commit both
+   run `pipeline/eval_taxonomy.py data/genres-moods-curated.json --record --accept-drop` and commit both
    files.

@@ -125,7 +125,7 @@ class Declaration(unittest.TestCase):
 
 
 class Credentials(unittest.TestCase):
-    """The shell is the seam: `scripts/lib/den-env.sh` still reads `den.env` and mints the bearer."""
+    """The shell is the seam: `lib/den-env.sh` still reads `den.env` and mints the bearer."""
 
     def minted(self, environ, stdout=b"bearer", code=0):
         completed = subprocess.CompletedProcess([], code, stdout=stdout)

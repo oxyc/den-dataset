@@ -11,7 +11,7 @@ edits: naming a cluster is a human judgement, and adding a label is a taxonomy b
 whole-universe reclassification.
 
 Not a stage. It is in no build order — nothing it writes is read by anything the pipeline builds — so no
-stage imports it; `scripts/recluster-run.sh` is its timer and runs it by path.
+stage imports it; `pipeline/recluster-run.sh` is its timer and runs it by path.
 
 **Deterministic, and the Swift's bytes.** Seeds are stride-sampled rather than random, so a weekly run is
 comparable to the last one instead of reshuffling every cluster id; and the arithmetic is the Swift's in
@@ -39,7 +39,7 @@ import sys
 # here, by name, before the imports below fail on it less legibly.
 if sys.version_info < (3, 12):
     sys.exit(f"recluster.py needs Python 3.12 or newer (for math.sumprod); {sys.executable} is "
-             f"{platform.python_version()}. scripts/recluster-run.sh finds one on PATH, or set PYTHON to one.")
+             f"{platform.python_version()}. pipeline/recluster-run.sh finds one on PATH, or set PYTHON to one.")
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if not __package__:

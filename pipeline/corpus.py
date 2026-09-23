@@ -13,7 +13,7 @@ What the stage adds is the declaration below, and two things it had to teach the
   * `combined` and `delta` are SETS. The reader takes each flag once per shard, and the set is resolved
     from the declared glob — so the stage cannot hand over one shard of three, which is exactly how
     eleven titles left a derived blob for a day.
-  * the corpus is the STORE's input. The two stages are in one order now, so `scripts/check-producers.py`
+  * the corpus is the STORE's input. The two stages are in one order now, so `pipeline/check_producers.py`
     reads "what builds the corpus" off the stage that writes it rather than off a field on the artifact
     that could name one script while the stage ran another.
 

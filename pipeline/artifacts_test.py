@@ -12,7 +12,7 @@ class Catalogue(unittest.TestCase):
         """The attrition rule, applied to declarations rather than to files.
 
         An entry no stage reads or writes is a producer registration for an artifact this pipeline does
-        not handle — `check-producers.py` would go on asking after it, and the answer would go on being
+        not handle — `check_producers.py` would go on asking after it, and the answer would go on being
         true and meaningless. That is `facets.bin` again: an artifact with an owner on paper, nothing
         rebuilding it, and 999 titles of drift before anyone looked.
         """

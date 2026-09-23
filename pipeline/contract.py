@@ -9,7 +9,7 @@ wrong:
 
   * the stage's own command line — `pipeline/store.py` turns each declared input into the flag that
     names it, so a declaration that has drifted from the writer fails at the argument parser;
-  * the producer registry in `scripts/check-producers.py`, which used to be a second list kept by hand.
+  * the producer registry in `pipeline/check_producers.py`, which used to be a second list kept by hand.
     That list drifted twice in one day — `metadata` stayed registered as a store input after the writer
     stopped reading it, then `enriched` did the same — and each time a test was the only thing that
     noticed. There is no second list now: the registry is read off the stages themselves.
@@ -50,7 +50,7 @@ class StageError(Exception):
 class Artifact:
     """One file — or one set of shards — a stage reads or writes.
 
-    `producer`/`how`/`dedicated` are the registration `check-producers.py` asks for. `dedicated` is false
+    `producer`/`how`/`dedicated` are the registration `check_producers.py` asks for. `dedicated` is false
     for a producer that builds several artifacts (the embed stage writes five), because the staleness
     warning is only meaningful for a producer edited FOR this artifact.
 

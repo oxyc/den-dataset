@@ -16,7 +16,7 @@ that are not style:
 
   * there are ~2.1 GB of bodies under `.cache/wiki` written by the Swift passes. A key that hashes
     differently does not miss loudly — it re-fetches the whole corpus and looks like a slow first run.
-  * `scripts/backfill-plot-provenance.py` reconstructs the same key to replay grounding decisions out of
+  * `pipeline/backfill_plot_provenance.py` reconstructs the same key to replay grounding decisions out of
     those bodies, and recovered 47,529 of 47,529 rows with it. A changed derivation makes that tool report
     every row unrecoverable rather than erroring.
 

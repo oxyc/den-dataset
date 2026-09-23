@@ -2,7 +2,7 @@
 """The cache key, pinned — because it is a contract with 2.1 GB of bodies already on disk.
 
 A key that hashes differently does not fail. It misses every entry the Swift passes wrote, re-fetches the
-whole corpus, and looks like a slow first run; and `scripts/backfill-plot-provenance.py`, which
+whole corpus, and looks like a slow first run; and `pipeline/backfill_plot_provenance.py`, which
 reconstructs the same key to replay grounding decisions out of those bodies, reports every row
 unrecoverable instead of erroring.
 
