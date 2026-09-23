@@ -151,8 +151,15 @@ class ReadBack:
         `value` is None where the store makes no claim — an axis the model declined, and now also one
         the publication gates withheld. They are the same sentinel on purpose; see `build_store.py`.
         """
-        values = self.ints("facet_v")
-        confs = self.ints("facet_c", "B", 1)
+        return self.dense(row, axes, "facet_v", "facet_c")
+
+    def tentative(self, row, axes):
+        """`{axis: (value, probability)}` for one row of the tentative tier, `facet_tv` / `facet_tp`."""
+        return self.dense(row, axes, "facet_tv", "facet_tp")
+
+    def dense(self, row, axes, values_name, bytes_name):
+        values = self.ints(values_name)
+        confs = self.ints(bytes_name, "B", 1)
         at = row * len(axes)
         return {axis: (self.text(values[at + i]), confs[at + i]) for i, axis in enumerate(axes)}
 
@@ -695,6 +702,54 @@ class PublicationGates(unittest.TestCase):
         self.assertEqual(reason, "validity<0.80")
 
 
+class TheTentativeTier(unittest.TestCase):
+    """`tentative()`: which refused answers still ship, in `facet_tv`, as the model's uncertain best guess."""
+
+    def setUp(self):
+        self.mod = build_store_module()
+
+    def refused(self, axis, answer, validity=1.0, narrative="bounded-fictional-narrative"):
+        ok, reason = self.mod.publishable(axis, answer, validity, narrative)
+        self.assertFalse(ok, "these cases are all answers the gates refuse")
+        return self.mod.tentative(axis, answer, reason)
+
+    def test_an_uncertain_argmax_over_the_floor_is_tentative(self):
+        self.assertTrue(self.refused("ending", choice("bittersweet", {"bittersweet": 0.55, "happy": 0.45})))
+        self.assertTrue(self.refused("ending", choice("open", {"open": 0.50, "happy": 0.3, "tragic": 0.2})),
+                        "the floor is inclusive")
+
+    def test_under_the_floor_is_withheld(self):
+        self.assertFalse(self.refused("ending", choice("bittersweet", {"bittersweet": 0.49, "happy": 0.3,
+                                                                        "tragic": 0.21})))
+
+    def test_a_tie_or_a_choice_that_is_not_the_argmax_is_withheld(self):
+        """A tie names no answer, and a choice its own distribution ranks second is not the best guess."""
+        self.assertFalse(self.refused("ending", choice("bittersweet", {"bittersweet": 0.5, "happy": 0.5})))
+        self.assertFalse(self.refused("ending", choice("bittersweet", {"bittersweet": 0.52, "happy": 0.55})))
+
+    def test_what_is_not_uncertainty_gets_no_tentative_value(self):
+        """The wrong work, a non-narrative programme, `does-not-apply`, `ending=unknown` and an archetype on
+        an unbounded narrative are refused for what the title is, not for how sure the model was."""
+        sure = {"downfall": 0.6, "rise": 0.4}
+        self.assertFalse(self.refused("tone", choice("comic", {"comic": 0.6, "pulpy": 0.4}), validity=0.79))
+        self.assertFalse(self.refused("tone", choice("comic", {"comic": 0.6, "pulpy": 0.4}),
+                                      narrative="non-narrative-program"))
+        self.assertFalse(self.refused("tone", choice("does-not-apply", {"does-not-apply": 0.6, "comic": 0.4})))
+        self.assertFalse(self.refused("ending", choice("unknown", {"unknown": 0.6, "happy": 0.4})))
+        self.assertFalse(self.refused("archetype", choice("downfall", sure), narrative="anthology"))
+        self.assertTrue(self.refused("archetype", choice("downfall", sure)), "the same answer, bounded")
+
+    def test_a_does_not_apply_runner_up_still_allows_one(self):
+        """Measured on #35's sample: 24 of 27 such answers graded right. The runner-up is a rival, not a veto."""
+        self.assertTrue(self.refused("chronology", choice("linear", {"linear": 0.6, "does-not-apply": 0.4})))
+
+    def test_the_measured_exclusions(self):
+        self.assertFalse(self.refused("scope", choice("single-city", {"single-city": 0.65, "regional": 0.35})))
+        self.assertFalse(self.refused("tone", choice("clinical", {"clinical": 0.66, "earnest": 0.34})))
+        self.assertTrue(self.refused("tone", choice("bleak", {"bleak": 0.66, "clinical": 0.34})),
+                        "clinical is excluded as an answer, not as a rival")
+
+
 class GatedFacetsReachTheStore(StoreFixture, unittest.TestCase):
     """The gate in the WRITER: a withheld value must be absent from the built artifact.
 
@@ -741,11 +796,19 @@ class GatedFacetsReachTheStore(StoreFixture, unittest.TestCase):
         self.assertEqual(doc["archetype"], (None, 0))
         self.assertEqual(doc["pacing"], (None, 0), "an axis with no answer reads identically")
 
+        # The film's 0.60 tone was refused as uncertain, so it ships in the tentative tier, with its
+        # probability. The documentary's refusals are about what it is, and ship nowhere.
+        self.assertEqual(store.tentative(1, axes)["tone"], ("comic", 60))
+        self.assertEqual(store.tentative(1, axes)["era"], (None, 0), "published, so not tentative too")
+        self.assertEqual(store.tentative(0, axes)["archetype"], (None, 0))
+        self.assertEqual(store.tentative(0, axes)["ending"], (None, 0))
+
         # The withheld values must not be left in the string dictionary either: a vocabulary entry no
         # row uses reads from the outside as a value with zero titles, not as one the gate withheld.
         interned = {store.text(i) for i in range(len(store.str_off) - 1)}
         self.assertNotIn("downfall", interned)
         self.assertIn("urban", interned)
+        self.assertIn("comic", interned, "a tentative value is a value the store uses")
 
         # And the build must SAY what it withheld, rather than leave it as a coverage surprise.
         self.assertIn("publication gates", stderr)
@@ -764,6 +827,9 @@ class GatedFacetsReachTheStore(StoreFixture, unittest.TestCase):
         self.assertEqual(gates["axes"]["archetype"]["published"], 0)
         self.assertEqual(gates["axes"]["setting"]["published"], 1)
         self.assertIn("ending=unknown", gates["axes"]["ending"]["withheld"])
+        self.assertEqual(gates["tentativeProbabilityMin"], 0.50)
+        self.assertEqual(gates["axes"]["tone"]["tentative"], 1)
+        self.assertNotIn("p<0.70", gates["axes"]["tone"]["withheld"], "a tentative value is not withheld")
 
 
 #: A wrapper that loads the real writer, edits one of its constants, and runs it. `check_provenance`

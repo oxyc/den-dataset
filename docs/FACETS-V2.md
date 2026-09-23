@@ -118,3 +118,25 @@ The pilots support collection, not unconditional argmax publication.
 
 `store/facets.py` applies clauses 2–4 when the store is written; the published manifest's `facetGates`
 counts what each clause withheld, per axis.
+
+### The tentative tier
+
+A value clause 4 refuses only for its probability is still the model's best guess, and a filter that
+drops it loses most of an axis's minority values (oxyc/den-atlas#35). Such a value ships in the store's
+separate `facet_tv` / `facet_tp` sections (den-spec `wire/store-v2.md`), never in `facet_v`, when it is
+the distribution's strict argmax at probability 0.50 or more. `scope` has no tentative tier, and nor does
+`tone=clinical`. A reader lists these after the published values and says they are tentative. Clauses 2
+and 3, `does-not-apply` and `ending=unknown` are not uncertainty and give no tentative value.
+
+The floor and the two exclusions come from a blind grading of 216 tentative values on the 2,000 most-voted
+films and series, graded from knowledge of the works:
+
+| probability | defensible | exact |
+|---|---|---|
+| 0.40–0.50 | 60% (29/48) | 40% |
+| 0.50–0.60 | 71% (60/84) | 56% |
+| 0.60–0.70 | 80% (67/84) | 65% |
+| ≥ 0.50 without `scope` and `tone=clinical` | 80% (120/150) | 65% |
+
+`scope` graded 7 of 14 at or above 0.50. `tone=clinical` was wrong on all five sampled titles. The
+published tier grades 9–10 of 10 by the same method. `facetGates` counts the tentative values per axis.
