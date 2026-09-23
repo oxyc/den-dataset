@@ -298,16 +298,32 @@ def backfill_properties(fields, cache, checkpointed, pace=PACE, excluded=None):
             say(f"{item.key}: asked {item.prop} for {len(ids)} checkpointed {kind} rows")
 
 
-def resolve_franchises(fields, cache):
+def resolve_franchises(fields, cache, items=None):
     """Keep a title's P179 targets only where they are a series (`wd.SERIES_CLASSES`), most specific first,
     and drop the field where none is. Runs before the entities are named, so a rejected list is not named
     either. Derived, like `basedOnKind`: the checkpoint keeps every target, so the rule can change without
-    a re-scrape."""
+    a re-scrape.
+
+    A title that IS a series another title names belongs to it too. The Beck television series is the item
+    its 26 films are each "part of the series" of, and no item states P179 to itself, so without this the
+    series shared no franchise with its own films. `items` is each title's own item, keyed like `fields`
+    (`identities`)."""
     targets = set()
     for row in fields.values():
         if isinstance(row.get("franchise"), list):
             targets.update(row["franchise"])
     members = wd.series(sorted(targets), cache)
+    joined = 0
+    for key, own in (items or {}).items():
+        row = fields.get(key)
+        if row is None or own not in members:
+            continue
+        listed = row["franchise"] if isinstance(row.get("franchise"), list) else []
+        if own not in listed:
+            row["franchise"] = listed + [own]
+            joined += 1
+    if joined:
+        say(f"franchise: {joined} titles are a series other titles name, and join it")
     kept = dropped = 0
     for row in fields.values():
         if not isinstance(row.get("franchise"), list):
@@ -517,7 +533,7 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE):
     refresh_collapsed_franchises(fields, cache, lambda: save(fields_path, fields), excluded)
     backfill_properties(fields, cache, lambda: save(fields_path, fields), pace, excluded)
 
-    resolve_franchises(fields, cache)
+    resolve_franchises(fields, cache, {key: found["item"] for key, found in resolved.items() if found.get("item")})
     resolve_awards(fields, cache)
     names = resolve_entities(fields, os.path.join(directory, "facts-entities.json"), cache)
     resolve_sources(fields, os.path.join(directory, "facts-source-types.json"))
