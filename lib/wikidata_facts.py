@@ -18,6 +18,7 @@ Awards (P166, P1411) were left out at an earlier 11% and are in now, at 17.2% (o
 import collections
 import json
 import math
+import os
 import re
 import unicodedata
 import urllib.parse
@@ -243,10 +244,58 @@ def parse_facts(payload, item):
     return out
 
 
-def _sparql(query):
-    return http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
-                        headers={"Content-Type": "application/sparql-query",
-                                 "Accept": "application/sparql-results+json"})
+#: A second endpoint for the per-batch queries: QLever's index of the weekly Wikidata dump. When WDQS
+#: throttles (429 with `Retry-After: 120`, 20–90 s queries) a corpus pass takes a day; QLever answered the
+#: same batch query in 0.5 s with the same rows. It is a dump, so an edit made since that week's dump is
+#: not in it, and it has no `SERVICE wikibase:label` — a query using that stays on WDQS.
+QLEVER_HOST = "qlever.dev"
+QLEVER_PATH = "/api/wikidata"
+#: WDQS predeclares these; QLever resolves only prefixes the query declares. Sent to QLever only: the
+#: cache key is the query text as WDQS is asked it, so an answer from either endpoint is kept under it.
+QLEVER_PREFIXES = ("PREFIX wd: <http://www.wikidata.org/entity/>\n"
+                   "PREFIX wdt: <http://www.wikidata.org/prop/direct/>\n"
+                   "PREFIX p: <http://www.wikidata.org/prop/>\n"
+                   "PREFIX psv: <http://www.wikidata.org/prop/statement/value/>\n"
+                   "PREFIX wikibase: <http://wikiba.se/ontology#>\n"
+                   "PREFIX schema: <http://schema.org/>\n"
+                   "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n"
+                   "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n")
+#: `qlever` asks QLever first and WDQS only when it fails; anything else asks WDQS first.
+PREFER_VAR = "DEN_SPARQL_PREFER"
+#: Which endpoint answered each live request, for the stage's log.
+ANSWERED = collections.Counter()
+
+
+def _ask(name, query, attempts=http.ATTEMPTS):
+    host, path, text = (QLEVER_HOST, QLEVER_PATH, QLEVER_PREFIXES + query) if name == "qlever" else \
+        (HOST, PATH, query)
+    payload = http.request(host, path, {"format": "json"}, method="POST", body=text.encode("utf-8"),
+                           headers={"Content-Type": "application/sparql-query",
+                                    "Accept": "application/sparql-results+json"}, attempts=attempts)
+    ANSWERED[name] += 1
+    return payload
+
+
+def _sparql(query, fallback=False, env=None):
+    """The body of one SPARQL request. With `fallback`, QLever stands behind WDQS (or in front of it, when
+    `PREFER_VAR` says so). WDQS is then asked once: its retries wait out a `Retry-After` of up to two
+    minutes each, which is the throttle QLever is there to avoid. It hands over only on a 429, a 5xx or a
+    timeout — any other status is its answer about the query. QLever hands over on any failure, since a
+    query it cannot run is still one WDQS can."""
+    if not fallback or "SERVICE wikibase:label" in query:
+        return _ask("wdqs", query)
+    env = os.environ if env is None else env
+    if env.get(PREFER_VAR) == "qlever":
+        try:
+            return _ask("qlever", query)
+        except http.HTTPError:
+            return _ask("wdqs", query)
+    try:
+        return _ask("wdqs", query, attempts=1)
+    except http.HTTPError as failure:
+        if failure.status != 0 and not http.is_transient(failure.status):
+            raise
+    return _ask("qlever", query)
 
 
 def fetch_facts(ids, media, item, cache=None, excluded=None):
@@ -261,7 +310,7 @@ def fetch_facts(ids, media, item, cache=None, excluded=None):
                 return parse_facts(hit, item), False
             except WikidataError:
                 pass
-    payload = _sparql(query)
+    payload = _sparql(query, fallback=True)
     parsed = parse_facts(payload, item)
     if key is not None:
         cache.write(key, payload)
@@ -361,7 +410,7 @@ def _run(select, body, ids, media, excluded=None):
              f"{exclusion(ids, excluded)}"
              f"  {body}\n"
              f"}}")
-    return bindings(_sparql(query))
+    return bindings(_sparql(query, fallback=True))
 
 
 def _language(tag):

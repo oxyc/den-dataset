@@ -7,6 +7,7 @@ of every one of them — 1,600 of 1,600 — and replayed them without asking WDQ
 """
 import json
 import random
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -269,7 +270,88 @@ class Fetch(unittest.TestCase):
         self.assertIsNone(self.cache.read(key))
 
 
-ENTITY = "http://www.wikidata.org/entity/"
+class Fallback(unittest.TestCase):
+    """The per-batch queries' second endpoint. Each host answers from a script: a status to raise, or a
+    body; every request is recorded as (host, the text sent, the attempts it was allowed)."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.cache = caching.ResponseCache("wiki", self.directory.name, 3600)
+        self.sent, self.script = [], {}
+        for patch in (mock.patch.object(wd.http, "request", self.answer),
+                      mock.patch.dict(wd.os.environ, {}, clear=False),
+                      mock.patch.object(wd, "ANSWERED", wd.collections.Counter())):
+            patch.start()
+            self.addCleanup(patch.stop)
+        wd.os.environ.pop(wd.PREFER_VAR, None)
+
+    def answer(self, host, path, params=None, body=None, attempts=wd.http.ATTEMPTS, **kwargs):
+        self.sent.append((host, body.decode("utf-8"), attempts))
+        reply = self.script[host]
+        if isinstance(reply, int):
+            raise wd.http.HTTPError(reply, f"https://{host}{path}")
+        return reply
+
+    def test_a_throttled_wdqs_hands_the_query_to_qlever_and_the_answer_is_kept_under_the_wdqs_text(self):
+        self.script = {wd.HOST: 429, wd.QLEVER_HOST: body({"tmdb": "1", "v": "tt1"})}
+        query = wd.facts_query([1], "movie", SPEC["imdbId"])
+        self.assertEqual(wd.fetch_facts([1], "movie", SPEC["imdbId"], self.cache), ({1: "tt1"}, True))
+        self.assertEqual(self.sent, [(wd.HOST, query, 1), (wd.QLEVER_HOST, wd.QLEVER_PREFIXES + query,
+                                                          wd.http.ATTEMPTS)])
+        self.assertIsNotNone(self.cache.read(self.cache.key(wd.CACHE_PATH, {"q": query})))
+        self.assertEqual(dict(wd.ANSWERED), {"qlever": 1})
+
+    def test_a_timeout_and_a_5xx_hand_over_too(self):
+        for status in (0, 503):
+            with self.subTest(status=status):
+                self.script = {wd.HOST: status, wd.QLEVER_HOST: body()}
+                self.sent = []
+                wd._sparql("SELECT ?x WHERE {}", fallback=True)
+                self.assertEqual([host for host, _, _ in self.sent], [wd.HOST, wd.QLEVER_HOST])
+
+    def test_a_wdqs_refusal_of_the_query_itself_is_its_answer(self):
+        self.script = {wd.HOST: 400, wd.QLEVER_HOST: body()}
+        with self.assertRaises(wd.http.HTTPError):
+            wd._sparql("SELECT ?x WHERE {}", fallback=True)
+        self.assertEqual([host for host, _, _ in self.sent], [wd.HOST])
+
+    def test_preferred_qlever_is_asked_first_and_wdqs_only_when_it_fails(self):
+        env = {wd.PREFER_VAR: "qlever"}
+        self.script = {wd.HOST: body({"x": "wdqs"}), wd.QLEVER_HOST: body({"x": "qlever"})}
+        self.assertEqual(wd._sparql("SELECT ?x WHERE {}", fallback=True, env=env), body({"x": "qlever"}))
+        self.script[wd.QLEVER_HOST] = 400
+        self.assertEqual(wd._sparql("SELECT ?x WHERE {}", fallback=True, env=env), body({"x": "wdqs"}))
+        self.assertEqual([(host, attempts) for host, _, attempts in self.sent],
+                         [(wd.QLEVER_HOST, wd.http.ATTEMPTS), (wd.QLEVER_HOST, wd.http.ATTEMPTS),
+                          (wd.HOST, wd.http.ATTEMPTS)])
+        self.assertEqual(dict(wd.ANSWERED), {"qlever": 1, "wdqs": 1})
+
+    def test_the_label_service_and_the_entity_steps_stay_on_wdqs(self):
+        """QLever has no `SERVICE wikibase:label`; the entity and source steps never fall back."""
+        env = {wd.PREFER_VAR: "qlever"}
+        self.script = {wd.HOST: body(), wd.QLEVER_HOST: body()}
+        wd._sparql('SELECT ?item ?itemLabel WHERE { SERVICE wikibase:label { bd:serviceParam '
+                   'wikibase:language "en". } }', fallback=True, env=env)
+        wd.os.environ[wd.PREFER_VAR] = "qlever"
+        wd.series(["Q1"])
+        self.assertEqual([(host, attempts) for host, _, attempts in self.sent],
+                         [(wd.HOST, wd.http.ATTEMPTS)] * 2)
+
+    def test_the_prefix_block_declares_every_prefix_a_per_batch_query_uses(self):
+        """WDQS predeclares them and QLever does not, so one missing here fails every batch on QLever."""
+        asked = []
+        with mock.patch.object(wd, "_sparql", lambda query, **_: asked.append(query) or body()):
+            wd.titles([1], "movie", excluded={1: ["Q9"]})
+        asked += [wd.facts_query([1, 2], media, item, excluded={1: ["Q9"]})
+                  for item in wd.SPECS for media in ("movie", "tv")]
+        declared = set(re.findall(r"PREFIX (\w+):", wd.QLEVER_PREFIXES))
+        for query in asked:
+            used = set(re.findall(r"(?<![\w<?])([a-z]+):\w", query)) - {"http", "https"}
+            self.assertLessEqual(used, declared, query)
+
+
+ENTITY ="http://www.wikidata.org/entity/"
 
 
 class Lookups(unittest.TestCase):
@@ -277,7 +359,8 @@ class Lookups(unittest.TestCase):
 
     def setUp(self):
         self.answers = {}
-        patch = mock.patch.object(wd, "_sparql", lambda query: self.answers["alias" if "altLabel" in query else "main"])
+        patch = mock.patch.object(wd, "_sparql",
+                                  lambda query, **_: self.answers["alias" if "altLabel" in query else "main"])
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -328,7 +411,7 @@ class Lookups(unittest.TestCase):
         """Without it, `en` and `mul` rows cannot be told apart and the rule above has nothing to go on."""
         asked = []
         self.answers = {"main": body(), "alias": body()}
-        with mock.patch.object(wd, "_sparql", lambda query: asked.append(query) or body()):
+        with mock.patch.object(wd, "_sparql", lambda query, **_: asked.append(query) or body()):
             wd.titles([1], "movie")
         self.assertIn("(LANG(?label) AS ?labelLang) (LANG(?orig) AS ?origLang)", asked[0])
 
