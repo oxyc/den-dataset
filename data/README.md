@@ -17,7 +17,7 @@ are Wikidata. Licences per file are in [`LICENSES.md`](../LICENSES.md).
 | `genres-moods-curated.json` | genres & moods for 47,539 titles, with each title's source | not rebuildable ([#56](https://github.com/oxyc/den-dataset/issues/56)); extended by `./den genres-moods` (`AGENTS.md`) |
 | `genres-moods-rule.json` | the per-label thresholds the `genres_moods` stage derives with, fitted on golden half A | ~$0.31 of Jev plus the fitting |
 | `premise-tags-v1.json` | 37,533 titles × 8–12 structural premise tags, the first generation | a full LLM pass |
-| `premise-tags-v2.json` | 44,531 titles — every title the premise index covers | a full LLM pass |
+| `premise-tags-v2.json` | 44,697 titles — every title the premise index covers, plus 166 appended 2026-09-22 and not yet embedded | a full LLM pass; later runs append with `merge_premise_tags.py --into` |
 | `premise-tags-v1.SPEC.md`, `-v2.SPEC.md` | the prompts those tags were generated under; the tag files' `derivedFrom` cites them | — |
 | `plots-sidecar-v1.json` | 38,460 plot identities (`plotSHA`, length, shipped) and no prose | ~38k article fetches |
 | `embed-canary.json` | fixed texts and the exact int8 vectors den-embed must return for them | only when the space is meant to move (`docs/OPERATE.md`) |
