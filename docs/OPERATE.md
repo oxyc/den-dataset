@@ -209,6 +209,28 @@ the batch ids it wrote. A title below the vote floor is recorded as judged for t
 pending, so it is judged again the next day, or at once if its count or a floor changes, until it earns
 votes.
 
+## The weekly refresh
+
+`./den stage fetch --refresh --out-dir out` drains the worklists as usual, then asks Wikipedia for the current
+revision of every grounded title's article, 50 a request, and re-fetches only the titles whose revision moved,
+whose page is gone, or whose revision is unknown. `--plan` does the asking and reports the counts; it drains
+nothing and fetches nothing. The re-fetched records land in new batches, and `out/refresh/<stamp>/` hands the
+rest of the week's work on:
+
+```sh
+./den stage embed --out-dir out --reembed-keys out/refresh/<stamp>/changed.txt
+pipeline/consolidate_corpus.py withdraw --keys out/refresh/<stamp>/plotless.txt \
+    --reason "lost its plot in the <stamp> refresh" --out out/withdrawn.jsonl
+```
+
+`changed.txt` is every title whose plot text differs; which of them are worth classifying again is the
+cosine gate in oxyc/den-dataset#5, decided after the re-embed, and a re-classify goes in as a new shard that
+supersedes by `runStartedAt`. A title whose article was edited outside its plot is in neither list.
+
+The first refresh of an out-dir also records a revision for titles the Enterprise path grounded (it names
+none): where the cached action-API body yields exactly the stored text, that body's revision is recorded;
+the rest count as unknown and are re-fetched once. On out-repass that is ~9,700 recorded and ~7,300 re-fetched.
+
 ## Reading an enrich report
 
 A title is admitted when its TMDB vote count clears its TMDB floor **or** the number of Wikipedias with an

@@ -80,7 +80,7 @@ class Declaration(unittest.TestCase):
     def test_it_declares_the_batches_and_the_checkpoint_that_resumes_them(self):
         """An absent checkpoint is not an empty one: it made a delta restart the numbering at 1 and
         overwrite two batches."""
-        self.assertEqual([bind(e).name for e in fetch.OUTPUTS], ["enriched", "enrich_checkpoint"])
+        self.assertEqual([bind(e).name for e in fetch.OUTPUTS], ["enriched", "enrich_checkpoint", "refresh"])
 
     def test_both_worklists_are_declared(self):
         self.assertEqual(sorted(bind(e).name for e in fetch.INPUTS), ["universe_movie", "universe_tv"])
@@ -282,7 +282,7 @@ class Drained(unittest.TestCase):
 
 class Topology(unittest.TestCase):
     def test_the_batches_and_the_checkpoint_are_owned_by_the_stage_that_writes_them(self):
-        for name in ("enriched", "enrich_checkpoint"):
+        for name in ("enriched", "enrich_checkpoint", "refresh"):
             self.assertEqual(getattr(artifacts, name.upper()).producer, "")
             self.assertEqual(pipeline.producers()[name], (fetch.PRODUCER, fetch.HOW, False))
 

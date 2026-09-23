@@ -520,6 +520,28 @@ def admit(records, floors, today, cache, worklist_votes=None, excluded=None):
     return admitted, from_worklist
 
 
+def candidates(titles, cache, excluded):
+    """`key -> facts`: what `reground` reads each title's candidate articles from. Raises what Wikidata
+    raises; the caller decides what a failed lookup costs.
+
+    ONE mapping query per media type, keyed by both — see `lib/wikidata.mapping` — and one language query
+    beside it. P364 is its own request rather than another OPTIONAL on the mapping, whose text is the
+    cache key for ~770 bodies already on disk. So is the source-work query, asked only about the titles
+    the mapping names a source work for.
+    """
+    facts = {}
+    for media in sorted({record["mediaType"] for record in titles}):
+        ids = [record["tmdbId"] for record in titles if record["mediaType"] == media]
+        spoken = wikidata.languages(ids, media, cache, excluded=excluded.get(media))
+        mapped = wikidata.mapping(ids, media, plot.HEADINGS_BY_LANGUAGE, cache, excluded=excluded.get(media))
+        works = wikidata.sources(sorted(i for i, found in mapped.items() if found.get("sourceArticle")),
+                                 media, cache, excluded=excluded.get(media))
+        for tmdb_id, found in mapped.items():
+            facts[key(media, tmdb_id)] = dict(found, languages=spoken.get(tmdb_id, []),
+                                              sourceWorks=works.get(tmdb_id, {}))
+    return facts
+
+
 def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude_anime=False, client=None,
         cache=None, token=None, today=None):
     """One batch. Returns the report the drain reads by key.
@@ -631,21 +653,8 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
             # plotless regardless: over the whole repass it refused 3 titles out of 59,209.
             titles.append(dict(found, **wikidata.provenance(resolved.get(label))))
 
-    # ONE mapping query per media type, keyed by both — see `lib/wikidata.mapping` — and one language query
-    # beside it. P364 is its own request rather than another OPTIONAL on the mapping, whose text is the
-    # cache key for ~770 bodies already on disk. So is the source-work query, asked only about the titles
-    # the mapping names a source work for.
-    facts = {}
     try:
-        for media in sorted({record["mediaType"] for record in titles}):
-            ids = [record["tmdbId"] for record in titles if record["mediaType"] == media]
-            spoken = wikidata.languages(ids, media, cache, excluded=excluded.get(media))
-            mapped = wikidata.mapping(ids, media, plot.HEADINGS_BY_LANGUAGE, cache, excluded=excluded.get(media))
-            works = wikidata.sources(sorted(i for i, found in mapped.items() if found.get("sourceArticle")),
-                                     media, cache, excluded=excluded.get(media))
-            for tmdb_id, found in mapped.items():
-                facts[key(media, tmdb_id)] = dict(found, languages=spoken.get(tmdb_id, []),
-                                                  sourceWorks=works.get(tmdb_id, {}))
+        facts = candidates(titles, cache, excluded)
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise Aborted(f"Wikidata mapping failed for batch {batch_id} after retries ({error}); nothing "
                       f"written — re-run to retry this batch") from error

@@ -188,6 +188,11 @@ class Context:
     #: The embed pass re-embeds every stored title whose document differs from the one its vector was made
     #: from. See `pipeline/embed.py`.
     reembed_changed: bool = False
+    #: The fetch stage, after its drain, re-fetches the grounded titles whose Wikipedia article changed since
+    #: the revision their record names, and lists them for the stages after it. With `plan` it asks for the
+    #: revisions, reports the counts, and fetches and writes nothing — the drain included. See
+    #: `pipeline/refresh.py`.
+    refresh: bool = False
 
     def _filename(self, artifact):
         """The declared filename with the dataset version in it, or a refusal when it needs one and the run

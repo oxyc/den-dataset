@@ -182,5 +182,46 @@ class Fetch(unittest.TestCase):
         self.assertEqual((self.requests, second), (1, first))
 
 
+class Revisions(unittest.TestCase):
+    """The bulk revision check: 50 titles a request, each answer keyed by the title that was ASKED."""
+
+    def setUp(self):
+        self.sent = []
+        patch = mock.patch.object(wikipedia.http, "request", self.answer)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def answer(self, host, path, params=None, **kwargs):
+        """enwiki's shape, measured: `normalized`, then `redirects`, then the pages under the title landed on."""
+        self.sent.append((host, params, kwargs))
+        titles = params["titles"].split("|")
+        pages = [{"title": t, "lastrevid": 1000 + i} for i, t in enumerate(titles)
+                 if t not in ("the wire", "Naruto: Shippūden", "Gone")]
+        query = {"pages": pages + [{"title": "Gone", "missing": True},
+                                   {"title": "The Wire", "lastrevid": 7},
+                                   {"title": "Naruto (TV series)", "lastrevid": 9}],
+                 "normalized": [{"from": "the wire", "to": "The wire"}],
+                 "redirects": [{"from": "The wire", "to": "The Wire"},
+                               {"from": "Naruto: Shippūden", "to": "Naruto (TV series)"}]}
+        return json.dumps({"batchcomplete": True, "query": query}).encode()
+
+    def test_fifty_titles_a_request_and_maxlag_on_every_one(self):
+        titles = [f"Film {n}" for n in range(101)]
+        found = wikipedia.revisions(titles, "de")
+        self.assertEqual([len(params["titles"].split("|")) for _h, params, _k in self.sent], [50, 50, 1])
+        self.assertEqual({host for host, _p, _k in self.sent}, {"de.wikipedia.org"})
+        self.assertEqual({params["maxlag"] for _h, params, _k in self.sent}, {"5"})
+        self.assertEqual(len(found), 101)
+
+    def test_an_answer_is_found_through_normalising_and_redirects_and_a_missing_page_is_none(self):
+        found = wikipedia.revisions(["the wire", "Naruto: Shippūden", "Gone"])
+        self.assertEqual(found, {"the wire": 7, "Naruto: Shippūden": 9, "Gone": None})
+
+    def test_a_body_with_no_query_is_refused_rather_than_read_as_every_page_gone(self):
+        with mock.patch.object(wikipedia.http, "request", return_value=b'{"error":{"code":"x"}}'):
+            with self.assertRaises(ValueError):
+                wikipedia.revisions(["Alien"])
+
+
 if __name__ == "__main__":
     unittest.main()

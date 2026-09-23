@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEN = os.path.join(HERE, "den")
@@ -218,7 +219,7 @@ class Dispatch(unittest.TestCase):
                                   since=None, expect=None, pause_ms=0, limit=None, media=None, vote_floor=40,
                                   regional_vote_floor=10, wikipedia_floor=7, regional_wikipedia_floor=4,
                                   plan=False, spend=False, dump_docs=None, reembed_keys=None,
-                                  reembed_changed=False)
+                                  reembed_changed=False, refresh=False)
         ctx = module.context(args)
         self.assertEqual((ctx.vote_floor, ctx.regional_vote_floor, ctx.wikipedia_floor,
                           ctx.regional_wikipedia_floor), (40, 10, 7, 4))
@@ -238,12 +239,25 @@ class Dispatch(unittest.TestCase):
                                   since=None, expect=None, pause_ms=0, limit=None, media=None, vote_floor=None,
                                   regional_vote_floor=None, wikipedia_floor=None, regional_wikipedia_floor=None,
                                   plan=True, spend=False, dump_docs=None, reembed_keys="keys.txt",
-                                  reembed_changed=True)
+                                  reembed_changed=True, refresh=False)
         ctx = module.context(args)
         self.assertEqual((ctx.reembed_keys, ctx.reembed_changed, ctx.plan), ("keys.txt", True, True))
         listed = den("stage", "embed", "--help").stdout
         for flag in ("--reembed-keys", "--reembed-changed"):
             self.assertIn(flag, listed)
+
+    def test_the_refresh_reaches_the_run(self):
+        """A `--refresh` the parser accepts and `Context` drops is a weekly job that drains new titles,
+        re-fetches nothing, and reports success."""
+        import importlib.machinery
+        loader = importlib.machinery.SourceFileLoader("den_entry", DEN)
+        module = importlib.util.module_from_spec(importlib.util.spec_from_loader("den_entry", loader))
+        loader.exec_module(module)
+        parser_args = ["stage", "fetch", "--refresh", "--plan"]
+        with mock.patch.object(module, "execute") as executed:
+            self.assertEqual(module.main(parser_args), 0)
+        ctx = executed.call_args.args[1]
+        self.assertEqual((ctx.refresh, ctx.plan), (True, True))
 
 
 class EndToEnd(fixture.StoreFixture, unittest.TestCase):
