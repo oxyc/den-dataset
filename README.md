@@ -83,8 +83,10 @@ a day with no error anywhere. They are still built as the store's inputs; the pu
 - `store/` — the store writer, one module per section group of den-spec's `wire/store-v1.md`.
 - `lib/` — HTTP, the response cache, and the TMDB, Wikidata, Wikipedia and Jev clients.
 - `data/` — committed inputs. `guards/` — CI checks on the tree itself.
-- `scripts/` — the store writer's command line, the publisher and its guards, the shell runners, and tools
-  not yet moved into a package (oxyc/den-dataset#73).
+- `tools/` — standalone tools with dependencies the pipeline does not take: the plot translator (torch) and
+  the recommendation-quality rulers (numpy, scipy).
+- `scripts/` — the publisher and its guards, the shell runners, and tools not yet moved into a package
+  (oxyc/den-dataset#73).
 
 ## Build / test
 

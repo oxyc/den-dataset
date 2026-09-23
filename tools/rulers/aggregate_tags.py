@@ -29,7 +29,8 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from llm_phase import load_manifest, read_output, expected_ids  # noqa: E402
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from pipeline.llm_phase import load_manifest, read_output, expected_ids  # noqa: E402
 
 V2 = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'
 TAG_RE = re.compile(r'^[a-z0-9]+(-[a-z0-9]+){1,4}$')

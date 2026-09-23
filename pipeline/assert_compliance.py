@@ -38,7 +38,7 @@ import sys
 # The enriched tree to prove compliance over. `--out-dir`, else DEN_OUT_DIR, else out-t02 beside the repo.
 # This was one developer's absolute home directory, in the script that is the §1.C compliance proof for a
 # PUBLIC repo — so nobody else could run the proof at all.
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_ROOT = os.environ.get('DEN_OUT_DIR') or os.path.join(REPO, 'out-t02')
 
 def default_roots(v2):

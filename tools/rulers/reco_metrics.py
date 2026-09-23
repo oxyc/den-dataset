@@ -3,7 +3,7 @@
 
 They were written against oxyc/den's `RecoEval.swift`, which no longer exists — so this is the
 only implementation of them, and these are decisions rather than a mirror of one. Each is a place
-a rewrite drifts without failing, which is why `test_reco_metrics.py` pins every one:
+a rewrite drifts without failing, which is why `reco_metrics_test.py` pins every one:
 
 - nDCG's ideal is capped at min(|relevant|, k), so a case with one relevant item scores 1.0
   when that item is placed first, instead of being unreachable.

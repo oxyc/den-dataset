@@ -321,8 +321,8 @@ FINALIZE_REPORT = Artifact(
 PREMISE_VECTORS = Artifact(
     name="premise_vectors",
     filename="vectors-premise.bin",
-    producer="scripts/v2/embed_tags.py",
-    how="scripts/v2/embed_tags.py",
+    producer="pipeline/embed_tags.py",
+    how="pipeline/embed_tags.py",
     manifest_key="premiseVectorsFile",
     required=False,
 )
@@ -333,8 +333,8 @@ PREMISE_VECTORS = Artifact(
 PREMISE_LABELS = Artifact(
     name="premise_labels",
     filename="labels-premise.json",
-    producer="scripts/v2/build_premise_labels.py",
-    how="scripts/v2/build_premise_labels.py --ids <premise ids> --labels <out-dir>/labels-t02.json "
+    producer="pipeline/build_premise_labels.py",
+    how="pipeline/build_premise_labels.py --ids <premise ids> --labels <out-dir>/labels-t02.json "
         "--blob <out-dir>/vectors-premise.bin --out <out-dir>/labels-premise.json",
     manifest_key="premiseLabelsFile",
 )

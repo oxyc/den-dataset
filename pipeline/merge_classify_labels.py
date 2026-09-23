@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fold the classification run into `labels-t02.json`.
 
-  scripts/v2/merge_classify_labels.py --phase out-repass/classify \
+  pipeline/merge_classify_labels.py --phase out-repass/classify \
       --labels out-repass/labels-t02.json --out out-repass/labels-t02.json
 
 The run labelled the 9,010 titles that have a Wikipedia plot and no labels. This adds them to the

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The premise-generation worklist, and the evidence each title is judged on.
 
-  scripts/v2/build_premise_worklist.py --combined out-repass/combined-v1-r2.jsonl \
+  pipeline/build_premise_worklist.py --combined out-repass/combined-v1-r2.jsonl \
       --articles out-repass/articles.jsonl --out-dir out-premise-v2
 
 Premise tags are free-form strings, so they are the one artifact a decision-only model cannot produce and
@@ -90,7 +90,7 @@ ap.add_argument("--articles", required=True, help="the articles stage's output, 
 ap.add_argument("--out-dir", required=True)
 args = ap.parse_args()
 
-root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 have = load_have(root)
 os.makedirs(args.out_dir, exist_ok=True)
 

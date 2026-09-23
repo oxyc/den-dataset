@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Collect the titles the generation run dropped, and re-batch them.
 
-  scripts/v2/build_premise_backfill.py --phase out-premise-v2/gen [--per-batch 22]
+  pipeline/build_premise_backfill.py --phase out-premise-v2/gen [--per-batch 22]
 
 A generating pass returns a correct-looking answer that is short: 22 works in, 20 out, and a report that
 says "all works processed". `validate_premise_batch.py` catches that — the key set is the only evidence

@@ -2,7 +2,7 @@
 """Convert the box-side embed output (`key\\tcsv` per line) into the shipped blob format.
 
 The embed runs on the homelab box because the published den-embed image cannot run on an
-Apple Silicon Mac (no AVX2 under emulation — see scripts/v2/README.md), and it writes a
+Apple Silicon Mac (no AVX2 under emulation — see docs/OPERATE.md), and it writes a
 resumable TSV rather than a binary so a killed run can append.
 
 Output is exactly what `finalize` writes: a `DENVEC02` blob, which carries its own keys.
@@ -17,7 +17,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from store import vector_blob  # noqa: E402
 
 

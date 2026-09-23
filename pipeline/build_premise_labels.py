@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write `labels-premise.json` in the premise blob's own row order.
 
-  scripts/v2/build_premise_labels.py --ids out-premise-v2/vectors/premise-v2-ids.json \
+  pipeline/build_premise_labels.py --ids out-premise-v2/vectors/premise-v2-ids.json \
       --labels out-repass/labels-t02.json --blob out-premise-v2/vectors/vectors-premise-v2.bin \
       --out out-repass/labels-premise.json
 
@@ -31,7 +31,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from store import vector_blob  # noqa: E402
 
 ap = argparse.ArgumentParser()

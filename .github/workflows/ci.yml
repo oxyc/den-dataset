@@ -52,7 +52,7 @@ jobs:
       # The embed path, which runs from a container on the box with nothing installed: these must stay
       # importable on a bare python3, because a syntax error there surfaces as a failed corpus run hours in.
       - name: The embed path compiles
-        run: python3 -m py_compile pipeline/embed_canary.py pipeline/embed_docs.py scripts/v2/embed_premise_v2.py pipeline/import_box_vectors.py
+        run: python3 -m py_compile pipeline/embed_canary.py pipeline/embed_docs.py pipeline/embed_premise_v2.py pipeline/import_box_vectors.py
       - name: Jev facet contracts
         run: |
           python3 -m py_compile pipeline/run_facets.py pipeline/run_combined.py pipeline/run_delta.py pipeline/audit_combined.py pipeline/consolidate_corpus.py
@@ -80,17 +80,17 @@ jobs:
         run: python3 -m unittest pipeline/build_store_test.py scripts/test_manifest_counts.py scripts/test_check_filename_version.py scripts/test_check_producers.py scripts/test_prune_manifest.py scripts/test_sign_manifest.py pipeline/consolidate_corpus_test.py scripts/test_eval_taxonomy.py pipeline/embed_canary_test.py scripts/test_check_plot_invariants.py scripts/test_backfill_plot_provenance.py pipeline/recluster_test.py
         env:
           DEN_SPEC_DIR: ${{ github.workspace }}/den-spec-checkout
-      # The ranking metrics. `scripts/v2/reco_metrics.py` is what `score_reco.py` scores a ranking change
+      # The ranking metrics. `tools/rulers/reco_metrics.py` is what `score_reco.py` scores a ranking change
       # with, and every case it pins is a place a reimplementation drifts quietly: the capped ideal, the
       # min() in average precision, "not measurable" diversity, unknown ids skipped for novelty, and the
       # gate's rule that a tie fails. Its suite was in no CI step and errored on import, so none of that
       # was checked by anything.
       - name: The ranking metrics
-        run: python3 -m unittest scripts/v2/test_reco_metrics.py
+        run: python3 -m unittest tools/rulers/reco_metrics_test.py
       # Appending a premise generation run to the committed `data/premise-tags-v2.json`: the repairs apply,
       # a key already there is refused, and the file's metadata and formatting survive.
       - name: The premise tags merge
-        run: python3 -m unittest scripts/v2/test_merge_premise_tags.py
+        run: python3 -m unittest pipeline/merge_premise_tags_test.py
       # The pipeline skeleton (oxyc/den-dataset#27): the stage contract, the artifact catalogue, the
       # producer registry derived from the stage order, the corpus, embed and store stages against the
       # rules they wrap, and `den`.

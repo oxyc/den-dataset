@@ -19,7 +19,7 @@ things one level up — the embed stage reads an empty row as "no clause", while
 scrape never reached — and recording the empty row is also what stops the resume re-querying it forever.
 
 **There is a cheaper path when the facts sidecar already exists.**
-`scripts/v2/derive_doc_facts.py` builds the same file out of `facts-<version>.json`, which already holds
+`pipeline/derive_doc_facts.py` builds the same file out of `facts-<version>.json`, which already holds
 both properties as QIDs plus a label map. Validated against a partial scrape of 25,366 titles at 100.00%
 on directors and 99.98% on genres. This stage is what runs when there is no sidecar to derive from.
 """

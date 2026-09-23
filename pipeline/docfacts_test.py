@@ -229,10 +229,10 @@ class Topology(unittest.TestCase):
         self.assertLess(order.index("genres_moods"), order.index("docfacts"))
 
     def test_the_cheaper_path_is_still_there(self):
-        """`scripts/v2/derive_doc_facts.py` builds the same file out of the facts sidecar, validated
+        """`pipeline/derive_doc_facts.py` builds the same file out of the facts sidecar, validated
         against a partial scrape at 100.00% on directors and 99.98% on genres. This stage is what runs
         when there is no sidecar to derive from, and the two must not drift."""
-        derive = os.path.join(REPO, "scripts", "v2", "derive_doc_facts.py")
+        derive = os.path.join(REPO, "pipeline", "derive_doc_facts.py")
         self.assertTrue(os.path.isfile(derive))
         with open(derive, encoding="utf-8") as fh:
             source = fh.read()

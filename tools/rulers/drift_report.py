@@ -28,8 +28,9 @@ import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from aggregate_tags import same_idea  # noqa: E402
-from llm_phase import load_manifest, read_output, expected_ids  # noqa: E402
+from pipeline.llm_phase import load_manifest, read_output, expected_ids  # noqa: E402
 
 V2 = '/Users/cindy/Projects/Personal/den-dataset/out-t02/v2'
 
