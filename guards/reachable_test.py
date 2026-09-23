@@ -2,7 +2,7 @@
 """The reachability guard, and a demonstration that it refuses something.
 
 A guard nobody has seen fail is not known to work. So the tests below build a package with a module
-nothing imports and require it to be named — the same shape `scripts/v2/` has today — before asserting
+nothing imports and require it to be named — the same shape `scripts/v2/` had — before asserting
 the real `pipeline/` and `store/` are clean.
 
 The three guarded packages are entered differently and so are asserted separately: `pipeline/` from the
@@ -11,10 +11,12 @@ import blocks of the stages that reach outside the machine. Three assertions rat
 because what a reader needs from a failure is the remedy for THAT tree, and the remedies are different
 sentences.
 
-`scripts/` is not a package, so it has a rule of its own — imports, paths named in code, shell scripts, CI
-and a declared list of operator tools — asserted in `ScriptRefusal` and at the end of `ThisRepo`.
+`tools/` and the shell scripts are not packages, so they have a rule of their own — imports, paths named in
+code, shell scripts, workflows and a declared list of operator tools — asserted in `ScriptRefusal` and at
+the end of `ThisRepo`. And a Python or shell file outside all of these is refused wherever it is.
 """
 import os
+import subprocess
 import tempfile
 import unittest
 
@@ -160,8 +162,8 @@ class Refusal(unittest.TestCase):
                              ["blob", "vectors"])
 
     def test_a_relative_import_in_the_entry_script_is_not_read_as_ours(self):
-        """An entry script sits in a package of its own — `scripts/v2/` — so its `from . import x` names
-        ITS siblings. Counting those as roots would mark a dead module live on a name collision, which is
+        """An entry script can sit in a package of its own — the store writer is in `pipeline/` — so its
+        `from . import x` names ITS siblings. Counting those as roots would mark a dead module live on a name collision, which is
         the one failure mode a reachability guard cannot have."""
         with tempfile.TemporaryDirectory() as parent:
             dir = os.path.join(parent, "pkg")
@@ -205,49 +207,56 @@ def repo(root, files):
 
 
 class ScriptRefusal(unittest.TestCase):
-    """`scripts/` is entered by import, by a path in code, by a shell script and by CI — and never by
+    """A script is entered by import, by a path in code, by a shell script and by a workflow — and never by
     prose. Each case is one of those, on a throwaway tree."""
 
     def test_a_script_only_prose_names_is_unreachable(self):
         """A docstring or a comment naming a file is how dead scripts survived: the prose outlived them."""
         with tempfile.TemporaryDirectory() as root:
-            repo(root, {"stage.py": "'''Run scripts/told.py by hand.'''\n# or scripts/v2/commented.py\n",
-                        "run.sh": "# scripts/shelled.py\necho done\n",
-                        "scripts/told.py": "", "scripts/v2/commented.py": "", "scripts/shelled.py": ""})
+            repo(root, {"stage.py": "'''Run tools/told.py by hand.'''\n# or tools/v2/commented.py\n",
+                        "run.sh": "# tools/shelled.py\necho done\n",
+                        "tools/told.py": "", "tools/v2/commented.py": "", "tools/shelled.py": ""})
             dead, _ = reachable.unreachable_scripts(root, ["stage.py", "run.sh"])
-            self.assertEqual(dead, ["scripts/shelled.py", "scripts/told.py", "scripts/v2/commented.py"])
+            self.assertEqual(dead, ["tools/shelled.py", "tools/told.py", "tools/v2/commented.py"])
 
     def test_every_way_in_counts_and_reaches_onward(self):
         """A producer string, an import off `sys.path`, a shell script naming another, and a CI run step
         all reach a script — and what a live script reaches is live too. A compile step is not a run."""
         with tempfile.TemporaryDirectory() as root:
             repo(root, {
-                "stage.py": 'PRODUCER = "scripts/v2/producer.py"\n',
-                "scripts/v2/producer.py": "import helper\n",
-                "scripts/v2/helper.py": 'CMD = ["bash", "scripts/loop.sh"]\n',
-                "scripts/loop.sh": ". scripts/lib/env.sh\n",
-                "scripts/lib/env.sh": "",
-                "ci.yml": "run: python3 -m py_compile scripts/compiled.py\nrun: python3 scripts/ran.py\n",
-                "scripts/compiled.py": "",
-                "scripts/ran.py": "",
+                "stage.py": 'PRODUCER = "tools/v2/producer.py"\n',
+                "tools/v2/producer.py": "import helper\n",
+                "tools/v2/helper.py": 'CMD = ["bash", "pipeline/loop.sh"]\n',
+                "pipeline/loop.sh": ". lib/env.sh\n",
+                "lib/env.sh": "",
+                "ci.yml": "run: python3 -m py_compile tools/compiled.py\nrun: python3 tools/ran.py\n",
+                "tools/compiled.py": "",
+                "tools/ran.py": "",
             })
             dead, _ = reachable.unreachable_scripts(root, ["stage.py", "ci.yml"])
-            self.assertEqual(dead, ["scripts/compiled.py"])
+            self.assertEqual(dead, ["tools/compiled.py"])
 
     def test_a_test_keeps_nothing_alive_and_is_named_with_its_subject(self):
         """The loophole a test runner opens: CI runs the test, the test imports the module, so the module
         looks reached. A test proves a module works, not that anything uses it."""
         with tempfile.TemporaryDirectory() as root:
-            repo(root, {"scripts/lonely.py": "", "scripts/test_lonely.py": "import lonely\n",
-                        "ci.yml": "run: python3 -m unittest scripts/test_lonely.py\n"})
+            repo(root, {"tools/lonely.py": "", "tools/lonely_test.py": "import lonely\n",
+                        "ci.yml": "run: python3 -m unittest tools/lonely_test.py\n"})
             self.assertEqual(reachable.unreachable_scripts(root, ["ci.yml"]),
-                             (["scripts/lonely.py"], ["scripts/test_lonely.py"]))
+                             (["tools/lonely.py"], ["tools/lonely_test.py"]))
 
     def test_an_operator_tool_is_live_and_so_is_what_it_imports(self):
         with tempfile.TemporaryDirectory() as root:
-            repo(root, {"scripts/tool.py": "import shared\n", "scripts/shared.py": "", "scripts/stray.py": ""})
-            self.assertEqual(reachable.unreachable_scripts(root, [], extra=["scripts/tool.py"]),
-                             (["scripts/stray.py"], []))
+            repo(root, {"tools/tool.py": "import shared\n", "tools/shared.py": "", "tools/stray.py": ""})
+            self.assertEqual(reachable.unreachable_scripts(root, [], extra=["tools/tool.py"]),
+                             (["tools/stray.py"], []))
+
+    def test_a_python_or_shell_file_outside_every_rule_is_named(self):
+        """The rules above only ask about the trees they walk, which is how `scripts/` grew: nothing asked.
+        So a Python or shell file must live where one of them asks — anywhere else is itself the refusal."""
+        self.assertEqual(reachable.homeless(["scripts/x.py", "run.sh", "pipeline/a.py", "pipeline/b.sh",
+                                             "tools/t/t.py", "guards/g.py", "den_test.py", "README.md"]),
+                         ["run.sh", "scripts/x.py"])
 
 
 class ThisRepo(unittest.TestCase):
@@ -271,9 +280,9 @@ class ThisRepo(unittest.TestCase):
 
     def test_nothing_under_lib_is_unreachable(self):
         """`lib/` is entered by import, from whichever stages leave the machine — so its roots are those
-        stages' own import blocks, over the stages `STAGES` actually reaches, and those of the scripts still
-        under `scripts/`. A stage that drops an upstream, or leaves the order entirely, strands the client
-        only it talked to in the same commit."""
+        stages' own import blocks, over the stages `STAGES` actually reaches, and those of the scripts. A
+        stage that drops an upstream, or leaves the order entirely, strands the client only it talked to in
+        the same commit."""
         stranded = sorted(set(reachable.modules(LIB)) - lib_reach())
         self.assertEqual(stranded, [], f"unreachable from the pipeline: "
                                        f"{[f'lib/{name}.py' for name in stranded]}. `lib/` holds what a "
@@ -305,6 +314,14 @@ class ThisRepo(unittest.TestCase):
                             f"{path} is in guards/operator-tools.json and is not a script")
             self.assertTrue(reason.strip(), f"{path} is in guards/operator-tools.json with no reason")
             self.assertNotIn(path, run, f"{path} is already reached by what runs; drop it from the list")
+
+    def test_every_python_and_shell_file_is_where_a_rule_asks_about_it(self):
+        tracked = subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, text=True,
+                                 check=True).stdout.splitlines()
+        stray = reachable.homeless(tracked)
+        self.assertEqual(stray, [], f"{stray} live where no reachability rule looks. Put code in the package "
+                                    f"that runs it — pipeline/, store/ or lib/ — or a standalone tool with "
+                                    f"dependencies of its own under tools/.")
 
     def test_no_test_outlives_its_subject(self):
         self.assertEqual(reachable.orphan_tests(PIPELINE), [])
