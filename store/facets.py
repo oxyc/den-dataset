@@ -18,7 +18,7 @@ APPLICABILITY = ("validity", "narrative_applicability")
 
 # ---- the FACETS-V2 publication gates ---------------------------------------------------------------
 #
-# `scripts/v2/FACETS-V2.md` § "Publication gates": "The pilots support collection, not unconditional
+# `docs/FACETS-V2.md` § "Publication gates": "The pilots support collection, not unconditional
 # argmax publication." The corpus is the collection — it keeps every answer with its full distribution,
 # so nothing here is unrecoverable and the store can be rebuilt with different thresholds in ~2 minutes.
 # The store is the PUBLICATION, and these are the conditions the spec puts on it.

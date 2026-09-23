@@ -199,7 +199,7 @@ def merge(work, model, web=False, accept_drop=False, curated=gm.CURATED, golden=
         titles[key] = entry
     head["sources"] = {**head.get("sources", {}), source: (
         f"Hand enrichment by {model} labelling agents" + (" with web search" if web else "") +
-        " (`./den genres-moods`, scripts/genres-moods-enrich.SPEC.md), assembled at 0.55 subgenre / 0.50 "
+        " (`./den genres-moods`, data/genres-moods-enrich.SPEC.md), assembled at 0.55 subgenre / 0.50 "
         "theme / 0.55 mood, top 3." + (" The pages read per title are in its `webSources`." if web else "") +
         " `animated` is the enriched batch row's, read off Wikidata's genres and types, for a title the file"
         " did not have, and kept otherwise.")}

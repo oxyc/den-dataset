@@ -15,6 +15,8 @@ are Wikidata. Licences per file are in [`LICENSES.md`](../LICENSES.md).
 | `prompts/facets-v2.md` | the plot-facet axes the classify pass asks, parsed into its questions | ours; hashed into every classify shard's manifest as `promptSha256` |
 | `prompts/facets-v1.md` | the nine-axis v1 facet prompt its census was run under | — |
 | `genres-moods-curated.json` | genres & moods for 47,539 titles, with each title's source | not rebuildable ([#56](https://github.com/oxyc/den-dataset/issues/56)); extended by `./den genres-moods` (`AGENTS.md`) |
+| `genres-moods-enrich.SPEC.md` | the brief `./den genres-moods prepare` fills with the vocabulary and definitions and hands each labelling agent | — |
+| `classify-vocab.json` | the vocabulary the September labelling phase's agents answered in; `merge_classify_labels.py` reads it from the phase directory, where `out-repass/classify/vocab.json` links here | — |
 | `genres-moods-rule.json` | the per-label thresholds the `genres_moods` stage derives with, fitted on golden half A | ~$0.31 of Jev plus the fitting |
 | `premise-tags-v1.json` | 37,533 titles × 8–12 structural premise tags, the first generation | a full LLM pass |
 | `premise-tags-v2.json` | 44,697 titles — every title the premise index covers, plus 166 appended 2026-09-22 and not yet embedded | a full LLM pass; later runs append with `merge_premise_tags.py --into` |

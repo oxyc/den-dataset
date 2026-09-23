@@ -31,7 +31,7 @@ What runs per shard is `audit_combined.validate_implementation` — the manifest
 reads the sidecar and the four source files the pass hashes into it. The ROW half (`audit_combined.audit`)
 is not a precondition of a join and is not run here: it re-reads the 445 MB article dump and reconstructs
 every state and question set, which is the readback you do once per paid pass, not once per join. The
-commands for it are in `scripts/v2/FACETS-V2.md`.
+commands for it are in `docs/FACETS-V2.md`.
 """
 import json
 import os

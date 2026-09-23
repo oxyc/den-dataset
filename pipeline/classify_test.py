@@ -61,7 +61,7 @@ def write_inputs(out):
 
 
 def hand_typed(out):
-    """The arguments `scripts/v2/FACETS-V2.md` writes out, on this out-dir.
+    """The arguments `docs/FACETS-V2.md` writes out, on this out-dir.
 
     The documented dry run names `--out out-repass/combined-v1.jsonl`; the shipped pass is the `-r2` rerun
     and the catalogue's glob is named for it, so the pipeline's shard name is what stands in for the path.

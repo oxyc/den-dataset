@@ -2,7 +2,7 @@
 """The delta question set: what `combined-v1-r2` did not ask.
 
 Same shape as `combined_questions.py` — typed questions keyed by id — so the existing runner can carry
-them. See `scripts/v2/JEV-QUESTIONS.md` for what is deliberately NOT here and why.
+them. See `docs/JEV-QUESTIONS.md` for what is deliberately NOT here and why.
 
 The wording below is the whole of the design. Each group has one trap it is written to avoid, named in its
 comment, because a question that falls into it costs the corpus state to discover.
