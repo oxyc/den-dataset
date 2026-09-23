@@ -315,6 +315,13 @@ class Wikidata:
             return [{"type": ENTITY + kind, "typeLabel": self.label(kind)} for kind in self.claims(qid, "P31")]
         if head == "SELECT ?item ?id":
             return [{"id": imdb_id} for imdb_id in self.claims(qid, "P345")]
+        if head == "SELECT ?item ?p ?v ?prec":
+            # `people_query`: the traits that name an item through `wdt:`, the dates with their precision.
+            rows = [{"p": prop, "v": ENTITY + target}
+                    for prop in re.findall(r"\?item wdt:(P\d+) \?v", query) for target in self.claims(qid, prop)]
+            rows += [{"p": prop, "v": stated["time"], "prec": str(stated["precision"])}
+                     for prop in re.findall(r"psv:(P\d+) \?node", query) for stated in self.claims(qid, prop)]
+            return rows
         if head == "SELECT ?item ?p ?t ?group":
             group = re.search(r"wdt:P279\* wd:(Q\d+)", query).group(1)
 
@@ -656,6 +663,22 @@ class DenRun(unittest.TestCase):
         self.assertEqual(list(zip(values[offsets[row]:offsets[row + 1]], won[offsets[row]:offsets[row + 1]])),
                          [(0, 1), (1, 0)])
         self.assertEqual(self.facts()["entities"]["Q91000001"]["imdbId"], "nm9000001")
+
+    def test_a_persons_traits_reach_the_store(self):
+        """Mara Voss directs movie:900001: her gender, birth, citizenship and occupation come from the
+        fixture Wikidata, ship on her entity, and land in the store as entity ids and a day count."""
+        entity = self.facts()["entities"]["Q91000001"]
+        self.assertEqual({k: entity[k] for k in ("gender", "born", "citizenship", "occupation")},
+                         {"gender": ["Q6581072"], "born": {"date": "1971-04-02", "precision": "day"},
+                          "citizenship": ["Q96000001"], "occupation": ["Q2526255"]})
+        self.assertEqual(self.facts()["entities"]["Q6581072"]["en"], "female")
+        store = Store(self.path(artifacts.STORE))
+        qids = store.column("ent_qid", "I", 4)
+        at = qids.index(91000001)
+        offsets, genders = store.column("ent_gender_o", "I", 4), store.column("ent_gender_v", "I", 4)
+        self.assertEqual([qids[e] for e in genders[offsets[at]:offsets[at + 1]]], [6581072])
+        self.assertEqual(store.column("ent_born", "i", 4)[at], 456, "1971-04-02")
+        self.assertEqual(store.column("ent_born_prec", "B", 1)[at], 0)
 
     def test_every_shipped_title_has_a_vector_and_says_which(self):
         store = Store(self.path(artifacts.STORE))

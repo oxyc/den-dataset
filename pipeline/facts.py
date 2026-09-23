@@ -94,6 +94,12 @@ BACKFILLED = ("awardsWon", "awardsNominated")
 #: batch, 3,800 batches.
 BACKFILL_BATCH = 500
 
+#: The record fields that credit a person, whose traits (`wd.people`) are asked. A company credited as a
+#: series' creator is asked too, and Wikidata states none of them for it.
+PERSON_FIELDS = ("cast", "directors", "creators", "screenwriters", "composers", "cinematographers")
+#: The traits that name an item — a gender, a country, an occupation — which ships by name.
+TRAIT_ITEMS = tuple(wd.PERSON_ITEMS.values())
+
 _ID = re.compile(r"[+-]?\d+")
 
 
@@ -348,15 +354,40 @@ def resolve_awards(fields, cache):
         f"({len(set(ceremonies.values()) - {None})} ceremonies); {titles} titles have one")
 
 
+def name_entities(names, qids, path, what="entity names"):
+    """Name every Q-id in `qids` that `names` has no entry for, into `names`, and save it."""
+    unresolved = sorted(set(qids) - set(names))
+    say(f"{what}: {len(names)} cached, {len(unresolved)} to resolve")
+    if not unresolved:
+        return
+    for qid, info in wd.entity_details(unresolved).items():
+        entry = {}
+        if info["name"] is not None:
+            entry["en"] = info["name"]
+        if info["tmdbPersonId"] is not None:
+            entry["tmdbPersonId"] = info["tmdbPersonId"]
+        if info["aliases"]:
+            # 0x1F-joined because the checkpoint is `{name: string}`; split back into a list below,
+            # once, at the boundary — a joined string reaching atlas made the whole file unparseable.
+            entry["aliases"] = "\x1f".join(sorted(info["aliases"]))
+        if entry:
+            names[qid] = entry
+    save(path, names)
+
+
 def resolve_entities(fields, path, cache):
     """Every Q-id a record names, resolved once and remembered: a resumed run that re-resolved all of them
     spent its whole life here at 16,500 titles and never reached a new batch. A single Q-id is walked too:
     `franchise` was one, and a harvest that walked only lists left all 3,019 of them unnamed.
 
+    Then each credited person's traits (`wd.people`: gender, birth, death, citizenship, occupation), for
+    every person not yet asked, and the names of the items those traits point at. `{}` records "asked, has
+    none", so a checkpoint named before traits existed is asked once.
+
     Then each entity's IMDb person id (P345), for every entry not yet asked — the ones just named and the
     ones a checkpoint named before this was asked at all. `""` records "asked, has none"."""
     names = checkpoint(path)
-    qids = set()
+    qids, people = set(), set()
     for row in fields.values():
         # The award items themselves are not named: what ships by name is their ceremony
         # (`awardsWonAt`/`awardsNominatedAt`), and naming every category would add thousands of entities.
@@ -367,22 +398,20 @@ def resolve_entities(fields, path, cache):
                 qids.update(item for item in value if isinstance(item, str) and item.startswith("Q"))
             elif isinstance(value, str) and value.startswith("Q"):
                 qids.add(value)
-    unresolved = sorted(qids - set(names))
-    say(f"entity names: {len(names)} cached, {len(unresolved)} to resolve")
-    if unresolved:
-        for qid, info in wd.entity_details(unresolved).items():
-            entry = {}
-            if info["name"] is not None:
-                entry["en"] = info["name"]
-            if info["tmdbPersonId"] is not None:
-                entry["tmdbPersonId"] = info["tmdbPersonId"]
-            if info["aliases"]:
-                # 0x1F-joined because the checkpoint is `{name: string}`; split back into a list below,
-                # once, at the boundary — a joined string reaching atlas made the whole file unparseable.
-                entry["aliases"] = "\x1f".join(sorted(info["aliases"]))
-            if entry:
-                names[qid] = entry
+        for name in PERSON_FIELDS:
+            people.update(q for q in row.get(name) or [] if isinstance(q, str) and q.startswith("Q"))
+    name_entities(names, qids, path)
+    # A person with no entry has no name either, and is asked for neither IMDb id nor traits.
+    unasked = sorted(qid for qid in people if qid in names and "traits" not in names[qid])
+    if unasked:
+        found = wd.people(unasked, cache)
+        for qid in unasked:
+            names[qid]["traits"] = found.get(qid, {})
         save(path, names)
+        say(f"person traits: {len(unasked)} people asked, {sum(1 for q in unasked if q in found)} have some")
+    values = {q for entry in names.values() for key in TRAIT_ITEMS
+              for q in (entry.get("traits") or {}).get(key) or []}
+    name_entities(names, values, path, what="trait values")
     unasked = sorted(qid for qid, entry in names.items() if "imdbId" not in entry)
     if unasked:
         found = wd.imdb_ids(unasked, cache)
@@ -448,6 +477,8 @@ def entity_out(entry):
     aliases = [part for part in (entry.get("aliases") or "").split("\x1f") if part]
     if aliases:
         out["aliases"] = aliases
+    # A person's traits ship beside the name, flat: `gender`, `born`, `died`, `citizenship`, `occupation`.
+    out.update(entry.get("traits") or {})
     return out
 
 

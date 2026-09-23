@@ -5,10 +5,18 @@ record refers to: 1,236 references (0.76%) name something the table does not des
 against the table alone dropped them — a cast member nobody can name still connects two titles, and the
 rail counts that overlap by id without ever needing the name.
 """
+import re
+import sys
 from collections import defaultdict
 
-from .format import U32_NONE
-from .facts import ENTITY_LISTS, MAKER_FIELDS
+from .format import I32_NONE, U32_NONE
+from .facts import ENTITY_LISTS, MAKER_FIELDS, PRECISION, PRECISION_NONE
+
+#: A person's traits that name an item (oxyc/den#136), entity-table field -> section base name.
+TRAIT_LISTS = {"gender": "ent_gender", "citizenship": "ent_citizen", "occupation": "ent_occupation"}
+#: A person's dates, entity-table field -> section name; the precision is `<name>_prec`.
+TRAIT_DATES = {"born": "ent_born", "died": "ent_died"}
+_PERSON_DATE = re.compile(r"(-?)(\d{4,})(?:-(\d\d))?(?:-(\d\d))?")
 
 
 def _numbers(qids):
@@ -25,6 +33,46 @@ def referenced_qids(rows):
                 if isinstance(q, str) and q.startswith("Q") and q[1:].isdigit():
                     found.add(int(q[1:]))
     return found
+
+
+def trait_qids(table):
+    """Every item a person's traits name — a gender, a country, an occupation — as a raw Q-id number, so
+    the entity table holds each one even when Wikidata gives it no English name."""
+    found = set()
+    for qid, ent in table.items():
+        if isinstance(ent, dict):
+            for field in TRAIT_LISTS:
+                for q in ent.get(field) or []:
+                    if not (isinstance(q, str) and q.startswith("Q") and q[1:].isdigit()):
+                        sys.exit(f"entity {qid} {field}: {q!r} is not a Wikidata item id")
+                    found.add(int(q[1:]))
+    return found
+
+
+def days_from_civil(year, month, day):
+    """Days since 1970-01-01 in the proleptic Gregorian calendar, for any year: `datetime.date` stops at
+    year 1, and a screenwriter credit reaches Sophocles. Year 0 is 1 BCE, as in Wikidata's RDF dates.
+    Howard Hinnant's `days_from_civil`."""
+    year -= month <= 2
+    era = year // 400
+    yoe = year - era * 400
+    doy = (153 * (month + (-3 if month > 2 else 9)) + 2) // 5 + day - 1
+    doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+
+
+def person_date(value, where):
+    """`{"date": "-0496", "precision": "year"}` → (days since the epoch, precision code), the same
+    encoding as `released`, with the decade and century a person's date may carry."""
+    if value is None:
+        return I32_NONE, PRECISION_NONE
+    text = value.get("date") if isinstance(value, dict) else None
+    code = PRECISION.get(value.get("precision")) if isinstance(value, dict) else None
+    match = _PERSON_DATE.fullmatch(text) if isinstance(text, str) else None
+    if match is None or code is None:
+        sys.exit(f"{where}: {value!r} is not a person date this writer understands")
+    sign, year, month, day = match.groups()
+    return days_from_civil(int(year) * (-1 if sign else 1), int(month or 1), int(day or 1)), code
 
 
 def intern(strings, table):
@@ -55,7 +103,7 @@ class Entities:
     def __init__(self, table, rows):
         self.table = table
         self.known = _numbers(table)
-        self.referenced = referenced_qids(rows)
+        self.referenced = referenced_qids(rows) | trait_qids(table)
         #: The sorted Q-id numbers. Everything referring to a person or company uses this index.
         self.qids = sorted(self.known | self.referenced)
         self._index = {q: i for i, q in enumerate(self.qids)}
@@ -88,6 +136,8 @@ class Entities:
             for i in row:
                 credits[i] += 1
         ent_name, ent_tmdb, ent_alias, ent_imdb = [], [], [], []
+        trait_lists = {field: [] for field in TRAIT_LISTS}
+        trait_dates = {field: ([], []) for field in TRAIT_DATES}
         by_num = {int(q[1:]): q for q in self.table if q.startswith("Q") and q[1:].isdigit()}
         for num in self.qids:
             # An entity the table does not describe: referenced by a record but with no entry. Its Q-id
@@ -110,6 +160,14 @@ class Entities:
             # IMDb's person id (Wikidata P345), for joining IMDb's own principals at run time. A join key
             # only: the Q-id stays the id anything public addresses an entity by.
             ent_imdb.append(strings.id(person_imdb_id(ent.get("imdbId"))))
+            # A person's traits as Wikidata states them (oxyc/den#136): the items as entity ids, which
+            # `trait_qids` put in the index, and the dates as `released` stores a date.
+            for field in TRAIT_LISTS:
+                trait_lists[field].append([self._index[int(q[1:])] for q in ent.get(field) or []])
+            for field, (days, precision) in trait_dates.items():
+                day, code = person_date(ent.get(field), f"entity Q{num} {field}")
+                days.append(day)
+                precision.append(code)
         count = len(self.qids)
         sec.put("ent_qid", "I", self.qids, 4, expect=count)
         sec.put("ent_name", "I", ent_name, 4, expect=count)
@@ -117,3 +175,19 @@ class Entities:
         sec.put("ent_credits", "I", credits, 4, expect=count)
         sec.put_list("ent_alias", "I", 4, ent_alias, expect_rows=count)
         sec.put("ent_imdb", "I", ent_imdb, 4, expect=count)
+        # May be empty: a store built from facts scraped before traits were asked, or a corpus of no people.
+        for field, section in TRAIT_LISTS.items():
+            sec.put_list(section, "I", 4, trait_lists[field], allow_empty=True, expect_rows=count)
+        for field, section in TRAIT_DATES.items():
+            days, precision = trait_dates[field]
+            sec.put(section, "i", days, 4, expect=count)
+            sec.put(f"{section}_prec", "B", precision, 1, expect=count)
+
+    def trait_counts(self):
+        """How many entities carry each trait, for the build's summary line."""
+        counts = {field: 0 for field in (*TRAIT_LISTS, *TRAIT_DATES)}
+        for ent in self.table.values():
+            if isinstance(ent, dict):
+                for field in counts:
+                    counts[field] += bool(ent.get(field))
+        return counts

@@ -144,6 +144,12 @@ PROVENANCE = {
     "ent_alias_v": "wikidata", "ent_alias_o": "wikidata",
     # IMDb's person id as Wikidata states it (P345): an id, not IMDb's dataset content.
     "ent_imdb": "identifier",
+    # A person's P21, P569, P570, P27 and P106, as Wikidata states them (oxyc/den#136).
+    "ent_gender_v": "wikidata", "ent_gender_o": "wikidata",
+    "ent_citizen_v": "wikidata", "ent_citizen_o": "wikidata",
+    "ent_occupation_v": "wikidata", "ent_occupation_o": "wikidata",
+    "ent_born": "wikidata", "ent_born_prec": "wikidata",
+    "ent_died": "wikidata", "ent_died_prec": "wikidata",
     "maker_ent": "wikidata",
     "maker_rows_v": "ours", "maker_rows_o": "ours",
     # `data/iconic-studios.json`: which studios, their names and their items are a judgement kept by hand.

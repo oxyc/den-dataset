@@ -183,6 +183,7 @@ def run(args, inputs, prose_check, provenance_check):
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
                       "entities": len(entity_index.qids), "iconicStudios": len(studio_list.kept),
                       "awardTitles": award_columns.titles, "ceremonies": len(award_columns.ceremonies),
+                      "personTraits": entity_index.trait_counts(),
                       "strings": len(ordered_strings),
                       "sections": len(sec.order)}, indent=1), file=sys.stderr)
 
