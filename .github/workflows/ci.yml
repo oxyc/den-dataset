@@ -139,6 +139,10 @@ jobs:
       # asserts that `den run`, given no dataset version, runs every stage but the two that buy or publish,
       # the six inputs no stage produces yet (seeded by hand, and failing here the day a stage produces one),
       # and that the store, the manifest and the facts agree on every count.
+      # The plot translator (oxyc/den-dataset#89) keeps torch out of the pipeline, so what runs here is its
+      # stdlib half: which plots it extracts, how it splits and rejoins them, the shard plan and the resume.
+      - name: The plot translator
+        run: python3 -m unittest tools/translate/translate_test.py
       - name: den run, end to end
         run: python3 -m unittest den_run_test.py
       # The publisher ITSELF, end to end against a fixture manifest and out-dir with `gh` stubbed. The

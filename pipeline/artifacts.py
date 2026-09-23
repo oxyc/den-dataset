@@ -187,6 +187,19 @@ DOC_FACTS = Artifact(
     filename="doc-facts.json",
 )
 
+#: English translations of the plots that are not in English, one JSON row per translation, append-only:
+#: `{key, lang, source_sha256, translator, english}`. The embed stage composes a title's document from its
+#: translation when `source_sha256` is the hash of the plot it would compose otherwise (oxyc/den-dataset#89).
+#: Optional: without it every plot embeds in its own language. Its translator needs torch, which the
+#: pipeline does not, so it lives in `tools/translate/` with its own dependencies.
+PLOT_TRANSLATIONS = Artifact(
+    name="plot_translations",
+    filename="plot-translations.jsonl",
+    producer="tools/translate/translate.py",
+    how="tools/translate/translate.py extract, then run — tools/translate/README.md",
+    required=False,
+)
+
 CORPUS = Artifact(
     name="corpus",
     filename="corpus-{version}.jsonl.gz",
@@ -354,7 +367,7 @@ RELEASE = Artifact(
 
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
              COMBINED_MANIFEST, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST, GENRES_MOODS,
-             DELTA, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH, DOC_FACTS, EMBED_LABELS,
-             EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
+             DELTA, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH, DOC_FACTS, PLOT_TRANSLATIONS,
+             EMBED_LABELS, EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
              DELTA_IDS, DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, FINALIZE_REPORT,
              PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)

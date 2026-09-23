@@ -1,0 +1,124 @@
+name: translate plots
+
+# English translations of the plots that are not in English (oxyc/den-dataset#89), on CPU runners.
+# tools/translate/README.md says how to feed it and what it writes.
+#
+# The cache lives as an asset on the `plot-translations` prerelease, not in actions/cache: it is ~50 CPU
+# hours of work, and actions/cache evicts an entry after 7 days unused or under repo-wide size pressure.
+# A release asset stays until it is replaced, and a local run or the embed stage downloads it the same way.
+# Wikipedia's plots are CC BY-SA, and so are their translations; the release notes say so. The HF models
+# are re-downloadable, so they are what actions/cache holds.
+on:
+  workflow_dispatch:
+    inputs:
+      max_chars:
+        description: Source characters per job. At ~150 chars/s on a runner, 2M is under 4 hours.
+        default: "2000000"
+
+# Two runs would each upload a merged cache, and the second would drop the first's rows.
+concurrency:
+  group: translate-plots
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RELEASE: plot-translations
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Inputs from the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir work
+          gh release download "$RELEASE" --pattern plots.jsonl --dir work
+          gh release download "$RELEASE" --pattern plot-translations.jsonl --dir work || touch work/plot-translations.jsonl
+          wc -l work/*
+      - name: Plan the shards
+        id: plan
+        run: |
+          python3 tools/translate/translate.py plan --plots work/plots.jsonl \
+            --cache work/plot-translations.jsonl --max-chars "${{ inputs.max_chars }}" --out-dir shards > matrix.json
+          cat matrix.json
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: shards
+          path: shards/
+          if-no-files-found: ignore
+
+  translate:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface
+          key: opus-mt-${{ matrix.lang }}-${{ hashFiles('tools/translate/models.json') }}
+      - name: Install
+        run: |
+          pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r tools/translate/requirements.txt
+      - uses: actions/download-artifact@v8
+        with:
+          name: shards
+          path: shards
+      # Stops itself at 4h20m, well inside the job's limit, so what it did is always uploaded; a dispatch
+      # after this one plans only what is still missing.
+      - name: Translate
+        run: |
+          python tools/translate/translate.py run --plots "shards/${{ matrix.shard }}.jsonl" \
+            --cache "out/${{ matrix.shard }}.jsonl" --device cpu --stop-after 15600
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: translated-${{ matrix.shard }}
+          path: out/
+          if-no-files-found: ignore
+
+  merge:
+    needs: [plan, translate]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: translated-*
+          path: new
+          merge-multiple: true
+      - name: Append to the cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$RELEASE" --pattern plot-translations.jsonl --dir work || { mkdir -p work; touch work/plot-translations.jsonl; }
+          before=$(wc -l < work/plot-translations.jsonl)
+          # A job cut off mid-write can leave a torn last line; the translator's own repair drops it.
+          for f in new/*.jsonl; do
+            [ -e "$f" ] || continue
+            python3 -c "import sys; sys.path.insert(0, 'tools/translate'); import translate; translate.repair(sys.argv[1])" "$f"
+            cat "$f" >> work/plot-translations.jsonl
+          done
+          python3 -c "import sys; sys.path.insert(0, '.'); from pipeline import compose; print(len(compose.read_translations(sys.argv[1])), 'translations')" work/plot-translations.jsonl
+          echo "rows: $before -> $(wc -l < work/plot-translations.jsonl)"
+          gh release upload "$RELEASE" work/plot-translations.jsonl --clobber

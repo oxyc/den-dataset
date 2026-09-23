@@ -17,11 +17,13 @@ The shape is the CC0 "lean" document: no title, no year, no cast, every fact cla
 dropped (the shipped store's composition, recovered by re-embedding probes against it), so it is not
 composed at all rather than composed and discarded.
 """
+import hashlib
 import json
 import os
 import unicodedata
 
 from .articles import key, ordered_batches
+from .contract import StageError
 
 #: `CharacterSet.whitespaces` as CoreFoundation implements it: the space separators, TAB — and U+200B ZERO
 #: WIDTH SPACE, which is a format character by category and trimmed anyway (measured against the binary).
@@ -158,12 +160,51 @@ def lean(creators, genres, tags, plot):
     return _trim(" ".join(parts), _space)
 
 
-def documents(enriched_dir, labels, doc_facts, done, plot_cap, tally):
+def source_plot(row, plot_cap):
+    """The plot a title's document carries, exactly as it follows `Plot: `: its Wikipedia plot capped and
+    trimmed, or "" for a row with none. A translation's `source_sha256` is the hash of this text, so a
+    translation made from any other version of the plot never matches."""
+    if not row.get("hasWikiPlot"):
+        return ""
+    return _trim(capped_plot(row.get("overview") or "", plot_cap), _space_or_newline)
+
+
+def plot_sha(plot):
+    return hashlib.sha256(plot.encode("utf-8")).hexdigest()
+
+
+def read_translations(path):
+    """`{(key, source_sha256): english}` from `tools/translate`'s append-only cache, the later line winning.
+
+    A killed translator can leave its last line torn, which is skipped; an unreadable line anywhere else
+    is a damaged file and is refused rather than read as fewer translations."""
+    with open(path, encoding="utf-8") as handle:
+        lines = handle.read().split("\n")
+    out = {}
+    for n, line in enumerate(lines, 1):
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+            out[(row["key"], row["source_sha256"])] = row["english"]
+        except (ValueError, KeyError, TypeError):
+            if n == len(lines):
+                continue
+            raise StageError(f"{path}:{n} is not a translation row: {line[:80]!r}") from None
+    return out
+
+
+def documents(enriched_dir, labels, doc_facts, done, plot_cap, tally, translations=None):
     """`(key, record, document)` for every labelled title not in `done`; `tally["missing"]` counts the
     enriched titles with no label.
 
     Batches are read NEWEST first and the first occurrence wins, which is newest-wins: 505 keys appear in
     several batches disagreeing about `hasWikiPlot`, and oldest-first would embed One Piece with no plot.
+
+    A plot that is not in English is embedded as its English translation when `translations` holds one
+    made from exactly this plot (oxyc/den-dataset#89): untranslated, bge-m3 places those titles by their
+    language before their story. A translation of an older plot is ignored and the original is embedded.
+    The translation is capped like any plot, because it is often longer than its source.
     """
     seen = set(done)
     for name in reversed(ordered_batches(enriched_dir)):
@@ -179,7 +220,10 @@ def documents(enriched_dir, labels, doc_facts, done, plot_cap, tally):
                 continue
             tags = [item["label"] for item in record["subgenres"]] + [item["label"] for item in record["moods"]]
             # Only a WIKIPEDIA plot, which is CC0-clean; a title with none composes on facts and tags.
-            plot = capped_plot(row.get("overview") or "", plot_cap) if row.get("hasWikiPlot") else ""
+            plot = source_plot(row, plot_cap)
+            english = translations.get((title, plot_sha(plot))) if translations and plot else None
+            if english is not None:
+                plot = capped_plot(english, plot_cap)
             facts = doc_facts.get(title) or {}
             seen.add(title)
             # `createdBy` is Wikidata (P170) on a batch the current enrichment wrote; an older batch can still

@@ -1,0 +1,13 @@
+{
+  "da": {"model": "Helsinki-NLP/opus-mt-da-en", "revision": "0960cff506758772cf23186b941305e0afeb43c5"},
+  "de": {"model": "Helsinki-NLP/opus-mt-de-en", "revision": "1a922f3b32a8e809e17a47d4b32142d8105924e5"},
+  "es": {"model": "Helsinki-NLP/opus-mt-es-en", "revision": "c96e2c5399ebfae4fc43d9669556b9afa74bb69d"},
+  "fr": {"model": "Helsinki-NLP/opus-mt-fr-en", "revision": "c4aed37b318c763fd177aa449b44e3b783cc6c02"},
+  "it": {"model": "Helsinki-NLP/opus-mt-it-en", "revision": "42556a0848fc726f4d27399f20b19ff6f01afe11"},
+  "ja": {"model": "Helsinki-NLP/opus-mt-ja-en", "revision": "0770961a39ba6bd66305b149c3f4110bcafca2e6"},
+  "ko": {"model": "Helsinki-NLP/opus-mt-ko-en", "revision": "e42d1f41b66194e6d10512f8a27bebc1f4f5097e"},
+  "nl": {"model": "Helsinki-NLP/opus-mt-nl-en", "revision": "48af999f2c59b10c05ca6e008dcedc07677a9b15"},
+  "pl": {"model": "Helsinki-NLP/opus-mt-pl-en", "revision": "7f2bb874fdfb6139f9842b91a9b75c4a6c93401c"},
+  "ru": {"model": "Helsinki-NLP/opus-mt-ru-en", "revision": "fbd6dc73284f95536648512cc21d57f19191961a"},
+  "sv": {"model": "Helsinki-NLP/opus-mt-sv-en", "revision": "202cf6240046bd8b6d08c207ee751ffd630d7ba8"}
+}
