@@ -110,9 +110,9 @@ class Declaration(unittest.TestCase):
             directory = tempfile.TemporaryDirectory()
             self.addCleanup(directory.cleanup)
             write_inputs(directory.name)
-            fetch.batch(context(directory.name, vote_floor=40, regional_vote_floor=10, imdb_floor=1500,
-                                regional_imdb_floor=300), "movie")
-        self.assertEqual(ran.call_args.kwargs["floors"], floors.Floors(40, 10, 1500, 300))
+            fetch.batch(context(directory.name, vote_floor=40, regional_vote_floor=10, wikipedia_floor=7,
+                                regional_wikipedia_floor=4), "movie")
+        self.assertEqual(ran.call_args.kwargs["floors"], floors.Floors(40, 10, 7, 4))
 
     def test_a_missing_worklist_stops_the_stage_and_names_who_builds_it(self):
         """A drain pointed at a worklist that is not there checkpoints nothing and reports `remaining` 0,

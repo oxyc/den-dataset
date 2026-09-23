@@ -5,15 +5,15 @@ Every stage has its own suite; this is the one that runs them in ORDER, so the s
 tested too: what one stage writes is what the next one reads, with nothing hand-built in between except
 the seeds named below. It is oxyc/den-dataset#27's acceptance item 1.
 
-**Nothing leaves the machine.** `lib/http.request` is replaced by `Upstreams`, which answers TMDB, the IMDb
-ratings dump, Wikipedia and Wikidata out of `pipeline/fixture-corpus/upstream/` and refuses any request it
+**Nothing leaves the machine.** `lib/http.request` is replaced by `Upstreams`, which answers TMDB,
+Wikipedia and Wikidata out of `pipeline/fixture-corpus/upstream/` and refuses any request it
 has no answer for. den-embed is a stand-in on a local port, reached over a real socket, with a canary made
 for it. A socket guard refuses every non-loopback connection this process opens, so a client that stopped
 going through `lib/http` fails here rather than reaching the internet.
 
 The upstream answers are hand-written in each service's wire shape. The titles, people and plots are
 invented: there is no TMDB text in them (no overview, no tagline — TMDB's terms), no Wikipedia prose
-(CC BY-SA), no real IMDb counts (a non-transferable licence), and no credential. `TMDB_API_KEY` is set to a
+(CC BY-SA), and no credential. `TMDB_API_KEY` is set to a
 string that is not one, because the fetch stage refuses to start without some value.
 
 **What is seeded, and why.** Two kinds of input are copied into the out-dir before the run, each in its
@@ -267,8 +267,9 @@ class Wikidata:
         if head == "SELECT ?tmdb ?film":
             # One item per id here, so nothing is contested and the evidence query is never asked.
             return [{"film": ENTITY + qid}]
-        if head == "SELECT ?tmdb ?imdb":
-            return [{"imdb": imdb_id} for imdb_id in self.claims(qid, "P345")]
+        if head == "SELECT ?tmdb (COUNT(DISTINCT ?article) AS ?wikis)":
+            wikis = bool(self.items[qid].get("enwiki")) + len(self.items[qid].get("sitelinks") or {})
+            return [{"wikis": str(wikis)}]
         if head == "SELECT ?tmdb ?code":
             through, via = prop(r"\?film wdt:(P\d+) \?v"), prop(r"\?v wdt:(P\d+) \?code")
             return [{"code": code} for item in self.claims(qid, through) for code in self.claims(item, via)]
@@ -323,15 +324,13 @@ class Upstreams:
         self.tmdb = read_json(os.path.join(UPSTREAM, "tmdb.json"))
         self.pages = read_json(os.path.join(UPSTREAM, "wikipedia.json"))
         self.wikidata = Wikidata(read_json(os.path.join(UPSTREAM, "wikidata.json")))
-        with open(os.path.join(UPSTREAM, "imdb-ratings.tsv"), "rb") as fh:
-            self.ratings = gzip.compress(fh.read(), mtime=0)
         self.hosts = set()
 
-    def request(self, host, path, params=None, method="GET", body=None, headers=None, received=None,
-                scheme="https", **_transport):
+    def request(self, host, path, params=None, method="GET", body=None, headers=None, scheme="https",
+                **_transport):
         if host.startswith("127.0.0.1:"):
-            return self.local(host, path, params, method=method, body=body, headers=headers,
-                              received=received, scheme=scheme, **_transport)
+            return self.local(host, path, params, method=method, body=body, headers=headers, scheme=scheme,
+                              **_transport)
         self.hosts.add(host)
         params = params or {}
         if host == tmdb_api.HOST:
@@ -340,10 +339,6 @@ class Upstreams:
             if found is None:
                 raise http.HTTPError(404, f"https://{host}{path}", b'{"status_code":34}')
             return json.dumps(found).encode()
-        if host == "datasets.imdbws.com":
-            if received is not None:
-                received.update({"status": 200, "etag": None, "last-modified": None})
-            return self.ratings
         if host.endswith(".wikipedia.org") and path == wikipedia.API_PATH:
             assert {k: v for k, v in params.items() if k != "page"} == wikipedia.PARSE_QUERY, params
             page = self.pages.get(host.split(".")[0], {}).get(params["page"])
@@ -663,7 +658,7 @@ class DenRun(unittest.TestCase):
         facts = {f"{r['mediaType']}:{r['tmdbId']}": r for r in self.facts()["records"]}
         # A film and a series sharing tmdbId 900001 are two titles all the way through.
         self.assertTrue({"movie:900001", "tv:900001"} <= store_keys)
-        # Below TMDB's regional floor, admitted on IMDb's count, grounded on the French Wikipedia.
+        # Below TMDB's regional floor, admitted on its three Wikipedias, grounded on the French one.
         jardin = self.enriched("movie:900002")
         self.assertEqual((jardin["plotLanguage"], jardin["plotArticleRole"]), ("fr", "own-other-language"))
         # An English article with no describing section: ships plotless, never dumped for the classifier.
@@ -688,7 +683,7 @@ class DenRun(unittest.TestCase):
         self.assertEqual(self.enriched("movie:900003")["overview"], "")
 
     def test_only_the_recorded_upstreams_were_asked(self):
-        self.assertEqual(self.upstreams.hosts, {tmdb_api.HOST, "datasets.imdbws.com", "query.wikidata.org",
+        self.assertEqual(self.upstreams.hosts, {tmdb_api.HOST, "query.wikidata.org",
                                                 "en.wikipedia.org", "fr.wikipedia.org", "ja.wikipedia.org"})
 
 

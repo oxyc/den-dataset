@@ -147,8 +147,8 @@ def announce_prose_source(media, served):
 def batch(ctx, media):
     """One batch of `media`'s worklist, under freshly asked credentials. Returns its report."""
     key, token = credentials()
-    floors = floor_rules.given(ctx.vote_floor, ctx.regional_vote_floor, ctx.imdb_floor,
-                               ctx.regional_imdb_floor)
+    floors = floor_rules.given(ctx.vote_floor, ctx.regional_vote_floor, ctx.wikipedia_floor,
+                               ctx.regional_wikipedia_floor)
     return enrich.run(ctx.require(bind(UNIVERSES[media]).artifact), ctx.out_dir, floors=floors,
                       limit=BATCH, client=tmdb_api.TMDB(key), token=token)
 

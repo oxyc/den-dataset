@@ -21,7 +21,9 @@
     }
   },
   "Q90000003": {
-    "tmdb": {"movie": 900002}, "sitelinks": {"fr": "Le Jardin d'hiver"}, "label": "The Winter Garden",
+    "tmdb": {"movie": 900002},
+    "sitelinks": {"fr": "Le Jardin d'hiver", "ca": "El jardí d'hivern", "eu": "Neguko lorategia"},
+    "label": "The Winter Garden",
     "claims": {
       "P31": ["Q97000001"], "P345": ["tt9000002"], "P577": [{"time": "+2016-11-02T00:00:00Z", "precision": 11}],
       "P57": ["Q91000014"], "P136": ["Q92000001"], "P495": ["Q96000003"], "P364": ["Q95000002"],

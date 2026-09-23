@@ -27,8 +27,7 @@ class Server(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         type(self).seen.append((self.path, dict(self.headers)))
         status, headers = type(self).plan.pop(0) if type(self).plan else (200, {})
-        # A 304 carries no body, and a client reading one would take it as the start of the next answer.
-        body = b"" if status == 304 else b'{"ok":1}'
+        body = b'{"ok":1}'
         self.send_response(status)
         for name, value in headers.items():
             self.send_header(name, value)
@@ -133,28 +132,6 @@ class Request(unittest.TestCase):
         self.ask((200, {}))
         path, _headers = Server.seen[0]
         self.assertEqual(path, "/w/api.php?page=Knife%2BHeart")
-
-    def test_a_conditional_get_answered_304_is_unchanged_not_an_error(self):
-        """The IMDb dump is refreshed by asking whether it changed; the usual answer is 304, and the caller
-        needs the validators of a 200 to ask that next time."""
-        Server.plan = [(200, {"ETag": '"v1"', "Last-Modified": "Mon, 21 Sep 2026 00:00:00 GMT"})]
-        received = {}
-        self.assertEqual(transport.request(HOST, "/dump", received=received), b'{"ok":1}')
-        self.assertEqual(received, {"status": 200, "etag": '"v1"',
-                                    "last-modified": "Mon, 21 Sep 2026 00:00:00 GMT"})
-        Server.plan = [(304, {})]
-        received = {}
-        self.assertEqual(transport.request(HOST, "/dump", headers={"If-None-Match": '"v1"'},
-                                           received=received), b"")
-        self.assertEqual(received["status"], 304)
-        self.assertEqual(Server.seen[-1][1].get("If-None-Match"), '"v1"')
-
-    def test_a_304_nobody_asked_for_is_still_an_error(self):
-        """Without a validator sent, a 304 says nothing about a copy the caller holds — returning its empty
-        body would read as an empty file."""
-        with self.assertRaises(transport.HTTPError) as refused:
-            self.ask((304, {}))
-        self.assertEqual(refused.exception.status, 304)
 
     def test_a_connection_that_cannot_be_made_is_retried_then_refused(self):
         def refuse(host, timeout):

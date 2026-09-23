@@ -11,6 +11,7 @@ stops holding fails by name rather than as a diff in a 300-title file.
 The bytes are pinned separately (`Bytes`), against output captured from the Swift encoder itself: every
 reader of a batch — `articles`, `embed`, the provenance backfill, the census — was written against that.
 """
+import datetime
 import json
 import os
 import tempfile
@@ -115,16 +116,14 @@ class Batch(unittest.TestCase):
         self.kinds, self.kind_calls = {}, []
         # Per (media, tmdbId): the English article of each P144 work, and whether it is a film or a series.
         self.sources, self.source_calls = {}, []
-        # IMDb: the id Wikidata names per (media, tmdbId), the dump's counts per id, and what loading the
-        # dump does — a `Ratings`, or an exception to raise.
-        self.imdb_ids, self.imdb_votes, self.imdb_id_calls = {}, {}, []
-        self.dump = None
+        # How many Wikipedias have an article on each (media, tmdbId), and what each lookup asked, on which day.
+        self.wikis, self.wiki_calls = {}, []
         # Which Wikidata items state each (media, tmdbId), what each item states, and the items each lookup
         # was told to leave out.
         self.claimants, self.evidence, self.excluded = {}, {}, []
-        for target, stub in ((enrich.wikidata, "mapping"), (enrich.plot, "plot"), (enrich.wikidata, "imdb_ids"),
+        for target, stub in ((enrich.wikidata, "mapping"), (enrich.plot, "plot"), (enrich.wikidata, "wikipedias"),
                              (enrich.wikidata, "languages"), (enrich.wikidata, "kinds"),
-                             (enrich.wikidata, "sources"), (enrich.imdb, "ratings"),
+                             (enrich.wikidata, "sources"),
                              (enrich.wikidata, "claimants"), (enrich.wikidata, "item_evidence")):
             patch = mock.patch.object(target, stub, getattr(self, stub + "_stub"))
             patch.start()
@@ -136,16 +135,10 @@ class Batch(unittest.TestCase):
     def item_evidence_stub(self, qids, media, cache=None):
         return {q: self.evidence[q] for q in qids if q in self.evidence}
 
-    def imdb_ids_stub(self, ids, media, cache=None, excluded=None):
-        self.imdb_id_calls.append((media, sorted(ids)))
-        self.excluded.append(("imdb", media, excluded))
-        return {i: self.imdb_ids[(media, i)] for i in ids if (media, i) in self.imdb_ids}
-
-    def ratings_stub(self, minimum=0, env=None, request=None):
-        if isinstance(self.dump, Exception):
-            raise self.dump
-        return self.dump or enrich.imdb.Ratings(
-            {tt: n for tt, n in self.imdb_votes.items() if n >= minimum}, "unchanged")
+    def wikipedias_stub(self, ids, media, day, cache=None, excluded=None):
+        self.wiki_calls.append((media, sorted(ids), day))
+        self.excluded.append(("wikipedias", media, excluded))
+        return {i: self.wikis[(media, i)] for i in ids if (media, i) in self.wikis}
 
     def mapping_stub(self, ids, media, languages, cache=None, excluded=None):
         self.mapping_calls.append((media, sorted(ids)))
@@ -561,66 +554,62 @@ class Batch(unittest.TestCase):
                 self.run_batch({"/movie/1": detail(1)}, [("movie", 1)], token="bearer")
         self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
 
-    # -- admission: TMDB's count OR IMDb's ------------------------------------------------------------
+    # -- admission: TMDB's count OR the Wikipedia count ------------------------------------------------
 
     def admission(self, *titles):
-        """One batch of `(tmdbId, TMDB votes, origin, IMDb id or None, IMDb votes)` movies. Returns the
-        report and the keys the batch wrote."""
+        """One batch of `(tmdbId, TMDB votes, origin, Wikipedias or None)` movies — None for a title
+        Wikidata has no item for. Returns the report and the keys the batch wrote."""
         bodies = {}
-        for tmdb_id, votes, origin, imdb_id, imdb_votes in titles:
+        for tmdb_id, votes, origin, wikis in titles:
             bodies[f"/movie/{tmdb_id}"] = detail(tmdb_id, votes=votes, origin_country=origin)
-            if imdb_id:
-                self.imdb_ids[("movie", tmdb_id)] = imdb_id
-                self.imdb_votes[imdb_id] = imdb_votes
+            if wikis is not None:
+                self.wikis[("movie", tmdb_id)] = wikis
         report = self.run_batch(bodies, [("movie", t[0]) for t in titles])
         return report, set(self.rows()) if os.path.exists(enrich.batch_path(self.out, 1)) else set()
 
-    def test_a_title_only_imdb_admits_is_admitted(self):
-        """`Elkürtük`: 44 TMDB votes, 40,939 on IMDb. TMDB's floor alone never let it in."""
-        report, written = self.admission((1, 44, ["TR"], "tt1", 40939))
+    def test_a_title_only_its_wikipedias_admit_is_admitted(self):
+        """`Chang` (1927): 25 TMDB votes, an article on 22 Wikipedias. TMDB's floor alone never let it in."""
+        report, written = self.admission((1, 25, ["US"], 22))
         self.assertEqual(written, {"movie:1"})
-        self.assertEqual((report["admittedByImdb"], report["admittedByTmdb"], report["belowFloor"]), (1, 0, 0))
+        self.assertEqual((report["admittedByWikipedias"], report["admittedByTmdb"], report["belowFloor"]),
+                         (1, 0, 0))
         self.assertEqual(self.checkpoint()["processed"], ["movie:1"])
 
-    def test_a_title_only_tmdb_admits_is_admitted(self):
-        """`El Señor de los Cielos`: IMDb undercounts it. The union keeps everything TMDB's floor admits."""
-        report, written = self.admission((1, 3650, ["US"], "tt1", 1648), (2, 60, ["US"], None, 0))
+    def test_a_title_tmdb_admits_is_admitted_without_asking_wikidata(self):
+        """The union keeps everything TMDB's floor admits, however few Wikipedias cover it."""
+        report, written = self.admission((1, 3650, ["US"], 0), (2, 60, ["US"], None))
         self.assertEqual(written, {"movie:1", "movie:2"})
-        self.assertEqual((report["admittedByTmdb"], report["admittedByImdb"], report["admittedByBoth"]), (2, 0, 0))
-
-    def test_a_title_both_admit_is_counted_as_both(self):
-        report, _written = self.admission((1, 500, ["US"], "tt1", 5000))
-        self.assertEqual((report["admittedByBoth"], report["admittedByTmdb"], report["admittedByImdb"]), (1, 0, 0))
+        self.assertEqual((report["admittedByTmdb"], report["admittedByWikipedias"]), (2, 0))
+        self.assertEqual(self.wiki_calls, [], "nothing was left short, so nothing is asked")
 
     def test_a_title_neither_admits_is_refused_and_judged_for_the_day(self):
         """Below every floor is a verdict about today: not processed, which would make it permanent, but
         recorded with what it was judged on, so this drain stops asking and a later day asks again."""
-        report, written = self.admission((1, 49, ["US"], "tt1", 1999))
+        report, written = self.admission((1, 49, ["US"], 4))
         self.assertEqual(written, set())
         self.assertEqual((report["belowFloor"], report["count"], report["remaining"]), (1, 0, 0))
         checkpoint = self.checkpoint()
         self.assertEqual(checkpoint["processed"], [])
         self.assertEqual(sorted(checkpoint["judgedBelow"]), ["movie:1"])
-        held = checkpoint["judgedBelow"]["movie:1"]
-        self.assertEqual((held["votes"], held["floors"], held["imdb"]), (49, [50, 15, 2000, 500], True))
+        self.assertEqual(checkpoint["judgedBelow"]["movie:1"],
+                         {"on": checkpoint["judgedBelow"]["movie:1"]["on"], "votes": 49, "floors": [50, 15, 5, 3]})
 
     def test_each_tier_has_its_own_floors(self):
-        """A regional origin clears at 15 TMDB or 500 IMDb; any other origin needs 50 or 2,000."""
+        """A regional origin clears at 15 TMDB votes or 3 Wikipedias; any other origin needs 50 or 5."""
         report, written = self.admission(
-            (1, 20, ["FR"], None, 0),          # regional, TMDB 20 ≥ 15
-            (2, 20, ["US"], None, 0),          # worldwide, TMDB 20 < 50, no IMDb id
-            (3, 5, ["BR"], "tt3", 600),        # regional, IMDb 600 ≥ 500
-            (4, 5, ["US"], "tt4", 600),        # worldwide, IMDb 600 < 2,000
-            (5, 5, ["US"], "tt5", 2500))       # worldwide, IMDb 2,500 ≥ 2,000
+            (1, 20, ["FR"], 0),          # regional, TMDB 20 ≥ 15
+            (2, 20, ["US"], None),       # worldwide, TMDB 20 < 50, no Wikidata item
+            (3, 5, ["BR"], 3),           # regional, 3 Wikipedias ≥ 3
+            (4, 5, ["US"], 4),           # worldwide, 4 < 5
+            (5, 5, ["US"], 5))           # worldwide, 5 ≥ 5
         self.assertEqual(written, {"movie:1", "movie:3", "movie:5"})
         self.assertEqual(report["belowFloor"], 2)
 
     def test_the_floors_a_run_names_are_the_ones_it_judges_by(self):
         bodies = {"/movie/1": detail(1, votes=30, origin_country=["US"])}
-        self.imdb_ids[("movie", 1)] = "tt1"
-        self.imdb_votes["tt1"] = 900
-        report = self.run_batch(bodies, [("movie", 1)], floors=enrich.floor_rules.given(imdb=800))
-        self.assertEqual(report["admittedByImdb"], 1)
+        self.wikis[("movie", 1)] = 2
+        report = self.run_batch(bodies, [("movie", 1)], floors=enrich.floor_rules.given(wikipedias=2))
+        self.assertEqual(report["admittedByWikipedias"], 1)
 
     def test_the_gate_judges_by_the_count_on_the_worklist_row(self):
         """`/discover` stated it when the universe was built, and that is the query the floor selected on.
@@ -638,86 +627,44 @@ class Batch(unittest.TestCase):
         self.assertEqual(set(self.rows()), {"movie:1"})
         self.assertEqual(report["votesFromWorklist"], 0)
 
-    def test_a_title_no_tmdb_count_is_stated_for_is_still_admitted_on_imdbs(self):
-        """The union's IMDb half exists for the titles TMDB undercounts, so a title neither the worklist
-        nor the record names a count for is judged on IMDb's alone — not compared against a floor."""
+    def test_a_title_no_tmdb_count_is_stated_for_is_judged_on_its_wikipedias(self):
+        """A title neither the worklist nor the record names a count for is judged on its Wikipedia count
+        alone — not compared against a floor it has no number for."""
         record = dict(tmdb_record(1), voteCount=None, originCountry=["US"])
-        ratings = enrich.imdb.Ratings({"tt1": 5000}, "unchanged")
-        self.imdb_ids[("movie", 1)] = "tt1"
-        admitted, _short, from_worklist = enrich.admit([record], enrich.floor_rules.DEFAULT, ratings,
-                                                       self.cache, {})
-        self.assertEqual((admitted, from_worklist), ({"movie:1": enrich.IMDB}, 0))
-
-    def test_a_title_with_no_imdb_id_is_judged_on_tmdb_alone_and_counted(self):
-        report, written = self.admission((1, 30, ["US"], None, 0), (2, 80, ["US"], None, 0))
-        self.assertEqual(written, {"movie:2"})
-        self.assertEqual(report["shortOfImdbId"], 1, "only a title TMDB left short needed the id")
+        self.wikis[("movie", 1)] = 9
+        admitted, from_worklist = enrich.admit([record], enrich.floor_rules.DEFAULT, "2026-09-22", self.cache, {})
+        self.assertEqual((admitted, from_worklist), ({"movie:1": enrich.WIKIPEDIAS}, 0))
 
     def test_the_gate_is_decided_before_the_expensive_work(self):
         """A refused title is never mapped to its articles and no plot is fetched for it: extra candidates
-        cost an id lookup, not a plot fetch and a classification."""
+        cost one count lookup per media, not a plot fetch and a classification — and only the titles TMDB
+        left short are asked about, on the day the batch runs."""
         self.mapping[("movie", 1)] = {"article": "Kept"}
         self.mapping[("movie", 2)] = {"article": "Refused"}
+        self.mapping[("movie", 3)] = {"article": "Popular"}
         self.plots[("Kept", "en")] = found("k" * 300)
-        self.admission((1, 44, ["TR"], "tt1", 40939), (2, 10, ["US"], "tt2", 10))
-        self.assertEqual(self.mapping_calls, [("movie", [1])])
-        self.assertEqual(self.plot_calls, [("Kept", "en")])
-        self.assertEqual(self.imdb_id_calls, [("movie", [1, 2])], "one lookup for the batch, per media")
+        self.plots[("Popular", "en")] = found("p" * 300)
+        self.admission((1, 25, ["US"], 22), (2, 10, ["US"], 1), (3, 900, ["US"], 40))
+        self.assertEqual(self.mapping_calls, [("movie", [1, 3])])
+        self.assertEqual(sorted(self.plot_calls), [("Kept", "en"), ("Popular", "en")])
+        today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+        self.assertEqual(self.wiki_calls, [("movie", [1, 2], today)], "one lookup for the short titles, per media")
 
-    def test_a_dump_that_cannot_be_had_admits_on_tmdb_alone_and_says_so(self):
-        """Not a refusal: the union's TMDB half is the floor the pipeline ran on before, so nothing it admits
-        is lost, and a title only IMDb admits is below-floor — never checkpointed — until a dump arrives."""
-        self.dump = enrich.imdb.Unavailable("HTTP 503 for https://datasets.imdbws.com/title.ratings.tsv.gz")
-        with mock.patch("sys.stderr") as stderr:
-            report, written = self.admission((1, 500, ["US"], "tt1", 5000), (2, 44, ["TR"], "tt2", 40939))
-        self.assertEqual(written, {"movie:1"})
-        self.assertEqual((report["admittedByTmdb"], report["admittedByBoth"], report["belowFloor"]), (1, 0, 1))
-        self.assertTrue(report["imdbGate"].startswith("off: "), report["imdbGate"])
-        self.assertIn("HTTP 503", report["imdbGate"])
-        self.assertEqual(self.imdb_id_calls, [], "no id is worth looking up with nothing to judge it by")
-        self.assertIn("IMDb half", "".join(str(c) for c in stderr.write.call_args_list))
-        with open(os.path.join(self.out, "enrich-log.txt")) as fh:
-            self.assertIn("imdb-gate off: HTTP 503", fh.read())
-        self.assertEqual(self.checkpoint()["processed"], ["movie:1"], "the IMDb-only title stays pending")
-
-    def test_the_report_names_the_dumps_freshness(self):
-        report, _written = self.admission((1, 500, ["US"], None, 0))
-        self.assertEqual(report["imdbGate"], "unchanged")
-
-    def test_a_failed_imdb_id_lookup_aborts_the_batch_and_writes_nothing(self):
-        with mock.patch.object(enrich.wikidata, "imdb_ids", side_effect=http.HTTPError(0, "x")):
+    def test_a_failed_wikipedia_count_aborts_the_batch_and_writes_nothing(self):
+        with mock.patch.object(enrich.wikidata, "wikipedias", side_effect=http.HTTPError(0, "x")):
             with self.assertRaises(enrich.Aborted):
                 self.run_batch({"/movie/1": detail(1, votes=10)}, [("movie", 1)])
         self.assertFalse(os.path.exists(enrich.checkpoint_path(self.out)))
         self.assertFalse(os.path.exists(os.path.join(self.out, "enriched")))
 
-    def test_no_imdb_count_is_written_anywhere(self):
-        """IMDb's licence is non-transferable: its counts decide admission and go nowhere. Not the batch,
-        which the corpus and the store are built from; not the log or the report either; and not the
-        checkpoint, whose below-floor verdicts record the TMDB count they were judged on and no IMDb one."""
-        report, _written = self.admission((1, 44, ["TR"], "tt1", 987654), (2, 500, ["US"], "tt2", 876543),
-                                          (3, 10, ["US"], "tt3", 1777))
-        with open(enrich.batch_path(self.out, 1), encoding="utf-8") as fh:
-            batch = fh.read()
-        with open(os.path.join(self.out, "enrich-log.txt"), "a+", encoding="utf-8") as fh:
-            fh.seek(0)
-            logged = fh.read()
-        with open(enrich.checkpoint_path(self.out), encoding="utf-8") as fh:
-            checkpoint = fh.read()
-        self.assertIn("movie:3", checkpoint, "the below-floor title must be in the checkpoint to prove this")
-        for text in (batch, logged, json.dumps(report), checkpoint):
-            self.assertNotIn("987654", text)
-            self.assertNotIn("876543", text)
-            self.assertNotIn("1777", text)
-
     # -- below-floor verdicts: one run drains, a later day re-judges -------------------------------------
 
     DAY, NEXT_DAY = "2026-09-22", "2026-09-23"
 
-    def below(self, votes=10, imdb_votes=100, today=DAY, **kwargs):
-        """One batch over movie 1: a worklist row stating `votes` TMDB votes, and `imdb_votes` on IMDb."""
-        self.imdb_ids[("movie", 1)] = "tt1"
-        self.imdb_votes["tt1"] = imdb_votes
+    def below(self, votes=10, wikis=1, today=DAY, **kwargs):
+        """One batch over movie 1: a worklist row stating `votes` TMDB votes, and articles on `wikis`
+        Wikipedias."""
+        self.wikis[("movie", 1)] = wikis
         self.mapping[("movie", 1)] = {"article": "One"}
         self.plots[("One", "en")] = found("o" * 300)
         client = StubTMDB({"/movie/1": detail(1, origin_country=["US"])})
@@ -735,12 +682,12 @@ class Batch(unittest.TestCase):
         self.assertEqual((report, asked), ({"remaining": 0, "count": 0}, []), "judged today already")
 
     def test_a_later_day_judges_it_again_and_admits_it_once_it_clears(self):
-        """A vote count only climbs: the verdict is about the day's counts, and the next day's dump can
-        carry the title over IMDb's floor."""
+        """The verdict is about the day's counts, and by the next day a title can have gained the
+        Wikipedia articles that carry it over the floor."""
         self.below()
-        report, asked = self.below(imdb_votes=5000, today=self.NEXT_DAY)
+        report, asked = self.below(wikis=6, today=self.NEXT_DAY)
         self.assertEqual(asked, ["/movie/1"])
-        self.assertEqual((report["admittedByImdb"], report["belowFloor"], report["batchId"]), (1, 0, 1))
+        self.assertEqual((report["admittedByWikipedias"], report["belowFloor"], report["batchId"]), (1, 0, 1))
         self.assertEqual(set(self.rows()), {"movie:1"})
         self.assertEqual((self.checkpoint()["processed"], self.checkpoint()["judgedBelow"]), (["movie:1"], {}))
 
@@ -762,18 +709,13 @@ class Batch(unittest.TestCase):
         report, asked = self.below(votes=10, floors=enrich.floor_rules.given(tmdb=5))
         self.assertEqual((asked, report["admittedByTmdb"]), (["/movie/1"], 1))
 
-    def test_a_verdict_made_without_imdb_is_judged_again_once_a_dump_arrives(self):
-        """The IMDb half off makes an IMDb-only title below the floor for want of a count. It stands while
-        the dump is still missing, and falls the moment there is one."""
-        self.dump = enrich.imdb.Unavailable("HTTP 503")
-        with mock.patch("sys.stderr"):
-            self.below(imdb_votes=5000)
-            self.assertEqual(self.checkpoint()["judgedBelow"]["movie:1"]["imdb"], False)
-            _report, asked = self.below(imdb_votes=5000)
-        self.assertEqual(asked, [], "no dump yet, so nothing new to judge it by")
-        self.dump = None
-        report, asked = self.below(imdb_votes=5000)
-        self.assertEqual((asked, report["admittedByImdb"]), (["/movie/1"], 1))
+    def test_a_verdict_made_under_the_imdb_floors_is_judged_again(self):
+        """A checkpoint written while the gate's other half was IMDb's holds verdicts under floors
+        `[50, 15, 2000, 500]` and an `imdb` flag. Those floors are not today's, so the title is asked again."""
+        put(enrich.checkpoint_path(self.out), json.dumps({"processed": [], "judgedBelow": {
+            "movie:1": {"on": self.DAY, "votes": 10, "floors": [50, 15, 2000, 500], "imdb": True}}}))
+        report, asked = self.below(wikis=6)
+        self.assertEqual((asked, report["admittedByWikipedias"]), (["/movie/1"], 1))
 
     def test_a_batch_that_admits_nothing_writes_no_batch_and_keeps_its_number(self):
         """Each refused attempt wrote a `batch-N.json` holding `[]` and moved the numbering on."""
@@ -781,7 +723,7 @@ class Batch(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.out, "enriched")))
         self.assertNotIn("batchId", report)
         self.assertEqual(self.checkpoint()["nextBatch"], 1)
-        report, _asked = self.below(imdb_votes=5000, today=self.NEXT_DAY)
+        report, _asked = self.below(wikis=6, today=self.NEXT_DAY)
         self.assertEqual(report["batchId"], 1)
         self.assertEqual(self.checkpoint()["nextBatch"], 2)
 
@@ -1126,8 +1068,8 @@ class CommandLine(unittest.TestCase):
     def test_the_floors_on_the_command_line_are_the_ones_the_batch_runs_at(self):
         with mock.patch.object(enrich, "run", return_value={"remaining": 0}) as ran, mock.patch("sys.stdout"):
             enrich.main(["--worklist", "w", "--out-dir", "o", "--vote-floor", "40", "--regional-vote-floor", "10",
-                         "--imdb-floor", "1500", "--regional-imdb-floor", "300"])
-            self.assertEqual(ran.call_args.args[2], enrich.floor_rules.Floors(40, 10, 1500, 300))
+                         "--wikipedia-floor", "7", "--regional-wikipedia-floor", "4"])
+            self.assertEqual(ran.call_args.args[2], enrich.floor_rules.Floors(40, 10, 7, 4))
             enrich.main(["--worklist", "w", "--out-dir", "o"])
             self.assertEqual(ran.call_args.args[2], enrich.floor_rules.DEFAULT)
 

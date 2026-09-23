@@ -373,29 +373,34 @@ def mapping(ids, media, languages, cache=None, excluded=None):
     return parsed
 
 
-def imdb_query(ids, media, excluded=None):
-    """The SPARQL that maps one batch of TMDB ids to their IMDb ids (P345), and nothing else.
+def wikipedias_query(ids, media, excluded=None):
+    """The SPARQL that counts, for one batch of TMDB ids, how many Wikipedias have an article on each.
 
     Separate from the mapping query because it is asked BEFORE admission, of the titles TMDB's count left
-    below its floor: they need an IMDb id to be judged on IMDb's count, and none of the mapping's
-    sitelinks until they are admitted.
+    below its floor, and it asks for a number rather than the mapping's rows: an unrestricted sitelink
+    pattern returns a row per language, which is exactly what `COUNT` folds away on the server. Only
+    Wikipedia sitelinks count — `wikibase:sitelinks` also counts Commons, Wikiquote and Wikisource.
+
+    The site is recognised by its URL, not by `?site wikibase:wikiGroup "wikipedia"`: the join takes WDQS
+    ~27 s per 150 titles, the string test ~2 s, for the same answer.
     """
     values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
-    return (f"SELECT ?tmdb ?imdb WHERE {{\n"
+    return (f"SELECT ?tmdb (COUNT(DISTINCT ?article) AS ?wikis) WHERE {{\n"
             f"  VALUES ?tmdb {{ {values} }}\n"
             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
             f"{exclusion(ids, excluded)}"
-            f"  ?film wdt:P345 ?imdb .\n"
+            f"  OPTIONAL {{ ?article schema:about ?film ; schema:isPartOf ?site .\n"
+            f'             FILTER(STRENDS(STR(?site), ".wikipedia.org/")) }}\n'
             f"}}\n"
-            f"ORDER BY ?tmdb ?imdb")
+            f"GROUP BY ?tmdb\n"
+            f"ORDER BY ?tmdb")
 
 
-def parse_imdb(payload):
-    """`tmdbId -> tt…` for one SPARQL body. RAISES on a body that is not a SPARQL result.
+def parse_wikipedias(payload):
+    """`tmdbId -> count` for one SPARQL body. RAISES on a body that is not a SPARQL result, or on a count
+    that is not an integer — read as zero, it would refuse a title for a malformed answer.
 
-    P345 is multi-valued and not checked against IMDb's id space, so only a `tt` id counts, and the first in
-    the query's order wins — the same one every run. An id with none is absent: the caller judges it on
-    TMDB's count alone.
+    An id with no Wikidata item is absent; the caller reads that as no Wikipedia at all.
     """
     try:
         bindings = json.loads(payload.decode("utf-8"))["results"]["bindings"]
@@ -405,31 +410,39 @@ def parse_imdb(payload):
         raise WikidataError(f"not a SPARQL result: {payload[:200]!r}") from None
     out = {}
     for binding in bindings:
-        raw, imdb = _cell(binding, "tmdb"), _cell(binding, "imdb")
-        if raw is None or not _INTEGER.fullmatch(raw) or not imdb or not imdb.startswith("tt"):
+        raw, count = _cell(binding, "tmdb"), _cell(binding, "wikis")
+        if raw is None or not _INTEGER.fullmatch(raw):
             continue
-        out.setdefault(int(raw), imdb)
+        if count is None or not _INTEGER.fullmatch(count):
+            raise WikidataError(f"a Wikipedia count that is not an integer: {count!r} for {raw}")
+        out[int(raw)] = int(count)
     return out
 
 
-def imdb_ids(ids, media, cache=None, excluded=None):
-    """`tmdbId -> tt…` for one batch of one media type, from disk where the same batch was asked before."""
+def wikipedias(ids, media, day, cache=None, excluded=None):
+    """`tmdbId -> how many Wikipedias have an article` for one batch of one media type, from disk where the
+    same batch was asked before on the same `day`.
+
+    The day is part of the cache key because the count moves and the gate judges it again daily: a
+    below-floor title comes back in a batch much like yesterday's, and a 180-day cache would answer it
+    with the same count until the entry expired.
+    """
     if not ids:
         return {}
-    query = imdb_query(ids, media, excluded)
+    query = wikipedias_query(ids, media, excluded)
     key = None
     if cache is not None:
-        key = cache.key("sparql-imdb", {"q": query})
+        key = cache.key("sparql-wikipedias", {"q": query, "day": day})
         hit = cache.read(key)
         if hit is not None:
             try:
-                return parse_imdb(hit)
+                return parse_wikipedias(hit)
             except WikidataError:
                 pass
     payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
                            headers={"Content-Type": "application/sparql-query",
                                     "Accept": "application/sparql-results+json"})
-    parsed = parse_imdb(payload)
+    parsed = parse_wikipedias(payload)
     if key is not None:
         cache.write(key, payload)
     return parsed

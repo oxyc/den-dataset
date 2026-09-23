@@ -866,8 +866,8 @@ class EverySectionDeclaresWhereItsBytesCameFrom(StoreFixture, unittest.TestCase)
         self.assertIn("VENDOR_ALLOWED", message)
 
     def test_a_section_carrying_imdb_counts_stops_the_build(self):
-        """The enrichment reads IMDb's vote counts to admit titles, and IMDb's licence does not allow them
-        to be passed on. A column declaring them is refused like a TMDB one."""
+        """IMDb's licence does not allow its counts to be passed on. A column declaring them is refused
+        like a TMDB one."""
         with tempfile.TemporaryDirectory() as out:
             writer = self.mutated(out, 'mod.PROVENANCE["released"] = "imdb"')
             with self.assertRaises(AssertionError) as caught:
