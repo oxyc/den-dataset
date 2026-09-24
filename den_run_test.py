@@ -322,6 +322,14 @@ class Wikidata:
             rows += [{"p": prop, "v": stated["time"], "prec": str(stated["precision"])}
                      for prop in re.findall(r"psv:(P\d+) \?node", query) for stated in self.claims(qid, prop)]
             return rows
+        if head == "SELECT ?item ?place ?country":
+            # `birthplace_query`: each place of birth, with the country it is in when Wikidata says.
+            return [{"place": ENTITY + place, "country": ENTITY + country if country else None}
+                    for place in self.claims(qid, "P19") for country in (self.claims(place, "P17") or [None])]
+        if head == "SELECT ?item ?iso":
+            return [{"iso": code} for code in self.claims(qid, "P297")]
+        if head == "SELECT ?item ?author":
+            return [{"author": ENTITY + author} for author in self.claims(qid, "P50")]
         if head == "SELECT ?item ?p ?t ?group":
             group = re.search(r"wdt:P279\* wd:(Q\d+)", query).group(1)
 
@@ -410,6 +418,15 @@ class Store:
 
     def keys(self):
         return [vector_blob.unpack_key(k) for k in self.column("keys", "Q", 8)]
+
+    def text(self, ident):
+        off, length = self.table["strings"]
+        starts = self.column("str_off", "I", 4)
+        return self.blob[off + starts[ident]:off + starts[ident + 1]].decode("utf-8")
+
+    def span(self, name, at):
+        offsets, values = self.column(f"{name}_o", "I", 4), self.column(f"{name}_v", "I", 4)
+        return values[offsets[at]:offsets[at + 1]]
 
     def flags(self, name):
         return dict(zip(self.keys(), self.column(name, "B", 1)))
@@ -679,6 +696,37 @@ class DenRun(unittest.TestCase):
         self.assertEqual([qids[e] for e in genders[offsets[at]:offsets[at + 1]]], [6581072])
         self.assertEqual(store.column("ent_born", "i", 4)[at], 456, "1971-04-02")
         self.assertEqual(store.column("ent_born_prec", "B", 1)[at], 0)
+
+    def test_a_birthplace_and_its_country_reach_the_store(self):
+        """Mara Voss was born in Portland, which Wikidata puts in the United States; Juno Park, who acts in
+        movie:900001, in a place it puts in no country. Both places are named, and the country ships its
+        ISO code."""
+        entities = self.facts()["entities"]
+        self.assertEqual({k: entities["Q91000001"][k] for k in ("birthplace", "birthcountry")},
+                         {"birthplace": ["Q96000101"], "birthcountry": ["Q96000001"]})
+        self.assertEqual(entities["Q91000003"]["birthplace"], ["Q96000102"])
+        self.assertNotIn("birthcountry", entities["Q91000003"])
+        self.assertEqual((entities["Q96000101"]["en"], entities["Q96000001"]["iso"]), ("Portland", "US"))
+        store = Store(self.path(artifacts.STORE))
+        qids = store.column("ent_qid", "I", 4)
+        mara, juno, usa = qids.index(91000001), qids.index(91000003), qids.index(96000001)
+        self.assertEqual([qids[e] for e in store.span("ent_bplace", mara)], [96000101])
+        self.assertEqual([qids[e] for e in store.span("ent_bcountry", mara)], [96000001])
+        self.assertEqual([qids[e] for e in store.span("ent_bplace", juno)], [96000102])
+        self.assertEqual(store.span("ent_bcountry", juno), [])
+        self.assertEqual(store.text(store.column("ent_iso", "I", 4)[usa]), "US")
+        self.assertEqual(store.column("ent_iso", "I", 4)[mara], 0xFFFFFFFF)
+
+    def test_the_source_works_authors_reach_the_store(self):
+        """movie:900001 is based on The Keeper's Book, which Hollis Crane and Idris Thale wrote. The authors
+        are named like any entity, aliases and all, though nothing credits Hollis Crane."""
+        record = next(r for r in self.facts()["records"] if (r["mediaType"], r["tmdbId"]) == ("movie", 900001))
+        self.assertEqual(record["sourceAuthors"], ["Q91000002", "Q91000017"])
+        self.assertEqual(self.facts()["entities"]["Q91000017"], {"en": "Hollis Crane", "aliases": ["H. Crane"]})
+        store = Store(self.path(artifacts.STORE))
+        qids = store.column("ent_qid", "I", 4)
+        row = store.keys().index("movie:900001")
+        self.assertEqual([qids[e] for e in store.span("src_authors", row)], [91000002, 91000017])
 
     def test_every_shipped_title_has_a_vector_and_says_which(self):
         store = Store(self.path(artifacts.STORE))

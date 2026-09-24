@@ -1268,6 +1268,62 @@ class PersonTraitsShip(StoreFixture, unittest.TestCase):
             self.assertIn(complaint, str(caught.exception))
 
 
+class BirthplacesAndSourceAuthorsShip(StoreFixture, unittest.TestCase):
+    """A person's birthplace and its country, a country's ISO code, and a title's source authors
+    (oxyc/den-dataset#114)."""
+
+    def span(self, store, name, at):
+        offsets = store.ints(f"{name}_o")
+        return store.ints(f"{name}_v")[offsets[at]:offsets[at + 1]]
+
+    def test_a_birthplace_its_country_and_the_countrys_code_reach_their_entities(self):
+        """Q100 directs movie:1. Q1754 and Q34 are named; Q1757 and Q33 are not, and are still in the entity
+        table, named by their Q-ids, because a birthplace points at them."""
+        entities = {"Q100": {"en": "Name 100", "aliases": ["Nom 100"], "birthplace": ["Q1754", "Q1757"],
+                             "birthcountry": ["Q33", "Q34"]},
+                    "Q1754": {"en": "Stockholm"}, "Q34": {"en": "Sweden", "iso": "SE"}}
+        with tempfile.TemporaryDirectory() as out:
+            store, stderr = self.build(out, entities=entities)
+        ent_qid, ent_name, ent_iso = store.ints("ent_qid"), store.ints("ent_name"), store.ints("ent_iso")
+        at = {q: i for i, q in enumerate(ent_qid)}
+        self.assertEqual([ent_qid[e] for e in self.span(store, "ent_bplace", at[100])], [1754, 1757])
+        self.assertEqual([ent_qid[e] for e in self.span(store, "ent_bcountry", at[100])], [33, 34])
+        self.assertEqual(store.text(ent_name[at[1757]]), "Q1757")
+        self.assertEqual((store.text(ent_iso[at[34]]), ent_iso[at[33]], ent_iso[at[100]]),
+                         ("SE", 0xFFFFFFFF, 0xFFFFFFFF))
+        self.assertEqual(self.span(store, "ent_bplace", at[101]), [])
+        self.assertIn('"birthplace": 1', stderr)
+
+    def test_a_titles_source_authors_are_entity_ids(self):
+        """An author nothing names still has an entity, named by the Q-id."""
+        titles = json.loads(json.dumps(self.TITLES))
+        titles[0]["facts"]["sourceAuthors"] = ["Q100", "Q120"]
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, titles=titles)
+        ent_qid, ent_name = store.ints("ent_qid"), store.ints("ent_name")
+        self.assertEqual([ent_qid[e] for e in self.span(store, "src_authors", 0)], [100, 120])
+        self.assertEqual(self.span(store, "src_authors", 1), [])
+        self.assertEqual(store.text(ent_name[ent_qid.index(120)]), "Q120")
+
+    def test_facts_from_before_them_write_the_sections_empty(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out)
+        entities = len(store.ints("ent_qid"))
+        self.assertEqual(store.ints("ent_bplace_o"), [0] * (entities + 1))
+        self.assertEqual(store.ints("ent_bcountry_o"), [0] * (entities + 1))
+        self.assertEqual(set(store.ints("ent_iso")), {0xFFFFFFFF})
+        self.assertEqual(store.ints("src_authors_o"), [0, 0, 0])
+
+    def test_a_malformed_birthplace_or_code_is_refused(self):
+        for entry, complaint in (({"birthplace": ["Stockholm"]}, "is not a Wikidata item id"),
+                                 ({"birthcountry": [34]}, "is not a Wikidata item id"),
+                                 ({"iso": "swe"}, "is not an ISO 3166-1 alpha-2 code")):
+            with self.subTest(entry=entry), tempfile.TemporaryDirectory() as out, \
+                    self.assertRaises(AssertionError) as caught:
+                self.build(out, entities={"Q100": {"en": "Name 100", "aliases": ["Nom 100"], **entry}})
+            self.assertIn(complaint, str(caught.exception))
+
+
 class OnlyATitleIdReachesTheImdbColumn(unittest.TestCase):
     """IMDb's id space is namespaced by prefix and Wikidata's P345 is not checked against it.
 

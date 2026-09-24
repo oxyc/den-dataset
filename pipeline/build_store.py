@@ -123,6 +123,8 @@ PROVENANCE = {
     "instance_of_v": "wikidata", "instance_of_o": "wikidata",
     "based_on_v": "wikidata", "based_on_o": "wikidata",
     "based_kind_v": "wikidata", "based_kind_o": "wikidata",
+    # P50 of each P144 target: who wrote the work a title is adapted from (oxyc/den-dataset#114).
+    "src_authors_v": "wikidata", "src_authors_o": "wikidata",
     # Wikidata genre Q-ids mapped into TMDB's genre ID SPACE. The values are CC0; the vocabulary the ids
     # index is TMDB's, which is a numbering, not content.
     "genres_v": "wikidata", "genres_o": "wikidata",
@@ -152,6 +154,10 @@ PROVENANCE = {
     "ent_occupation_v": "wikidata", "ent_occupation_o": "wikidata",
     "ent_born": "wikidata", "ent_born_prec": "wikidata",
     "ent_died": "wikidata", "ent_died_prec": "wikidata",
+    # A person's P19, its place's P17, and a country's P297 (oxyc/den-dataset#114).
+    "ent_bplace_v": "wikidata", "ent_bplace_o": "wikidata",
+    "ent_bcountry_v": "wikidata", "ent_bcountry_o": "wikidata",
+    "ent_iso": "wikidata",
     "maker_ent": "wikidata",
     "maker_rows_v": "ours", "maker_rows_o": "ours",
     # `data/iconic-studios.json`: which studios, their names and their items are a judgement kept by hand.

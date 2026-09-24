@@ -155,7 +155,8 @@ its vector and belongs here. On `out-repass` on 2026-09-22 this was 79 ids. A ba
 whole and the merge refuses a pass that skipped one; `pipeline/facts-run.sh out` loops until nothing is
 skipped.
 
-The per-batch queries (each property, and the titles hop) fall back to QLever's Wikidata endpoint
+The per-batch queries (each property, the titles hop, and the birthplace, country-code and source-author
+lookups) fall back to QLever's Wikidata endpoint
 (`https://qlever.dev/api/wikidata`) when WDQS answers 429, 5xx or times out. WDQS is then asked once rather
 than retried, because its `Retry-After` is two minutes. `DEN_SPARQL_PREFER=qlever` asks QLever first and
 WDQS only when QLever fails — use it while WDQS is throttling, when a pass would otherwise take a day. QLever

@@ -42,8 +42,11 @@ class Wikidata:
         self.nconst = {}        # qid -> IMDb person id
         self.links = {}         # award qid -> what it belongs to, as `wd.award_links` answers
         self.traits = {}        # person qid -> traits, as `wd.people` answers
+        self.births = {}        # person qid -> birthplace row, as `wd.birthplaces` answers
+        self.codes = {}         # country qid -> ISO code
+        self.authors = {}       # work qid -> [author qid]
         self.asked = {"facts": [], "titles": [], "names": [], "types": [], "series": [], "imdb": [],
-                      "awards": [], "people": []}
+                      "awards": [], "people": [], "births": [], "codes": [], "authors": []}
         self.failing = set()    # (media, tmdbId) whose batch raises
         self.languages = []     # (media, the languages the titles hop was told) per call
         self.live = False       # answered from the cache, so nothing is paced
@@ -122,6 +125,18 @@ class Wikidata:
         self.asked["people"].append(tuple(qids))
         return {q: self.traits[q] for q in qids if q in self.traits}
 
+    def birthplaces(self, qids, cache=None):
+        self.asked["births"].append(tuple(qids))
+        return {q: self.births[q] for q in qids if q in self.births}
+
+    def country_codes(self, qids, cache=None):
+        self.asked["codes"].append(tuple(qids))
+        return {q: self.codes[q] for q in qids if q in self.codes}
+
+    def authors_of(self, qids, cache=None):
+        self.asked["authors"].append(tuple(qids))
+        return {q: self.authors[q] for q in qids if q in self.authors}
+
 
 class Staged(unittest.TestCase):
     def setUp(self):
@@ -132,7 +147,9 @@ class Staged(unittest.TestCase):
         for name, stub in (("fetch_facts", self.wd.fetch_facts), ("titles", self.wd.titles_of),
                            ("entity_details", self.wd.entity_details), ("instance_of", self.wd.instance_of),
                            ("series", self.wd.series), ("imdb_ids", self.wd.imdb_ids),
-                           ("award_links", self.wd.award_links), ("people", self.wd.people)):
+                           ("award_links", self.wd.award_links), ("people", self.wd.people),
+                           ("birthplaces", self.wd.birthplaces), ("country_codes", self.wd.country_codes),
+                           ("authors", self.wd.authors_of)):
             original = getattr(facts.wd, name)
             setattr(facts.wd, name, stub)
             self.addCleanup(setattr, facts.wd, name, original)
@@ -469,6 +486,91 @@ class PersonTraits(Staged):
         self.assertEqual(self.read("facts-entities.json")["Q10"]["traits"], self.TRAITS)
 
 
+class Birthplaces(Staged):
+    """Where a credited person was born, and the country that place is in (oxyc/den-dataset#114)."""
+
+    BIRTH = {"birthplace": ["Q1754"], "birthcountry": ["Q34"]}
+
+    def test_a_birthplace_ships_named_with_its_countrys_code_and_is_asked_once(self):
+        """Q10 directs movie:1. The place and the country are named like any entity, and the country, and
+        the country of Q10's citizenship, are asked for their ISO code."""
+        self.wd.births = {"Q10": self.BIRTH}
+        self.wd.traits = {"Q10": {"citizenship": ["Q33"]}}
+        self.wd.names.update({"Q1754": {"name": "Stockholm", "tmdbPersonId": None, "aliases": []},
+                              "Q34": {"name": "Sweden", "tmdbPersonId": None, "aliases": []},
+                              "Q33": {"name": "Finland", "tmdbPersonId": None, "aliases": []}})
+        self.wd.codes = {"Q34": "SE", "Q33": "FI"}
+        self.run_stage()
+        self.assertEqual(self.wd.asked["births"], [("Q10",), ("Q10",)])
+        shipped = self.read(f"facts-{VERSION}.pre-merge.json")["entities"]
+        self.assertEqual({k: shipped["Q10"][k] for k in self.BIRTH}, self.BIRTH)
+        self.assertEqual(shipped["Q1754"], {"en": "Stockholm"})
+        self.assertEqual((shipped["Q34"], shipped["Q33"]["iso"]), ({"en": "Sweden", "iso": "SE"}, "FI"))
+        self.assertIn(("Q33", "Q34"), self.wd.asked["codes"])
+        asked = {name: len(self.wd.asked[name]) for name in ("births", "codes")}
+        self.run_stage()
+        self.assertEqual({name: self.wd.asked[name][asked[name]:] for name in asked},
+                         {"births": [], "codes": []}, "asked once, answer or none")
+
+    def test_a_person_with_no_birthplace_and_a_country_with_no_code_are_remembered(self):
+        self.wd.births = {"Q10": {"birthplace": ["Q1754"], "birthcountry": ["Q15180"]}}
+        self.wd.names["Q15180"] = {"name": "Soviet Union", "tmdbPersonId": None, "aliases": []}
+        self.run_stage()
+        names = self.read("facts-entities.json")
+        self.assertEqual(names["Q15180"]["iso"], "", "asked, has none")
+        self.assertNotIn("iso", self.read(f"facts-{VERSION}.pre-merge.json")["entities"]["Q15180"])
+        self.wd.births = {}
+        os.remove(os.path.join(self.out, "facts-entities.json"))
+        self.run_stage()
+        self.assertEqual(self.read("facts-entities.json")["Q10"]["birth"], {}, "asked, has none")
+        shipped = self.read(f"facts-{VERSION}.pre-merge.json")["entities"]["Q10"]
+        self.assertFalse(set(shipped) & {"birthplace", "birthcountry", "birth"})
+
+    def test_a_person_asked_for_traits_before_birthplaces_existed_is_asked(self):
+        """A checkpoint from #100's facts stage records `traits` and no `birth`: asked once, traits not
+        again."""
+        self.run_stage()
+        names = self.read("facts-entities.json")
+        for entry in names.values():
+            entry.pop("birth", None)
+        with open(os.path.join(self.out, "facts-entities.json"), "w", encoding="utf-8") as fh:
+            json.dump(names, fh)
+        self.wd.births = {"Q10": self.BIRTH}
+        people = len(self.wd.asked["people"])
+        self.run_stage()
+        self.assertEqual(self.read("facts-entities.json")["Q10"]["birth"], self.BIRTH)
+        self.assertEqual(self.wd.asked["people"][people:], [], "the traits were asked already")
+
+
+class SourceAuthors(Staged):
+    """Who wrote the work a title is adapted from: P50 of each `basedOn` target (oxyc/den-dataset#114)."""
+
+    def test_a_titles_source_authors_ship_named_and_each_work_is_asked_once(self):
+        """movie:1 adapts Q30 and Q31, tv:1 adapts Q31. Q11 wrote both works, so it is listed once; the
+        authors are named, though nothing credits them, and are not asked for person traits."""
+        self.wd.facts[("movie", 1)]["basedOn"] = ["Q30", "Q31"]
+        self.wd.facts[("tv", 1)]["basedOn"] = ["Q31"]
+        self.wd.authors = {"Q30": ["Q12", "Q11"], "Q31": ["Q11"]}
+        self.wd.names["Q11"] = {"name": "A Novelist", "tmdbPersonId": None, "aliases": ["A. N."]}
+        self.run_stage()
+        shipped = self.read(f"facts-{VERSION}.pre-merge.json")
+        authors = {(r["mediaType"], r["tmdbId"]): r.get("sourceAuthors") for r in shipped["records"]}
+        self.assertEqual(authors, {("movie", 1): ["Q11", "Q12"], ("tv", 1): ["Q11"]})
+        self.assertEqual(shipped["entities"]["Q11"], {"en": "A Novelist", "aliases": ["A. N."]})
+        self.assertEqual(self.read("facts-source-authors.json"), {"Q30": ["Q12", "Q11"], "Q31": ["Q11"]})
+        self.assertNotIn("Q11", {q for batch in self.wd.asked["people"] for q in batch})
+        asked = len(self.wd.asked["authors"])
+        self.run_stage()
+        self.assertEqual(self.wd.asked["authors"][asked:], [], "a work that was asked is not asked again")
+
+    def test_a_work_with_no_author_is_remembered_and_its_title_has_none(self):
+        self.run_stage()
+        self.assertEqual(self.read("facts-source-authors.json"), {"Q30": []})
+        record = next(r for r in self.read(f"facts-{VERSION}.pre-merge.json")["records"]
+                      if r["mediaType"] == "movie")
+        self.assertNotIn("sourceAuthors", record)
+
+
 class Resume(Staged):
     def test_a_finished_title_is_not_asked_again(self):
         """Nor is a name already resolved: re-resolving all of them on every restart is how a resumed run
@@ -606,7 +708,8 @@ class OneItemPerTitle(Staged):
         """Bonn also states its own TMDB id, so Boon is the one that states this id alone."""
         for order in ([BOON, BONN], [BONN, BOON]):
             with self.subTest(order=order):
-                for name in ("facts-fields.json", "facts-entities.json", "facts-source-types.json"):
+                for name in ("facts-fields.json", "facts-entities.json", "facts-source-types.json",
+                             "facts-source-authors.json"):
                     if os.path.exists(os.path.join(self.out, name)):
                         os.remove(os.path.join(self.out, name))
                 self.wd.claimants[("tv", 2559)] = order

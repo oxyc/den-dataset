@@ -756,6 +756,128 @@ def people(qids, cache=None, batch=500):
     return out
 
 
+#: Where a person was born (oxyc/den-dataset#114): P19 as the place Wikidata names — a city, a village, a
+#: hospital, now and then a country — and P17 of that place, the country it is in, so a search can ask
+#: "born in Sweden" as well as "born in Stockholm". Both at best rank; the country is Wikidata's own
+#: statement on the place, never inferred from the person's citizenship. Cached per batch like `people`.
+BIRTH_CACHE_PATH = "sparql-birthplace"
+#: The ISO 3166-1 alpha-2 code (P297) of a country a person trait names, so a reader can take `SE` where it
+#: would otherwise need Q34. A country that no longer exists has none, and is named by its item alone.
+ISO_CACHE_PATH = "sparql-iso"
+_ISO = re.compile(r"[A-Z]{2}")
+#: The author (P50) of a work a title is based on (P144): "adapted from Stephen King" is a question about
+#: the source work's author, which `basedOn` alone cannot answer.
+AUTHOR_CACHE_PATH = "sparql-authors"
+
+
+def _batched(qids, batch, query, parse, cache_path, cache):
+    """`parse` of each `query` batch over the sorted `qids`, merged, cached per batch under `cache_path` as
+    `people` is. These queries name no label service, so QLever stands behind WDQS (`_sparql`)."""
+    out = {}
+    ordered = sorted(set(qids))
+    for start in range(0, len(ordered), batch):
+        text = query(ordered[start:start + batch])
+        key = cache.key(cache_path, {"q": text}) if cache is not None else None
+        hit = cache.read(key) if key is not None else None
+        if hit is not None:
+            try:
+                out.update(parse(hit))
+                continue
+            except WikidataError:
+                pass
+        payload = _sparql(text, fallback=True)
+        out.update(parse(payload))
+        if key is not None:
+            cache.write(key, payload)
+    return out
+
+
+def _is_item(qid):
+    return qid.startswith("Q") and qid[1:].isdigit()
+
+
+def _by_number(qids):
+    return sorted(qids, key=lambda q: int(q[1:]))
+
+
+def birthplace_query(qids):
+    values = " ".join(f"wd:{q}" for q in sorted(set(qids)))
+    return ("SELECT ?item ?place ?country WHERE {\n"
+            f"  VALUES ?item {{ {values} }}\n"
+            "  ?item wdt:P19 ?place .\n"
+            "  OPTIONAL { ?place wdt:P17 ?country . }\n"
+            "}")
+
+
+def parse_birthplaces(payload):
+    """`Q-id -> {"birthplace": [...], "birthcountry": [...]}`, each sorted by Q-id number. A place with no
+    country leaves `birthcountry` out; a value that is not an item ("unknown value") is no place."""
+    found = {}
+    for binding in bindings(payload):
+        uri, place = _value(binding, "item"), _value(binding, "place")
+        if uri is None or place is None or not _is_item(_qid(place)):
+            continue
+        row = found.setdefault(_qid(uri), ({}, set()))
+        row[0].setdefault(_qid(place), None)
+        country = _value(binding, "country")
+        if country is not None and _is_item(_qid(country)):
+            row[1].add(_qid(country))
+    out = {}
+    for qid, (places, countries) in found.items():
+        out[qid] = {"birthplace": _by_number(places)}
+        if countries:
+            out[qid]["birthcountry"] = _by_number(countries)
+    return out
+
+
+def birthplaces(qids, cache=None, batch=500):
+    """`Q-id -> parse_birthplaces row` for the `qids` Wikidata names a place of birth for."""
+    return _batched(qids, batch, birthplace_query, parse_birthplaces, BIRTH_CACHE_PATH, cache)
+
+
+def iso_query(qids):
+    values = " ".join(f"wd:{q}" for q in sorted(set(qids)))
+    return f"SELECT ?item ?iso WHERE {{\n  VALUES ?item {{ {values} }}\n  ?item wdt:P297 ?iso .\n}}"
+
+
+def parse_iso(payload):
+    """`Q-id -> "SE"`. Two codes on one item (none on the corpus's countries) keep the lesser."""
+    out = {}
+    for binding in bindings(payload):
+        uri, code = _value(binding, "item"), _value(binding, "iso")
+        if uri is None or code is None or not _ISO.fullmatch(code):
+            continue
+        qid = _qid(uri)
+        out[qid] = min(out.get(qid, code), code)
+    return out
+
+
+def country_codes(qids, cache=None, batch=500):
+    """`Q-id -> ISO 3166-1 alpha-2 code` for the `qids` Wikidata gives one."""
+    return _batched(qids, batch, iso_query, parse_iso, ISO_CACHE_PATH, cache)
+
+
+def author_query(qids):
+    values = " ".join(f"wd:{q}" for q in sorted(set(qids)))
+    return f"SELECT ?item ?author WHERE {{\n  VALUES ?item {{ {values} }}\n  ?item wdt:P50 ?author .\n}}"
+
+
+def parse_authors(payload):
+    """`work Q-id -> [author Q-id]`, sorted by Q-id number. An "unknown value" author is no one."""
+    found = {}
+    for binding in bindings(payload):
+        uri, author = _value(binding, "item"), _value(binding, "author")
+        if uri is None or author is None or not _is_item(_qid(author)):
+            continue
+        found.setdefault(_qid(uri), set()).add(_qid(author))
+    return {qid: _by_number(authors) for qid, authors in found.items()}
+
+
+def authors(qids, cache=None, batch=500):
+    """`work Q-id -> [author Q-id]` for the works in `qids` Wikidata names an author of."""
+    return _batched(qids, batch, author_query, parse_authors, AUTHOR_CACHE_PATH, cache)
+
+
 def instance_of(qids, batch=200):
     """`Q-id -> its P31 labels`, for the targets of `basedOn` — what a source work IS, which the bare Q-id
     cannot say.
