@@ -20,9 +20,15 @@ name: daily
 #            DEN_DAILY_SPEND                    `true` to let the scheduled run buy the day's answers
 #            DEN_DAILY_RUNS_ON                  a JSON runner label list, e.g. ["self-hosted","den"]; default
 #                                               ubuntu-latest
-#            DEN_OUT_DIR / DEN_CACHE_DIR        persistent paths on a self-hosted runner; without them the
-#                                               out-dir and the response cache are carried in the Actions cache
+#            DEN_OUT_DIR / DEN_CACHE_DIR        the persistent out-dir and response cache the job runs over;
+#                                               required — see "Where the out-dir lives" below
 #            DEN_REVISIT_WEEKS                  the weekly slice's cycle, default 8
+#
+# WHERE THE OUT-DIR LIVES. The job runs over the out-dir the live dataset was built from, and that out-dir is
+# not publishable: enriched batches from before oxyc/den-dataset#53 still carry TMDB's overviews. So it is
+# never put in the Actions cache — on a public repository a pull request's workflow can restore the base
+# branch's caches, which would publish it. Until a private store for it is chosen (oxyc/den-dataset#27), the
+# job runs only where DEN_OUT_DIR names a persistent path, and refuses without one.
 on:
   schedule:
     - cron: "23 3 * * *"   # daily
@@ -58,18 +64,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      # Without persistent paths the out-dir and the response cache ride in the Actions cache, one entry per
-      # run, restored from the newest. An out-dir that did not come back is not a first generation: the
-      # change set refuses a live manifest whose batches this out-dir does not hold.
-      - name: Restore the out-dir
-        if: vars.DEN_OUT_DIR == ''
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ${{ env.OUT }}
-            ${{ env.DEN_CACHE_DIR }}
-          key: den-state-${{ github.run_id }}
-          restore-keys: den-state-
+      - name: The out-dir
+        run: |
+          if [ -z "${{ vars.DEN_OUT_DIR }}" ]; then
+            echo "error: DEN_OUT_DIR is not set, so there is no out-dir to run over. It is never carried in" >&2
+            echo "       the Actions cache: a pull request's workflow can restore it, and it holds TMDB text." >&2
+            exit 1
+          fi
+          test -d "$OUT/enriched" || { echo "error: $OUT holds no enriched batches" >&2; exit 1; }
       # The live manifest the change set and the gates compare with. Public, read with the job's own token.
       - name: The live manifest
         env:
@@ -133,11 +135,3 @@ jobs:
             ${{ env.OUT }}/checked.json
           if-no-files-found: error
           retention-days: 14
-      - name: Save the out-dir
-        if: always() && vars.DEN_OUT_DIR == ''
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ${{ env.OUT }}
-            ${{ env.DEN_CACHE_DIR }}
-          key: den-state-${{ github.run_id }}
