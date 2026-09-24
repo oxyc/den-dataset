@@ -20,9 +20,9 @@ every publish gate (`publish --plan`). Nothing is signed or uploaded: the signin
   * no `TMDB_API_KEY` — no delta worklist: no new titles are discovered; the refresh still runs;
   * no `--spend` or no `TYPESAFE_API_KEY` — the classify and critique passes, and the genres & moods ask.
     A changed title then keeps its old rows, and a new one has none; the report says which;
-  * no `DEN_EMBED_URL` — the embed pass. The vectors must come from the den-embed that serves the queries
-    (`docs/OPERATE.md`, "The alignment rule"), so a job that cannot reach it embeds nothing rather than
-    embedding somewhere else. A new title with a plot then has no vector and the plot-vector gate refuses.
+  * no `DEN_EMBED_URL` — the embed pass. Any den-embed will do whose canary answers match
+    (`docs/OPERATE.md`, "The alignment rule"); the scheduled job runs its own. A new title with a plot then
+    has no vector and the plot-vector gate refuses.
 
 **What it refuses**, before anything runs:
 
@@ -185,8 +185,8 @@ def run_day(day):
             day.stage(name, spend=day.can_buy)
         elif name == "embed":
             if not env.get("DEN_EMBED_URL"):
-                day.skip(name, "no DEN_EMBED_URL: vectors come from the den-embed that serves queries or not "
-                               "at all, so a new title with a plot has no vector and the check refuses it")
+                day.skip(name, "no DEN_EMBED_URL, so nothing was embedded: a new title with a plot has no "
+                               "vector and the check refuses it")
                 continue
             day.stage(name)
         elif name == "facts":
