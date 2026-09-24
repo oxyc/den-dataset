@@ -398,6 +398,105 @@ def franchises(targets, members):
     return sorted(kept, key=lambda q: (members[q], _int(q[1:]) or 0, q))
 
 
+#: The franchise stage's lookups (`pipeline/franchises.py`): a series item's parents, a source work's book
+#: series, and the TMDB id of a work a title follows. Their own cache path, beside the class requests.
+FRANCHISE_CACHE_PATH = "sparql-franchise"
+#: What a SOURCE work's series must be for its adaptations to share it: a book series (novel series and
+#: comic book series are subclasses). The Martin Beck novels are one; so are the Wallander novels. A film
+#: series is not: a live-action remake's P144 is the animated film, whose series is the studio catalogue.
+BOOK_SERIES_CLASSES = ("Q277759",)
+
+
+def _pairs(payload, left, right):
+    out = {}
+    for binding in bindings(payload):
+        a, b = _value(binding, left), _value(binding, right)
+        if a is not None and b is not None:
+            out.setdefault(_qid(a), set()).add(_qid(b))
+    return {q: sorted(found, key=lambda v: (_int(v[1:]) or 0, v)) for q, found in out.items()}
+
+
+def _franchise_lookup(qids, query_for, parse, cache, batch):
+    """`parse` over every batch of `qids`, each answer cached under its query text like `series`."""
+    out = {}
+    ordered = sorted(set(qids))
+    for start in range(0, len(ordered), batch):
+        query = query_for(ordered[start:start + batch])
+        key = cache.key(FRANCHISE_CACHE_PATH, {"q": query}) if cache is not None else None
+        hit = cache.read(key) if key is not None else None
+        if hit is not None:
+            try:
+                out.update(parse(hit))
+                continue
+            except WikidataError:
+                pass
+        payload = _sparql(query, fallback=True)
+        out.update(parse(payload))
+        if key is not None:
+            cache.write(key, payload)
+    return out
+
+
+def parents_query(qids):
+    """The series and franchises each of `qids` is part of: P179, P361 or P8345 to an item of a
+    `SERIES_CLASSES` class. A critics' list is not one, so it is no parent either."""
+    values = " ".join(f"wd:{q}" for q in qids)
+    classes = " ".join(f"wd:{q}" for q in SERIES_CLASSES)
+    return ("SELECT ?item ?parent WHERE {\n"
+            f"  VALUES ?item {{ {values} }}\n"
+            "  ?item wdt:P179|wdt:P361|wdt:P8345 ?parent .\n"
+            f"  FILTER EXISTS {{ VALUES ?class {{ {classes} }} ?parent wdt:P31/wdt:P279* ?class . }}\n"
+            "}")
+
+
+def parents(qids, cache=None, batch=100):
+    """`Q-id -> [parent Q-ids]` for the series and franchises in `qids` that are part of a bigger one: the
+    Raimi trilogy of "Spider-Man in film", the Skywalker saga of Star Wars."""
+    return _franchise_lookup(qids, parents_query, lambda p: _pairs(p, "item", "parent"), cache, batch)
+
+
+def source_series_query(qids):
+    values = " ".join(f"wd:{q}" for q in qids)
+    classes = " ".join(f"wd:{q}" for q in BOOK_SERIES_CLASSES)
+    return ("SELECT ?item ?series WHERE {\n"
+            f"  VALUES ?item {{ {values} }}\n"
+            "  ?item wdt:P179 ?series .\n"
+            f"  FILTER EXISTS {{ VALUES ?class {{ {classes} }} ?series wdt:P31/wdt:P279* ?class . }}\n"
+            "}")
+
+
+def source_series(qids, cache=None, batch=100):
+    """`source Q-id -> [book series Q-ids]` for the `basedOn` targets that are part of a book series. The
+    films of Roseanna and The Man on the Balcony share no film series, but their novels share one: the only
+    statement that makes the 1993 Beck films Beck."""
+    return _franchise_lookup(qids, source_series_query, lambda p: _pairs(p, "item", "series"), cache, batch)
+
+
+def tmdb_query(qids):
+    values = " ".join(f"wd:{q}" for q in qids)
+    return ("SELECT ?item ?movie ?tv WHERE {\n"
+            f"  VALUES ?item {{ {values} }}\n"
+            "  OPTIONAL { ?item wdt:P4947 ?movie . }\n"
+            "  OPTIONAL { ?item wdt:P4983 ?tv . }\n"
+            "}")
+
+
+def parse_tmdb(payload):
+    out = {}
+    for binding in bindings(payload):
+        uri = _value(binding, "item")
+        for media, name in (("movie", "movie"), ("tv", "tv")):
+            tmdb_id = _int(_value(binding, name))
+            if uri is not None and tmdb_id is not None:
+                out.setdefault(_qid(uri), set()).add(f"{media}:{tmdb_id}")
+    return {q: sorted(keys) for q, keys in out.items()}
+
+
+def tmdb_keys(qids, cache=None, batch=200):
+    """`Q-id -> ["movie:123", ...]`: the titles a sequel link points at, as the corpus keys them."""
+    return _franchise_lookup(qids, tmdb_query, parse_tmdb, cache, batch)
+
+
 def article_title(url):
     """`https://en.wikipedia.org/wiki/Inception` → `Inception`: underscores to spaces, percent-decoded,
     and left as it is when the escapes do not decode."""

@@ -1,0 +1,420 @@
+{
+ "about": "The hand-checked franchises of oxyc/den-atlas#92 as corpus keys, for pipeline/eval_franchises.py. `together` is one franchise, `eras` its eras where the case says; `apart` must never share a franchise (separate adaptations of Sherlock Holmes and Dracula, a studio's films, a shared universe's separate stories); `none` is no franchise (a studio's films, a thematic trilogy). The owner's decisions it encodes: one franchise with eras, a TV series joins its films, a shared universe is not the franchise.",
+ "cases": [
+  {
+   "name": "Beck",
+   "together": [
+    "movie:25699",
+    "movie:34645",
+    "movie:46320",
+    "movie:34644",
+    "movie:270043",
+    "movie:119671",
+    "movie:383623",
+    "tv:38148"
+   ],
+   "eras": [
+    [
+     "movie:34645",
+     "movie:46320",
+     "movie:34644"
+    ],
+    [
+     "movie:270043",
+     "movie:119671",
+     "movie:383623"
+    ]
+   ]
+  },
+  {
+   "name": "Wallander",
+   "together": [
+    "movie:221868",
+    "movie:227246",
+    "movie:218939",
+    "tv:7263"
+   ],
+   "eras": [
+    [
+     "movie:221868",
+     "movie:227246",
+     "movie:218939"
+    ],
+    [
+     "tv:7263"
+    ]
+   ]
+  },
+  {
+   "name": "James Bond",
+   "together": [
+    "movie:646",
+    "movie:658",
+    "movie:36557",
+    "movie:37724",
+    "movie:370172"
+   ],
+   "eras": [
+    [
+     "movie:646",
+     "movie:658"
+    ],
+    [
+     "movie:36557",
+     "movie:37724",
+     "movie:370172"
+    ]
+   ]
+  },
+  {
+   "name": "Spider-Man",
+   "together": [
+    "movie:557",
+    "movie:558",
+    "movie:1930",
+    "movie:315635",
+    "movie:324857",
+    "movie:569094"
+   ],
+   "eras": [
+    [
+     "movie:557",
+     "movie:558"
+    ],
+    [
+     "movie:1930"
+    ],
+    [
+     "movie:315635"
+    ],
+    [
+     "movie:324857",
+     "movie:569094"
+    ]
+   ]
+  },
+  {
+   "name": "Star Wars",
+   "together": [
+    "movie:11",
+    "movie:1891",
+    "movie:1892",
+    "movie:140607",
+    "movie:330459",
+    "tv:83867",
+    "tv:82856"
+   ],
+   "eras": [
+    [
+     "movie:11",
+     "movie:1891",
+     "movie:1892"
+    ],
+    [
+     "movie:140607"
+    ]
+   ]
+  },
+  {
+   "name": "Star Trek",
+   "together": [
+    "movie:152",
+    "movie:154",
+    "movie:13475",
+    "tv:253",
+    "tv:655"
+   ],
+   "eras": [
+    [
+     "movie:152",
+     "movie:154"
+    ],
+    [
+     "movie:13475"
+    ]
+   ]
+  },
+  {
+   "name": "Godzilla",
+   "together": [
+    "movie:1678",
+    "movie:1682",
+    "movie:12561",
+    "movie:315011",
+    "movie:940721",
+    "movie:124905",
+    "movie:399566"
+   ],
+   "eras": [
+    [
+     "movie:1678",
+     "movie:1682"
+    ],
+    [
+     "movie:12561"
+    ],
+    [
+     "movie:124905",
+     "movie:399566"
+    ]
+   ]
+  },
+  {
+   "name": "Wizarding World",
+   "together": [
+    "movie:671",
+    "movie:12445",
+    "movie:259316",
+    "movie:338952"
+   ],
+   "eras": [
+    [
+     "movie:671",
+     "movie:12445"
+    ],
+    [
+     "movie:259316",
+     "movie:338952"
+    ]
+   ]
+  },
+  {
+   "name": "Mission: Impossible",
+   "together": [
+    "movie:954",
+    "movie:353081",
+    "tv:4357"
+   ],
+   "eras": [
+    [
+     "movie:954",
+     "movie:353081"
+    ],
+    [
+     "tv:4357"
+    ]
+   ]
+  },
+  {
+   "name": "Toy Story",
+   "together": [
+    "movie:862",
+    "movie:863",
+    "movie:301528"
+   ]
+  },
+  {
+   "name": "Three Colours",
+   "together": [
+    "movie:108",
+    "movie:109",
+    "movie:110"
+   ]
+  },
+  {
+   "name": "Before trilogy",
+   "together": [
+    "movie:76",
+    "movie:80",
+    "movie:132344"
+   ]
+  },
+  {
+   "name": "Batman",
+   "together": [
+    "movie:268",
+    "movie:364",
+    "movie:272",
+    "movie:155",
+    "movie:414906"
+   ],
+   "eras": [
+    [
+     "movie:268",
+     "movie:364"
+    ],
+    [
+     "movie:272",
+     "movie:155"
+    ],
+    [
+     "movie:414906"
+    ]
+   ]
+  },
+  {
+   "name": "Carry On",
+   "together": [
+    "movie:32110",
+    "movie:32107",
+    "movie:5066",
+    "movie:19307"
+   ]
+  },
+  {
+   "name": "Planet of the Apes",
+   "together": [
+    "movie:871",
+    "movie:61791",
+    "movie:281338"
+   ],
+   "eras": [
+    [
+     "movie:871"
+    ],
+    [
+     "movie:61791",
+     "movie:281338"
+    ]
+   ]
+  },
+  {
+   "name": "Alien",
+   "together": [
+    "movie:348",
+    "movie:679",
+    "movie:70981"
+   ]
+  },
+  {
+   "name": "Halloween",
+   "together": [
+    "movie:948",
+    "movie:424139",
+    "movie:610253"
+   ],
+   "eras": [
+    [
+     "movie:948"
+    ],
+    [
+     "movie:424139",
+     "movie:610253"
+    ]
+   ]
+  },
+  {
+   "name": "Millennium",
+   "together": [
+    "movie:15472",
+    "movie:24253",
+    "movie:65754"
+   ],
+   "eras": [
+    [
+     "movie:15472",
+     "movie:24253"
+    ],
+    [
+     "movie:65754"
+    ]
+   ]
+  },
+  {
+   "name": "Twin Peaks",
+   "together": [
+    "tv:1920",
+    "movie:1923"
+   ]
+  },
+  {
+   "name": "Fargo",
+   "together": [
+    "movie:275",
+    "tv:60622"
+   ]
+  },
+  {
+   "name": "Rocky",
+   "together": [
+    "movie:1366",
+    "movie:1374",
+    "movie:312221"
+   ],
+   "eras": [
+    [
+     "movie:1366",
+     "movie:1374"
+    ],
+    [
+     "movie:312221"
+    ]
+   ]
+  },
+  {
+   "name": "Olsen Gang",
+   "together": [
+    "movie:11389",
+    "movie:24667"
+   ],
+   "eras": [
+    [
+     "movie:11389"
+    ],
+    [
+     "movie:24667"
+    ]
+   ]
+  }
+ ],
+ "apart": [
+  [
+   "movie:10528",
+   "tv:19885"
+  ],
+  [
+   "movie:10528",
+   "tv:1415"
+  ],
+  [
+   "tv:19885",
+   "tv:1415"
+  ],
+  [
+   "movie:27118",
+   "movie:10528"
+  ],
+  [
+   "movie:138",
+   "movie:11868"
+  ],
+  [
+   "movie:138",
+   "movie:6114"
+  ],
+  [
+   "movie:11868",
+   "movie:6114"
+  ],
+  [
+   "movie:129",
+   "movie:128"
+  ],
+  [
+   "movie:129",
+   "movie:8392"
+  ],
+  [
+   "movie:128",
+   "movie:4935"
+  ],
+  [
+   "movie:1726",
+   "movie:10195"
+  ]
+ ],
+ "none": [
+  "movie:129",
+  "movie:128",
+  "movie:4935",
+  "movie:4638",
+  "movie:747",
+  "movie:107985"
+ ],
+ "floors": {
+  "togetherRecall": 0.2,
+  "eraAgreement": 0.8,
+  "apartViolations": 0,
+  "noneViolations": 0
+ }
+}

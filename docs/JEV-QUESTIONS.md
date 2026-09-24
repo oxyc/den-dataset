@@ -54,3 +54,16 @@ holds what the code cannot: why these groups, and what was deliberately left out
 **The cost is the questions, not the article.** Jev bills question text as input at the article's rate; the
 classify pass spent ~377M of its 487M input tokens on question text. A delta pass costs roughly its question
 text times the corpus, so fewer, shorter definitions are the saving.
+
+## The franchise questions
+
+`pipeline/franchises.py` asks one Choice and two Nouls per title, over its article lead and one appended
+section listing its candidate franchise groups from Wikidata, lettered A to D. The questions are the same for
+every title; the letters are what differ, and the states shard keeps what each title was shown. A letter
+Choice, rather than a Noul per group, because a title is an entry of one franchise and the choice between a
+story's own series and the shared universe or studio above it is the judgment being bought.
+
+Deliberately not asked: the era's name (the Wikidata group it falls in names it), the franchise's name (its
+Wikidata label), and whether a group is a catalogue on its own (a catalogue is the group its titles answer
+`none` for).
+

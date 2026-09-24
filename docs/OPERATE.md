@@ -177,6 +177,27 @@ title nothing chooses for ships with no Wikidata fields; the facts stage warns a
 longer contested is refused as stale. A checkpointed row scraped under another choice is scraped again on
 the next run.
 
+**6b. The franchises** — which titles are one franchise, in eras (oxyc/den-atlas#92). Wikidata decides
+where it leaves one answer; every other title is asked Jev with its candidate groups listed, and only with
+`--spend`. `--plan` prints how many would be asked. The derive runs every time and writes
+`out/franchises.json` only if it clears `data/franchise-golden.json`'s floors.
+
+```sh
+./den stage franchises --out-dir out --plan
+./den stage franchises --out-dir out --spend
+```
+
+A title answered in any shard is never asked again, and its answer counts only while its candidates are the
+ones it was asked with (`answered under other candidates` in the derivation's counts). The golden set's
+floors start just under what Wikidata alone scored over the whole corpus (recall 0.20, era agreement 0.83,
+no violations): most golden franchises need an answer. After the first `--spend` run, score it and make its
+figures the floors:
+
+```sh
+python3 pipeline/eval_franchises.py out/franchises.json --facts out/facts-<ver>.json
+python3 pipeline/eval_franchises.py out/franchises.json --facts out/facts-<ver>.json --record
+```
+
 **7. The corpus** — the pass shards, facts and genres & moods joined into one JSONL, the source of truth.
 
 ```sh

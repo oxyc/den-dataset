@@ -118,6 +118,37 @@ GENRES_MOODS = Artifact(
     filename="genres-moods.json",
 )
 
+#: The article rows the franchise pass sends Jev: a title's article with one more section listing its
+#: candidate franchise groups A to D (`pipeline/franchises.py`), and the candidates themselves, which are
+#: what an answer's letter means. One shard per content digest; its answers are the shard of the same digest.
+FRANCHISE_STATES = Artifact(
+    name="franchise_states",
+    filename="franchise-states*.jsonl",
+    shards=True,
+)
+
+#: The franchise answers Jev was paid for, in `run_combined`'s row shape, one shard per states shard. A title
+#: answered in any shard is never asked again. They carry TMDB titles, so they are backed up, not published.
+FRANCHISE_ANSWERS = Artifact(
+    name="franchise_answers",
+    filename="franchise-answers-v1*.jsonl",
+    shards=True,
+)
+
+#: Each franchise answer shard's sidecar, named by `run_combined` from the shard.
+FRANCHISE_ANSWERS_MANIFEST = Artifact(
+    name="franchise_answers_manifest",
+    filename="franchise-answers-v1*.jsonl.manifest.json",
+    shards=True,
+)
+
+#: Every franchise, its members in release order with their era, and each title's franchise
+#: (oxyc/den-atlas#92). Rebuilt on every run from the facts and the answers, behind the golden set.
+FRANCHISES = Artifact(
+    name="franchises",
+    filename="franchises.json",
+)
+
 #: The second pass — the questions `combined-v1-r2` did not ask. It buys from a paid provider, and without
 #: `--spend` the script prints the estimate and stops, so the command a refusal quotes carries it.
 #:
@@ -393,5 +424,6 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              COMBINED_MANIFEST, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST, GENRES_MOODS,
              DELTA, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH, PUBLISHED_META, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS,
              EMBED_LABELS, EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
-             DELTA_IDS, DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, FINALIZE_REPORT,
+             DELTA_IDS, DELTA_FACTS, FACTS, FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST,
+             FRANCHISES, VECTORS, VECTOR_LABELS, FINALIZE_REPORT,
              PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)

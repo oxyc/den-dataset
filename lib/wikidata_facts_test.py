@@ -546,5 +546,34 @@ class Vocabulary(unittest.TestCase):
         self.assertIsNone(wd.article_title("https://en.wikipedia.org/"))
 
 
+
+
+class FranchiseLookups(unittest.TestCase):
+    """The franchise stage's three lookups: their query text is their cache key, and their answers are keyed
+    by the item asked about."""
+
+    def test_a_parent_must_be_a_series_so_a_list_is_none(self):
+        query = wd.parents_query(["Q1", "Q2"])
+        self.assertIn("?item wdt:P179|wdt:P361|wdt:P8345 ?parent .", query)
+        self.assertIn("wd:Q24856 wd:Q5398426 wd:Q196600 wd:Q138337574", query)
+
+    def test_a_source_series_must_be_a_book_series(self):
+        self.assertIn("?series wdt:P31/wdt:P279* ?class", wd.source_series_query(["Q3"]))
+        self.assertIn("VALUES ?class { wd:Q277759 }", wd.source_series_query(["Q3"]))
+
+    def test_pairs_are_grouped_by_the_item_asked_about_in_q_id_order(self):
+        payload = body({"item": wd_uri("Q1"), "parent": wd_uri("Q30")}, {"item": wd_uri("Q1"), "parent": wd_uri("Q4")},
+                       {"item": wd_uri("Q2"), "parent": wd_uri("Q4")})
+        self.assertEqual(wd._pairs(payload, "item", "parent"), {"Q1": ["Q4", "Q30"], "Q2": ["Q4"]})
+
+    def test_a_tmdb_id_is_a_corpus_key(self):
+        payload = body({"item": wd_uri("Q1"), "movie": "557"}, {"item": wd_uri("Q2"), "tv": "38148"},
+                       {"item": wd_uri("Q3")})
+        self.assertEqual(wd.parse_tmdb(payload), {"Q1": ["movie:557"], "Q2": ["tv:38148"]})
+
+
+def wd_uri(qid):
+    return "http://www.wikidata.org/entity/" + qid
+
 if __name__ == "__main__":
     unittest.main()
