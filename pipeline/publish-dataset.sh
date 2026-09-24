@@ -11,6 +11,7 @@
 #   ./den stage finalize --out-dir out                           # labels-*.json + vectors-*.bin + manifest
 #   python3 pipeline/build_store.py … --stamp-meta out/dataset.meta.json    # THE artifact
 #   pipeline/publish-dataset.sh [OUT_DIR] [--unsigned]       # default: ./out, then ./data
+#   pipeline/publish-dataset.sh OUT_DIR --check              # every gate; nothing signed, nothing uploaded
 #
 # Requires `gh` authenticated with write access to the repo. The blobs are gitignored (large derived data),
 # so they live as release assets, never in git.
@@ -18,6 +19,13 @@
 # SIGNED (oxyc/den#127): the meta is signed with the Ed25519 key at $DEN_DATASET_SIGNING_KEY (default
 # ~/.config/den/dataset-signing.pem) just before anything uploads — see pipeline/sign_manifest.py. No key
 # is a refusal; `--unsigned` publishes without a signature, deliberately.
+#
+# CHECK (oxyc/den-dataset#27): `--check` runs every gate below exactly as a publish does and stops where the
+# signing starts, so an unattended job with no key and no write access can end at "ready to publish". It
+# touches no release: the live manifest the comparisons need is read from OUT_DIR/published/dataset.meta.json
+# (where `den stage changes` reads it too) rather than downloaded, and nothing is created or uploaded. It
+# rewrites the manifest the way a publish does (the prune, the counts, the stamps), so what it leaves is what
+# a publish of that out-dir would sign.
 #
 # Run it FROM THE REPO ROOT: the ownership guard resolves producer paths (`pipeline/…`) and
 # `git ls-files` against the working directory.
@@ -28,9 +36,11 @@ set -euo pipefail
 # instead and reported success.
 DIR=""
 unsigned=0
+check=0
 for arg in "$@"; do
   case "$arg" in
     --unsigned) unsigned=1 ;;
+    --check) check=1 ;;
     -*) echo "error: unknown option $arg" >&2; exit 2 ;;
     *) [ -z "$DIR" ] || { echo "error: one out-dir only (got $DIR and $arg)" >&2; exit 2; }; DIR="$arg" ;;
   esac
@@ -48,7 +58,7 @@ REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
 # The signing key is checked FIRST, before the prune rewrites the meta. Publishing unsigned used to be the
 # only thing this script did, silently, and a consumer that pins our key refuses an unsigned meta.
 signing_key="${DEN_DATASET_SIGNING_KEY:-$HOME/.config/den/dataset-signing.pem}"
-if [ "$unsigned" -eq 0 ] && [ ! -f "$signing_key" ]; then
+if [ "$check" -eq 0 ] && [ "$unsigned" -eq 0 ] && [ ! -f "$signing_key" ]; then
   echo "error: no dataset signing key at $signing_key — the meta would publish unsigned." >&2
   echo "       Put the Ed25519 key (PKCS#8 PEM) there, or point DEN_DATASET_SIGNING_KEY at it. Its public" >&2
   echo "       half must be PUBLIC_KEY in pipeline/sign_manifest.py, which is what consumers pin." >&2
@@ -109,7 +119,8 @@ blobs=("$DIR"/den-*.store)
 
 # What actually publishes: the files the manifest names, plus whatever else the glob found that it does
 # not (announced as such).
-echo "publishing → $REPO data-latest:"
+if [ "$check" -eq 1 ]; then echo "checking, not publishing — what $REPO data-latest would carry:"
+else echo "publishing → $REPO data-latest:"; fi
 python3 -c '
 import json, sys
 meta = json.load(open(sys.argv[1]))
@@ -127,7 +138,7 @@ done
 echo "  $(basename "$meta")"
 
 # Create the release if it doesn't exist yet.
-gh release view data-latest -R "$REPO" >/dev/null 2>&1 \
+[ "$check" -eq 1 ] || gh release view data-latest -R "$REPO" >/dev/null 2>&1 \
   || gh release create data-latest -R "$REPO" --title "Dataset (latest)" --notes "The published Den dataset artifact — the den-<version>.store den-atlas mmaps, and the manifest describing it."
 
 # Upload one asset with retries. A single multi-file `gh release upload` is all-or-nothing: if it dies partway
@@ -199,7 +210,17 @@ trap 'rm -f "$manifest_files" "$published_meta" "$download_err"' EXIT
 # `2>/dev/null` collapsed an expired token, a 5xx, a rate limit and a `gh` too old for these flags all into
 # "skip the check" — silently, and permanently in the last case.
 have_published=0
-if gh release download data-latest -R "$REPO" -p dataset.meta.json -O "$published_meta" --clobber \
+live_copy="$DIR/published/dataset.meta.json"
+if [ "$check" -eq 1 ]; then
+  # The same file `den stage changes` diffs against, so the gates and the change set compare with one
+  # manifest. Absent, the comparisons have nothing to compare with — said loudly, because the publish that
+  # follows makes them against the release as it is then.
+  if [ -f "$live_copy" ]; then
+    cp "$live_copy" "$published_meta"; have_published=1
+  else
+    echo "check: no live manifest at $live_copy — the comparisons against the published dataset are left to the publish." >&2
+  fi
+elif gh release download data-latest -R "$REPO" -p dataset.meta.json -O "$published_meta" --clobber \
      2>"$download_err"; then
   have_published=1
 elif grep -qiE 'release not found|no assets|asset not found|not found' "$download_err"; then
@@ -531,6 +552,20 @@ print(" ".join(sorted(k for k, v in old.items()
     [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
     echo "       DEN_ALLOW_DROPPING_BLOBS=1 — continuing." >&2
   fi
+fi
+
+# CHECK ends here: every gate above has run and passed, and what follows only signs and uploads. A signature
+# carried forward from an older generation is dropped, as `--unsigned` drops one: it cannot verify over this
+# meta, and the publish signs it again.
+if [ "$check" -eq 1 ]; then
+  python3 - "$meta" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+if meta.pop("signature", None) is not None:
+    json.dump(meta, open(sys.argv[1], "w"), indent=1)
+PY
+  echo "ready to publish: $(basename "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("storeFile") or "")' "$meta")") and $(basename "$meta") passed every gate. Nothing was signed or uploaded."
+  exit 0
 fi
 
 # SIGN — the last write to the meta, and before any upload, so a signing failure leaves the release as it

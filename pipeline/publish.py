@@ -59,11 +59,12 @@ OUTPUTS = (artifacts.RELEASE,)
 def argv(ctx):
     """The publisher's command line: the script, and the directory to publish.
 
-    One positional, which is the script's whole interface. Absolute, because `run` moves the working
+    One positional, which is the script's whole interface, plus `--check` for a `--plan` run: every gate,
+    and nothing signed or uploaded (oxyc/den-dataset#27). Absolute, because `run` moves the working
     directory to the repo root for the ownership guard — a relative `--out-dir out` has to go on meaning
     the `out` the operator named, not the repo's.
     """
-    return [SCRIPT, os.path.abspath(ctx.out_dir)]
+    return [SCRIPT, os.path.abspath(ctx.out_dir)] + (["--check"] if ctx.plan else [])
 
 
 def run(ctx):
@@ -76,4 +77,6 @@ def run(ctx):
     result = subprocess.run(argv(ctx), cwd=REPO)
     if result.returncode != 0:
         raise StageError(f"publish: {PRODUCER} exited {result.returncode}")
+    if ctx.plan:
+        return f"checked only — ready to publish {os.path.abspath(ctx.out_dir)}; nothing signed or uploaded"
     return artifacts.RELEASE.filename

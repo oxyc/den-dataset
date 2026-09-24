@@ -64,8 +64,10 @@ UNCHANGED, MOVED, GONE, UNKNOWN = "unchanged", "moved", "gone", "unknown"
 
 
 class Fresh:
-    """The wiki cache with its reads switched off: every article is asked again, and its answer replaces the
-    body on disk, so the article stage's re-read of the same page sees the new revision too."""
+    """A response cache with its reads switched off: every request is asked again, and its answer replaces
+    the body on disk, so a later reader of the same request sees the new answer too. The refresh re-reads
+    articles through it; the facts and doc-facts stages re-ask the change set's titles through it, since an
+    answer cached under the same query text is exactly the one being checked."""
 
     def __init__(self, cache):
         self.cache = cache

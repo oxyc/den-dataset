@@ -87,6 +87,17 @@ COMBINED_MANIFEST = Artifact(
     shards=True,
 )
 
+#: The article rows of a change set's titles, one dump per change set, named by its digest. The classify
+#: stage writes it and runs both passes over it into shards named by the same digest, so a run that is
+#: stopped and started again resumes the same shards rather than buying a second set. Kept: a shard's
+#: manifest records the dump it read by path and hash, and the audit reopens it.
+CHANGED_ARTICLES = Artifact(
+    name="changed_articles",
+    filename="classify/articles-*.jsonl",
+    shards=True,
+    dedicated=False,
+)
+
 #: The genres & moods answers Jev was paid for: one row per title, append-only, in `run_combined`'s row
 #: shape. One shard per article dump — the wildcard holds the dump's digest, because the pass's manifest
 #: hashes the dump and a rebuilt one could not resume the old shard — and a title answered in any shard is
@@ -149,8 +160,10 @@ FRANCHISES = Artifact(
     filename="franchises.json",
 )
 
-#: The second pass — the questions `combined-v1-r2` did not ask. It buys from a paid provider, and without
-#: `--spend` the script prints the estimate and stops, so the command a refusal quotes carries it.
+#: The second pass — the questions `combined-v1-r2` did not ask: the critique, technique, depiction and
+#: audience answers. Written by the critique stage (`pipeline/critique.py`), which runs
+#: `pipeline/run_delta.py` over the same article dump the classify stage just classified, so a title's two
+#: rows read one article — the corpus join refuses a pair that did not.
 #:
 #: `v2`, not `v1`: every `delta-v1` row was answered from the title alone, because the pass patched out the
 #: function `classify()` builds its state from, so Jev never saw the article (fixed in #60). The glob names
@@ -158,20 +171,25 @@ FRANCHISES = Artifact(
 DELTA = Artifact(
     name="delta",
     filename="delta-v2*.jsonl",
-    producer="pipeline/run_delta.py",
-    how="pipeline/run_delta.py --spend",
     shards=True,
 )
 
-#: Tombstones: titles a re-fetch left with no plot, whose older classify and critique rows the corpus join
-#: must stop shipping. Append-only and written by hand from the re-fetch's key list, because deciding a
-#: title lost its plot is the re-fetch's call, not a stage's. Optional: an out-dir with none withdraws
-#: nothing. See `pipeline/consolidate_corpus.py`.
+#: Each delta shard's sidecar, named by the pass from `--out` as the classify pass names its own, and read
+#: back by the corpus stage's audit.
+DELTA_MANIFEST = Artifact(
+    name="delta_manifest",
+    filename="delta-v2*.jsonl.manifest.json",
+    shards=True,
+)
+
+#: Tombstones: titles that lost their plot, whose older classify and critique rows the corpus join must
+#: stop shipping. Append-only. The change set writes them for what lost its plot since the live dataset
+#: (`pipeline/changes.py`), through `pipeline/consolidate_corpus.py withdraw`, which an operator can still
+#: run by hand on a list of their own. Optional: an out-dir with none withdraws nothing.
 WITHDRAWN = Artifact(
     name="withdrawn",
     filename="withdrawn.jsonl",
-    producer="pipeline/consolidate_corpus.py",
-    how="pipeline/consolidate_corpus.py withdraw --keys <keys> --reason <why> --out <out-dir>/withdrawn.jsonl",
+    dedicated=False,
     required=False,
 )
 
@@ -229,10 +247,14 @@ PUBLISHED_META = Artifact(
 #: the stages after it take — `keys.txt` (added and changed), `withdrawn.txt` (lost their plot, for
 #: `consolidate_corpus.py withdraw`) and, with `--revisit-weeks`, `revisit.txt`. Rewritten whole each run:
 #: it is derived from the batches and the live manifest, so there is nothing in it to lose.
+#:
+#: Optional to the stages that read it: an out-dir from before it, or a stage run by hand without it, does
+#: what it always did. Read through `changes.listed`, never by path.
 CHANGES = Artifact(
     name="changes",
     filename="changes",
     dedicated=False,
+    required=False,
 )
 
 #: Wikidata's director (P57) and genre (P136) per title: the two clauses of the lean document that used to
@@ -421,9 +443,10 @@ RELEASE = Artifact(
 )
 
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
-             COMBINED_MANIFEST, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST, GENRES_MOODS,
-             DELTA, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH, PUBLISHED_META, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS,
-             EMBED_LABELS, EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
-             DELTA_IDS, DELTA_FACTS, FACTS, FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST,
-             FRANCHISES, VECTORS, VECTOR_LABELS, FINALIZE_REPORT,
-             PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)
+             COMBINED_MANIFEST, CHANGED_ARTICLES, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST,
+             GENRES_MOODS, DELTA, DELTA_MANIFEST, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH,
+             PUBLISHED_META, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
+             EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
+             FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISES,
+             VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST,
+             RELEASE)

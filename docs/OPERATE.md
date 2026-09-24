@@ -85,10 +85,12 @@ cp den.env.example den.env        # TMDB_API_KEY (worklist discover/delta); Ente
 #    One batch by hand, credentials already in the environment:
 python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --limit 150
 
-# 3a. Classify — the one step that buys ($20.47 for 47,529 titles). --plan first. docs/FACETS-V2.md.
+# 3a. Classify and critique — the steps that buy ($20.47 for 47,529 titles). --plan first. docs/FACETS-V2.md.
+#     With a change set (below) each buys only the titles it lists, into shards of their own.
 ./den stage articles --out-dir out
 ./den stage classify --out-dir out --plan
 ./den stage classify --out-dir out
+./den stage critique --out-dir out --spend
 
 # 3b. Genres & moods for titles the curated file lacks. --plan first; --spend asks Jev, then it derives.
 ./den stage genres_moods --out-dir out --plan
@@ -256,7 +258,9 @@ votes.
 revision of every grounded title's article, 50 a request, and re-fetches only the titles whose revision moved,
 whose page is gone, or whose revision is unknown. `--plan` does the asking and reports the counts; it drains
 nothing and fetches nothing. The re-fetched records land in new batches, and `out/refresh/<stamp>/` hands the
-rest of the week's work on:
+rest of the week's work on. The change set (below) reads the same batches, so a run through `./den stage
+changes` needs neither list by hand: it re-embeds, re-classifies and withdraws what moved. By hand, without
+one:
 
 ```sh
 ./den stage embed --out-dir out --reembed-keys out/refresh/<stamp>/changed.txt
@@ -264,9 +268,7 @@ pipeline/consolidate_corpus.py withdraw --keys out/refresh/<stamp>/plotless.txt 
     --reason "lost its plot in the <stamp> refresh" --out out/withdrawn.jsonl
 ```
 
-`changed.txt` is every title whose plot text differs; which of them are worth classifying again is the
-cosine gate in oxyc/den-dataset#5, decided after the re-embed, and a re-classify goes in as a new shard that
-supersedes by `runStartedAt`. A title whose article was edited outside its plot is in neither list.
+A title whose article was edited outside its plot is in neither list.
 
 The first refresh of an out-dir also records a revision for titles the Enterprise path grounded (it names
 none): where the cached action-API body yields exactly the stored text, that body's revision is recorded;
@@ -284,8 +286,15 @@ gh release download data-latest -p dataset.meta.json -D out/published --clobber
 ```
 
 Without `out/published/dataset.meta.json` every title is new, which is right for a fresh out-dir and
-wrong for any other: check that `plan.json` names a `baseline`. `--revisit-weeks N` also lists this week's
-slice of an N-week cycle (`revisit.txt`), so a weekly run revisits the whole corpus once per cycle.
+wrong for any other: check that `plan.json` names a `baseline`. Without a baseline the stages after it do
+what they always did. With one, classify and critique buy only the listed titles, embed re-embeds them,
+facts and doc-facts ask again the titles answered for by another Wikidata item, and the titles that lost
+their plot are tombstoned in `withdrawn.jsonl`. `--revisit-weeks N` also lists this week's slice of an
+N-week cycle (`revisit.txt`), whose facts and doc facts are asked again, so a weekly run revisits the whole
+corpus once per cycle.
+
+`./den stage publish --out-dir out --plan` then runs every gate the publish runs, against the same
+`published/dataset.meta.json`, and stops before signing: nothing is uploaded.
 
 ## Reading an enrich report
 

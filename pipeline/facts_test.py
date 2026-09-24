@@ -56,6 +56,7 @@ class Wikidata:
         self.by_item = {}       # qid -> {spec key: value}
         self.evidence = {}      # qid -> item_evidence row
         self.excluded = []
+        self.through = set()    # (media, ids, the cache's type) per batch asked
 
     def answer(self, media, tmdb_id, excluded, table):
         """A contested title answers from its items that were not left out, merged the way WDQS merges
@@ -77,6 +78,7 @@ class Wikidata:
 
     def fetch_facts(self, ids, media, item, cache=None, excluded=None):
         self.asked["facts"].append((media, tuple(ids), item.key))
+        self.through.add((media, tuple(ids), type(cache).__name__))
         self.excluded.append((media, excluded))
         # Late in the batch, so the properties before it have already landed on the row.
         if item.key == "cast" and any((media, i) in self.failing for i in ids):
@@ -661,6 +663,42 @@ class Resume(Staged):
         os.remove(os.path.join(self.out, "facts-fields.json"))
         self.run_stage()
         self.assertTrue(slept and set(slept) == {facts.PACE})
+
+
+class Again(Staged):
+    """The change set's titles answered for by another item, and the weekly slice, are asked afresh."""
+
+    def change_set(self, baseline=True, **lists):
+        directory = os.path.join(self.out, "changes")
+        os.makedirs(directory, exist_ok=True)
+        for name in ("keys", "withdrawn", "items", "revisit"):
+            with open(os.path.join(directory, f"{name}.txt"), "w", encoding="utf-8") as fh:
+                fh.writelines(f"{key}\n" for key in lists.get(name, ()))
+        with open(os.path.join(directory, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"baseline": {"datasetVersion": "live", "maxBatchId": 1} if baseline else None,
+                       "revisit": {"weeks": 4} if "revisit" in lists else None}, fh)
+
+    def test_a_listed_title_is_scraped_again_without_the_cache_and_its_new_entities_named(self):
+        self.run_stage()
+        self.wd.through.clear()
+        self.wd.facts[("movie", 1)] = dict(self.wd.facts[("movie", 1)], directors=["Q11"])
+        self.wd.names["Q11"] = {"name": "Bo Director", "tmdbPersonId": None, "aliases": []}
+        self.change_set(items=["movie:1"], keys=["movie:1"])
+        self.run_stage()
+        asked = {(media, ids) for media, ids, _ in self.wd.through}
+        self.assertEqual(asked, {("movie", (1,))}, "only the listed title, in each pass that covers it")
+        self.assertEqual({through for _, _, through in self.wd.through}, {"Fresh"})
+        shipped = self.read(f"facts-{VERSION}.json")
+        record = next(r for r in shipped["records"] if (r["mediaType"], r["tmdbId"]) == ("movie", 1))
+        self.assertEqual(record["directors"], ["Q11"])
+        self.assertEqual(shipped["entities"]["Q11"]["en"], "Bo Director")
+
+    def test_a_first_generation_scrapes_nothing_again(self):
+        self.run_stage()
+        self.wd.through.clear()
+        self.change_set(baseline=False, items=["movie:1"], revisit=["tv:1"])
+        self.run_stage()
+        self.assertEqual(self.wd.through, set())
 
 
 class Merge(Staged):

@@ -138,6 +138,15 @@ class CommandLine(unittest.TestCase):
             self.assertEqual(publish.argv(Context(out_dir=out, dataset_version="v9")),
                              [publish.SCRIPT, out])
 
+    def test_a_plan_runs_the_gates_and_publishes_nothing(self):
+        """`den stage publish --plan` is the publisher's `--check`: an unattended run ends at "ready to
+        publish" with no key and no write access. The flag is the script's; what it skips is proven by
+        `DEN_PUBLISH_VIA=check pipeline/publish-dataset.test.sh`, every refusal run through it."""
+        with tempfile.TemporaryDirectory() as out:
+            self.assertEqual(publish.argv(Context(out_dir=out, plan=True)), [publish.SCRIPT, out, "--check"])
+        with open(publish.SCRIPT, encoding="utf-8") as fh:
+            self.assertIn("--check) check=1 ;;", fh.read())
+
     def test_the_publish_dir_is_made_absolute(self):
         """It is resolved before the working directory changes to the repo root, so `--out-dir out` means
         the operator's `out` and not the repo's."""

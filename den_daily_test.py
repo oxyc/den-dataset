@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""The daily job, twice, over the fixture corpus — offline, and through every publish gate.
+
+`den_run_test.py` runs the pipeline once into an empty out-dir. The daily job (oxyc/den-dataset#27) is the
+same pipeline run again over the out-dir the live dataset was built from, doing only what moved. This runs
+it as the job does, on two days:
+
+  * **day one** — `den run` into an empty out-dir, then `den stage publish --plan`: every gate the publisher
+    runs, nothing signed or uploaded. The manifest it leaves is "published": copied to `published/`, where
+    the next day's change set and gates read the live dataset from.
+  * **day two** — one film's plot is rewritten upstream. `den run --refresh` re-reads it, the change set
+    names it, and the stages after redo it and nothing else; the gates run again, now against the live
+    manifest, so the record-count and store-identity guards compare two generations.
+
+Everything `DenRun` asserts about the out-dir holds after day two as well — the subclass inherits its
+cases and runs them against the second day's state.
+
+**The one gate the fixture cannot pass is the quality gate**, and the gate is not changed to let it. It
+scores the labels against `data/eval/golden-large.json` and refuses unless 70% of those 2,568 real titles
+are in the corpus (`pipeline/eval_taxonomy.py`, `MIN_COVERAGE`); an invented corpus has none of them. So
+the check is required to get through every gate before it and to be refused by that one, for that reason.
+Any other refusal fails this test.
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import unittest
+
+import den_run_test as fixture
+
+from pipeline import artifacts
+
+EDITED = "movie:900001"
+LEDGER = "The Lighthouse Ledger"
+#: What the quality gate says about a corpus the golden set does not overlap, and what check mode says
+#: once every gate has passed.
+UNSCORABLE = "eval: the golden set and the labels do not overlap at all"
+READY = "ready to publish"
+
+
+class DenDaily(fixture.DenRun):
+    """Two days of the job. `DenRun`'s cases run against the out-dir day two leaves."""
+
+    @classmethod
+    def drive(cls, den):
+        common = ("--out-dir", cls.out, "--stamp-meta", cls.meta)
+        cls.run_code, cls.run_said = cls.den(den, "run", *common, "--mode", "export")
+        cls.began = re.findall(r"^==> (\w+)$", cls.run_said, re.M)
+        cls.day_one = cls.snapshot()
+        cls.check_one = cls.check()
+        cls.go_live()
+
+        page = cls.upstreams.pages["en"][LEDGER]
+        page["revid"] += 1
+        page["wikitext"] = page["wikitext"].replace("rows to the mainland", "sails to the mainland")
+        cls.day_two_code, cls.day_two_said = cls.den(den, "run", *common, "--mode", "export", "--refresh")
+        cls.day_two = cls.snapshot()
+        with open(cls.meta, encoding="utf-8") as fh:
+            cls.day_two_meta = json.load(fh)
+        cls.check_two = cls.check()
+        cls.facts_refusal = cls.den(den, "stage", "facts", *common, "--dataset-version", fixture.GIVEN_VERSION)
+
+    @classmethod
+    def check(cls):
+        """`den stage publish --plan`, from outside the process: the publisher is a subprocess whose output
+        is the gates' verdicts, and nothing it does goes near the network."""
+        done = subprocess.run([sys.executable, os.path.join(fixture.HERE, "den"), "stage", "publish",
+                               "--out-dir", cls.out, "--plan"], capture_output=True, text=True, cwd=fixture.HERE)
+        return done.returncode, done.stdout + done.stderr
+
+    @classmethod
+    def snapshot(cls):
+        with open(cls.meta, encoding="utf-8") as fh:
+            meta = json.load(fh)
+        with open(os.path.join(cls.out, artifacts.EMBED_LABELS.filename), encoding="utf-8") as fh:
+            embedded = [json.loads(line) for line in fh if line.strip()]
+        return {"version": meta["datasetVersion"], "storeSha256": meta.get("storeSha256"),
+                "embedded": [f"{r['mediaType']}:{r['tmdbId']}" for r in embedded]}
+
+    @classmethod
+    def go_live(cls):
+        """What a publish of day one leaves on `data-latest`: the manifest as the check left it, pruned and
+        stamped with `maxBatchId`. Copied rather than uploaded, which is all the next day reads of it."""
+        live = os.path.join(cls.out, artifacts.PUBLISHED_META.filename)
+        os.makedirs(os.path.dirname(live), exist_ok=True)
+        shutil.copy(cls.meta, live)
+
+    def finalized(self):
+        """Day two's manifest before its check pruned it, as a publish does."""
+        return self.day_two_meta
+
+    def gates(self, check):
+        code, said = check
+        self.assertIn("award merge gate: 7 merges applied, none stale", said)
+        self.assertIn("plot-vector gate: all", said)
+        self.assertIn("wikidata item gate: every contested title has its item chosen", said)
+        self.assertIn("alias gate: the store applied", said)
+        self.assertIn(UNSCORABLE, said, f"refused by a gate before the quality gate:\n{said[-3000:]}")
+        self.assertEqual(code, 1)
+        self.assertNotIn(READY, said)
+
+    # ---- the gates -----------------------------------------------------------------------------------
+
+    def test_day_one_passes_every_gate_the_fixture_can(self):
+        self.gates(self.check_one)
+        self.assertIn("left to the publish", self.check_one[1], "no live manifest on day one")
+
+    def test_day_two_is_gated_against_the_live_dataset(self):
+        self.gates(self.check_two)
+        self.assertNotIn("left to the publish", self.check_two[1])
+
+    # ---- what day two did ---------------------------------------------------------------------------
+
+    def plan(self):
+        with open(os.path.join(self.out, "changes", "plan.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_day_two_ran(self):
+        self.assertEqual(self.day_two_code, 0, f"day two refused:\n{self.day_two_said[-3000:]}")
+
+    def test_the_change_set_is_the_edit(self):
+        plan = self.plan()
+        self.assertEqual(plan["baseline"]["datasetVersion"], self.day_one["version"])
+        self.assertEqual((plan["added"], plan["changed"], plan["withdrawn"]), ([], {EDITED: ["plot"]}, {}))
+
+    def test_only_the_changed_title_is_embedded_again(self):
+        again = self.day_two["embedded"][len(self.day_one["embedded"]):]
+        self.assertEqual(self.day_two["embedded"][:len(self.day_one["embedded"])], self.day_one["embedded"])
+        self.assertEqual(again, [EDITED])
+
+    def test_a_new_generation_is_built(self):
+        self.assertNotEqual(self.day_two["version"], self.day_one["version"])
+        self.assertNotEqual(self.day_two["storeSha256"], self.day_one["storeSha256"])
+
+
+if __name__ == "__main__":
+    unittest.main()

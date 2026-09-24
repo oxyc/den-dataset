@@ -40,7 +40,7 @@ import subprocess
 import sys
 import time
 
-from . import artifacts, finalize, jsonbytes
+from . import artifacts, changes, finalize, jsonbytes, refresh
 from .contract import REPO, StageError, bind
 from lib import cache as caching
 from lib import http, wikidata
@@ -72,7 +72,7 @@ PACE = 0.3
 
 #: `labels-t02.json` is `--labels` here: the plot vectors' titles, which `finalize` wrote just before this
 #: stage. The manifest is read for the dataset version, which names every file this stage writes.
-INPUTS = (artifacts.VECTOR_LABELS.called("labels"), artifacts.DELTA_IDS, artifacts.MANIFEST)
+INPUTS = (artifacts.VECTOR_LABELS.called("labels"), artifacts.DELTA_IDS, artifacts.MANIFEST, artifacts.CHANGES)
 #: The two passes, in the order the merge takes them — which is not cosmetic: the FIRST file wins a
 #: collision, and swapped, every overlapping title would publish as vectorless.
 OUTPUTS = (artifacts.CORPUS_FACTS, artifacts.DELTA_FACTS, artifacts.FACTS)
@@ -572,8 +572,13 @@ def ambiguous_keys(records):
                   if r.get("wikidataCandidates") and not r.get("wikidataItem"))
 
 
-def scrape(keys, has_vector, directory, version, out, cache, pace=PACE):
-    """One pass: `keys` scraped into `out`, checkpointed in `directory`. Returns how many ids it skipped."""
+def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, again=frozenset()):
+    """One pass: `keys` scraped into `out`, checkpointed in `directory`. Returns how many ids it skipped.
+
+    `again` are titles to ask afresh although the checkpoint holds them — the change set's titles now
+    answered for by another Wikidata item, and the weekly slice (`pipeline/changes.py`). They are dropped
+    from the checkpoint and asked with the cache's reads off: an answer cached under the same query text is
+    the one being checked. New entities they name are named as any are; a name already known is kept."""
     fields_path = os.path.join(directory, "facts-fields.json")
     fields = checkpoint(fields_path)
     types = by_type(keys)
@@ -594,10 +599,20 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE):
         del fields[key]
     if merged:
         say(f"facts: re-scraping {len(merged)} checkpointed contested titles scraped under another choice")
+    listed = sorted(key for key in set(again) & set(requested) if key in fields)
+    for key in listed:
+        del fields[key]
+    if listed:
+        say(f"facts: asking {len(listed)} checkpointed titles again, as the change set lists them")
     if fields:
         say(f"resuming from {len(fields)} checkpointed titles")
         types = {kind: [i for i in ids if f"{kind}:{i}" not in fields] for kind, ids in types.items()}
+    fresh = {kind: [i for i in ids if f"{kind}:{i}" in again] for kind, ids in types.items()}
+    types = {kind: [i for i in ids if f"{kind}:{i}" not in again] for kind, ids in types.items()}
     skipped = scrape_batches(fields, types, cache, pace, lambda: save(fields_path, fields), resolved, excluded)
+    if any(fresh.values()):
+        skipped += scrape_batches(fields, fresh, refresh.Fresh(cache) if cache is not None else None, pace,
+                                  lambda: save(fields_path, fields), resolved, excluded)
     refresh_collapsed_franchises(fields, cache, lambda: save(fields_path, fields), excluded)
     backfill_properties(fields, cache, lambda: save(fields_path, fields), pace, excluded)
 
@@ -664,11 +679,13 @@ def run(ctx, cache=None):
     labels = ctx.require(BOUND[artifacts.VECTOR_LABELS.name].artifact)
     delta = ctx.require(artifacts.DELTA_IDS)
     cache = wikidata.cache_for() if cache is None else cache
+    again = changes.listed(ctx, "items", "revisit")
     skipped = 0
     for has_vector, keys, artifact in ((True, keys_from_labels(labels), artifacts.CORPUS_FACTS),
                                        (False, keys_from_ids(delta), artifacts.DELTA_FACTS)):
         directory = os.path.join(ctx.out_dir, CHECKPOINTS[has_vector])
-        skipped += scrape(keys, has_vector, directory, ctx.dataset_version, ctx.path(artifact), cache)
+        skipped += scrape(keys, has_vector, directory, ctx.dataset_version, ctx.path(artifact), cache,
+                          again=again)
     if skipped:
         raise StageError(f"facts: {skipped} ids were skipped after their batches failed, so the scrape is "
                          f"not finished and the merge would publish without them. Everything else is "

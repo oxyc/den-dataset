@@ -25,7 +25,7 @@ sys.path.insert(0, REPO)
 
 import pipeline  # noqa: E402
 from lib import http  # noqa: E402
-from pipeline import artifacts, changes, enrich, refresh  # noqa: E402
+from pipeline import artifacts, changes, consolidate_corpus, enrich, refresh  # noqa: E402
 from pipeline.contract import Context, StageError  # noqa: E402
 
 import den_run_test as fixture  # noqa: E402  — the offline upstreams, not its test cases
@@ -109,6 +109,62 @@ class Rules(unittest.TestCase):
         self.assertEqual((plan["counts"]["revised"], plan["counts"]["unchanged"]), (1, 0))
         self.assertEqual(out.read("keys.txt"), [f"movie:{n}" for n in (1, 2, 3, 4, 5)])
         self.assertEqual(out.read("withdrawn.txt"), ["movie:7"])
+
+    def tombstones(self, out):
+        path = os.path.join(out.out, artifacts.WITHDRAWN.filename)
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as fh:
+            return [json.loads(line) for line in fh if line.strip()]
+
+    def test_a_title_that_lost_its_plot_is_tombstoned_once(self):
+        out = Batches(self)
+        out.publish(out.add(row(1), row(2)))
+        out.add(row(1, plot=None))
+        out.plan()
+        out.plan()
+        stones = self.tombstones(out)
+        self.assertEqual([(t["mediaType"], t["tmdbId"], t["reason"]) for t in stones],
+                         [("movie", 1, "lost its plot since live (den stage changes)")],
+                         "planned twice against one live dataset, tombstoned once")
+        self.assertEqual(out.read("tombstoned.txt"), [], "the second plan tombstoned nothing new")
+        # The corpus join reads the file it wrote.
+        self.assertIn("movie:1", consolidate_corpus.read_withdrawals(
+            os.path.join(out.out, artifacts.WITHDRAWN.filename)))
+
+    def test_a_title_that_regains_its_plot_before_the_next_publish_is_classified_again(self):
+        """Its tombstone took the rows the live dataset shipped for it; the same text back is not "no
+        change", it is a title with no judgements until a run answers it again."""
+        out = Batches(self)
+        out.publish(out.add(row(1), row(2)))
+        out.add(row(1, plot=None))
+        out.plan()
+        out.add(row(1))
+        plan = out.plan()
+        self.assertEqual((plan["changed"], plan["withdrawn"]), ({"movie:1": ["regained"]}, {}))
+        self.assertEqual((plan["counts"]["unchanged"], plan["counts"]["revised"]), (1, 0))
+        self.assertEqual(out.read("keys.txt"), ["movie:1"])
+        out.publish(out.number, version="next")
+        self.assertEqual(out.plan()["changed"], {}, "a later live version is past the tombstone")
+
+    def test_a_title_withdrawn_once_already_is_not_tombstoned_again(self):
+        out = Batches(self)
+        out.publish(out.add(row(1)))
+        out.add(row(1, plot=None))
+        out.plan()
+        out.add(row(1, plot="back"))
+        out.publish(out.number, version="next")
+        out.add(row(1, plot=None))
+        plan = out.plan()
+        self.assertEqual((plan["withdrawn"], plan["counts"]["withdrawnBefore"]), ({"movie:1": "lostPlot"}, 1))
+        self.assertEqual(len(self.tombstones(out)), 1)
+
+    def test_a_first_generation_tombstones_nothing(self):
+        out = Batches(self)
+        out.add(row(1))
+        out.add(row(1, plot=None))
+        self.assertEqual(out.plan()["withdrawn"], {})
+        self.assertEqual(self.tombstones(out), [])
 
     def test_an_unknown_revision_or_item_is_not_a_change(self):
         """The Enterprise path records no revision, and older batches no item. An unknown proves nothing."""
@@ -300,6 +356,8 @@ class OnTheFixtureCorpus(unittest.TestCase):
         plan = self.plan()
         self.assertEqual((plan["added"], plan["changed"]), ([], {}))
         self.assertEqual(plan["withdrawn"], {"movie:900001": "lostPlot"})
+        with open(os.path.join(self.out, artifacts.WITHDRAWN.filename), encoding="utf-8") as fh:
+            self.assertEqual([json.loads(line)["tmdbId"] for line in fh], [900001])
 
 
 if __name__ == "__main__":

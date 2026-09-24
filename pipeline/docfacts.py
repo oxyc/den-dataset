@@ -28,7 +28,7 @@ import json
 import os
 import sys
 
-from . import artifacts, genres_moods
+from . import artifacts, changes, genres_moods, refresh
 from .contract import StageError
 from lib import cache as caching
 from lib import http, wikidata
@@ -53,7 +53,7 @@ CONCURRENCY = 3
 
 #: The titles to scrape are the ones with genres & moods: the embed pass composes a document for those and
 #: no others, and this run's `genres_moods` stage has just written them.
-INPUTS = (artifacts.GENRES_MOODS,)
+INPUTS = (artifacts.GENRES_MOODS, artifacts.CHANGES)
 
 OUTPUTS = (artifacts.DOC_FACTS,)
 
@@ -143,24 +143,32 @@ def run(ctx, cache=None):
         if found.get("candidates") and key in rows and wikidata.provenance(found) != {
                 name: rows[key][name] for name in ("wikidataItem", "wikidataCandidates") if name in rows[key]}:
             del rows[key]
+    # The change set's titles now answered for by another item, and the weekly slice, are asked again with
+    # the cache's reads off (`pipeline/changes.py`): the answer cached under the same query is the old one.
+    again = {key for key in changes.listed(ctx, "items", "revisit") if key in rows}
+    for key in again:
+        del rows[key]
     before = len(rows)
     todo = outstanding(labels, rows)
     wanted = sum(len(ids) for ids in todo.values())
-    print(f"  doc-facts: {before} cached, {wanted} to fetch", file=sys.stderr)
-
+    print(f"  doc-facts: {before} cached, {wanted} to fetch ({len(again)} of them again)", file=sys.stderr)
+    fresh = refresh.Fresh(cache) if cache is not None else None
+    work = [(media, ids, cache) for media, ids in batches(
+        {media: [i for i in ids if f"{media}:{i}" not in again] for media, ids in todo.items()})]
+    work += [(media, ids, fresh) for media, ids in batches(
+        {media: [i for i in ids if f"{media}:{i}" in again] for media, ids in todo.items()})]
     done = 0
-    work = batches(todo)
     with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
         for index in range(0, len(work), CONCURRENCY):
             group = work[index:index + CONCURRENCY]
             try:
-                answers = list(pool.map(lambda job: wikidata.doc_facts(job[1], job[0], cache,
+                answers = list(pool.map(lambda job: wikidata.doc_facts(job[1], job[0], job[2],
                                                                        excluded=excluded.get(job[0])), group))
             except (wikidata.WikidataError, http.HTTPError) as refusal:
                 raise StageError(
                     f"docfacts: the scrape stopped at {done}/{wanted} ({refusal}). Everything it had "
                     f"already paid for is in {path}; re-run to continue from there.") from None
-            for (media, ids), found in zip(group, answers):
+            for (media, ids, _cache), found in zip(group, answers):
                 for tmdb_id in ids:
                     fact = found.get(tmdb_id) or {}
                     rows[f"{media}:{tmdb_id}"] = {"directors": fact.get("directors") or [],

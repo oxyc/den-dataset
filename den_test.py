@@ -35,8 +35,8 @@ class Listing(unittest.TestCase):
         # labels file the facts passes scrape the ids of, the merged facts before the franchises grouped
         # from them and the corpus that joins them, the corpus before the store built from it, and the
         # publish that uploads the store is last.
-        expected = ("worklist", "fetch", "changes", "articles", "classify", "genres_moods", "docfacts", "embed",
-                    "finalize", "facts", "franchises", "corpus", "store", "publish")
+        expected = ("worklist", "fetch", "changes", "articles", "classify", "critique", "genres_moods",
+                    "docfacts", "embed", "finalize", "facts", "franchises", "corpus", "store", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
