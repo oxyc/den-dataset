@@ -193,6 +193,9 @@ class Context:
     #: revisions, reports the counts, and fetches and writes nothing — the drain included. See
     #: `pipeline/refresh.py`.
     refresh: bool = False
+    #: The change set adds this week's slice of a cycle this many weeks long (`pipeline/changes.py`), so a
+    #: weekly run revisits the whole corpus once per cycle. None adds no slice.
+    revisit_weeks: int | None = None
 
     def _filename(self, artifact):
         """The declared filename with the dataset version in it, or a refusal when it needs one and the run

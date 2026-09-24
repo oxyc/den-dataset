@@ -180,6 +180,30 @@ REFRESH = Artifact(
     required=False,
 )
 
+#: The live dataset's manifest — `dataset.meta.json` as the `data-latest` release carries it now, copied into
+#: the out-dir by whoever runs the change set (`gh release download data-latest -p dataset.meta.json -D
+#: <out-dir>/published`). Its `maxBatchId` names the enriched batches that dataset was built from, which is
+#: the whole baseline `pipeline/changes.py` diffs against. Its own directory, because the out-dir's
+#: `dataset.meta.json` is the NEXT generation's, rewritten by `finalize` during the run. Optional: without
+#: it there is no live dataset to diff against, and every title is new.
+PUBLISHED_META = Artifact(
+    name="published_meta",
+    filename="published/dataset.meta.json",
+    producer="pipeline/publish-dataset.sh",
+    how="gh release download data-latest -p dataset.meta.json -D <out-dir>/published",
+    required=False,
+)
+
+#: The change set: what moved since the live dataset (`pipeline/changes.py`). `plan.json`, and the key lists
+#: the stages after it take — `keys.txt` (added and changed), `withdrawn.txt` (lost their plot, for
+#: `consolidate_corpus.py withdraw`) and, with `--revisit-weeks`, `revisit.txt`. Rewritten whole each run:
+#: it is derived from the batches and the live manifest, so there is nothing in it to lose.
+CHANGES = Artifact(
+    name="changes",
+    filename="changes",
+    dedicated=False,
+)
+
 #: Wikidata's director (P57) and genre (P136) per title: the two clauses of the lean document that used to
 #: come from TMDB. Scraped separately from the embed pass because it is ~770 SPARQL requests.
 DOC_FACTS = Artifact(
@@ -367,7 +391,7 @@ RELEASE = Artifact(
 
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
              COMBINED_MANIFEST, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST, GENRES_MOODS,
-             DELTA, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH, DOC_FACTS, PLOT_TRANSLATIONS,
+             DELTA, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH, PUBLISHED_META, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS,
              EMBED_LABELS, EMBED_VECTORS, COMPOSITION, EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS,
              DELTA_IDS, DELTA_FACTS, FACTS, VECTORS, VECTOR_LABELS, FINALIZE_REPORT,
              PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST, RELEASE)

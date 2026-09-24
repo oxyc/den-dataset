@@ -40,6 +40,8 @@ Options (both run forms):
                                    Wikipedia article changed since the revision it records, and lists the
                                    titles whose plot changed or went under out/refresh/<stamp>/. With
                                    --plan it reports the counts and fetches nothing
+    --revisit-weeks N              the change set also lists this week's slice of a cycle N weeks long, so
+                                   a weekly run revisits every title once per cycle
     --set NAME=PATH                point one artifact at a path outright, repeatable — repeat the same
                                    NAME to name every shard of a set
 
@@ -109,7 +111,7 @@ def context(args):
                             regional_wikipedia_floor=args.regional_wikipedia_floor, plan=args.plan,
                             spend=args.spend, dump_docs=args.dump_docs or "",
                             reembed_keys=args.reembed_keys or "", reembed_changed=args.reembed_changed,
-                            refresh=args.refresh)
+                            refresh=args.refresh, revisit_weeks=args.revisit_weeks)
 
 
 def execute(module, ctx):
@@ -164,6 +166,8 @@ def main(argv=None):
         sub.add_argument("--refresh", action="store_true",
                          help="the fetch stage re-fetches every grounded title whose Wikipedia article "
                               "changed since its recorded revision; with --plan it only counts them")
+        sub.add_argument("--revisit-weeks", type=int, metavar="N",
+                         help="the change set also lists this week's slice of an N-week cycle")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")
         return sub
 

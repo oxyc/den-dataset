@@ -250,6 +250,21 @@ The first refresh of an out-dir also records a revision for titles the Enterpris
 none): where the cached action-API body yields exactly the stored text, that body's revision is recorded;
 the rest count as unknown and are re-fetched once. On out-repass that is ~9,700 recorded and ~7,300 re-fetched.
 
+## The change set
+
+`./den stage changes --out-dir out` lists what moved since the live dataset: titles added, changed and
+withdrawn, under `out/changes/` (`pipeline/changes.py` says what counts as each). It needs the live manifest
+beside the out-dir's own, because its `maxBatchId` says which batches the live dataset was built from:
+
+```sh
+gh release download data-latest -p dataset.meta.json -D out/published --clobber
+./den stage changes --out-dir out [--revisit-weeks 8]
+```
+
+Without `out/published/dataset.meta.json` every title is new, which is right for a fresh out-dir and
+wrong for any other: check that `plan.json` names a `baseline`. `--revisit-weeks N` also lists this week's
+slice of an N-week cycle (`revisit.txt`), so a weekly run revisits the whole corpus once per cycle.
+
 ## Reading an enrich report
 
 A title is admitted when its TMDB vote count clears its TMDB floor **or** the number of Wikipedias with an
