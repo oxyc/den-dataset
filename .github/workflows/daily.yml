@@ -1,0 +1,143 @@
+name: daily
+
+# The daily job (oxyc/den-dataset#27): one day of the pipeline over the out-dir the live dataset was built
+# from, ending at "ready to publish". It runs `./den daily` and nothing else — what a day is, which stage a
+# missing credential skips and what it refuses to buy are in `pipeline/daily.py`, and `den_daily_test.py` runs
+# the same command over the fixture corpus in CI. The weekly run adds a rolling slice of older titles.
+#
+# NOTHING IS SIGNED OR PUBLISHED HERE. The signing key lives only on the owner's machine. A ready run uploads
+# the store, the manifest and `checked.json` as an artifact, and `docs/OPERATE.md` ("Publishing a daily run")
+# is the one command that signs and publishes those bytes.
+#
+# OFF UNTIL SWITCHED ON: the schedule runs only when the repository variable DEN_DAILY_ENABLED is `true`, so
+# merging this starts nothing. What it reads, all by name and none required:
+#
+#   secrets  TMDB_API_KEY                       the delta worklist; without it no new titles are discovered
+#            TYPESAFE_API_KEY                   the classify, critique and genres & moods answers (with spend)
+#            WIKIMEDIA_ENTERPRISE_USERNAME/_PASSWORD   optional plot source
+#            DEN_EMBED_URL                      the den-embed that SERVES queries; without it nothing is embedded
+#   vars     DEN_DAILY_ENABLED                  `true` to run on the schedule
+#            DEN_DAILY_SPEND                    `true` to let the scheduled run buy the day's answers
+#            DEN_DAILY_RUNS_ON                  a JSON runner label list, e.g. ["self-hosted","den"]; default
+#                                               ubuntu-latest
+#            DEN_OUT_DIR / DEN_CACHE_DIR        persistent paths on a self-hosted runner; without them the
+#                                               out-dir and the response cache are carried in the Actions cache
+#            DEN_REVISIT_WEEKS                  the weekly slice's cycle, default 8
+on:
+  schedule:
+    - cron: "23 3 * * *"   # daily
+    - cron: "47 4 * * 1"   # weekly: the daily run plus this week's revisit slice
+  workflow_dispatch:
+    inputs:
+      revisit_weeks:
+        description: "Revisit this week's slice of an N-week cycle (empty: no slice)"
+        required: false
+        default: ""
+      spend:
+        description: "Buy the day's classify, critique and genres & moods answers"
+        type: boolean
+        default: false
+
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  daily:
+    if: github.event_name == 'workflow_dispatch' || vars.DEN_DAILY_ENABLED == 'true'
+    runs-on: ${{ fromJSON(vars.DEN_DAILY_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 360
+    env:
+      OUT: ${{ vars.DEN_OUT_DIR || 'out' }}
+      DEN_CACHE_DIR: ${{ vars.DEN_CACHE_DIR || '.cache' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # Without persistent paths the out-dir and the response cache ride in the Actions cache, one entry per
+      # run, restored from the newest. An out-dir that did not come back is not a first generation: the
+      # change set refuses a live manifest whose batches this out-dir does not hold.
+      - name: Restore the out-dir
+        if: vars.DEN_OUT_DIR == ''
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.OUT }}
+            ${{ env.DEN_CACHE_DIR }}
+          key: den-state-${{ github.run_id }}
+          restore-keys: den-state-
+      # The live manifest the change set and the gates compare with. Public, read with the job's own token.
+      - name: The live manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$OUT/published"
+          if ! gh release download data-latest -R "$GITHUB_REPOSITORY" -p dataset.meta.json \
+                 -D "$OUT/published" --clobber 2> download.err; then
+            if grep -qiE 'release not found|no assets|not found' download.err; then
+              echo "no live dataset yet: this run is a first generation"
+            else
+              cat download.err >&2; exit 1
+            fi
+          fi
+      - name: The day
+        id: day
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          WIKIMEDIA_ENTERPRISE_USERNAME: ${{ secrets.WIKIMEDIA_ENTERPRISE_USERNAME }}
+          WIKIMEDIA_ENTERPRISE_PASSWORD: ${{ secrets.WIKIMEDIA_ENTERPRISE_PASSWORD }}
+          DEN_EMBED_URL: ${{ secrets.DEN_EMBED_URL }}
+          WEEKS: ${{ github.event_name == 'workflow_dispatch' && inputs.revisit_weeks || (github.event.schedule == '47 4 * * 1' && (vars.DEN_REVISIT_WEEKS || '8') || '') }}
+          # format() so a dispatch's `false` is a non-empty string and is not replaced by the schedule's variable.
+          SPEND: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.spend) || format('{0}', vars.DEN_DAILY_SPEND == 'true') }}
+        run: |
+          args=(--out-dir "$OUT")
+          [ -n "$WEEKS" ] && args+=(--revisit-weeks "$WEEKS")
+          [ "$SPEND" = "true" ] && args+=(--spend)
+          ./den daily "${args[@]}"
+      - name: Report
+        if: always()
+        run: |
+          [ -f "$OUT/daily-report.md" ] && cat "$OUT/daily-report.md" >> "$GITHUB_STEP_SUMMARY"
+          python3 - "$OUT" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, os, sys
+          path = os.path.join(sys.argv[1], "checked.json")
+          print("store=" + (json.load(open(path))["storeFile"] if os.path.exists(path) else ""))
+          PY
+        id: report
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: daily-report-${{ github.run_id }}
+          path: |
+            ${{ env.OUT }}/daily-report.json
+            ${{ env.OUT }}/daily-report.md
+            ${{ env.OUT }}/changes/plan.json
+          if-no-files-found: ignore
+          retention-days: 30
+      # Ready to publish: the exact bytes every gate passed, and the record `--checked` holds them to.
+      - name: Upload the dataset, ready to publish
+        if: steps.day.outcome == 'success' && steps.report.outputs.store != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: dataset-${{ github.run_id }}
+          path: |
+            ${{ env.OUT }}/${{ steps.report.outputs.store }}
+            ${{ env.OUT }}/dataset.meta.json
+            ${{ env.OUT }}/checked.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Save the out-dir
+        if: always() && vars.DEN_OUT_DIR == ''
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.OUT }}
+            ${{ env.DEN_CACHE_DIR }}
+          key: den-state-${{ github.run_id }}

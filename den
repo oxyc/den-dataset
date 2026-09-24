@@ -4,6 +4,8 @@
     den stages                     what runs, in what order, and what each stage reads and writes
     den stage <name> [options]     run one
     den run [options]              run them all, in order
+    den daily [options]            one day of the job over the live dataset's out-dir, ending at "ready
+                                   to publish" (pipeline/daily.py)
     den genres-moods prepare|merge a hand enrichment of genres & moods by labelling agents (see AGENTS.md)
 
 Options (both run forms):
@@ -62,7 +64,7 @@ if sys.version_info < (3, 11):
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pipeline  # noqa: E402
-from pipeline import genres_moods_enrich  # noqa: E402
+from pipeline import daily, genres_moods_enrich  # noqa: E402
 
 
 def describe():
@@ -177,6 +179,7 @@ def main(argv=None):
     with_options(commands.add_parser("stage", help="run one stage")).add_argument("name")
 
     genres_moods_enrich.register(commands)
+    daily.register(commands)
 
     args = parser.parse_args(argv)
     try:
@@ -184,6 +187,8 @@ def main(argv=None):
             return describe()
         if args.command == "genres-moods":
             return genres_moods_enrich.run(args)
+        if args.command == "daily":
+            return daily.run(args)
         ctx = context(args)
         if args.command == "stage":
             chosen = [pipeline.stage(args.name)]

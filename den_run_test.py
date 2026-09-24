@@ -630,12 +630,8 @@ class DenRun(unittest.TestCase):
         with gzip.open(self.path(artifacts.CORPUS), "rt", encoding="utf-8") as fh:
             return [json.loads(line) for line in fh if line.strip()]
 
-    def finalized(self):
-        """The manifest as `finalize` and the store wrote it — before any publish prunes it."""
-        return read_json(self.meta)
-
     def test_the_manifest_describes_the_labels_and_the_vectors_it_ships_beside(self):
-        meta = self.finalized()
+        meta = read_json(self.meta)
         _count, dims, blob_keys, _blob, _base = vector_blob.read(self.path(artifacts.VECTORS))
         self.assertEqual(set(blob_keys), self.labels(), "every labelled title has exactly one plot vector")
         self.assertEqual(meta["count"], len(self.labels()))

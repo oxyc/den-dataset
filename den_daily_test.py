@@ -30,6 +30,7 @@ import sys
 import unittest
 
 import den_run_test as fixture
+import pipeline
 
 from pipeline import artifacts
 
@@ -56,10 +57,8 @@ class DenDaily(fixture.DenRun):
         page = cls.upstreams.pages["en"][LEDGER]
         page["revid"] += 1
         page["wikitext"] = page["wikitext"].replace("rows to the mainland", "sails to the mainland")
-        cls.day_two_code, cls.day_two_said = cls.den(den, "run", *common, "--mode", "export", "--refresh")
+        cls.day_two_code, cls.day_two_said = cls.den(den, "daily", "--out-dir", cls.out, "--mode", "export")
         cls.day_two = cls.snapshot()
-        with open(cls.meta, encoding="utf-8") as fh:
-            cls.day_two_meta = json.load(fh)
         cls.check_two = cls.check()
         cls.facts_refusal = cls.den(den, "stage", "facts", *common, "--dataset-version", fixture.GIVEN_VERSION)
 
@@ -88,9 +87,17 @@ class DenDaily(fixture.DenRun):
         os.makedirs(os.path.dirname(live), exist_ok=True)
         shutil.copy(cls.meta, live)
 
-    def finalized(self):
-        """Day two's manifest before its check pruned it, as a publish does."""
-        return self.day_two_meta
+    def test_the_manifest_describes_the_labels_and_the_vectors_it_ships_beside(self):
+        """`den daily` ends with the check, which prunes the manifest as a publish does, so what `finalize`
+        declared about the labels and the blob is gone from it. What a publish keeps still has to hold."""
+        meta = fixture.read_json(self.meta)
+        _count, dims, blob_keys, _blob, _base = fixture.vector_blob.read(self.path(artifacts.VECTORS))
+        self.assertEqual(set(blob_keys), self.labels())
+        self.assertEqual(meta["dims"], dims)
+        self.assertEqual(meta["embeddingSpace"], self.canary["spaceId"])
+        self.assertEqual(meta["embedderMaxTokens"], fixture.EmbedStandIn.HEALTH["max_tokens"])
+        self.assertNotIn("labelsFile", meta, "pruned, as a publish prunes it")
+        self.assertIsInstance(meta["maxBatchId"], int, "stamped, for the next day's change set")
 
     def gates(self, check):
         code, said = check
@@ -118,8 +125,38 @@ class DenDaily(fixture.DenRun):
         with open(os.path.join(self.out, "changes", "plan.json"), encoding="utf-8") as fh:
             return json.load(fh)
 
-    def test_day_two_ran(self):
-        self.assertEqual(self.day_two_code, 0, f"day two refused:\n{self.day_two_said[-3000:]}")
+    def report(self):
+        with open(os.path.join(self.out, "daily-report.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_day_two_is_one_command_that_runs_every_stage_it_may(self):
+        """`den daily`: every stage but the two that buy, the check at the end — refused, on the fixture, by
+        the quality gate alone (`test_day_two_is_gated_against_the_live_dataset`)."""
+        ran = self.report()["ran"]
+        self.assertEqual(ran, [name for name in pipeline.STAGES if name not in ("classify", "critique", "publish")],
+                         self.day_two_said[-3000:])
+        self.assertEqual(self.day_two_code, 1)
+        self.assertFalse(self.report()["ready"])
+        self.assertIn("publish", self.report()["verdict"])
+
+    def test_the_report_names_what_moved_and_what_was_skipped(self):
+        report = self.report()
+        self.assertEqual(report["baseline"]["datasetVersion"], self.day_one["version"])
+        self.assertEqual((report["added"], report["changed"]), ([], {EDITED: ["plot"]}))
+        self.assertEqual(report["datasetVersion"], self.day_two["version"])
+        self.assertEqual([s["stage"] for s in report["skipped"]], ["classify", "critique", "genres_moods (ask)"])
+        self.assertEqual(report["spend"], {"inputTokens": 0, "usd": 0.0})
+        with open(os.path.join(self.out, "daily-report.md"), encoding="utf-8") as fh:
+            summary = fh.read()
+        self.assertIn(f"{EDITED} (plot)", summary)
+        self.assertIn("Not ready", summary)
+
+    def test_the_delta_ids_are_written_by_the_documented_rule(self):
+        """The live facts' titles and the ids already listed, less what the new labels carry."""
+        with open(os.path.join(self.out, artifacts.DELTA_IDS.filename), encoding="utf-8") as fh:
+            ids = set(fh.read().split())
+        self.assertFalse(ids & self.labels())
+        self.assertIn("tv:900006", ids, "the premise-only title with no plot vector")
 
     def test_the_change_set_is_the_edit(self):
         plan = self.plan()
