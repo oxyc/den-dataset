@@ -1011,6 +1011,85 @@ else
 fi
 teardown
 
+# --- publishing what a --check passed elsewhere (oxyc/den-dataset#27) ------------------------------------
+#
+# The daily job ends at `--check` and uploads the store, the manifest and `checked.json` as its artifact;
+# the owner publishes those bytes with `--checked`. Run once, not per mode: `--checked` is its own entry.
+
+if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
+  # A checked artifact: the check run in $DIR, its three files copied to $WORK/artifact.
+  checked_artifact() {
+    mkdir -p "$DIR/published"
+    [ -f "$PUBLISHED_META" ] && cp "$PUBLISHED_META" "$DIR/published/dataset.meta.json"
+    PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" --check > "$WORK/check.log" 2>&1 \
+      || { bad "the check refused the fixture: $(tail -3 "$WORK/check.log")"; return 1; }
+    ARTIFACT="$WORK/artifact"
+    mkdir -p "$ARTIFACT"
+    cp "$DIR"/den-*.store "$DIR/dataset.meta.json" "$DIR/checked.json" "$ARTIFACT/"
+  }
+  run_checked() { PATH="$BIN:$PATH" bash "$PUBLISH" "$ARTIFACT" --checked > "$WORK/out.log" 2> "$WORK/err.log"; }
+
+  setup
+  write_meta
+  publish_baseline
+  if checked_artifact && run_checked; then
+    [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store dataset.meta.json " ] \
+      && ok "--checked publishes the store and the meta the check passed, meta last" \
+      || bad "--checked uploaded $(tr '\n' ' ' < "$UPLOADS")"
+    signature_verifies "$ARTIFACT/dataset.meta.json" \
+      && ok "…signed" || bad "--checked published an unsigned or unverifiable meta"
+    grep -q "quality gate: run by the check" "$WORK/out.log" \
+      && ok "…and says which gates the check ran rather than skipping them in silence" \
+      || bad "--checked did not say the quality gate ran in the check"
+  else
+    bad "--checked refused a checked artifact: $(tail -3 "$WORK/err.log")"
+  fi
+  teardown
+
+  for tamper in store meta record; do
+    setup
+    write_meta
+    publish_baseline
+    if checked_artifact; then
+      case "$tamper" in
+        store)  printf 'x' >> "$ARTIFACT"/den-*.store ;;
+        meta)   python3 - "$ARTIFACT/dataset.meta.json" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1])); meta["datasetVersion"] = "bbbbbbbbbbbb"; json.dump(meta, open(sys.argv[1], "w"))
+PY
+                ;;
+        record) rm "$ARTIFACT/checked.json" ;;
+      esac
+      if run_checked; then
+        bad "--checked published an artifact whose $tamper changed after the check"
+      else
+        grep -qE "not the bytes the check passed|no checked.json" "$WORK/err.log" \
+          && ok "--checked refuses an artifact whose $tamper is not what the check passed" \
+          || bad "refused, but not for the $tamper: $(tail -3 "$WORK/err.log")"
+      fi
+      [ ! -s "$UPLOADS" ] && ok "…and uploads nothing" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s)"
+    fi
+    teardown
+  done
+
+  # The release moved after the check: a later generation with more records went live. The comparison
+  # against the release as it is NOW still refuses the shrink.
+  setup
+  write_meta
+  if checked_artifact; then
+    write_meta aaaaaaaaaaab 20
+    publish_baseline
+    if run_checked; then
+      bad "--checked published a store with fewer records than the release carries now"
+    else
+      grep -q "would lose records" "$WORK/err.log" \
+        && ok "--checked compares against the release as it is at publish time, not at check time" \
+        || bad "refused, but not for the shrink: $(tail -3 "$WORK/err.log")"
+    fi
+  fi
+  teardown
+fi
+
 echo ""
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

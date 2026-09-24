@@ -12,6 +12,7 @@
 #   python3 pipeline/build_store.py … --stamp-meta out/dataset.meta.json    # THE artifact
 #   pipeline/publish-dataset.sh [OUT_DIR] [--unsigned]       # default: ./out, then ./data
 #   pipeline/publish-dataset.sh OUT_DIR --check              # every gate; nothing signed, nothing uploaded
+#   pipeline/publish-dataset.sh ARTIFACT_DIR --checked       # what a --check passed: sign and publish it
 #
 # Requires `gh` authenticated with write access to the repo. The blobs are gitignored (large derived data),
 # so they live as release assets, never in git.
@@ -27,6 +28,14 @@
 # rewrites the manifest the way a publish does (the prune, the counts, the stamps), so what it leaves is what
 # a publish of that out-dir would sign.
 #
+# CHECKED: `--checked` publishes what a `--check` passed somewhere else — the daily job's artifact, which is
+# the store, the manifest and `checked.json`, with no out-dir beside them. It refuses unless the store and
+# the manifest are byte for byte what the check recorded, then runs every gate that reads only them or the
+# release AS IT IS NOW (the record counts, the store identity, the dropped files, the version, the
+# consistency, the alias, item and award gates), signs and uploads. The gates that read the out-dir (the
+# grounding and plot-vector census, the store inputs' ownership, the quality score) ran in the check, on
+# these bytes, and cannot run without it; each one says so here rather than being skipped in silence.
+#
 # Run it FROM THE REPO ROOT: the ownership guard resolves producer paths (`pipeline/…`) and
 # `git ls-files` against the working directory.
 set -euo pipefail
@@ -37,10 +46,12 @@ set -euo pipefail
 DIR=""
 unsigned=0
 check=0
+checked=0
 for arg in "$@"; do
   case "$arg" in
     --unsigned) unsigned=1 ;;
     --check) check=1 ;;
+    --checked) checked=1 ;;
     -*) echo "error: unknown option $arg" >&2; exit 2 ;;
     *) [ -z "$DIR" ] || { echo "error: one out-dir only (got $DIR and $arg)" >&2; exit 2; }; DIR="$arg" ;;
   esac
@@ -54,6 +65,7 @@ else
 fi
 
 REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
+[ "$check" -eq 1 ] && [ "$checked" -eq 1 ] && { echo "error: --check and --checked are two different runs" >&2; exit 2; }
 
 # The signing key is checked FIRST, before the prune rewrites the meta. Publishing unsigned used to be the
 # only thing this script did, silently, and a consumer that pins our key refuses an unsigned meta.
@@ -69,6 +81,32 @@ fi
 shopt -s nullglob
 meta="$DIR/dataset.meta.json"
 
+# Named `ran_by_check` so each gate that cannot run without the out-dir says it ran there, not "skipped".
+ran_by_check() { echo "$1: run by the check that passed these bytes ($DIR/checked.json)"; }
+if [ "$checked" -eq 1 ]; then
+  python3 - "$DIR" <<'PY' || { echo "       Nothing uploaded." >&2; exit 1; }
+import hashlib, json, os, sys
+d = sys.argv[1]
+path = os.path.join(d, "checked.json")
+if not os.path.exists(path):
+    sys.exit(f"error: no checked.json in {d} — --checked publishes only what a --check passed")
+record = json.load(open(path))
+digest = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+meta = json.load(open(os.path.join(d, "dataset.meta.json")))
+store = os.path.join(d, record.get("storeFile") or "?")
+problems = []
+if digest(os.path.join(d, "dataset.meta.json")) != record.get("metaSha256"):
+    problems.append("dataset.meta.json is not the manifest the check passed")
+if meta.get("storeFile") != record.get("storeFile") or not os.path.exists(store):
+    problems.append(f"the manifest names {meta.get('storeFile')!r} and the check passed {record.get('storeFile')!r}")
+elif digest(store) != record.get("storeSha256") or meta.get("storeSha256") != record.get("storeSha256"):
+    problems.append(f"{record['storeFile']} is not the store the check passed")
+if problems:
+    sys.exit("error: these are not the bytes the check passed: " + "; ".join(problems))
+print(f"checked: {record['storeFile']} and dataset.meta.json are what the check passed at {record.get('checkedAt')}")
+PY
+fi
+
 # 0) PRUNE — the release carries ONE artifact, `den-<ver>.store`, and the manifest that describes it
 # (oxyc/den#113). The store holds what the per-blob artifacts held: facts, labels, cards, facets, rail
 # facets, the entity table, alias titles, and both vector matrices as sections.
@@ -81,7 +119,8 @@ meta="$DIR/dataset.meta.json"
 # This is also what removed the gzip pass that used to run here: a precompressed twin existed because atlas
 # SERVED those JSON blobs to clients sending `Accept-Encoding: gzip`. Nothing is served from the release any
 # more — atlas reads the store from disk and mmaps it, and a compressed file cannot be mapped.
-retired="$(python3 "$(dirname "$0")/prune_manifest.py" --retired "$meta")"
+retired=""
+[ "$checked" -eq 1 ] || retired="$(python3 "$(dirname "$0")/prune_manifest.py" --retired "$meta")"
 if [ -n "$retired" ]; then
   # Keep the FIRST pre-cutover manifest and never clobber it.
   #
@@ -105,7 +144,7 @@ if [ -n "$retired" ]; then
   echo "at $(basename "$meta").prepublish — for its KEYS, not as a rollback; see deploy/README.md):"
   echo "$retired" | sed 's/^/  /'
 fi
-python3 "$(dirname "$0")/prune_manifest.py" --prune "$meta"
+[ "$checked" -eq 1 ] || python3 "$(dirname "$0")/prune_manifest.py" --prune "$meta"
 
 # Every entry is a GLOB: a literal path is not subject to nullglob, so a missing file stayed in the array
 # and the uploader failed on it three times with a message about an upload rather than a missing file.
@@ -318,7 +357,8 @@ PY
 fi
 
 # Stamp the counts for next time, whether or not there was anything to compare against.
-python3 "$(dirname "$0")/manifest_counts.py" --stamp "$meta" "$DIR"
+if [ "$checked" -eq 1 ]; then ran_by_check "record counts stamp"
+else python3 "$(dirname "$0")/manifest_counts.py" --stamp "$meta" "$DIR"; fi
 
 # GROUNDING GUARD (oxyc/den-dataset#16). Every check above asks whether the right rows arrived, in the right
 # shape, from the right producer, for this generation. None of them asks whether a row is about the title it
@@ -356,7 +396,9 @@ python3 "$(dirname "$0")/manifest_counts.py" --stamp "$meta" "$DIR"
 # Piece, Bleach, Pokémon, Re:Zero and Off Campus shipped that way with nothing noticing. It has no override:
 # the fix is to classify and embed the title, and 0 titles fail on the shipped generation.
 plot_guard=0
-if [ -d "$DIR/enriched" ]; then
+if [ "$checked" -eq 1 ]; then
+  ran_by_check "grounding guard and plot-vector gate"
+elif [ -d "$DIR/enriched" ]; then
   plot_labels="$DIR/labels-$(python3 -c '
 import json, sys
 print(json.load(open(sys.argv[1])).get("taxonomyVersion") or "")
@@ -431,7 +473,8 @@ fi
 # and mtime into `storeInputs`, and this re-hashes them against the tree (a changed input REFUSES, with
 # DEN_ALLOW_STALE_STORE_INPUTS=1 as the deliberate override) and holds each input's producer to the
 # recorded mtime (a warning, like the staleness warning above).
-python3 "$(dirname "$0")/check_producers.py" "$meta" "$DIR"
+if [ "$checked" -eq 1 ]; then ran_by_check "ownership guard"
+else python3 "$(dirname "$0")/check_producers.py" "$meta" "$DIR"; fi
 
 # DEAD-GENERATION GUARD. Every guard above asks whether a blob is present, parseable, owned and the right
 # size. None of them asks whether it belongs to THIS generation. The producer stamps the version into the
@@ -510,7 +553,9 @@ labels="$DIR/labels-$(python3 -c '
 import json, sys
 print(json.load(open(sys.argv[1])).get("taxonomyVersion") or "")
 ' "$meta").json"
-if [ -f "$labels" ]; then
+if [ "$checked" -eq 1 ]; then
+  ran_by_check "quality gate"
+elif [ -f "$labels" ]; then
   if ! python3 "$(dirname "$0")/eval_taxonomy.py" "$labels" --gate \
        --golden "$(dirname "$0")/../data/eval/golden-large.json"; then
     echo "       quality gate: the labels in $DIR score below what ships. Nothing uploaded." >&2
@@ -564,7 +609,20 @@ meta = json.load(open(sys.argv[1]))
 if meta.pop("signature", None) is not None:
     json.dump(meta, open(sys.argv[1], "w"), indent=1)
 PY
+  # What `--checked` holds the artifact to: the digests of exactly the bytes that passed.
+  python3 - "$meta" "$DIR" <<'PY'
+import datetime, hashlib, json, os, sys
+meta_path, d = sys.argv[1:3]
+meta = json.load(open(meta_path))
+record = {"datasetVersion": meta.get("datasetVersion"), "storeFile": meta.get("storeFile"),
+          "storeSha256": hashlib.sha256(open(os.path.join(d, meta["storeFile"]), "rb").read()).hexdigest(),
+          "metaSha256": hashlib.sha256(open(meta_path, "rb").read()).hexdigest(),
+          "maxBatchId": meta.get("maxBatchId"),
+          "checkedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+json.dump(record, open(os.path.join(d, "checked.json"), "w"), indent=1)
+PY
   echo "ready to publish: $(basename "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("storeFile") or "")' "$meta")") and $(basename "$meta") passed every gate. Nothing was signed or uploaded."
+  echo "  to publish exactly these bytes: pipeline/publish-dataset.sh <dir holding them and checked.json> --checked"
   exit 0
 fi
 

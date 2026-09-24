@@ -60,7 +60,7 @@ it is a corpus decision: re-embed, then `den-update den-embed`.
 `./den run --out-dir out` runs every stage in order. It skips the paid classify pass unless given
 `--spend`, and stops before publishing unless given `--publish`. `facts`, `corpus` and `store` name their
 files by the version `finalize` derives, and read it from `out/dataset.meta.json`; a `--dataset-version`
-given to any of them is only checked against it. The daily delta prints the same sequence.
+given to any of them is only checked against it. `./den daily` runs the same sequence over what moved.
 
 ```sh
 # 1. Secrets. den.env is gitignored; the fetch stage reads it.
@@ -139,7 +139,8 @@ and is stamped `hasVector`; the delta pass covers `out/facts-delta-ids.txt` and 
 `/recommend` must never let a vectorless record into an ANN path. The stage refuses without the list: a merge
 missing the delta pass once dropped 137 titles and only `/recommend` noticed.
 
-The list is yours to write, fresh every rebuild: every title the LAST published facts file carries that the
+`./den daily` writes the list by this rule (`pipeline/daily.py`), keeping the ids it already names; by
+hand it is yours to write, fresh every rebuild: every title the LAST published facts file carries that the
 new labels do not, plus any id atlas is missing, `movie:1` / `tv:2`, one per line.
 
 ```sh
@@ -244,13 +245,31 @@ score more than the tolerance under the baseline in `data/eval/quality-floors.js
 when recorded: `pipeline/eval_taxonomy.py out/labels-t02.json --record` after an improvement ships, with
 `--accept-drop` for a deliberate drop. Commit the result.
 
-## The daily delta
+## The daily job
 
-`pipeline/delta-run.sh [DAYS_BACK] [OUT_DIR]` builds a delta worklist and enriches one batch per media. It
-**stops before the classify pass** — that step buys, so it never runs unattended — and prints steps 3a–8 with
-the batch ids it wrote. A title below the vote floor is recorded as judged for that day and not counted as
-pending, so it is judged again the next day, or at once if its count or a floor changes, until it earns
-votes.
+`./den daily --out-dir out` is one day: TMDB's delta worklist, the drain and the refresh, the change set
+since the live dataset, the stages after it over what moved, and every publish gate. It ends at "ready to
+publish" and signs and uploads nothing; `out/daily-report.md` says what moved, what was skipped for want of a
+credential, and what was bought. `pipeline/daily.py` is what it runs, skips and refuses. It needs the live
+manifest in `out/published/` (see "The change set") and reads credentials from the environment:
+`TMDB_API_KEY`, `TYPESAFE_API_KEY` with `--spend`, `DEN_EMBED_URL` — the den-embed that serves queries.
+`--revisit-weeks N` is the weekly run.
+
+`.github/workflows/daily.yml` runs it on a schedule once the repository variable `DEN_DAILY_ENABLED` is
+`true`; its header lists the secrets and variables it reads. A ready run uploads the store, the manifest
+and `checked.json` as the artifact `dataset-<run id>`.
+
+### Publishing a daily run
+
+From the repo root, with the signing key where `publish-dataset.sh` looks for it:
+
+```sh
+gh run download <run id> -R oxyc/den-dataset -n dataset-<run id> -D daily-<run id>
+pipeline/publish-dataset.sh daily-<run id> --checked
+```
+
+`--checked` refuses unless the store and the manifest are the bytes the run's check passed, compares them
+again with the release as it is now, signs, and uploads — the manifest last.
 
 ## The weekly refresh
 

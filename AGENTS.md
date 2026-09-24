@@ -13,7 +13,7 @@ prose somewhere that can go stale without anything failing.
 | Why was a publish refused? | `pipeline/publish-dataset.sh` and the `pipeline/check_*.py` guards it runs beside it. `pipeline/publish.py` runs it and adds no guard of its own; `./den stage publish --plan` runs every gate and signs and uploads nothing. |
 | What does a daily run redo? | `pipeline/changes.py` — the change set since the live dataset, which the stages after it read. |
 | Which titles are one franchise, and why? | `pipeline/franchises.py` (the stage), `pipeline/franchise_groups.py` (what Wikidata decides alone), `data/franchise-golden.json` (the gate). |
-| How do I run it? | `docs/OPERATE.md`. `./den run` runs every stage; it skips the paid classify pass without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. |
+| How do I run it? | `docs/OPERATE.md`. `./den run` runs every stage; it skips the paid classify and critique passes without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. `./den daily` is the scheduled job (`pipeline/daily.py`). |
 
 ## The part that is still being rebuilt
 
