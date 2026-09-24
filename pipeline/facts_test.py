@@ -387,8 +387,7 @@ class Backfill(Staged):
         asked = len(self.wd.asked["facts"])
         self.run_stage()
         self.assertEqual(sorted(self.wd.asked["facts"][asked:]),
-                         [("movie", (1,), "awardsNominated"), ("movie", (1,), "awardsWon"),
-                          ("tv", (1,), "awardsNominated"), ("tv", (1,), "awardsWon")])
+                         sorted((media, (1,), key) for media in ("movie", "tv") for key in facts.BACKFILLED))
         self.assertEqual(self.read("facts-fields.json")["movie:1"]["awardsWon"], ["Q900"])
         asked = len(self.wd.asked["facts"])
         self.run_stage()
@@ -444,6 +443,45 @@ class Backfill(Staged):
         self.wd.nconst = {"Q10": "nm0000010"}
         self.run_stage()
         self.assertEqual(self.read("facts-entities.json")["Q10"]["imdbId"], "nm0000010")
+
+
+class FranchiseEvidence(Staged):
+    """What groups titles into a franchise beyond P179 (oxyc/den-atlas#92): the media franchise, the sequel
+    order and the fictional characters. Asked of every row once, and shipped as raw Q-ids; only the media
+    franchise is named, because a franchise row shows it."""
+
+    def test_the_evidence_ships_and_only_the_media_franchise_is_named(self):
+        self.wd.facts[("movie", 1)].update(mediaFranchise=["Q60"], follows=["Q61"], followedBy=["Q62"],
+                                           characters=["Q63"])
+        self.wd.names.update({q: {"name": f"name {q}", "tmdbPersonId": None, "aliases": []}
+                              for q in ("Q60", "Q61", "Q62", "Q63")})
+        self.run_stage()
+        shipped = self.read(f"facts-{VERSION}.pre-merge.json")
+        record = next(r for r in shipped["records"] if r["mediaType"] == "movie" and r["tmdbId"] == 1)
+        self.assertEqual((record["mediaFranchise"], record["follows"], record["followedBy"], record["characters"]),
+                         (["Q60"], ["Q61"], ["Q62"], ["Q63"]))
+        self.assertEqual(shipped["entities"]["Q60"], {"en": "name Q60"})
+        named = {q for batch in self.wd.asked["names"] for q in batch}
+        self.assertEqual(named & {"Q61", "Q62", "Q63"}, set(), "a sequel or a character is not named")
+        for q in ("Q61", "Q62", "Q63"):
+            self.assertNotIn(q, shipped["entities"])
+
+    def test_a_title_with_no_evidence_ships_none_and_is_not_asked_again(self):
+        self.run_stage()
+        record = next(r for r in self.read(f"facts-{VERSION}.pre-merge.json")["records"] if r["mediaType"] == "tv")
+        for key in facts.FRANCHISE_EVIDENCE:
+            self.assertNotIn(key, record)
+            self.assertEqual(self.read("facts-fields.json")["tv:1"][key], [], "asked, has none")
+        asked = len(self.wd.asked["facts"])
+        self.run_stage()
+        self.assertEqual(self.wd.asked["facts"][asked:], [])
+
+    def test_the_evidence_does_not_count_as_an_award(self):
+        """Awards are filed by ceremony from `AWARDS` alone; a character is never asked for as an award."""
+        self.wd.facts[("movie", 1)].update(characters=["Q63"])
+        self.run_stage()
+        asked = {q for batch in self.wd.asked["awards"] for q in batch}
+        self.assertNotIn("Q63", asked)
 
 
 class PersonTraits(Staged):
