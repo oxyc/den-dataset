@@ -23,12 +23,14 @@ from .contract import Context, StageError, bind
 from .run_delta_test import StubTypeSafe, article
 
 
-def change_set(out, keys, baseline=True):
+def change_set(out, keys, baseline=True, new=None):
+    """`keys` listed as new (what the paid passes buy for), unless `new` names fewer of them."""
     directory = os.path.join(out, "changes")
     os.makedirs(directory, exist_ok=True)
-    for name in ("keys", "withdrawn", "items"):
+    lists = {"keys": keys, "new": keys if new is None else new}
+    for name in ("keys", "new", "withdrawn", "items"):
         with open(os.path.join(directory, f"{name}.txt"), "w", encoding="utf-8") as fh:
-            fh.writelines(f"{key}\n" for key in (keys if name == "keys" else ()))
+            fh.writelines(f"{key}\n" for key in lists.get(name, ()))
     with open(os.path.join(directory, "plan.json"), "w", encoding="utf-8") as fh:
         json.dump({"baseline": {"datasetVersion": "live", "maxBatchId": 1} if baseline else None,
                    "revisit": None}, fh)
@@ -120,6 +122,13 @@ class ChangeSet(unittest.TestCase):
         with self.assertRaisesRegex(StageError, "not given --spend"):
             critique.run(self.ctx(spend=False))
         self.assertEqual(StubTypeSafe.requests, [])
+
+    def test_a_changed_plot_is_not_bought_again(self):
+        """Only what is new is classified: a title whose plot changed keeps the pair of rows it has."""
+        change_set(self.out, ["movie:1", "movie:2"], new=["movie:2"])
+        shard = classify.run(self.ctx())
+        critique.run(self.ctx())
+        self.assertEqual([r["tmdbId"] for r in self.rows(shard)], [2])
 
     def test_a_change_set_with_no_article_buys_nothing(self):
         change_set(self.out, ["movie:9"])

@@ -86,7 +86,7 @@ cp den.env.example den.env        # TMDB_API_KEY (worklist discover/delta); Ente
 python3 -m pipeline.enrich --worklist out/worklist-movie.json --out-dir out --limit 150
 
 # 3a. Classify and critique — the steps that buy ($20.47 for 47,529 titles). --plan first. docs/FACETS-V2.md.
-#     With a change set (below) each buys only the titles it lists, into shards of their own.
+#     With a change set (below) each buys only the new titles, into shards of their own.
 ./den stage articles --out-dir out
 ./den stage classify --out-dir out --plan
 ./den stage classify --out-dir out
@@ -287,9 +287,9 @@ gh release download data-latest -p dataset.meta.json -D out/published --clobber
 
 Without `out/published/dataset.meta.json` every title is new, which is right for a fresh out-dir and
 wrong for any other: check that `plan.json` names a `baseline`. Without a baseline the stages after it do
-what they always did. With one, classify and critique buy only the listed titles, embed re-embeds them,
-facts and doc-facts ask again the titles answered for by another Wikidata item, and the titles that lost
-their plot are tombstoned in `withdrawn.jsonl`. `--revisit-weeks N` also lists this week's slice of an
+what they always did. With one, classify and critique buy only the new titles (a changed plot keeps its
+rows), embed re-embeds every listed title, facts and doc-facts ask again the titles answered for by another
+Wikidata item, and the titles that lost their plot are tombstoned in `withdrawn.jsonl`. `--revisit-weeks N` also lists this week's slice of an
 N-week cycle (`revisit.txt`), whose facts and doc facts are asked again, so a weekly run revisits the whole
 corpus once per cycle.
 

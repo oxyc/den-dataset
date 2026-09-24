@@ -17,9 +17,11 @@ corpus join globs rather than at a fresh name — a new name is a new manifest, 
 $20. `ctx.plan` is the dry run the launch procedure is written around: it parses the input, prints the call
 and cost plan, and touches neither the provider nor the output.
 
-**A daily run classifies only what moved** (oxyc/den-dataset#27). With a change set that has a live baseline
-(`pipeline/changes.py`), the stage writes the article rows of the titles it lists to a dump of their own,
-named by its digest, and classifies that dump into a shard named by the same digest. The shared article dump
+**A daily run classifies only what is new** (oxyc/den-dataset#27). With a change set that has a live baseline
+(`pipeline/changes.py`), the stage writes the article rows of the titles it lists as new (`new.txt`: added,
+and regained after a tombstone) to a dump of their own. A title whose plot changed keeps its rows, which
+read the older article; the join accepts that pair, since both passes read the same one. The dump is
+named by its digest, and classified into a shard named by the same digest. The shared article dump
 grows and changes every day, so a run over it could never resume the shipped shard's manifest; the change
 set's dump is small, fixed for the change set, and resumes its own. Its rows supersede the older shards' by
 key, because its run started later (`pipeline/consolidate_corpus.py`). The critique stage then runs the
@@ -89,7 +91,7 @@ def changed_articles(ctx):
     there. The digest names the dump and both passes' shards, so the same change set resumes the same
     shards however often the stage is started.
     """
-    keys = changes.listed(ctx, "keys")
+    keys = changes.listed(ctx, "new")
     kept = []
     with open(ctx.require(artifacts.ARTICLES), "rb") as handle:
         for line in handle:
