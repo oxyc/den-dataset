@@ -20,8 +20,10 @@ name: daily
 #            DEN_DAILY_SPEND                    `true` to let the scheduled run buy the day's answers
 #            DEN_DAILY_RUNS_ON                  a JSON runner label list, e.g. ["self-hosted","den"]; default
 #                                               ubuntu-latest
-#            DEN_OUT_DIR / DEN_CACHE_DIR        the persistent out-dir and response cache the job runs over;
-#                                               required — see "Where the out-dir lives" below
+#            DEN_STATE_REPO                     a PRIVATE repository whose `state` release carries the out-dir
+#                                               between runs (pipeline/state.sh); with secret DEN_STATE_TOKEN,
+#                                               a token that can write that repository's releases
+#            DEN_OUT_DIR / DEN_CACHE_DIR        instead, persistent paths on a self-hosted runner
 #            DEN_REVISIT_WEEKS                  the weekly slice's cycle, default 8
 #            DEN_EMBED_IMAGE                    the den-embed image the box serves, by digest: the job runs it
 #                                               at MAX_TOKENS=1024 and the canary checks its space before a
@@ -31,8 +33,8 @@ name: daily
 # WHERE THE OUT-DIR LIVES. The job runs over the out-dir the live dataset was built from, and that out-dir is
 # not publishable: enriched batches from before oxyc/den-dataset#53 still carry TMDB's overviews. So it is
 # never put in the Actions cache — on a public repository a pull request's workflow can restore the base
-# branch's caches, which would publish it. Until a private store for it is chosen (oxyc/den-dataset#27), the
-# job runs only where DEN_OUT_DIR names a persistent path, and refuses without one.
+# branch's caches, which would publish it. It lives in a private repository (DEN_STATE_REPO) or on a
+# self-hosted runner's disk (DEN_OUT_DIR), and the job refuses with neither.
 on:
   schedule:
     - cron: "23 3 * * *"   # daily
@@ -68,11 +70,19 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # From the private state repository when DEN_STATE_REPO names one (pipeline/state.sh), else the
+      # persistent path DEN_OUT_DIR names on a self-hosted runner; with neither there is nothing to run over.
       - name: The out-dir
+        env:
+          DEN_STATE_REPO: ${{ vars.DEN_STATE_REPO }}
+          GH_TOKEN: ${{ secrets.DEN_STATE_TOKEN }}
         run: |
-          if [ -z "${{ vars.DEN_OUT_DIR }}" ]; then
-            echo "error: DEN_OUT_DIR is not set, so there is no out-dir to run over. It is never carried in" >&2
-            echo "       the Actions cache: a pull request's workflow can restore it, and it holds TMDB text." >&2
+          if [ -n "$DEN_STATE_REPO" ]; then
+            bash pipeline/state.sh restore "$OUT"
+          elif [ -z "${{ vars.DEN_OUT_DIR }}" ]; then
+            echo "error: neither DEN_STATE_REPO nor DEN_OUT_DIR is set, so there is no out-dir to run over." >&2
+            echo "       It is never carried in the Actions cache: a pull request's workflow can restore it," >&2
+            echo "       and it holds TMDB text." >&2
             exit 1
           fi
           test -d "$OUT/enriched" || { echo "error: $OUT holds no enriched batches" >&2; exit 1; }
@@ -152,3 +162,11 @@ jobs:
             ${{ env.OUT }}/checked.json
           if-no-files-found: error
           retention-days: 14
+      # Whatever the day reached is kept — above all the answers it bought — ready or not.
+      - name: Save the out-dir
+        if: always() && vars.DEN_STATE_REPO != '' && steps.day.outcome != 'skipped'
+        env:
+          DEN_STATE_REPO: ${{ vars.DEN_STATE_REPO }}
+          GH_TOKEN: ${{ secrets.DEN_STATE_TOKEN }}
+          STATE_RUN: ${{ github.run_id }}
+        run: bash pipeline/state.sh save "$OUT"

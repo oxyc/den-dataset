@@ -169,6 +169,10 @@ jobs:
       # publish would refuse, and uploads nothing.
       - name: The publisher, checking only
         run: DEN_PUBLISH_VIA=check bash pipeline/publish-dataset.test.sh
+      # The daily job's out-dir, carried between runs in a private repository: a save and a restore round-trip
+      # it, a second save replaces the first, and an empty out-dir is never saved over the state.
+      - name: The daily job's state
+        run: bash pipeline/state.test.sh
 
   ci-ok:
     # One required status check. `always()` so a skipped job does not fail branch protection.
