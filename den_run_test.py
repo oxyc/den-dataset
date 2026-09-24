@@ -295,7 +295,27 @@ class Wikidata:
             return [{"alias": alias} for alias in self.items[qid].get("aliases") or []]
         raise AssertionError(f"the fixture's Wikidata does not know this query:\n{query}")
 
+    def kinds(self, qid):
+        """Every class `qid` is an instance of, through P279, over the fixture's own statements."""
+        seen, frontier = set(), list(self.claims(qid, "P31"))
+        while frontier:
+            kind = frontier.pop()
+            if kind not in seen:
+                seen.add(kind)
+                frontier += self.claims(kind, "P279")
+        return seen
+
     def about_item(self, head, query, qid):
+        if head in ("SELECT ?item ?parent", "SELECT ?item ?series"):
+            # The franchise stage's series parents and source book series, filtered by class like WDQS.
+            classes = set(re.findall(r"wd:(Q\d+)", re.search(r"VALUES \?class \{([^}]*)\}", query).group(1)))
+            props = ("P179", "P361", "P8345") if head.endswith("?parent") else ("P179",)
+            name = head.rpartition("?")[2]
+            return [{name: ENTITY + target} for prop in props for target in self.claims(qid, prop)
+                    if self.kinds(target) & classes]
+        if head == "SELECT ?item ?movie ?tv":
+            tmdb = (self.items.get(qid) or {}).get("tmdb") or {}
+            return [{media: str(tmdb[media]) for media in ("movie", "tv") if media in tmdb}]
         if "?members" in head:
             # `?item wdt:P31/wdt:P279* ?class`, walked over the fixture's own statements.
             classes = set(re.findall(r"wd:(Q\d+)", re.search(r"VALUES \?class \{([^}]*)\}", query).group(1)))

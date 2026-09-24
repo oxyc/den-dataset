@@ -27,8 +27,9 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: finalize straight after the embedding, because it turns the embed stores into `labels-t02.json`, the
 #: vector blob and the manifest; the facts after that, because the corpus facts pass scrapes the ids in
 #: that labels file; the facts before the corpus join and the store, because both of them read the merged
-#: facts; and publishing is last because it uploads what the store wrote. That ordering is the whole reason
-#: a stage can stop naming a producer for an artifact another stage makes.
+#: facts; the franchises straight after the facts, because they are grouped from them; and publishing is
+#: last because it uploads what the store wrote. That ordering is the whole reason a stage can stop naming
+#: a producer for an artifact another stage makes.
 #:
 #: `den run` STOPS BEFORE PUBLISHING unless asked with --publish: every other stage writes into the
 #: out-dir and can be run again, while publish replaces the moving `data-latest` release. The order below
@@ -38,7 +39,7 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: `worklist --mode delta` skips the titles the previous run's `genres-moods.json` names, because a delta
 #: extends an out-dir rather than starting one.
 STAGES = ("worklist", "fetch", "changes", "articles", "classify", "genres_moods", "docfacts", "embed",
-          "finalize", "facts", "corpus", "store", "publish")
+          "finalize", "facts", "franchises", "corpus", "store", "publish")
 
 
 def stage(name):
