@@ -55,7 +55,10 @@ job always has one: it downloads `dataset.meta.json` from the `data-latest` rele
 What it writes, under `changes/`, rewritten whole every run:
 
   * `plan.json`     — the baseline, the counts, and every listed title with its reasons;
-  * `keys.txt`      — added and changed: the titles every later stage runs for;
+  * `keys.txt`      — added and changed: the titles every later stage runs for, but the paid ones;
+  * `new.txt`       — added, and regained: the titles the paid passes buy for. A changed plot keeps the
+    classify and critique rows it has — a decision about spend, not a claim that they still fit; a regained
+    title has none left, since its tombstone took them;
   * `withdrawn.txt` — what `consolidate_corpus.py withdraw` takes;
   * `items.txt`     — the changed titles answered for by another Wikidata item, whose facts and doc facts are
     asked again (the facts and doc-facts stages evict them from their checkpoints);
@@ -293,6 +296,8 @@ def run(ctx, now=None):
     }
     write_list(os.path.join(directory, "keys.txt"), keys)
     write_list(os.path.join(directory, "withdrawn.txt"), list(withdrawn))
+    write_list(os.path.join(directory, "new.txt"),
+               sorted(set(added) | {key for key, why in changed.items() if why == [REGAINED]}, key=order))
     write_list(os.path.join(directory, "items.txt"), [key for key, why in changed.items() if ITEM in why])
     stale = os.path.join(directory, "revisit.txt")
     if ctx.revisit_weeks:
@@ -323,7 +328,7 @@ def planned(ctx):
 
 
 #: The lists a later stage can ask for, by the file each is written to.
-LISTS = ("keys", "withdrawn", "items", "revisit")
+LISTS = ("keys", "new", "withdrawn", "items", "revisit")
 
 
 def listed(ctx, *names):

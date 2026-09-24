@@ -90,6 +90,7 @@ class Rules(unittest.TestCase):
         plan = out.plan()
         self.assertEqual(plan["baseline"], {"datasetVersion": "live", "maxBatchId": 1})
         self.assertEqual((plan["added"], plan["changed"], plan["counts"]["unchanged"]), (["movie:2"], {}, 1))
+        self.assertEqual(out.read("new.txt"), ["movie:2"])
 
     def test_each_kind_of_change_is_named(self):
         out = Batches(self)
@@ -109,6 +110,7 @@ class Rules(unittest.TestCase):
         self.assertEqual((plan["counts"]["revised"], plan["counts"]["unchanged"]), (1, 0))
         self.assertEqual(out.read("keys.txt"), [f"movie:{n}" for n in (1, 2, 3, 4, 5)])
         self.assertEqual(out.read("withdrawn.txt"), ["movie:7"])
+        self.assertEqual(out.read("new.txt"), [], "a changed plot is not bought again")
 
     def tombstones(self, out):
         path = os.path.join(out.out, artifacts.WITHDRAWN.filename)
@@ -144,6 +146,7 @@ class Rules(unittest.TestCase):
         self.assertEqual((plan["changed"], plan["withdrawn"]), ({"movie:1": ["regained"]}, {}))
         self.assertEqual((plan["counts"]["unchanged"], plan["counts"]["revised"]), (1, 0))
         self.assertEqual(out.read("keys.txt"), ["movie:1"])
+        self.assertEqual(out.read("new.txt"), ["movie:1"], "its tombstone took its rows, so it is bought again")
         out.publish(out.number, version="next")
         self.assertEqual(out.plan()["changed"], {}, "a later live version is past the tombstone")
 
