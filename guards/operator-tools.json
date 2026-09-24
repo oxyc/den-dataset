@@ -1,5 +1,4 @@
 {
-  "pipeline/delta-run.sh": "the daily freshness pass up to the paid boundary: new titles' worklist and enrichment, then prints the commands that buy",
   "pipeline/embed-corpus-run.sh": "a whole-corpus embed in segments, restarting den-embed between them so ONNX Runtime's arena cannot OOM the host",
   "pipeline/facts-run.sh": "reruns the facts stage until no WDQS batch was skipped, which one attempt at the full corpus never manages",
   "pipeline/recluster-run.sh": "the re-cluster report a person reads before a taxonomy bump; no timer runs it, so it is run by hand",

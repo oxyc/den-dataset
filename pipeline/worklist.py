@@ -10,7 +10,7 @@ Which ids exist, in which order, and which of them are already published. The ru
     the only mode that is deterministic end to end.
   * `discover` — `/discover` sorted `vote_count.desc`, the highest-vote titles first. The pilot seed.
   * `delta` — titles released since `--since` that clear the discovery floor and have no genres & moods
-    yet. The daily freshness pass `pipeline/delta-run.sh` drives.
+    yet. The daily job, `den daily` (`pipeline/daily.py`), asks for this one.
 
 **The mode is not defaulted.** For a full run the cheapest-looking answer means enriching the 500
 highest-vote titles and calling that the catalogue; for a delta it means re-enriching everything already
@@ -30,8 +30,8 @@ asks TMDB nothing (oxyc/den-dataset#53). `regional` is whether the same query, n
 origins, names the title too: one more paged query per media rather than a question per title. An
 `export` row has neither: the daily dump states popularity, not votes or origins.
 
-**A delta writes the same two filenames as a full run**, which is why `pipeline/delta-run.sh` keeps its
-lists in `$OUT_DIR/delta/`. Point the two outputs there with `--set` rather than moving the whole out-dir,
+**A delta writes the same two filenames as a full run**, which is why `pipeline/daily.py` keeps its
+lists in `<out-dir>/delta/`. Point the two outputs there with `--set` rather than moving the whole out-dir,
 so the genres & moods a delta must skip are still found beside everything else: forty delta rows written over a
 47k-title one do not corrupt anything — they end the full run, quietly, as a batch that reports nothing
 remaining.

@@ -5,9 +5,9 @@
 #   den_load_env || exit 1  # den.env → environment, TMDB_API_KEY required
 #   enterprise_login        # optional 24h bearer; degrades to the free action API
 #
-# Sourced, not executed. It lived as three near-identical copies (two enrich wrappers, and the copy
-# delta-run never had — which is why the daily pass ran with no credentials at all). `pipeline/fetch.py`
-# sources it too, per batch, and reads the two values back on a pipe.
+# Sourced, not executed. It lived as three near-identical copies (two enrich wrappers, and the copy the
+# old daily pass never had — which is why it ran with no credentials at all). `pipeline/fetch.py` sources
+# it, per batch, and reads the two values back on a pipe.
 #
 # These signal failure with `return`, not `exit`, because a sourced `exit` would kill the caller from inside
 # a helper. So a caller that does NOT set -e must check: `den_load_env || exit 1`. Inlining this without
@@ -16,7 +16,7 @@
 
 # den.env holds TMDB_API_KEY and the optional Wikimedia Enterprise credentials. Every command that
 # touches TMDB needs it, so a script that forgets to load it fails at its first HTTP call rather than
-# here — which is what made the missing copy in delta-run.sh hard to see.
+# here — which is what made the old daily pass's missing copy hard to see.
 den_load_env() {
     [ -f den.env ] || { echo "missing den.env — cp den.env.example den.env and fill it" >&2; return 1; }
     set -a

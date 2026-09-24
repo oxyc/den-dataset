@@ -151,8 +151,8 @@ class Context:
     #: different catalogues, enrichment is billed per title, and the one the command picks unasked is the
     #: pilot's 500. See `pipeline/worklist.py`.
     mode: str = ""
-    #: The date a `delta` collects titles from, `YYYY-MM-DD`. Per run by construction — `delta-run.sh`
-    #: computes it from how many days back the pass is looking.
+    #: The date a `delta` collects titles from, `YYYY-MM-DD`. Per run by construction — `den daily`
+    #: computes it from how many days back the job is looking.
     since: str = ""
     #: Stop the embed pass after this many NEW titles. ONNX Runtime's memory arena grows to its peak and
     #: never shrinks, so a long-lived den-embed creeps up until it OOMs the machine; the run is segmented

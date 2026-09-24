@@ -1063,11 +1063,11 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class CommandLine(unittest.TestCase):
-    """The two places a person or a timer types this module's command line, held to its parser."""
+    """Where a person types this module's command line — `docs/OPERATE.md` — held to its parser."""
 
     def invocations(self):
         found = []
-        for path in ("pipeline/delta-run.sh", "docs/OPERATE.md"):
+        for path in ("docs/OPERATE.md",):
             with open(os.path.join(REPO, path), encoding="utf-8") as fh:
                 text = fh.read().replace("\\\n", " ")
             found += [(path, line.split("python3 -m pipeline.enrich", 1)[1])
@@ -1076,9 +1076,9 @@ class CommandLine(unittest.TestCase):
         return found
 
     def test_every_documented_invocation_parses(self):
-        """The daily delta runs this unattended; a flag the parser does not know is a dead timer."""
+        """A documented flag the parser does not know is a command that fails for whoever types it."""
         found = self.invocations()
-        self.assertEqual(sorted({path for path, _ in found}), ["docs/OPERATE.md", "pipeline/delta-run.sh"])
+        self.assertEqual(sorted({path for path, _ in found}), ["docs/OPERATE.md"])
         for path, rest in found:
             words = rest.split("|")[0].split("#")[0].replace(")", " ").split()
             flags = {word for word in words if word.startswith("--")}
