@@ -10,12 +10,18 @@ import sys
 from collections import defaultdict
 
 from .format import I32_NONE, U32_NONE
-from .facts import ENTITY_LISTS, MAKER_FIELDS, PRECISION, PRECISION_NONE
+from .facts import ENTITY_LISTS, MAKER_FIELDS, PRECISION, PRECISION_NONE, SOURCE_LISTS
 
 #: A person's traits that name an item (oxyc/den#136), entity-table field -> section base name.
 TRAIT_LISTS = {"gender": "ent_gender", "citizenship": "ent_citizen", "occupation": "ent_occupation"}
 #: A person's dates, entity-table field -> section name; the precision is `<name>_prec`.
 TRAIT_DATES = {"born": "ent_born", "died": "ent_died"}
+#: Where a person was born (oxyc/den-dataset#114): the place (P19) and its country (P17), as items,
+#: entity-table field -> section base name.
+BIRTH_LISTS = {"birthplace": "ent_bplace", "birthcountry": "ent_bcountry"}
+#: Every entity-table field whose values are items the entity table must hold.
+ITEM_LISTS = (*TRAIT_LISTS, *BIRTH_LISTS)
+_ISO = re.compile(r"[A-Z]{2}")
 _PERSON_DATE = re.compile(r"(-?)(\d{4,})(?:-(\d\d))?(?:-(\d\d))?")
 
 
@@ -28,7 +34,7 @@ def referenced_qids(rows):
     found = set()
     for row in rows:
         facts_row = row.get("facts") or {}
-        for field in (*MAKER_FIELDS, *ENTITY_LISTS):
+        for field in (*MAKER_FIELDS, *ENTITY_LISTS, *SOURCE_LISTS):
             for q in facts_row.get(field) or []:
                 if isinstance(q, str) and q.startswith("Q") and q[1:].isdigit():
                     found.add(int(q[1:]))
@@ -36,12 +42,12 @@ def referenced_qids(rows):
 
 
 def trait_qids(table):
-    """Every item a person's traits name — a gender, a country, an occupation — as a raw Q-id number, so
-    the entity table holds each one even when Wikidata gives it no English name."""
+    """Every item a person's traits name — a gender, a country, an occupation, a birthplace — as a raw Q-id
+    number, so the entity table holds each one even when Wikidata gives it no English name."""
     found = set()
     for qid, ent in table.items():
         if isinstance(ent, dict):
-            for field in TRAIT_LISTS:
+            for field in ITEM_LISTS:
                 for q in ent.get(field) or []:
                     if not (isinstance(q, str) and q.startswith("Q") and q[1:].isdigit()):
                         sys.exit(f"entity {qid} {field}: {q!r} is not a Wikidata item id")
@@ -83,6 +89,7 @@ def intern(strings, table):
             for alias in ent.get("aliases") or []:
                 strings.add(alias)
             strings.add(person_imdb_id(ent.get("imdbId")))
+            strings.add(country_code(ent.get("iso"), qid))
 
 
 def person_imdb_id(raw):
@@ -92,6 +99,16 @@ def person_imdb_id(raw):
     if not isinstance(raw, str):
         return None
     return raw if raw.startswith("nm") and raw[2:].isdigit() else None
+
+
+def country_code(raw, qid):
+    """A country's ISO 3166-1 alpha-2 code, or `None` for an entity with none. Anything else is refused: a
+    reader resolves `SE` through this column, and a lower-case or three-letter code never matches."""
+    if raw is None:
+        return None
+    if not (isinstance(raw, str) and _ISO.fullmatch(raw)):
+        sys.exit(f"entity {qid} iso: {raw!r} is not an ISO 3166-1 alpha-2 code")
+    return raw
 
 
 class Entities:
@@ -138,6 +155,8 @@ class Entities:
         ent_name, ent_tmdb, ent_alias, ent_imdb = [], [], [], []
         trait_lists = {field: [] for field in TRAIT_LISTS}
         trait_dates = {field: ([], []) for field in TRAIT_DATES}
+        birth_lists = {field: [] for field in BIRTH_LISTS}
+        ent_iso = []
         by_num = {int(q[1:]): q for q in self.table if q.startswith("Q") and q[1:].isdigit()}
         for num in self.qids:
             # An entity the table does not describe: referenced by a record but with no entry. Its Q-id
@@ -168,6 +187,10 @@ class Entities:
                 day, code = person_date(ent.get(field), f"entity Q{num} {field}")
                 days.append(day)
                 precision.append(code)
+            # Where they were born (oxyc/den-dataset#114), items like the traits, and a country's ISO code.
+            for field in BIRTH_LISTS:
+                birth_lists[field].append([self._index[int(q[1:])] for q in ent.get(field) or []])
+            ent_iso.append(strings.id(country_code(ent.get("iso"), f"Q{num}")))
         count = len(self.qids)
         sec.put("ent_qid", "I", self.qids, 4, expect=count)
         sec.put("ent_name", "I", ent_name, 4, expect=count)
@@ -182,10 +205,14 @@ class Entities:
             days, precision = trait_dates[field]
             sec.put(section, "i", days, 4, expect=count)
             sec.put(f"{section}_prec", "B", precision, 1, expect=count)
+        # May be empty too: facts scraped before birthplaces were asked.
+        for field, section in BIRTH_LISTS.items():
+            sec.put_list(section, "I", 4, birth_lists[field], allow_empty=True, expect_rows=count)
+        sec.put("ent_iso", "I", ent_iso, 4, expect=count)
 
     def trait_counts(self):
         """How many entities carry each trait, for the build's summary line."""
-        counts = {field: 0 for field in (*TRAIT_LISTS, *TRAIT_DATES)}
+        counts = {field: 0 for field in (*TRAIT_LISTS, *TRAIT_DATES, *BIRTH_LISTS, "iso")}
         for ent in self.table.values():
             if isinstance(ent, dict):
                 for field in counts:

@@ -28,6 +28,10 @@ ENTITY_LISTS = {
     "basedOn": "based_on",
 }
 
+#: The authors of the works a title is adapted from (oxyc/den-dataset#114): P50 of each `basedOn` target,
+#: which the facts stage resolves. Optional, like the role lists: corpus field -> section base name.
+SOURCE_LISTS = {"sourceAuthors": "src_authors"}
+
 #: The credit fields `makers` is the union of. Screenwriters were shipped and dropped by the reader for
 #: months: 67.2% coverage feeding the rail's heaviest weight.
 MAKER_FIELDS = ("directors", "creators", "screenwriters")
@@ -107,6 +111,7 @@ class Facts:
         self.roles = {field: [] for field in ROLE_LISTS}
         self.entity_lists = {field: [] for field in ENTITY_LISTS}
         self.based_kind = []
+        self.source_lists = {field: [] for field in SOURCE_LISTS}
         self.genres = []
         self.countries = []
         self.languages = []
@@ -236,6 +241,12 @@ class Facts:
             self.entity_lists[field].append(
                 [i for i in (ent.id(q, field) for q in facts.get(field) or []) if i is not None])
         self.based_kind.append([strings.id(k) for k in facts.get("basedOnKind") or [] if k])
+        for field in SOURCE_LISTS:
+            row_list = []
+            for i in (ent.id(q, field) for q in facts.get(field) or []):
+                if i is not None and i not in row_list:
+                    row_list.append(i)
+            self.source_lists[field].append(row_list)
         end_days, end_prec = days_since_epoch(facts.get("ended"), key)
         self.ended.append(end_days)
         self.ended_prec.append(end_prec)
@@ -256,6 +267,9 @@ class Facts:
         for field, section in ENTITY_LISTS.items():
             sec.put_list(section, "I", 4, self.entity_lists[field])
         sec.put_list("based_kind", "I", 4, self.based_kind)
+        # May be empty: facts scraped before the source works' authors were asked.
+        for field, section in SOURCE_LISTS.items():
+            sec.put_list(section, "I", 4, self.source_lists[field], allow_empty=True)
         sec.put_list("genres", "I", 4, self.genres)
         sec.put_list("countries", "I", 4, self.countries)
         sec.put_list("languages", "I", 4, self.languages)

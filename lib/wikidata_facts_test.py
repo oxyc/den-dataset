@@ -242,6 +242,53 @@ class People(unittest.TestCase):
         self.assertEqual((first, second, len(asked)), ({"Q1": {"gender": ["Q6581072"]}},) * 2 + (1,))
 
 
+class Birthplaces(unittest.TestCase):
+    """Where a person was born and the country it is in, a country's code, a work's authors
+    (oxyc/den-dataset#114)."""
+
+    def test_a_place_and_its_countries_parse_and_unknown_is_no_place(self):
+        got = wd.parse_birthplaces(body(
+            {"item": ENTITY + "Q1", "place": ENTITY + "Q1757", "country": ENTITY + "Q33"},
+            {"item": ENTITY + "Q1", "place": ENTITY + "Q1754", "country": ENTITY + "Q34"},
+            # A place in no country, and a place Wikidata states as "unknown value".
+            {"item": ENTITY + "Q2", "place": ENTITY + "Q1128337"},
+            {"item": ENTITY + "Q3", "place": "http://www.wikidata.org/.well-known/genid/abc123"}))
+        self.assertEqual(got, {"Q1": {"birthplace": ["Q1754", "Q1757"], "birthcountry": ["Q33", "Q34"]},
+                               "Q2": {"birthplace": ["Q1128337"]}})
+
+    def test_the_queries(self):
+        self.assertEqual(wd.birthplace_query(["Q2", "Q1"]),
+                         "SELECT ?item ?place ?country WHERE {\n  VALUES ?item { wd:Q1 wd:Q2 }\n"
+                         "  ?item wdt:P19 ?place .\n  OPTIONAL { ?place wdt:P17 ?country . }\n}")
+        self.assertIn("?item wdt:P297 ?iso .", wd.iso_query(["Q34"]))
+        self.assertIn("?item wdt:P50 ?author .", wd.author_query(["Q30"]))
+
+    def test_only_an_alpha_2_code_is_a_country_code(self):
+        got = wd.parse_iso(body({"item": ENTITY + "Q34", "iso": "SE"}, {"item": ENTITY + "Q15180", "iso": "su"},
+                                {"item": ENTITY + "Q1", "iso": "USA"}))
+        self.assertEqual(got, {"Q34": "SE"})
+
+    def test_a_works_authors_parse_sorted_by_number(self):
+        got = wd.parse_authors(body({"item": ENTITY + "Q30", "author": ENTITY + "Q39829"},
+                                    {"item": ENTITY + "Q30", "author": ENTITY + "Q10"},
+                                    {"item": ENTITY + "Q31", "author": "http://www.wikidata.org/.well-known/genid/x"}))
+        self.assertEqual(got, {"Q30": ["Q10", "Q39829"]})
+
+    def test_an_answer_is_cached_per_batch_and_qlever_stands_behind_wdqs(self):
+        asked = []
+        payload = body({"item": ENTITY + "Q30", "author": ENTITY + "Q10"})
+
+        def sparql(query, fallback=False):
+            asked.append(fallback)
+            return payload
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(wd, "_sparql", sparql):
+            cache = caching.ResponseCache("wiki", directory, 3600)
+            first = wd.authors(["Q30", "Q31"], cache)
+            second = wd.authors(["Q31", "Q30"], cache)
+        self.assertEqual((first, second, asked), ({"Q30": ["Q10"]}, {"Q30": ["Q10"]}, [True]))
+
+
 class Fetch(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

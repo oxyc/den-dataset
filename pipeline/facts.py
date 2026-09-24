@@ -15,7 +15,7 @@ labels and no facets row — and is not. /recommend must never let a vectorless 
 `hasVector` is per record and one pass cannot state both. Each pass keeps its own checkpoint: sharing one
 would write every corpus record into the delta file, stamped vectorless. The corpus pass keeps the Swift's
 (`facts-fields.json`, `facts-entities.json`, `facts-source-types.json` in the out-dir), so an out-dir it
-scraped resumes; the delta pass keeps its three under `facts-delta/`.
+scraped resumes, beside `facts-source-authors.json`; the delta pass keeps its four under `facts-delta/`.
 
 **Resumable, and a batch that fails does not end the pass.** A corpus pass is thousands of WDQS requests
 over hours, and one of them WILL time out. A failed batch is dropped whole — a row holding the properties
@@ -79,7 +79,7 @@ OUTPUTS = (artifacts.CORPUS_FACTS, artifacts.DELTA_FACTS, artifacts.FACTS)
 
 BOUND = {bind(entry).name: bind(entry) for entry in INPUTS}
 
-#: Where each pass keeps its three checkpoints, relative to the out-dir.
+#: Where each pass keeps its four checkpoints, relative to the out-dir.
 CHECKPOINTS = {True: "", False: "facts-delta"}
 
 #: Properties added to `wd.SPECS` after checkpoints were already on disk. A row scraped before them lacks
@@ -98,6 +98,10 @@ BACKFILL_BATCH = 500
 PERSON_FIELDS = ("cast", "directors", "creators", "screenwriters", "composers", "cinematographers")
 #: The traits that name an item — a gender, a country, an occupation — which ships by name.
 TRAIT_ITEMS = tuple(wd.PERSON_ITEMS.values())
+#: Where a person was born (`wd.birthplaces`): the place and its country, items too, named like the traits.
+BIRTH_ITEMS = ("birthplace", "birthcountry")
+#: The traits whose items are countries, each asked for its ISO code (`wd.country_codes`).
+COUNTRY_ITEMS = ("citizenship", "birthcountry")
 
 _ID = re.compile(r"[+-]?\d+")
 
@@ -395,9 +399,11 @@ def resolve_entities(fields, path, cache):
     spent its whole life here at 16,500 titles and never reached a new batch. A single Q-id is walked too:
     `franchise` was one, and a harvest that walked only lists left all 3,019 of them unnamed.
 
-    Then each credited person's traits (`wd.people`: gender, birth, death, citizenship, occupation), for
-    every person not yet asked, and the names of the items those traits point at. `{}` records "asked, has
-    none", so a checkpoint named before traits existed is asked once.
+    Then each credited person's traits (`wd.people`: gender, birth, death, citizenship, occupation) and
+    birthplace (`wd.birthplaces`: the place and its country), each for every person not yet asked, and the
+    names of the items those point at. `{}` records "asked, has none", under `traits` and `birth` apart, so
+    a checkpoint named before either existed is asked once. Then each country those name, for its ISO code
+    (`""` for none).
 
     Then each entity's IMDb person id (P345), for every entry not yet asked — the ones just named and the
     ones a checkpoint named before this was asked at all. `""` records "asked, has none"."""
@@ -424,9 +430,25 @@ def resolve_entities(fields, path, cache):
             names[qid]["traits"] = found.get(qid, {})
         save(path, names)
         say(f"person traits: {len(unasked)} people asked, {sum(1 for q in unasked if q in found)} have some")
+    unasked = sorted(qid for qid in people if qid in names and "birth" not in names[qid])
+    if unasked:
+        found = wd.birthplaces(unasked, cache)
+        for qid in unasked:
+            names[qid]["birth"] = found.get(qid, {})
+        save(path, names)
+        say(f"birthplaces: {len(unasked)} people asked, {sum(1 for q in unasked if q in found)} have one")
     values = {q for entry in names.values() for key in TRAIT_ITEMS
               for q in (entry.get("traits") or {}).get(key) or []}
+    values |= {q for entry in names.values() for q in person_items(entry, BIRTH_ITEMS)}
     name_entities(names, values, path, what="trait values")
+    countries = {q for entry in names.values() for q in person_items(entry, COUNTRY_ITEMS)}
+    unasked = sorted(qid for qid in countries if qid in names and "iso" not in names[qid])
+    if unasked:
+        found = wd.country_codes(unasked, cache)
+        for qid in unasked:
+            names[qid]["iso"] = found.get(qid, "")
+        save(path, names)
+        say(f"country codes: {len(unasked)} countries asked, {sum(1 for q in unasked if q in found)} have one")
     unasked = sorted(qid for qid, entry in names.items() if "imdbId" not in entry)
     if unasked:
         found = wd.imdb_ids(unasked, cache)
@@ -435,6 +457,41 @@ def resolve_entities(fields, path, cache):
         save(path, names)
         say(f"imdb ids: {len(unasked)} entities asked, {sum(1 for q in unasked if q in found)} have one")
     return names
+
+
+def person_items(entry, keys):
+    """The items a checkpointed person's `traits` and `birth` name under `keys`."""
+    stated = {**(entry.get("traits") or {}), **(entry.get("birth") or {})}
+    return [q for key in keys for q in stated.get(key) or []]
+
+
+def resolve_source_authors(fields, path, cache):
+    """Who wrote what each adapted title is adapted from: `sourceAuthors`, the authors (P50) of its
+    `basedOn` works, sorted by Q-id number, and left out where none has one. The authors are then named with
+    every other entity. Derived like `basedOnKind`: the checkpoint maps each work to its authors, `[]` for
+    asked-and-none, so a work is asked once."""
+    found = checkpoint(path)
+    works = set()
+    for row in fields.values():
+        if isinstance(row.get("basedOn"), list):
+            works.update(q for q in row["basedOn"] if isinstance(q, str) and q.startswith("Q"))
+    unresolved = sorted(works - set(found))
+    say(f"source authors: {len(found)} works cached, {len(unresolved)} to resolve")
+    if unresolved:
+        answered = wd.authors(unresolved, cache)
+        for qid in unresolved:
+            found[qid] = answered.get(qid, [])
+        save(path, found)
+    titles = 0
+    for row in fields.values():
+        authors = {q for work in row.get("basedOn") or [] if isinstance(work, str)
+                   for q in found.get(work) or []}
+        if authors:
+            row["sourceAuthors"] = sorted(authors, key=lambda q: int(q[1:]))
+            titles += 1
+        else:
+            row.pop("sourceAuthors", None)
+    say(f"sourceAuthors: {titles} titles adapt a work Wikidata names an author of")
 
 
 def resolve_sources(fields, path):
@@ -492,8 +549,12 @@ def entity_out(entry):
     aliases = [part for part in (entry.get("aliases") or "").split("\x1f") if part]
     if aliases:
         out["aliases"] = aliases
-    # A person's traits ship beside the name, flat: `gender`, `born`, `died`, `citizenship`, `occupation`.
+    # A person's traits ship beside the name, flat: `gender`, `born`, `died`, `citizenship`, `occupation`,
+    # and where they were born, `birthplace` and `birthcountry`. A country ships its ISO code as `iso`.
     out.update(entry.get("traits") or {})
+    out.update(entry.get("birth") or {})
+    if entry.get("iso"):
+        out["iso"] = entry["iso"]
     return out
 
 
@@ -535,6 +596,8 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE):
 
     resolve_franchises(fields, cache, {key: found["item"] for key, found in resolved.items() if found.get("item")})
     resolve_awards(fields, cache)
+    # Before the entities are named, so the authors are named with them.
+    resolve_source_authors(fields, os.path.join(directory, "facts-source-authors.json"), cache)
     names = resolve_entities(fields, os.path.join(directory, "facts-entities.json"), cache)
     resolve_sources(fields, os.path.join(directory, "facts-source-types.json"))
     entities = shipped_entities(names, fields)
