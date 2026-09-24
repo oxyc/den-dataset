@@ -15,7 +15,7 @@ name: daily
 #   secrets  TMDB_API_KEY                       the delta worklist; without it no new titles are discovered
 #            TYPESAFE_API_KEY                   the classify, critique and genres & moods answers (with spend)
 #            WIKIMEDIA_ENTERPRISE_USERNAME/_PASSWORD   optional plot source
-#            DEN_EMBED_URL                      the den-embed that SERVES queries; without it nothing is embedded
+#            DEN_EMBED_URL                      a den-embed to embed against instead of the job's own
 #   vars     DEN_DAILY_ENABLED                  `true` to run on the schedule
 #            DEN_DAILY_SPEND                    `true` to let the scheduled run buy the day's answers
 #            DEN_DAILY_RUNS_ON                  a JSON runner label list, e.g. ["self-hosted","den"]; default
@@ -23,6 +23,10 @@ name: daily
 #            DEN_OUT_DIR / DEN_CACHE_DIR        the persistent out-dir and response cache the job runs over;
 #                                               required — see "Where the out-dir lives" below
 #            DEN_REVISIT_WEEKS                  the weekly slice's cycle, default 8
+#            DEN_EMBED_IMAGE                    the den-embed image the box serves, by digest: the job runs it
+#                                               at MAX_TOKENS=1024 and the canary checks its space before a
+#                                               vector is written. Without it (and DEN_EMBED_URL) nothing is
+#                                               embedded
 #
 # WHERE THE OUT-DIR LIVES. The job runs over the out-dir the live dataset was built from, and that out-dir is
 # not publishable: enriched batches from before oxyc/den-dataset#53 still carry TMDB's overviews. So it is
@@ -86,6 +90,19 @@ jobs:
               cat download.err >&2; exit 1
             fi
           fi
+      # The same image at the same token cap gives the box's vectors byte for byte on a hosted runner (#27);
+      # the embed stage's canary refuses before writing one if it does not.
+      - name: den-embed
+        if: vars.DEN_EMBED_IMAGE != ''
+        env:
+          IMAGE: ${{ vars.DEN_EMBED_IMAGE }}
+        run: |
+          docker run -d --name den-embed -p 127.0.0.1:8080:8080 -e MAX_TOKENS=1024 "$IMAGE"
+          for _ in $(seq 60); do
+            curl -fsS http://127.0.0.1:8080/health && exit 0
+            sleep 5
+          done
+          docker logs den-embed >&2; exit 1
       - name: The day
         id: day
         env:
@@ -93,7 +110,7 @@ jobs:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           WIKIMEDIA_ENTERPRISE_USERNAME: ${{ secrets.WIKIMEDIA_ENTERPRISE_USERNAME }}
           WIKIMEDIA_ENTERPRISE_PASSWORD: ${{ secrets.WIKIMEDIA_ENTERPRISE_PASSWORD }}
-          DEN_EMBED_URL: ${{ secrets.DEN_EMBED_URL }}
+          DEN_EMBED_URL: ${{ secrets.DEN_EMBED_URL || (vars.DEN_EMBED_IMAGE != '' && 'http://127.0.0.1:8080' || '') }}
           WEEKS: ${{ github.event_name == 'workflow_dispatch' && inputs.revisit_weeks || (github.event.schedule == '47 4 * * 1' && (vars.DEN_REVISIT_WEEKS || '8') || '') }}
           # format() so a dispatch's `false` is a non-empty string and is not replaced by the schedule's variable.
           SPEND: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.spend) || format('{0}', vars.DEN_DAILY_SPEND == 'true') }}

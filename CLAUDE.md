@@ -24,10 +24,12 @@ Never delete one to save space without asking, and never assume "it's in git". A
 needs belongs in `data/` (see `data/README.md`); a premise vector blob aligns to the `labels-premise.json`
 built beside it, never to a tags file.
 
-## Embed where you serve
+## One embedding space
 
-Corpus vectors and live query vectors must come from the same `den-embed` **instance**, not the same
-version string. `docs/OPERATE.md` "The alignment rule" is the procedure and the current state.
+Corpus vectors and live query vectors must be in the same **space**, and the known-answer canary
+(`data/embed-canary.json`) is what says they are — not a version string, and not a host. The same image at
+`MAX_TOKENS=1024` gives byte-identical vectors on the box and on a GitHub-hosted runner (#27), so the corpus
+can be embedded in either. `docs/OPERATE.md` "The alignment rule" is the procedure and the current state.
 
 ## Docs
 

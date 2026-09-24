@@ -5,17 +5,17 @@ in `./den stages`; this file is the order, the prerequisites, and the things the
 
 ## The alignment rule (do not break this)
 
-**The corpus and every live query must come from the same `den-embed`.** int8 dot products are meaningless
+**The corpus and every live query must be embedded in the same space.** int8 dot products are meaningless
 between vectors from different ones, and nothing about the result looks wrong when they are:
 oxyc/den-dataset#21 was a corpus half-embedded by two den-embed builds, measured at 6.3/10 top-10 overlap,
 found by hand months later.
 
-**1. Embed where you serve** — against the den-embed on the box that answers live queries, not a local
-container. The published image cannot run on an Apple Silicon Mac at all: ONNX Runtime needs AVX2, which
-emulation lacks, so `/health` answers and the first embed dies with an illegal instruction ("connection
-refused" from the client). Whether architecture alone moves vectors is unsettled (#21 compared arm64 and
-x86_64 without holding `MAX_TOKENS` fixed); two x86_64 hosts, AVX2 and AVX-512, are byte-identical at a
-matching cap.
+**1. The same image, anywhere x86_64** — the digest the box serves, at `MAX_TOKENS=1024`. The box's Intel
+AVX2 and a GitHub-hosted runner's AMD AVX-512 return byte-identical vectors (24/24, #27), so the daily job
+embeds in its own container (`.github/workflows/daily.yml`) and a person can embed against the box. The
+published image cannot run on an Apple Silicon Mac at all: ONNX Runtime needs AVX2, which emulation lacks,
+so `/health` answers and the first embed dies with an illegal instruction ("connection refused" from the
+client). Whatever the host, the canary (2.) is what decides.
 
 ```sh
 ssh root@pve 'incus exec den -- podman run --rm --network den -v /opt/den/embed:/w:z \
@@ -252,7 +252,7 @@ since the live dataset, the stages after it over what moved, and every publish g
 publish" and signs and uploads nothing; `out/daily-report.md` says what moved, what was skipped for want of a
 credential, and what was bought. `pipeline/daily.py` is what it runs, skips and refuses. It needs the live
 manifest in `out/published/` (see "The change set") and reads credentials from the environment:
-`TMDB_API_KEY`, `TYPESAFE_API_KEY` with `--spend`, `DEN_EMBED_URL` — the den-embed that serves queries.
+`TMDB_API_KEY`, `TYPESAFE_API_KEY` with `--spend`, and `DEN_EMBED_URL` — a den-embed whose canary answers match.
 `--revisit-weeks N` is the weekly run.
 
 `.github/workflows/daily.yml` runs it on a schedule once the repository variable `DEN_DAILY_ENABLED` is
