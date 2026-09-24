@@ -259,6 +259,21 @@ manifest in `out/published/` (see "The change set") and reads credentials from t
 `true`; its header lists the secrets and variables it reads. A ready run uploads the store, the manifest
 and `checked.json` as the artifact `dataset-<run id>`.
 
+### Where its out-dir lives
+
+The job runs over the out-dir the live dataset was built from, and carries it between runs in the `state`
+release of a PRIVATE repository (`pipeline/state.sh`; repository variable `DEN_STATE_REPO`, secret
+`DEN_STATE_TOKEN`). Private, because pre-#53 enriched batches hold TMDB overviews. Seed it once, from the
+out-dir that built the live dataset, with a token that can write that repository's releases:
+
+```sh
+DEN_STATE_REPO=<owner>/<state repo> GH_TOKEN=<token> pipeline/state.sh save out-repass
+```
+
+The stores are left out (every run rebuilds one), and so is the response cache, which the job does not need.
+On a self-hosted runner, `DEN_OUT_DIR` names a persistent out-dir instead. The job's den-embed is the image
+`DEN_EMBED_IMAGE` names, which must be the digest the box serves.
+
 ### Publishing a daily run
 
 From the repo root, with the signing key where `publish-dataset.sh` looks for it:
