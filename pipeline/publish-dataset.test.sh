@@ -16,7 +16,7 @@
 # refuses through the wrapper is to run the refusals through it. A wrapper that swallowed an exit code
 # would satisfy every argv comparison and fail here.
 #
-# Run: pipeline/publish-dataset.test.sh  ·  DEN_PUBLISH_VIA=stage pipeline/publish-dataset.test.sh
+# Run: pipeline/publish-dataset.test.sh  ·  DEN_PUBLISH_VIA=stage …  ·  DEN_PUBLISH_VIA=check …
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -202,8 +202,33 @@ publish_baseline() { cp "$DIR/dataset.meta.json" "$PUBLISHED_META"; }
 # The publisher, invoked the way this run is testing it. Both forms take the publish dir as their only
 # argument and leave the same two logs behind, so a case reads identically either way. The stage is given
 # no `--dataset-version`: the store it uploads is named by the manifest, not by the declaration.
+#
+# `DEN_PUBLISH_VIA=check` runs every case through `--check` as well (oxyc/den-dataset#27), on a copy of the
+# out-dir with the published manifest where `--check` reads it, and then publishes as the script does. The
+# two verdicts must agree: `--check` refuses what the publish refuses, passes what it publishes, and uploads
+# nothing either way. The one refusal it cannot share is the signing's, which it does not reach.
 run_publish() {
-  if [ "${DEN_PUBLISH_VIA:-script}" = "stage" ]; then
+  if [ "${DEN_PUBLISH_VIA:-script}" = "check" ]; then
+    local checked="$WORK/checked" check_rc publish_rc
+    rm -rf "$checked"; cp -a "$DIR" "$checked"; mkdir -p "$checked/published"
+    [ -f "$PUBLISHED_META" ] && cp "$PUBLISHED_META" "$checked/published/dataset.meta.json"
+    PATH="$BIN:$PATH" bash "$PUBLISH" "$checked" --check > "$WORK/check.log" 2>&1
+    check_rc=$?
+    [ ! -s "$UPLOADS" ] || bad "--check uploaded $(tr '\n' ' ' < "$UPLOADS")"
+    PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" > "$WORK/out.log" 2> "$WORK/err.log"
+    publish_rc=$?
+    if [ "$publish_rc" -eq 0 ] && [ "$check_rc" -ne 0 ]; then
+      bad "--check refused what publishes: $(tail -3 "$WORK/check.log")"
+    elif [ "$publish_rc" -ne 0 ] && [ "$check_rc" -eq 0 ] \
+         && ! grep -qE "signing key|openssl could not" "$WORK/err.log"; then
+      bad "--check passed what the publish refuses: $(tail -3 "$WORK/err.log")"
+    elif [ "$check_rc" -eq 0 ] && ! grep -q "ready to publish" "$WORK/check.log"; then
+      bad "--check passed without saying it is ready to publish"
+    else
+      ok "--check agrees with the publish"
+    fi
+    return "$publish_rc"
+  elif [ "${DEN_PUBLISH_VIA:-script}" = "stage" ]; then
     PATH="$BIN:$PATH" python3 "$HERE/../den" stage publish --out-dir "$DIR" \
       > "$WORK/out.log" 2> "$WORK/err.log"
   else

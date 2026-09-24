@@ -18,12 +18,12 @@ row, the fixture's Wikipedia sitelinks are what admit its titles.
 **What is seeded, and why.** Two kinds of input are copied into the out-dir before the run, each in its
 own directory under `seeds/` so the kind is visible from the path:
 
-  * `seeds/unproduced/` — the six inputs NO stage produces (`UNPRODUCED`). The audit in #27 found that
+  * `seeds/unproduced/` — the five inputs NO stage produces (`UNPRODUCED`). The audit in #27 found that
     `./den run` cannot run unattended because of exactly these. `UnproducedSeeds` fails the moment a stage
     starts producing one, so the seed is deleted rather than left to shadow the real producer.
-  * `seeds/unbought/` — the classify pass's shard. Its stage exists but buys from a paid provider, and
-    `den run` leaves it out without `--spend`; CI can never buy. `TheClassifyPassStillBuys` fails if that
-    stops being true. The genres & moods stage's answer shard is the same kind of input — what its ask
+  * `seeds/unbought/` — the classify and critique passes' shards. Their stages exist but buy from a paid
+    provider, and `den run` leaves them out without `--spend`; CI can never buy. `TheClassifyPassStillBuys`
+    fails if that stops being true. The genres & moods stage's answer shard is the same kind of input — what its ask
     would buy — and the test WRITES it (`write_genres_moods_answer`), because one answer is 78 questions'
     worth of probabilities and would not review.
 
@@ -75,11 +75,10 @@ FIXTURE = os.path.join(HERE, "pipeline", "fixture-corpus")
 UPSTREAM = os.path.join(FIXTURE, "upstream")
 SEEDS = os.path.join(FIXTURE, "seeds")
 
-#: The six inputs no stage produces, and the seed file(s) standing in for each. oxyc/den-dataset#27.
+#: The five inputs no stage produces, and the seed file(s) standing in for each. oxyc/den-dataset#27.
 UNPRODUCED = {
     "export_movie": ("movie_ids.json",),
     "export_tv": ("tv_series_ids.json",),
-    "delta": ("delta-v2.jsonl", "delta-v2.jsonl.manifest.json"),
     "delta_ids": ("facts-delta-ids.txt",),
     "premise_labels": ("labels-premise.json",),
     # A binary blob does not review, so the seed is its key list and `setUpClass` writes the blob.
@@ -372,13 +371,41 @@ class Wikidata:
         raise AssertionError(f"the fixture's Wikidata does not know this item query: {head}")
 
 
+#: The committed award ceremony merges, and the fixture series nominated once at each one's `from` body.
+AWARD_MERGES = os.path.join(HERE, "data", "award-ceremony-merges.json")
+NOMINEE_AT_MERGED_BODIES = "Q90000002"  # tv:900001
+
+
+def with_merged_award_bodies(items):
+    """The fixture's items, plus one prize conferred by each `from` body in `data/award-ceremony-merges.json`
+    and a nomination for it on one fixture series.
+
+    The merge list is data about the real corpus, and the publish refuses a store in which a `from` is named
+    by no title (`check_award_merges.py --gate`): a merge nothing needs any more is stale. An invented corpus
+    names none of those bodies, so without this the run could not pass that gate — and the gate is not
+    changed to let it. Read from the committed file rather than copied into `upstream/`, so a merge added
+    there is exercised here the same day: the store build files each `from` under its `into`, for real.
+    """
+    items = dict(items)
+    nominee = dict(items[NOMINEE_AT_MERGED_BODIES])
+    claims = dict(nominee["claims"])
+    nominated = list(claims.get("P1411") or [])
+    for number, merge in enumerate(read_json(AWARD_MERGES)["merges"], start=1):
+        prize = f"Q991{number:05d}"
+        items[prize] = {"label": f"Fixture prize {number}", "claims": {"P1027": [merge["from"]]}}
+        nominated.append(prize)
+    nominee["claims"] = dict(claims, P1411=nominated)
+    items[NOMINEE_AT_MERGED_BODIES] = nominee
+    return items
+
+
 class Upstreams:
     """`lib/http.request`, answered from the fixture. A request it has no answer for FAILS the test."""
 
     def __init__(self, local_request):
         self.local = local_request
         self.pages = read_json(os.path.join(UPSTREAM, "wikipedia.json"))
-        self.wikidata = Wikidata(read_json(os.path.join(UPSTREAM, "wikidata.json")))
+        self.wikidata = Wikidata(with_merged_award_bodies(read_json(os.path.join(UPSTREAM, "wikidata.json"))))
         self.hosts = set()
 
     def request(self, host, path, params=None, method="GET", body=None, headers=None, scheme="https",
@@ -555,7 +582,8 @@ class DenRun(unittest.TestCase):
     def test_den_run_runs_every_stage_it_is_allowed_to(self):
         """Unattended, given no version: the stages from `facts` on take the one `finalize` derived."""
         self.assertEqual(self.run_code, 0, f"den run refused:\n{self.run_said[-3000:]}")
-        self.assertEqual(self.began, [m.NAME for m in pipeline.stages() if m.NAME not in ("classify", "publish")])
+        self.assertEqual(self.began, [m.NAME for m in pipeline.stages()
+                                      if m.NAME not in ("classify", "critique", "publish")])
 
     def test_a_given_version_is_only_a_check(self):
         """One given by hand that disagrees with the manifest is refused rather than obeyed: the facts would
@@ -581,7 +609,7 @@ class DenRun(unittest.TestCase):
 
     def test_den_run_leaves_out_exactly_the_stages_that_buy_or_publish(self):
         order = [m.NAME for m in pipeline.stages()]
-        self.assertEqual([name for name in order if name not in self.began], ["classify", "publish"])
+        self.assertEqual([name for name in order if name not in self.began], ["classify", "critique", "publish"])
 
     # ---- the published shapes agree with each other ---------------------------------------------------
 
@@ -602,8 +630,12 @@ class DenRun(unittest.TestCase):
         with gzip.open(self.path(artifacts.CORPUS), "rt", encoding="utf-8") as fh:
             return [json.loads(line) for line in fh if line.strip()]
 
+    def finalized(self):
+        """The manifest as `finalize` and the store wrote it — before any publish prunes it."""
+        return read_json(self.meta)
+
     def test_the_manifest_describes_the_labels_and_the_vectors_it_ships_beside(self):
-        meta = read_json(self.meta)
+        meta = self.finalized()
         _count, dims, blob_keys, _blob, _base = vector_blob.read(self.path(artifacts.VECTORS))
         self.assertEqual(set(blob_keys), self.labels(), "every labelled title has exactly one plot vector")
         self.assertEqual(meta["count"], len(self.labels()))
@@ -693,12 +725,19 @@ class DenRun(unittest.TestCase):
         self.assertNotIn("Q99000001", self.facts()["entities"], "a category is not named")
         store = Store(self.path(artifacts.STORE))
         ceremonies = store.column("ceremony_qid", "I", 4)
-        self.assertEqual(ceremonies, [99000010, 99000020])
         offsets = store.column("award_o", "I", 4)
         values, won = store.column("award_v", "I", 4), store.column("award_w", "B", 1)
         row = store.keys().index("movie:900001")
-        self.assertEqual(list(zip(values[offsets[row]:offsets[row + 1]], won[offsets[row]:offsets[row + 1]])),
-                         [(0, 1), (1, 0)])
+        self.assertEqual([(ceremonies[v], w) for v, w in zip(values[offsets[row]:offsets[row + 1]],
+                                                             won[offsets[row]:offsets[row + 1]])],
+                         [(99000010, 1), (99000020, 0)])
+        # The series nominated at every merged body (`with_merged_award_bodies`) is filed under each `into`,
+        # and no `from` reaches the table.
+        merges = read_json(AWARD_MERGES)["merges"]
+        row = store.keys().index("tv:900001")
+        self.assertEqual(sorted(ceremonies[v] for v in values[offsets[row]:offsets[row + 1]]),
+                         sorted(int(m["into"][1:]) for m in merges))
+        self.assertFalse({int(m["from"][1:]) for m in merges} & set(ceremonies))
         self.assertEqual(self.facts()["entities"]["Q91000001"]["imdbId"], "nm9000001")
 
     def test_a_persons_traits_reach_the_store(self):
@@ -879,12 +918,14 @@ class NoStageReadsWhatALaterOneWrites(unittest.TestCase):
 
 
 class TheClassifyPassStillBuys(unittest.TestCase):
-    def test_classify_is_left_out_of_an_unpaid_run(self):
-        """`seeds/unbought/` stands in for a pass CI cannot buy. If classify stops spending, `den run` runs
-        it and the seed shadows its output: delete the seed."""
-        classify = pipeline.stage("classify")
-        self.assertTrue(classify.SPENDS and not getattr(classify, "FREE_WITHOUT_SPEND", False),
-                        "classify runs without --spend now: delete pipeline/fixture-corpus/seeds/unbought/")
+    def test_classify_and_critique_are_left_out_of_an_unpaid_run(self):
+        """`seeds/unbought/` stands in for the passes CI cannot buy. If either stops spending, `den run` runs
+        it and the seed shadows its output: delete that pass's seed."""
+        for name in ("classify", "critique"):
+            stage = pipeline.stage(name)
+            self.assertTrue(stage.SPENDS and not getattr(stage, "FREE_WITHOUT_SPEND", False),
+                            f"{name} runs without --spend now: delete its seed in "
+                            f"pipeline/fixture-corpus/seeds/unbought/")
 
 
 if __name__ == "__main__":

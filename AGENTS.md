@@ -10,15 +10,16 @@ prose somewhere that can go stale without anything failing.
 | What builds an artifact? | The stage that declares it in `OUTPUTS`. For one nothing here builds yet, `pipeline/artifacts.py`. Or the producer column of `./den stages`. |
 | What does a store section mean? | den-spec `wire/store-v1.md`, then the `store/` module named for its heading. |
 | What order are the store's sections written in? | `store/build.py`, and `PROVENANCE` declares the same order. |
-| Why was a publish refused? | `pipeline/publish-dataset.sh` and the `pipeline/check_*.py` guards it runs beside it. `pipeline/publish.py` runs it and adds no guard of its own. |
+| Why was a publish refused? | `pipeline/publish-dataset.sh` and the `pipeline/check_*.py` guards it runs beside it. `pipeline/publish.py` runs it and adds no guard of its own; `./den stage publish --plan` runs every gate and signs and uploads nothing. |
+| What does a daily run redo? | `pipeline/changes.py` — the change set since the live dataset, which the stages after it read. |
 | Which titles are one franchise, and why? | `pipeline/franchises.py` (the stage), `pipeline/franchise_groups.py` (what Wikidata decides alone), `data/franchise-golden.json` (the gate). |
 | How do I run it? | `docs/OPERATE.md`. `./den run` runs every stage; it skips the paid classify pass without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. |
 
 ## The part that is still being rebuilt
 
-`pipeline/` holds **thirteen** stages — `./den stages` lists them. What is left outside the order are the side passes
-no stage runs but the corpus join and the store read — the delta question pass (`pipeline/run_delta.py`) and the
-premise tags — and each still answers for itself in `pipeline/artifacts.py` until it lands. Beside the
+`pipeline/` holds **fourteen** stages — `./den stages` lists them. What is left outside the order is the side
+pass no stage runs but the store reads — the premise tags — and it still answers for itself in
+`pipeline/artifacts.py` until it lands. Beside the
 stages sit the tools an operator runs by hand, each declared in `guards/operator-tools.json`; a tool with
 dependencies the pipeline does not take lives under `tools/` instead.
 

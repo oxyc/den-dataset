@@ -33,9 +33,14 @@ rule. A revision or item that was never recorded (the Enterprise path names no r
 nothing, and the refresh re-fetches exactly those titles until they are known.
 
 **Withdrawn** is a title that had a plot and has none now. Its classify and critique rows were read from an
-article it no longer has, so `pipeline/consolidate_corpus.py withdraw --keys changes/withdrawn.txt` stops
-the join shipping them. The title keeps its facts, its genres & moods and its row, as the join's
-tombstones already work.
+article it no longer has, so this stage tombstones it in `withdrawn.jsonl` — through
+`pipeline/consolidate_corpus.py`'s own `withdraw`, so there is one writer's format — and the corpus join
+stops shipping those rows. The title keeps its facts, its genres & moods and its row, as the join's
+tombstones already work. The reason names the live version it was lost against, and a title that regains
+its plot before the next publish is listed `regained` while that version is live, so it is classified
+again rather than shipping without the rows its tombstone took. A title already tombstoned is not
+tombstoned again: the file is append-only and a key is withdrawn once (`read_withdrawals`), so one that
+loses a plot a second time is counted `withdrawnBefore` in the plan and printed for a person to decide.
 
 **The weekly slice** (oxyc/den-dataset#5). `--revisit-weeks N` adds every title whose key hashes into this
 week's slice of N, so the whole corpus is revisited once every N weeks with no state kept about what was
@@ -52,19 +57,23 @@ What it writes, under `changes/`, rewritten whole every run:
   * `plan.json`     — the baseline, the counts, and every listed title with its reasons;
   * `keys.txt`      — added and changed: the titles every later stage runs for;
   * `withdrawn.txt` — what `consolidate_corpus.py withdraw` takes;
-  * `revisit.txt`   — this week's slice, with `--revisit-weeks` only.
+  * `items.txt`     — the changed titles answered for by another Wikidata item, whose facts and doc facts are
+    asked again (the facts and doc-facts stages evict them from their checkpoints);
+  * `revisit.txt`   — this week's slice, with `--revisit-weeks` only; asked again the same way.
 
 Keys only. The plan carries no text: an old batch's `overview` is TMDB's prose when `hasWikiPlot` is false,
 so the digest is taken of grounded records only, and never leaves this process.
 """
+import contextlib
 import datetime
 import hashlib
 import json
 import os
+import sys
 
 from lib import cache as caching
 
-from . import artifacts, enrich
+from . import artifacts, consolidate_corpus, enrich
 from .contract import StageError, how_to_build
 
 NAME = "changes"
@@ -77,9 +86,10 @@ SPENDS = False
 #: The batches, and the live manifest that says which of them the live dataset saw. The manifest is
 #: optional: without it every title is new, which is a first generation.
 INPUTS = (artifacts.ENRICHED, artifacts.PUBLISHED_META)
-OUTPUTS = (artifacts.CHANGES,)
+#: And the tombstones: appended to, never rewritten.
+OUTPUTS = (artifacts.CHANGES, artifacts.WITHDRAWN)
 
-PLOT, ARTICLE, GAINED, ITEM = "plot", "article", "gainedPlot", "item"
+PLOT, ARTICLE, GAINED, ITEM, REGAINED = "plot", "article", "gainedPlot", "item", "regained"
 LOST = "lostPlot"
 
 
@@ -190,6 +200,47 @@ def baseline(ctx, highest):
     return meta.get("datasetVersion"), through
 
 
+def tombstones(path):
+    """`key -> reason` for every title `withdrawn.jsonl` withdraws; `{}` with no file."""
+    if not os.path.exists(path):
+        return {}
+    out = {}
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                row = json.loads(line)
+                out[enrich.key(row["mediaType"], row["tmdbId"])] = row.get("reason") or ""
+    return out
+
+
+def lost_since(version):
+    """The reason a tombstone this stage writes gives: the live version the plot was lost against."""
+    return f"lost its plot since {version} (den stage changes)"
+
+
+def withdraw(ctx, directory, withdrawn, current, changed, live, now):
+    """Tombstone what lost its plot, and list what regained one while its tombstone's version is live.
+
+    Returns `(tombstoned, withdrawn before)`. `changed` gains the regained titles."""
+    path = ctx.path(artifacts.WITHDRAWN)
+    standing = tombstones(path)
+    fresh = [key for key in withdrawn if key not in standing]
+    before = [key for key in withdrawn if key in standing]
+    listed = os.path.join(directory, "tombstoned.txt")
+    write_list(listed, fresh)
+    if fresh:
+        with contextlib.redirect_stdout(sys.stderr):
+            consolidate_corpus.withdraw(["--keys", listed, "--reason", lost_since(live[0]), "--out", path], now=now)
+    for key, reason in standing.items():
+        if reason == lost_since(live[0]) and current.get(key, {}).get("plot") and key not in changed:
+            changed[key] = [REGAINED]
+    if before:
+        print(f"changes: {len(before)} title(s) lost a plot they were withdrawn for once already, and a key is "
+              f"withdrawn once; the corpus still ships what a later classify run answered for them: "
+              f"{', '.join(before[:10])}", file=sys.stderr)
+    return fresh, before
+
+
 def write_list(path, keys):
     caching.write_atomically(path, "".join(f"{key}\n" for key in keys).encode("utf-8"))
 
@@ -204,6 +255,18 @@ def run(ctx, now=None):
     current = snapshot(enriched)
     before = snapshot(enriched, through=live[1]) if live else {}
     added, changed, withdrawn, revised, unchanged = diff(before, current)
+    directory = ctx.path(artifacts.CHANGES)
+    os.makedirs(directory, exist_ok=True)
+    listed_before = set(changed)
+    tombstoned, again = withdraw(ctx, directory, withdrawn, current, changed, live,
+                                 now or datetime.datetime.now(datetime.timezone.utc)) if live else ([], [])
+    for key in set(changed) - listed_before:
+        if current[key]["revision"] != before[key]["revision"] and None not in (current[key]["revision"],
+                                                                                 before[key]["revision"]):
+            revised -= 1
+        else:
+            unchanged -= 1
+    changed = {key: changed[key] for key in sorted(changed, key=order)}
 
     revisit = []
     today = (now or datetime.datetime.now(datetime.timezone.utc)).date()
@@ -219,7 +282,8 @@ def run(ctx, now=None):
         "baseline": {"datasetVersion": live[0], "maxBatchId": live[1]} if live else None,
         "throughBatch": numbers[-1],
         "counts": {"titles": len(current), "added": len(added), "changed": len(changed),
-                   "withdrawn": len(withdrawn), "revised": revised, "unchanged": unchanged,
+                   "withdrawn": len(withdrawn), "tombstoned": len(tombstoned), "withdrawnBefore": len(again),
+                   "revised": revised, "unchanged": unchanged,
                    "keys": len(keys), "revisit": len(revisit)},
         "revisit": ({"weeks": ctx.revisit_weeks, "slice": week(today) % ctx.revisit_weeks,
                      "date": today.isoformat()} if ctx.revisit_weeks else None),
@@ -227,10 +291,9 @@ def run(ctx, now=None):
         "changed": changed,
         "withdrawn": withdrawn,
     }
-    directory = ctx.path(artifacts.CHANGES)
-    os.makedirs(directory, exist_ok=True)
     write_list(os.path.join(directory, "keys.txt"), keys)
     write_list(os.path.join(directory, "withdrawn.txt"), list(withdrawn))
+    write_list(os.path.join(directory, "items.txt"), [key for key, why in changed.items() if ITEM in why])
     stale = os.path.join(directory, "revisit.txt")
     if ctx.revisit_weeks:
         write_list(stale, revisit)
@@ -244,3 +307,50 @@ def run(ctx, now=None):
             f"{len(withdrawn)} withdrawn; {len(revisit)} to revisit"
             f"{'; no live manifest, so every title is new' if not live else ''})")
 
+
+def planned(ctx):
+    """This out-dir's plan when it has a live baseline — a run doing only what moved — or None: no change
+    set, or a first generation, where a stage does what it always did."""
+    path = os.path.join(ctx.path(artifacts.CHANGES), "plan.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            plan = json.load(handle)
+    except ValueError as error:
+        raise StageError(f"changes: {path} will not parse ({error}); run `{HOW}` again") from None
+    return plan if plan.get("baseline") else None
+
+
+#: The lists a later stage can ask for, by the file each is written to.
+LISTS = ("keys", "withdrawn", "items", "revisit")
+
+
+def listed(ctx, *names):
+    """The keys the change set in this out-dir lists under `names`, as a set — what a later stage runs for.
+
+    Empty when there is no change set (an out-dir from before it, or a stage run by hand) and when the plan
+    has no baseline. A first generation lists every title as added, and "every title" is not an instruction
+    to redo anything: there is nothing yet to redo. Taking it as one would re-embed and re-scrape a whole
+    corpus because a live manifest was not downloaded. A list the plan does not name is refused.
+    """
+    unknown = [name for name in names if name not in LISTS]
+    if unknown:
+        raise StageError(f"changes: no list named {unknown[0]!r}; the change set writes {', '.join(LISTS)}")
+    directory = ctx.path(artifacts.CHANGES)
+    plan = planned(ctx)
+    if not plan:
+        return set()
+    out = set()
+    for name in names:
+        path = os.path.join(directory, f"{name}.txt")
+        if name == "revisit" and not plan.get("revisit"):
+            continue
+        with open(path, encoding="utf-8") as handle:
+            for number, line in enumerate(handle, 1):
+                key = line.strip()
+                media, _, ident = key.partition(":")
+                if media not in ("movie", "tv") or not (ident.isascii() and ident.isdigit()):
+                    raise StageError(f"changes: {path}:{number} is not a mediaType:tmdbId key: {key[:80]!r}")
+                out.add(key)
+    return out

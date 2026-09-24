@@ -104,13 +104,14 @@ class Declaration(unittest.TestCase):
         """The pin the derived registry hangs from. The pass has no `INPUT_ARGS` of its own to check
         against, so the check is its parser: every declared argument name is one the pass has."""
         parsed = script.argument_parser().parse_args(hand_typed("/nowhere"))
-        for entry in (bind(e) for e in classify.INPUTS):
+        for entry in (bind(e) for e in classify.PASSED):
             self.assertTrue(hasattr(parsed, entry.arg), f"{entry.arg} is not an argument of the pass")
 
     def test_the_outputs_are_the_shard_and_the_manifest_beside_it(self):
         """A stage that declared only the rows would leave the provenance for a $20 artifact owned by
         nobody — and the auditor reads it by a name derived from `--out`, not by one it is given."""
-        self.assertEqual([bind(e).name for e in classify.OUTPUTS], ["combined", "combined_manifest"])
+        self.assertEqual([bind(e).name for e in classify.OUTPUTS],
+                         ["combined", "combined_manifest", "changed_articles"])
 
     def test_the_enrichment_keeps_one_name_and_reaches_the_pass_under_its_own(self):
         """`out/enriched` is `--enriched-dir` to this pass and to the embed pass, and the pipeline calls
@@ -287,12 +288,13 @@ class Topology(unittest.TestCase):
         self.assertEqual(pipeline.producers()["enriched"][0], fetch.PRODUCER)
         self.assertEqual(pipeline.producers()["articles"][0], "pipeline/articles.py")
 
-    def test_the_delta_pass_is_a_different_rule_and_keeps_its_own_producer(self):
-        """`delta` is a second pass over a second article dump, run by a second script. This stage writes
-        `combined` and nothing else, so the delta stays an input that answers for itself rather than being
-        swept into a registration that would name the wrong file."""
-        self.assertEqual(artifacts.DELTA.producer, "pipeline/run_delta.py")
+    def test_the_delta_pass_is_a_different_rule_and_has_its_own_stage(self):
+        """`delta` is a second pass run by a second script. This stage writes `combined` and not the delta,
+        so the delta is registered against the critique stage and the script it runs, not swept into a
+        registration that would name the wrong file."""
+        self.assertEqual(artifacts.DELTA.producer, "")
         self.assertNotIn(artifacts.DELTA, [bind(e).artifact for e in classify.OUTPUTS])
+        self.assertEqual(pipeline.producers()["delta"][0], "pipeline/run_delta.py")
 
     def test_the_titles_are_classified_before_the_corpus_joins_them(self):
         self.assertLess(pipeline.STAGES.index("classify"), pipeline.STAGES.index("corpus"))

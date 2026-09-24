@@ -75,6 +75,58 @@ class Staged(unittest.TestCase):
             return json.load(fh)
 
 
+def change_set(out, baseline=True, **lists):
+    """A change set in `out` as `pipeline/changes.py` writes one: the plan, and each named list."""
+    directory = os.path.join(out, "changes")
+    os.makedirs(directory, exist_ok=True)
+    for name in ("keys", "withdrawn", "items", "revisit"):
+        with open(os.path.join(directory, f"{name}.txt"), "w", encoding="utf-8") as fh:
+            fh.writelines(f"{key}\n" for key in lists.get(name, ()))
+    with open(os.path.join(directory, "plan.json"), "w", encoding="utf-8") as fh:
+        json.dump({"baseline": {"datasetVersion": "live", "maxBatchId": 1} if baseline else None,
+                   "revisit": {"weeks": 4} if "revisit" in lists else None}, fh)
+
+
+class Cache:
+    """A response cache that answers nothing; what matters is which one a batch was asked through."""
+
+    def key(self, *_args):
+        return "k"
+
+    def read(self, _key):
+        return None
+
+    def write(self, _key, _body):
+        pass
+
+
+class Again(Staged):
+    """The change set's Wikidata titles are asked again, through a cache that does not answer from disk."""
+
+    def stub(self, ids, media, cache=None, excluded=None):
+        self.through = getattr(self, "through", []) + [(media, list(ids), type(cache).__name__)]
+        return super().stub(ids, media, cache, excluded)
+
+    def test_a_title_answered_by_another_item_and_the_weekly_slice_are_asked_again_fresh(self):
+        self.labels([self.record(11), self.record(12), self.record(13), self.record(14)])
+        docfacts.write(os.path.join(self.out, "doc-facts.json"),
+                       {f"movie:{n}": {"directors": ["Old"], "genres": []} for n in (11, 12, 13)})
+        change_set(self.out, items=["movie:11"], revisit=["movie:12"], keys=["movie:11"])
+        self.answers = {("movie", 11): {"directors": ["New"], "genres": []}}
+        docfacts.run(self.context(), cache=Cache())
+        self.assertEqual(self.through, [("movie", [14], "Cache"), ("movie", [11, 12], "Fresh")])
+        self.assertEqual({k: v["directors"] for k, v in self.facts().items()},
+                         {"movie:11": ["New"], "movie:12": [], "movie:13": ["Old"], "movie:14": []})
+
+    def test_a_first_generation_asks_nothing_again(self):
+        """With no live dataset there is nothing to have changed since, whatever the lists hold."""
+        self.labels([self.record(11)])
+        docfacts.write(os.path.join(self.out, "doc-facts.json"), {"movie:11": {"directors": ["Old"], "genres": []}})
+        change_set(self.out, baseline=False, items=["movie:11"])
+        docfacts.run(self.context(), cache=Cache())
+        self.assertEqual(getattr(self, "through", []), [])
+
+
 class Writing(Staged):
     def test_an_id_with_neither_fact_is_recorded_empty_rather_than_left_out(self):
         """The embed stage reads an empty row as "no clause"; a missing key is a title the scrape never
@@ -224,7 +276,8 @@ class Topology(unittest.TestCase):
     def test_the_titles_are_this_runs_genres_and_moods(self):
         """Not `labels-t02.json`, which `finalize` writes after this stage: reading it made a fresh out-dir
         unable to start."""
-        self.assertEqual([bind(e).artifact for e in docfacts.INPUTS], [artifacts.GENRES_MOODS])
+        self.assertEqual([bind(e).artifact for e in docfacts.INPUTS], [artifacts.GENRES_MOODS, artifacts.CHANGES])
+        self.assertFalse(artifacts.CHANGES.required, "the change set only says which titles to ask again")
         order = list(pipeline.STAGES)
         self.assertLess(order.index("genres_moods"), order.index("docfacts"))
 

@@ -101,9 +101,11 @@ Next, by hand — the classify stage BUYS, so it is not run unattended. In \`./d
 
   1. Dump the articles the classify pass reads:
        ./den stage articles --out-dir $OUT_DIR
-  2. Classify — with --plan first, to see the call and cost plan:
+  2. Classify and critique — with --plan first, to see the call and cost plan:
        ./den stage classify --out-dir $OUT_DIR --plan
        ./den stage classify --out-dir $OUT_DIR
+       ./den stage critique --out-dir $OUT_DIR --plan
+       ./den stage critique --out-dir $OUT_DIR --spend
   3. Genres & moods for the new titles — --plan first, --spend to ask Jev, then it derives
      \`genres-moods.json\` behind the quality floors:
        ./den stage genres_moods --out-dir $OUT_DIR --plan
