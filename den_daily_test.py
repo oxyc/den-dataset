@@ -11,6 +11,9 @@ it as the job does, on two days:
   * **day two** — one film's plot is rewritten upstream. `den run --refresh` re-reads it, the change set
     names it, and the stages after redo it and nothing else; the gates run again, now against the live
     manifest, so the record-count and store-identity guards compare two generations.
+  * **day two, from the release** — the same day again, in an out-dir that holds only the bundle day one's
+    publish put beside the dataset (`pipeline/published.py`): no plots, no shards, no answers. It has to
+    build the same corpus and the same store, since that is how the job runs — it keeps nothing between runs.
 
 Everything `DenRun` asserts about the out-dir holds after day two as well — the subclass inherits its
 cases and runs them against the second day's state.
@@ -21,6 +24,7 @@ are in the corpus (`pipeline/eval_taxonomy.py`, `MIN_COVERAGE`); an invented cor
 the check is required to get through every gate before it and to be refused by that one, for that reason.
 Any other refusal fails this test.
 """
+import gzip
 import json
 import os
 import re
@@ -32,7 +36,8 @@ import unittest
 import den_run_test as fixture
 import pipeline
 
-from pipeline import artifacts
+from pipeline import artifacts, consolidate_corpus, published
+from pipeline.enrich import batch_path as enrich_batch
 
 EDITED = "movie:900001"
 LEDGER = "The Lighthouse Ledger"
@@ -53,6 +58,7 @@ class DenDaily(fixture.DenRun):
         cls.day_one = cls.snapshot()
         cls.check_one = cls.check()
         cls.go_live()
+        cls.seeded = cls.seed_from_release()
 
         page = cls.upstreams.pages["en"][LEDGER]
         page["revid"] += 1
@@ -60,6 +66,7 @@ class DenDaily(fixture.DenRun):
         cls.day_two_code, cls.day_two_said = cls.den(den, "daily", "--out-dir", cls.out, "--mode", "export")
         cls.day_two = cls.snapshot()
         cls.check_two = cls.check()
+        cls.seeded_code, cls.seeded_said = cls.den(den, "daily", "--out-dir", cls.seeded, "--mode", "export")
         cls.facts_refusal = cls.den(den, "stage", "facts", *common, "--dataset-version", fixture.GIVEN_VERSION)
 
     @classmethod
@@ -86,6 +93,24 @@ class DenDaily(fixture.DenRun):
         live = os.path.join(cls.out, artifacts.PUBLISHED_META.filename)
         os.makedirs(os.path.dirname(live), exist_ok=True)
         shutil.copy(cls.meta, live)
+
+    @classmethod
+    def seed_from_release(cls):
+        """An empty out-dir holding only what a machine that keeps nothing starts from: the bundle day one's
+        publish put on its `corpus-<ver>` release, the live manifest, and the day's TMDB export worklists."""
+        seeded = os.path.join(cls.tmp, "seeded")
+        published.bundle(cls.out, os.path.join(seeded, "published"))
+        shutil.copy(cls.meta, os.path.join(seeded, artifacts.PUBLISHED_META.filename))
+        for name in ("movie_ids.json", "tv_series_ids.json"):
+            shutil.copy(os.path.join(cls.out, name), seeded)
+        return seeded
+
+    @classmethod
+    def corpus_of(cls, out_dir):
+        with open(os.path.join(out_dir, artifacts.MANIFEST.filename), encoding="utf-8") as fh:
+            version = json.load(fh)["datasetVersion"]
+        with gzip.open(os.path.join(out_dir, f"corpus-{version}.jsonl.gz"), "rt", encoding="utf-8") as fh:
+            return [json.loads(line) for line in fh if line.strip()]
 
     def test_the_manifest_describes_the_labels_and_the_vectors_it_ships_beside(self):
         """`den daily` ends with the check, which prunes the manifest as a publish does, so what `finalize`
@@ -167,6 +192,36 @@ class DenDaily(fixture.DenRun):
         again = self.day_two["embedded"][len(self.day_one["embedded"]):]
         self.assertEqual(self.day_two["embedded"][:len(self.day_one["embedded"])], self.day_one["embedded"])
         self.assertEqual(again, [EDITED])
+
+    # ---- the same day, from the release ------------------------------------------------------------------
+
+    def test_a_day_seeded_from_the_release_builds_what_the_kept_out_dir_builds(self):
+        """The job keeps nothing between runs (#27): it starts each day from the bundle the last publish put
+        beside the live dataset. That day has to be the day an out-dir that kept everything has — the same
+        corpus, the same generation, the same store — without the classify and critique shards, the answers
+        or a single plot."""
+        self.assertIn("seeded", self.seeded_said, self.seeded_said[-3000:])
+        self.assertIsNotNone(self.day_two["storeSha256"])
+        self.assertEqual(self.corpus_of(self.seeded), self.corpus_of(self.out))
+        with open(os.path.join(self.seeded, artifacts.MANIFEST.filename), encoding="utf-8") as fh:
+            meta = json.load(fh)
+        self.assertEqual((meta["datasetVersion"], meta.get("storeSha256")),
+                         (self.day_two["version"], self.day_two["storeSha256"]))
+        self.assertEqual(self.seeded_code, self.day_two_code)
+
+    def test_the_seed_carries_no_plot(self):
+        """The bundle is published beside the dataset, so what it lays out holds a plot's digest, never its
+        text: the edited title's plot is in the seeded out-dir only because day two fetched it again."""
+        with open(enrich_batch(self.seeded, self.day_one_batch()), encoding="utf-8") as fh:
+            seeded = json.load(fh)
+        self.assertTrue(seeded)
+        allowed = {"tmdbId", "mediaType", "plotSha256", *consolidate_corpus.SOURCE}
+        for record in seeded:
+            self.assertLessEqual(set(record), allowed, record)
+
+    def day_one_batch(self):
+        with open(os.path.join(self.seeded, artifacts.PUBLISHED_META.filename), encoding="utf-8") as fh:
+            return json.load(fh)["maxBatchId"]
 
     def test_a_new_generation_is_built(self):
         self.assertNotEqual(self.day_two["version"], self.day_one["version"])

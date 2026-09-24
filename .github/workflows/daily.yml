@@ -1,12 +1,12 @@
 name: daily
 
-# The daily job (oxyc/den-dataset#27): one day of the pipeline over the out-dir the live dataset was built
-# from, ending at "ready to publish". It runs `./den daily` and nothing else — what a day is, which stage a
+# The daily job (oxyc/den-dataset#27): one day of the pipeline, started from what the live dataset was
+# published with, ending at "ready to publish". It runs `./den daily` and nothing else — what a day is, which stage a
 # missing credential skips and what it refuses to buy are in `pipeline/daily.py`, and `den_daily_test.py` runs
 # the same command over the fixture corpus in CI. The weekly run adds a rolling slice of older titles.
 #
 # NOTHING IS SIGNED OR PUBLISHED HERE. The signing key lives only on the owner's machine. A ready run uploads
-# the store, the manifest and `checked.json` as an artifact, and `docs/OPERATE.md` ("Publishing a daily run")
+# the store, the manifest, `checked.json` and the bundle the next day starts from as an artifact, and `docs/OPERATE.md` ("Publishing a daily run")
 # is the one command that signs and publishes those bytes.
 #
 # OFF UNTIL SWITCHED ON: the schedule runs only when the repository variable DEN_DAILY_ENABLED is `true`, so
@@ -20,21 +20,16 @@ name: daily
 #            DEN_DAILY_SPEND                    `true` to let the scheduled run buy the day's answers
 #            DEN_DAILY_RUNS_ON                  a JSON runner label list, e.g. ["self-hosted","den"]; default
 #                                               ubuntu-latest
-#            DEN_STATE_REPO                     a PRIVATE repository whose `state` release carries the out-dir
-#                                               between runs (pipeline/state.sh); with secret DEN_STATE_TOKEN,
-#                                               a token that can write that repository's releases
-#            DEN_OUT_DIR / DEN_CACHE_DIR        instead, persistent paths on a self-hosted runner
 #            DEN_REVISIT_WEEKS                  the weekly slice's cycle, default 8
 #            DEN_EMBED_IMAGE                    the den-embed image the box serves, by digest: the job runs it
 #                                               at MAX_TOKENS=1024 and the canary checks its space before a
 #                                               vector is written. Without it (and DEN_EMBED_URL) nothing is
 #                                               embedded
 #
-# WHERE THE OUT-DIR LIVES. The job runs over the out-dir the live dataset was built from, and that out-dir is
-# not publishable: enriched batches from before oxyc/den-dataset#53 still carry TMDB's overviews. So it is
-# never put in the Actions cache — on a public repository a pull request's workflow can restore the base
-# branch's caches, which would publish it. It lives in a private repository (DEN_STATE_REPO) or on a
-# self-hosted runner's disk (DEN_OUT_DIR), and the job refuses with neither.
+# IT KEEPS NOTHING BETWEEN RUNS. Each run starts in an empty out-dir from what the live dataset's publish put
+# beside it: the manifest on `data-latest` and the bundle on `corpus-<its version>` (`pipeline/published.py`
+# says what that is and how a day is seeded from it). Nothing from a run is cached or saved; what it bought
+# reaches the next day only by being published.
 on:
   schedule:
     - cron: "23 3 * * *"   # daily
@@ -63,43 +58,26 @@ jobs:
     runs-on: ${{ fromJSON(vars.DEN_DAILY_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 360
     env:
-      OUT: ${{ vars.DEN_OUT_DIR || 'out' }}
-      DEN_CACHE_DIR: ${{ vars.DEN_CACHE_DIR || '.cache' }}
+      OUT: out
+      DEN_CACHE_DIR: .cache
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      # From the private state repository when DEN_STATE_REPO names one (pipeline/state.sh), else the
-      # persistent path DEN_OUT_DIR names on a self-hosted runner; with neither there is nothing to run over.
-      - name: The out-dir
-        env:
-          DEN_STATE_REPO: ${{ vars.DEN_STATE_REPO }}
-          GH_TOKEN: ${{ secrets.DEN_STATE_TOKEN }}
-        run: |
-          if [ -n "$DEN_STATE_REPO" ]; then
-            bash pipeline/state.sh restore "$OUT"
-          elif [ -z "${{ vars.DEN_OUT_DIR }}" ]; then
-            echo "error: neither DEN_STATE_REPO nor DEN_OUT_DIR is set, so there is no out-dir to run over." >&2
-            echo "       It is never carried in the Actions cache: a pull request's workflow can restore it," >&2
-            echo "       and it holds TMDB text." >&2
-            exit 1
-          fi
-          test -d "$OUT/enriched" || { echo "error: $OUT holds no enriched batches" >&2; exit 1; }
-      # The live manifest the change set and the gates compare with. Public, read with the job's own token.
-      - name: The live manifest
+      # The live manifest, and the bundle its publish put on `corpus-<version>`. Public, read with the job's
+      # own token. Without either there is nothing to start from, and a day never starts from nothing: that
+      # is a whole generation, bought at once (docs/OPERATE.md, "Where a day starts").
+      - name: The live dataset
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$OUT/published"
-          if ! gh release download data-latest -R "$GITHUB_REPOSITORY" -p dataset.meta.json \
-                 -D "$OUT/published" --clobber 2> download.err; then
-            if grep -qiE 'release not found|no assets|not found' download.err; then
-              echo "no live dataset yet: this run is a first generation"
-            else
-              cat download.err >&2; exit 1
-            fi
-          fi
+          gh release download data-latest -R "$GITHUB_REPOSITORY" -p dataset.meta.json -D "$OUT/published"
+          version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["datasetVersion"])' \
+                     "$OUT/published/dataset.meta.json")"
+          gh release download "corpus-$version" -R "$GITHUB_REPOSITORY" -D "$OUT/published" \
+            || { echo "error: no corpus-$version release: the live dataset was published without its bundle" >&2; exit 1; }
       # The same image at the same token cap gives the box's vectors byte for byte on a hosted runner (#27);
       # the embed stage's canary refuses before writing one if it does not.
       - name: den-embed
@@ -160,13 +138,6 @@ jobs:
             ${{ env.OUT }}/${{ steps.report.outputs.store }}
             ${{ env.OUT }}/dataset.meta.json
             ${{ env.OUT }}/checked.json
+            ${{ env.OUT }}/bundle/
           if-no-files-found: error
           retention-days: 14
-      # Whatever the day reached is kept — above all the answers it bought — ready or not.
-      - name: Save the out-dir
-        if: always() && vars.DEN_STATE_REPO != '' && steps.day.outcome != 'skipped'
-        env:
-          DEN_STATE_REPO: ${{ vars.DEN_STATE_REPO }}
-          GH_TOKEN: ${{ secrets.DEN_STATE_TOKEN }}
-          STATE_RUN: ${{ github.run_id }}
-        run: bash pipeline/state.sh save "$OUT"

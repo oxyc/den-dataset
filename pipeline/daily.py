@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""THE DAILY JOB — `./den daily`: one day of the pipeline over the out-dir the live dataset was built from,
+"""THE DAILY JOB — `./den daily`: one day of the pipeline since the live dataset,
 ending at "ready to publish" (oxyc/den-dataset#27).
 
     ./den daily --out-dir DIR [--mode delta|export] [--since YYYY-MM-DD] [--revisit-weeks N] [--spend]
@@ -14,6 +14,10 @@ title's changed article re-read (`fetch --refresh`); the change set since the li
 against `published/dataset.meta.json`, which the caller downloads); the stages after it over that set; and
 every publish gate (`publish --plan`). Nothing is signed or uploaded: the signing key is the owner's, and
 `docs/OPERATE.md` says how the result is published.
+
+**Where it starts.** From the out-dir the live dataset was built from — or, on a machine that keeps nothing
+between runs, from that dataset's `corpus-<ver>` release downloaded into `published/`, which it lays out as
+the out-dir first (`pipeline/published.py`).
 
 **What a missing credential skips**, each named in the report so a skipped stage is never a quiet one:
 
@@ -43,7 +47,7 @@ import sys
 
 from lib import cache as caching
 
-from . import artifacts, changes, finalize, load, refresh
+from . import artifacts, changes, finalize, load, published, refresh
 from .contract import Context, StageError
 from . import STAGES
 
@@ -150,9 +154,22 @@ def live_version(ctx):
         return json.load(handle).get("datasetVersion")
 
 
+def seed_if_empty(ctx):
+    """Lay the live dataset's bundle out as the out-dir when the out-dir holds nothing yet
+    (`pipeline/published.py`) — the run on a machine that keeps nothing between runs."""
+    enriched = ctx.path(artifacts.ENRICHED)
+    bundle = os.path.join(os.path.dirname(ctx.path(artifacts.PUBLISHED_META)), published.RECORD)
+    if (os.path.isdir(enriched) and os.listdir(enriched)) or not os.path.exists(bundle):
+        return None
+    seeded = published.seed(ctx.out_dir)
+    print(f"==> seeded from the live dataset: {json.dumps(seeded, sort_keys=True)}", file=sys.stderr)
+    return seeded
+
+
 def run_day(day):
     """Every stage of the day, in `STAGES` order. Returns the check's verdict: `(ready, why)`."""
     ctx, env = day.ctx, day.environ
+    day.seeded = seed_if_empty(ctx)
     refuse_a_first_generation_by_accident(ctx)
     for name in STAGES:
         if name == "worklist":
@@ -228,7 +245,7 @@ def report(day, ready, why, tokens):
         "store": {key: meta.get(key) for key in ("storeFile", "storeSha256", "storeBytes", "storeRecords")},
         "counts": plan.get("counts"), "added": plan.get("added", []), "changed": plan.get("changed", {}),
         "withdrawn": plan.get("withdrawn", {}), "revisit": plan.get("revisit"),
-        "ran": day.ran, "skipped": day.skipped,
+        "seeded": getattr(day, "seeded", None), "ran": day.ran, "skipped": day.skipped,
         "spend": {"inputTokens": tokens, "usd": round(tokens * rate, 4)},
     }
     caching.write_atomically(os.path.join(ctx.out_dir, REPORT),

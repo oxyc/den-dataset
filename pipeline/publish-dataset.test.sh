@@ -85,7 +85,9 @@ case "$2" in
     if [ -f "$PUBLISHED_META" ]; then cp "$PUBLISHED_META" "$out"; exit 0; fi
     echo "release not found" >&2; exit 1 ;;
   upload)
-    for a in "$@"; do [ -f "$a" ] && basename "$a" >> "$UPLOADS"; done
+    # data-latest's uploads in $UPLOADS, every other release's in $UPLOADS.<tag>.
+    target="$UPLOADS"; [ "$3" = data-latest ] || target="$UPLOADS.$3"
+    for a in "$@"; do [ -f "$a" ] && basename "$a" >> "$target"; done
     exit 0 ;;
   create) exit 0 ;;
 esac
@@ -194,6 +196,19 @@ if extra:
 with open(path, "w") as fh:
     json.dump(meta, fh)
 PY
+  write_bundle_inputs "$version"
+}
+
+# The files the bundle gathers beside the store (`pipeline/published.py`): what the next run starts from. The
+# contents are placeholders; what is under test is that they are gathered, recorded and uploaded.
+write_bundle_inputs() {
+  local version="$1"
+  mkdir -p "$DIR/index"
+  for f in "corpus-$version.jsonl.gz" "corpus-$version-entities.json.gz" "facts-$version.json" \
+           labels-premise.json genres-moods.json doc-facts.json index/composition.json facts-fields.json \
+           facts-entities.json; do
+    printf '{}' > "$DIR/$f"
+  done
 }
 
 # The manifest as it is "already published", so the drop/shrink guards have a baseline.
@@ -206,7 +221,8 @@ publish_baseline() { cp "$DIR/dataset.meta.json" "$PUBLISHED_META"; }
 # `DEN_PUBLISH_VIA=check` runs every case through `--check` as well (oxyc/den-dataset#27), on a copy of the
 # out-dir with the published manifest where `--check` reads it, and then publishes as the script does. The
 # two verdicts must agree: `--check` refuses what the publish refuses, passes what it publishes, and uploads
-# nothing either way. The one refusal it cannot share is the signing's, which it does not reach.
+# nothing either way. The one refusal it cannot share is the signing's, which it does not reach; the one it
+# adds is a missing bundle, which a hand publish only warns about.
 run_publish() {
   if [ "${DEN_PUBLISH_VIA:-script}" = "check" ]; then
     local checked="$WORK/checked" check_rc publish_rc
@@ -217,7 +233,10 @@ run_publish() {
     [ ! -s "$UPLOADS" ] || bad "--check uploaded $(tr '\n' ' ' < "$UPLOADS")"
     PATH="$BIN:$PATH" bash "$PUBLISH" "$DIR" > "$WORK/out.log" 2> "$WORK/err.log"
     publish_rc=$?
-    if [ "$publish_rc" -eq 0 ] && [ "$check_rc" -ne 0 ]; then
+    # One refusal is `--check`'s alone, and stricter: the daily job's artifact must carry the bundle, while
+    # a publish typed by hand from a dir without its inputs goes out without one and says so.
+    if [ "$publish_rc" -eq 0 ] && [ "$check_rc" -ne 0 ] \
+       && ! { grep -q "artifact must carry it" "$WORK/check.log" && grep -q "no bundle" "$WORK/err.log"; }; then
       bad "--check refused what publishes: $(tail -3 "$WORK/check.log")"
     elif [ "$publish_rc" -ne 0 ] && [ "$check_rc" -eq 0 ] \
          && ! grep -qE "signing key|openssl could not" "$WORK/err.log"; then
@@ -270,6 +289,11 @@ if run_publish; then
   signature_verifies "$DIR/dataset.meta.json" \
     && ok "the meta it publishes carries a signature that verifies against the key" \
     || bad "the published meta is unsigned, or its signature does not verify"
+  # oxyc/den-dataset#27: what the next daily run starts from, on its own release.
+  grep -qx corpus.jsonl.gz "$UPLOADS.corpus-aaaaaaaaaaaa" 2>/dev/null \
+    && grep -qx bundle.json "$UPLOADS.corpus-aaaaaaaaaaaa" \
+    && ok "the bundle is published as corpus-<ver>, with its record" \
+    || bad "the bundle was not published: $(cat "$UPLOADS.corpus-aaaaaaaaaaaa" 2>/dev/null | tr '\n' ' ')"
 else
   bad "the happy path failed: $(tail -3 "$WORK/err.log")"
 fi
@@ -1026,6 +1050,7 @@ if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
     ARTIFACT="$WORK/artifact"
     mkdir -p "$ARTIFACT"
     cp "$DIR"/den-*.store "$DIR/dataset.meta.json" "$DIR/checked.json" "$ARTIFACT/"
+    cp -r "$DIR/bundle" "$ARTIFACT/"
   }
   run_checked() { PATH="$BIN:$PATH" bash "$PUBLISH" "$ARTIFACT" --checked > "$WORK/out.log" 2> "$WORK/err.log"; }
 
@@ -1038,6 +1063,8 @@ if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
       || bad "--checked uploaded $(tr '\n' ' ' < "$UPLOADS")"
     signature_verifies "$ARTIFACT/dataset.meta.json" \
       && ok "…signed" || bad "--checked published an unsigned or unverifiable meta"
+    grep -qx facts.json "$UPLOADS.corpus-aaaaaaaaaaaa" 2>/dev/null \
+      && ok "…with the bundle the check gathered" || bad "--checked published no bundle"
     grep -q "quality gate: run by the check" "$WORK/out.log" \
       && ok "…and says which gates the check ran rather than skipping them in silence" \
       || bad "--checked did not say the quality gate ran in the check"
@@ -1046,7 +1073,7 @@ if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
   fi
   teardown
 
-  for tamper in store meta record; do
+  for tamper in store meta record bundle; do
     setup
     write_meta
     publish_baseline
@@ -1059,6 +1086,7 @@ meta = json.load(open(sys.argv[1])); meta["datasetVersion"] = "bbbbbbbbbbbb"; js
 PY
                 ;;
         record) rm "$ARTIFACT/checked.json" ;;
+        bundle) printf 'x' >> "$ARTIFACT/bundle/facts.json" ;;
       esac
       if run_checked; then
         bad "--checked published an artifact whose $tamper changed after the check"

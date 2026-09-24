@@ -21,6 +21,11 @@ subgenres nor moods gets the derived ones and keeps its primary genre. A title c
 about the requested work gets nothing. The result must clear the quality baseline
 (`pipeline/eval_taxonomy.py --gate`) or nothing is written.
 
+**A rebuilt out-dir** (oxyc/den-dataset#27) holds only today's answer shards. The entries derived from earlier
+days' answers come from the live dataset's `genres-moods.json` (`published_genres_moods`), and are applied
+as those answers were — a title the curated file lacks, or a curated title with neither subgenres nor moods —
+under this run's answers and the curated file as it is now.
+
 The rule's digest is recorded in the output rather than in the answers' manifest: the manifest decides
 whether a shard can be resumed, and a new rule must not make bought answers unresumable.
 """
@@ -48,7 +53,8 @@ SPENDS = True
 #: false: it derives from the answers already on disk and asks nothing.
 FREE_WITHOUT_SPEND = True
 
-INPUTS = (artifacts.ARTICLES, artifacts.ENRICHED, artifacts.COMBINED, artifacts.WITHDRAWN)
+INPUTS = (artifacts.ARTICLES, artifacts.ENRICHED, artifacts.COMBINED, artifacts.WITHDRAWN,
+          artifacts.PUBLISHED_GENRES_MOODS)
 OUTPUTS = (artifacts.GENRES_MOODS_ANSWERS, artifacts.GENRES_MOODS_ANSWERS_MANIFEST, artifacts.GENRES_MOODS)
 
 CURATED = gm.CURATED
@@ -336,13 +342,30 @@ def derive(ctx):
     # The classify rows are required whether or not anything was answered — they are this stage's input,
     # and an out-dir without them is not one this stage can speak for. Parsing them is what waits on an
     # answer: the shards are 680 MB, and with nothing derived nothing would be asked of them.
-    shards = ctx.require_all(artifacts.COMBINED)
+    base = ctx.require(artifacts.PUBLISHED_GENRES_MOODS)
+    shards = ctx.paths(artifacts.COMBINED) if base else ctx.require_all(artifacts.COMBINED)
     classify = gm.read_classify(shards, ctx.require(artifacts.WITHDRAWN)) if answers else {}
     animated = gm.read_animated(ctx.path(artifacts.ENRICHED)) if answers else {}
 
     counts = {"kept": 0, "derived": 0, "filled": 0, "not about the requested work": 0,
               "no enrichment row": 0, "nothing cleared the rule": 0}
     new = {}
+    if base:
+        # Earlier days' derivations, applied as they were made; this run's answers replace them below.
+        with open(base, encoding="utf-8") as fh:
+            published = json.load(fh)
+        for key, entry in (published.get("titles") or {}).items():
+            if entry.get("source") != SOURCE or key in answers:
+                continue
+            prior = titles.get(key)
+            if prior is None and entry.get("primaryGenreSource") == SOURCE:
+                new[key] = entry
+                counts["derived"] += 1
+            elif prior is not None and not (prior.get("subgenres") or prior.get("moods")):
+                titles[key] = {**prior, "subgenres": entry["subgenres"], "moods": entry["moods"], "source": SOURCE}
+                counts["filled"] += 1
+        head_base = {"published": hashlib.sha256(json.dumps(published, sort_keys=True).encode()).hexdigest(),
+                     "answers": (published.get("derivation") or {}).get("answers", [])}
     for key in sorted(answers, key=gm.sort_key):
         prior = titles.get(key)
         if prior is not None and (prior.get("subgenres") or prior.get("moods")):
@@ -380,6 +403,8 @@ def derive(ctx):
     head["count"] = len(titles)
     head["derivation"] = {"curatedSha256": curated_sha, "rule": os.path.relpath(RULE, REPO),
                           "ruleSha256": rule_sha, "answers": provenance}
+    if base:
+        head["derivation"]["base"] = head_base
 
     path = ctx.path(artifacts.GENRES_MOODS)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)

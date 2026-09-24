@@ -15,6 +15,7 @@ Run: `python3 -m unittest pipeline/consolidate_corpus_test.py`
 """
 import contextlib
 import gzip
+import hashlib
 import importlib.util
 import io
 import json
@@ -476,6 +477,88 @@ class Withdrawn(unittest.TestCase):
         code, err = self.join()
         self.assertEqual(code, 1)
         self.assertIn("no reason", err)
+
+
+class Base(unittest.TestCase):
+    """A published corpus as the base: the judgements of every title no shard of this run answers."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.facts = os.path.join(self.dir, "facts.json")
+        self.labels = os.path.join(self.dir, "genres-moods.json")
+        self.base = os.path.join(self.dir, "base.jsonl")
+        self.out = os.path.join(self.dir, "corpus.jsonl")
+        facts_file(self.facts, ["movie:1", "movie:2", "movie:3"])
+        genres_moods_file(self.labels, ["movie:1", "movie:2", "movie:3"])
+        write(self.base, [{"key": f"movie:{n}", "mediaType": "movie", "tmdbId": n,
+                           "facets": {"tone": {"choice": "old"}}, "critique": {"craft": {"p": 0.2}},
+                           "applicability": {}, "scores": {}, "nouls": {}, "technique": {}, "depicts": {},
+                           "audience": {}, "source": {"plotArticle": f"Old {n}", "plotSha256": "0" * 64}}
+                          for n in (1, 2)])
+
+    def rows(self):
+        return {r["key"]: r for r in read(self.out)}
+
+    def test_a_title_no_shard_answers_keeps_its_published_judgements(self):
+        shard = os.path.join(self.dir, "combined-v1-r2-new.jsonl")
+        write(shard, [combined(3, answers={"tone": {"choice": "new"}})])
+        code, err = run(self.dir, [shard], [], self.facts, self.labels, self.out, ["--base", self.base])
+        self.assertEqual(code, 0, err)
+        rows = self.rows()
+        self.assertEqual(rows["movie:1"]["facets"], {"tone": {"choice": "old"}})
+        self.assertEqual(rows["movie:1"]["critique"], {"craft": {"p": 0.2}})
+        self.assertEqual(rows["movie:3"]["facets"], {"tone": {"choice": "new"}})
+        self.assertEqual(rows["movie:1"]["source"]["plotArticle"], "Old 1", "no batch here: the base's source")
+
+    def test_a_day_that_bought_nothing_needs_no_shard(self):
+        code, err = run(self.dir, [], [], self.facts, self.labels, self.out, ["--base", self.base])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.rows()), 3)
+
+    def test_without_a_base_the_shards_are_required(self):
+        code, err = run(self.dir, [], [], self.facts, self.labels, self.out)
+        self.assertNotEqual(code, 0)
+        self.assertIn("needs --combined and --delta", err)
+
+    def test_a_tombstone_takes_the_published_judgements_too(self):
+        tombstones = os.path.join(self.dir, "withdrawn.jsonl")
+        write(tombstones, [{"mediaType": "movie", "tmdbId": 2, "reason": "lost its plot",
+                            "withdrawnAt": "2026-09-24T03:00:00+00:00"}])
+        code, err = run(self.dir, [], [], self.facts, self.labels, self.out,
+                        ["--base", self.base, "--withdrawn", tombstones])
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.rows()["movie:2"]["facets"], self.rows()["movie:2"]["critique"]), ({}, {}))
+
+    def test_a_published_title_never_leaves_the_corpus(self):
+        facts_file(self.facts, ["movie:1"])
+        genres_moods_file(self.labels, ["movie:1"])
+        code, err = run(self.dir, [], [], self.facts, self.labels, self.out, ["--base", self.base])
+        self.assertNotEqual(code, 0)
+        self.assertIn("would leave it", err)
+
+    def test_source_is_read_off_the_newest_batch_and_carries_no_text(self):
+        enriched = os.path.join(self.dir, "enriched")
+        os.makedirs(enriched)
+        with open(os.path.join(enriched, "batch-1.json"), "w", encoding="utf-8") as fh:
+            json.dump([{"tmdbId": 1, "mediaType": "movie", "hasWikiPlot": True, "overview": "First plot.",
+                        "plotArticle": "One", "plotLanguage": "en", "plotRevId": 1}], fh)
+        with open(os.path.join(enriched, "batch-2.json"), "w", encoding="utf-8") as fh:
+            json.dump([{"tmdbId": 1, "mediaType": "movie", "hasWikiPlot": True, "overview": "Second plot.",
+                        "plotArticle": "One", "plotLanguage": "en", "plotRevId": 2, "title": "TMDB's"},
+                       {"tmdbId": 3, "mediaType": "movie", "hasWikiPlot": False, "overview": "TMDB prose."}], fh)
+        code, err = run(self.dir, [], [], self.facts, self.labels, self.out,
+                        ["--base", self.base, "--enriched", enriched])
+        self.assertEqual(code, 0, err)
+        rows = self.rows()
+        self.assertEqual(rows["movie:1"]["source"],
+                         {"hasWikiPlot": True, "plotArticle": "One", "plotLanguage": "en", "plotRevId": 2,
+                          "plotSha256": hashlib.sha256("Second plot.".encode()).hexdigest()})
+        self.assertEqual(rows["movie:3"]["source"], {"hasWikiPlot": False})
+        with open(self.out, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertNotIn("plot.", text)
+        self.assertNotIn("TMDB", text)
 
 
 class Prose(unittest.TestCase):

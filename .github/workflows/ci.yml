@@ -139,7 +139,7 @@ jobs:
       # script that nothing that runs reaches and `guards/operator-tools.json` does not declare, and on a
       # Python or shell file anywhere else.
       - name: The pipeline
-        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/refresh_test.py pipeline/changes_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/critique_test.py pipeline/daily_test.py pipeline/genres_moods_test.py pipeline/franchise_groups_test.py pipeline/franchises_test.py pipeline/docfacts_test.py pipeline/compose_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py store/format_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/wikidata_facts_test.py lib/plot_test.py lib/enterprise_test.py lib/denembed_test.py guards/reachable_test.py den_test.py
+        run: python3 -m unittest pipeline/contract_test.py pipeline/artifacts_test.py pipeline/worklist_test.py pipeline/fetch_test.py pipeline/refresh_test.py pipeline/changes_test.py pipeline/enrich_test.py pipeline/floors_test.py pipeline/articles_test.py pipeline/classify_test.py pipeline/critique_test.py pipeline/daily_test.py pipeline/published_test.py pipeline/genres_moods_test.py pipeline/franchise_groups_test.py pipeline/franchises_test.py pipeline/docfacts_test.py pipeline/compose_test.py pipeline/embed_test.py pipeline/finalize_test.py pipeline/facts_test.py pipeline/corpus_test.py pipeline/store_test.py pipeline/publish_test.py store/build_test.py store/format_test.py lib/http_test.py lib/cache_test.py lib/tmdb_test.py lib/wikipedia_test.py lib/wikidata_test.py lib/wikidata_facts_test.py lib/plot_test.py lib/enterprise_test.py lib/denembed_test.py guards/reachable_test.py den_test.py
       # The stages above are tested one at a time; this runs them IN ORDER, so what one writes is what the
       # next reads (oxyc/den-dataset#27, acceptance item 1). `den run` over the fixture corpus in
       # `pipeline/fixture-corpus/`, with Wikipedia and Wikidata answered from that directory and TMDB refused,
@@ -169,10 +169,6 @@ jobs:
       # publish would refuse, and uploads nothing.
       - name: The publisher, checking only
         run: DEN_PUBLISH_VIA=check bash pipeline/publish-dataset.test.sh
-      # The daily job's out-dir, carried between runs in a private repository: a save and a restore round-trip
-      # it, a second save replaces the first, and an empty out-dir is never saved over the state.
-      - name: The daily job's state
-        run: bash pipeline/state.test.sh
 
   ci-ok:
     # One required status check. `always()` so a skipped job does not fail branch protection.
