@@ -16,6 +16,8 @@ separately (oxyc/den-dataset#27) over live `/discover`, which CI has neither the
 for; `export` is offline and deterministic, and was diffed byte for byte over a real 1,247,062-line daily
 dump.
 """
+import argparse
+import datetime
 import json
 import os
 import re
@@ -24,7 +26,7 @@ import unittest
 
 import pipeline
 
-from . import artifacts, floors, worklist
+from . import artifacts, daily, floors, worklist
 from .contract import Context, StageError, bind
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -109,9 +111,12 @@ class Declaration(unittest.TestCase):
         self.assertEqual(worklist.VOTE_FLOOR, 15)
         self.assertEqual(worklist.VOTE_FLOOR, min(floors.DEFAULT.tmdb, floors.DEFAULT.regional_tmdb))
 
-    def test_the_daily_pass_admits_at_the_worldwide_floor(self):
-        with open(os.path.join(REPO, "pipeline", "delta-run.sh"), encoding="utf-8") as fh:
-            self.assertIn(f"VOTE_FLOOR:-{floors.DEFAULT.tmdb}", fh.read())
+    def test_the_daily_job_admits_at_the_default_floors(self):
+        """`den daily` names no floor, so the fetch stage admits at `pipeline/floors.py`'s defaults."""
+        day = daily.Day(argparse.Namespace(out_dir="out", mode="delta", since=None, revisit_weeks=None,
+                                           spend=False), {}, datetime.datetime(2026, 9, 24))
+        self.assertEqual((day.ctx.vote_floor, day.ctx.regional_vote_floor, day.ctx.wikipedia_floor,
+                          day.ctx.regional_wikipedia_floor), (None, None, None, None))
 
     def test_it_does_not_write_the_shipped_catalogues_filename(self):
         """`pipeline/build_worklist.py` owns `worklist-<media>.json` — the ids Den already ships, ordered by
@@ -298,49 +303,27 @@ class Delta(Staged):
         self.assertEqual(client.asked, [])
 
     def test_a_delta_that_found_nothing_is_not_a_failure(self):
-        """The answer on a quiet day. Refusing it would fail the daily pass for doing its job — which is
-        why `pipeline/delta-run.sh` counts titles that survived enrichment rather than worklist rows."""
+        """The answer on a quiet day. Refusing it would fail the daily job for doing its job."""
         made = worklist.run(context(self.out, mode="delta", since="2026-09-07"),
                             FakeTMDB({"movie": [[]], "tv": [[]]}))
         self.assertIn("universe-movie.json", made)
         self.assertEqual(self.universe(os.path.join(self.out, "universe-movie.json")), [])
 
-    def test_the_daily_pass_names_the_window_the_labels_and_both_outputs(self):
-        """The one mode with a live caller. `pipeline/delta-run.sh` runs this every day, so its invocation
-        is the oracle for what a delta needs — and the two `--set` lines are not decoration: without them a
-        delta's forty rows are written over the full run's 47k-title worklists under the same names.
+    def test_the_daily_job_names_the_window_the_labels_and_both_outputs(self):
+        """The one mode with a live caller. `den daily` runs this every day, so what it hands the stage is
+        the oracle for what a delta needs — and the two universe overrides are not decoration: without them a
+        delta's forty rows are written over the full run's 47k-title universes under the same names.
 
-        The genres & moods override is the expensive one to lose. Point it at nothing and the pass
-        re-enriches the whole published catalogue at the per-title price, reporting an ordinary-looking count.
-        """
-        with open(os.path.join(REPO, "pipeline", "delta-run.sh"), encoding="utf-8") as fh:
-            script = fh.read()
-        invocation = script.split("./den stage worklist")[1].split("\n\n")[0]
-        self.assertIn("--mode delta", invocation)
-        self.assertIn('--since "$SINCE"', invocation)
-        for name in ("genres_moods", "universe_movie", "universe_tv"):
-            self.assertIn(f"--set \"{name}=", invocation, f"the daily pass does not point {name} anywhere")
-
-    def test_the_hand_off_names_commands_that_exist_in_the_pipelines_order(self):
-        """What the daily pass prints for a person to run next. It named `dump-articles` after that command
-        was deleted — the binary answers `unknown command` — and skipped `docfacts`, whose absence composes
-        a different vector space. Every stage from the dump on, in `STAGES` order — and no Swift binary, which
-        no longer exists to answer."""
-        with open(os.path.join(REPO, "pipeline", "delta-run.sh"), encoding="utf-8") as fh:
-            script = fh.read()
-        hand_off = script.split("Next, by hand")[1]
-        stages = list(dict.fromkeys(re.findall(r"\./den stage ([a-z_]+)", hand_off)))
-        self.assertEqual(stages, list(pipeline.STAGES[pipeline.STAGES.index("articles"):]))
-        self.assertNotIn("swift build", script)
-        self.assertNotIn("taxonomy-backfill", script)
-
-    def test_the_media_the_daily_pass_enriches_are_the_media_this_stage_builds(self):
-        """The stage writes both lists in one call and the script then drains each. A media the script
-        loops over and the stage does not build is a `universe-<media>.json` that is never there."""
-        with open(os.path.join(REPO, "pipeline", "delta-run.sh"), encoding="utf-8") as fh:
-            script = fh.read()
-        self.assertIn("for media in movie tv; do", script)
-        self.assertEqual(sorted(worklist.MEDIA), ["movie", "tv"])
+        The genres & moods it skips by are the out-dir's own, the file every later stage reads: point the
+        stage at nothing and it re-enriches the whole published catalogue at the per-title price."""
+        now = datetime.datetime(2026, 9, 24, 3, 23, tzinfo=datetime.timezone.utc)
+        ctx = daily.Day(argparse.Namespace(out_dir="out", mode=None, since=None, revisit_weeks=None, spend=False),
+                        {}, now).ctx
+        self.assertEqual((ctx.mode, ctx.since), ("delta", "2026-09-17"))
+        self.assertEqual(ctx.path(artifacts.UNIVERSE_MOVIE), os.path.join("out", "delta", "universe-movie.json"))
+        self.assertEqual(ctx.path(artifacts.UNIVERSE_TV), os.path.join("out", "delta", "universe-tv.json"))
+        self.assertEqual(ctx.path(artifacts.GENRES_MOODS), os.path.join("out", artifacts.GENRES_MOODS.filename))
+        self.assertIn(artifacts.GENRES_MOODS, [bind(e).artifact for e in worklist.INPUTS])
 
 
 class Written(Staged):
