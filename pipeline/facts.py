@@ -86,7 +86,14 @@ CHECKPOINTS = {True: "", False: "facts-delta"}
 #: the key, and so does a row that was asked and has no value, so for these alone a row that was asked
 #: records `[]`: `backfill_properties` asks every checkpointed row with no entry, and the record as it
 #: ships drops the empty list.
-BACKFILLED = ("awardsWon", "awardsNominated")
+AWARDS = ("awardsWon", "awardsNominated")
+#: What groups titles into a franchise beyond P179 (`wd.SPECS`, oxyc/den-atlas#92).
+FRANCHISE_EVIDENCE = ("mediaFranchise", "follows", "followedBy", "characters")
+BACKFILLED = AWARDS + FRANCHISE_EVIDENCE
+#: Record fields whose Q-ids are not named. An award ships by its ceremony; a sequel is a title with its own
+#: record; a character is evidence for grouping, and naming every one would add tens of thousands of
+#: entities. A media franchise IS named: a franchise row shows it.
+UNNAMED = AWARDS + ("follows", "followedBy", "characters")
 #: Ids per backfill request. Far more than `BATCH`: the backfill asks one property of every checkpointed
 #: row, and a WDQS request's cost is the request, not its size — measured on the corpus while WDQS was
 #: throttling this client, 25 ids took 22 s and 500 took 5.4 s. At 25 the 47,618-title corpus was ~15 s a
@@ -350,7 +357,7 @@ def resolve_awards(fields, cache):
     award items, so the rule can change without a re-scrape."""
     items = set()
     for row in fields.values():
-        for key in BACKFILLED:
+        for key in AWARDS:
             items.update(row.get(key) or [])
     links = wd.award_links(sorted(items), cache)
     ceremonies = {q: wd.ceremony(links.get(q) or {}) for q in items}
@@ -410,10 +417,10 @@ def resolve_entities(fields, path, cache):
     names = checkpoint(path)
     qids, people = set(), set()
     for row in fields.values():
-        # The award items themselves are not named: what ships by name is their ceremony
-        # (`awardsWonAt`/`awardsNominatedAt`), and naming every category would add thousands of entities.
+        # `UNNAMED` fields are not named: an award ships by its ceremony (`awardsWonAt`/`awardsNominatedAt`),
+        # and naming every category, sequel and character would add tens of thousands of entities.
         for name, value in row.items():
-            if name in BACKFILLED:
+            if name in UNNAMED:
                 continue
             if isinstance(value, list):
                 qids.update(item for item in value if isinstance(item, str) and item.startswith("Q"))

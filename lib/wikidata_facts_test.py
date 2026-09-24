@@ -29,6 +29,13 @@ class Query(unittest.TestCase):
                          'SELECT ?tmdb ?v WHERE {\n  VALUES ?tmdb { "11" "12" }\n  ?film wdt:P4947 ?tmdb .\n'
                          '  ?film wdt:P57 ?v .\n}')
 
+    def test_the_characters_query_leaves_out_real_people(self):
+        """A biopic's P674 is its real subjects; only a fictional character links a franchise. The filter
+        is part of the query text, so it is cached with the answer."""
+        self.assertEqual(wd.facts_query([5], "movie", SPEC["characters"]),
+                         'SELECT ?tmdb ?v WHERE {\n  VALUES ?tmdb { "5" }\n  ?film wdt:P4947 ?tmdb .\n'
+                         '  ?film wdt:P674 ?v . FILTER NOT EXISTS { ?v wdt:P31 wd:Q5 . }\n}')
+
     def test_an_iso_query_reads_the_code_off_the_value(self):
         self.assertEqual(wd.facts_query([5], "tv", SPEC["languages"]),
                          'SELECT ?tmdb ?code WHERE {\n  VALUES ?tmdb { "5" }\n  ?film wdt:P4983 ?tmdb .\n'

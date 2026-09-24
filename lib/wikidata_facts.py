@@ -12,7 +12,9 @@ entity and source-work lookups were never cached; the scrape checkpoints what th
 
 Everything an entity is carried as is a Q-id; names live in a shared entity map, resolved once per build.
 The coverage figures beside each spec were measured on this corpus, and they are why several
-obvious-looking properties are absent: P1080 narrative universe scored 0%, P155/P156 sequel order 8%.
+obvious-looking properties are absent: P1080 narrative universe scored 0%. P155/P156 sequel order was left
+out at 8% as a ranking signal and is in now as franchise evidence, with P8345 and P674 (oxyc/den-atlas#92):
+over the 2,000 most-voted titles it links 633, 314 of them to a sequel no P179 series names.
 Awards (P166, P1411) were left out at an earlier 11% and are in now, at 17.2% (oxyc/den#135).
 """
 import collections
@@ -30,11 +32,13 @@ from .wikidata import HOST, ID_PROPERTY, PATH, WikidataError, exclusion
 #: the two scrapes' entries cannot collide.
 CACHE_PATH = "sparql-facts"
 
-Spec = collections.namedtuple("Spec", "key prop kind iso_via tv_only single numeric")
+Spec = collections.namedtuple("Spec", "key prop kind iso_via tv_only single numeric where")
 
 
-def spec(key, prop, kind, iso_via=None, tv_only=False, single=False, numeric=False):
-    return Spec(key, prop, kind, iso_via, tv_only, single, numeric)
+def spec(key, prop, kind, iso_via=None, tv_only=False, single=False, numeric=False, where=""):
+    """`where` is a SPARQL pattern on `?v` that a value must also match, asked with the property so it is
+    cached with it — part of the query text, so changing it re-asks the property."""
+    return Spec(key, prop, kind, iso_via, tv_only, single, numeric, where)
 
 
 #: `entity` is a Q-id with a name in `entities`; `iso` resolves the value to a code through a second
@@ -63,6 +67,14 @@ SPECS = (
     spec("franchise", "P179", "entity"),                     # sparse (41% top films, 5% tail); see SERIES_CLASSES
     spec("mainSubjects", "P921", "entity"),                  # 29%
     spec("basedOn", "P144", "entity"),                       # 18% — links adaptations of one source
+    # Franchise evidence (oxyc/den-atlas#92), measured on the 2,000 most-voted titles: each links titles
+    # the P179 `franchise` does not. Evidence for grouping, never a plot source (`lib/wikidata.py`: a
+    # franchise sibling is not the same story).
+    spec("mediaFranchise", "P8345", "entity"),               # 16% — the umbrella: Star Wars incl. Andor
+    spec("follows", "P155", "entity"),                       # with followedBy 32% — Carry On, Zombieland 2
+    spec("followedBy", "P156", "entity"),
+    # Fictional characters only: 23% of P674 values are real people, which would link every biopic.
+    spec("characters", "P674", "entity", where="FILTER NOT EXISTS { ?v wdt:P31 wd:Q5 . }"),
     spec("narrativeLocations", "P840", "entity"),            # 47%
     spec("seasons", "P2437", "literal", tv_only=True, single=True, numeric=True),
     spec("episodes", "P1113", "literal", tv_only=True, single=True, numeric=True),
@@ -133,7 +145,7 @@ def facts_query(ids, media, item, excluded=None):
         body = (f"?film p:{item.prop} ?st . ?st psv:{item.prop} ?node . "
                 f"?node wikibase:timeValue ?v ; wikibase:timePrecision ?prec .")
     else:
-        select, body = "?tmdb ?v", f"?film wdt:{item.prop} ?v ."
+        select, body = "?tmdb ?v", f"?film wdt:{item.prop} ?v .{' ' + item.where if item.where else ''}"
     return (f"SELECT {select} WHERE {{\n"
             f"  VALUES ?tmdb {{ {_values(ids)} }}\n"
             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
