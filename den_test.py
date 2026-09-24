@@ -34,7 +34,7 @@ class Listing(unittest.TestCase):
         # that reads them, classified before the vectors are embedded, the vectors finalized into the
         # labels file the facts passes scrape the ids of, the merged facts before the corpus that joins
         # them, the corpus before the store built from it, and the publish that uploads the store is last.
-        expected = ("worklist", "fetch", "articles", "classify", "genres_moods", "docfacts", "embed",
+        expected = ("worklist", "fetch", "changes", "articles", "classify", "genres_moods", "docfacts", "embed",
                     "finalize", "facts", "corpus", "store", "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
@@ -212,7 +212,7 @@ class Dispatch(unittest.TestCase):
                                   since=None, expect=None, pause_ms=0, limit=None, media=None, vote_floor=40,
                                   regional_vote_floor=10, wikipedia_floor=7, regional_wikipedia_floor=4,
                                   plan=False, spend=False, dump_docs=None, reembed_keys=None,
-                                  reembed_changed=False, refresh=False)
+                                  reembed_changed=False, refresh=False, revisit_weeks=None)
         ctx = module.context(args)
         self.assertEqual((ctx.vote_floor, ctx.regional_vote_floor, ctx.wikipedia_floor,
                           ctx.regional_wikipedia_floor), (40, 10, 7, 4))
@@ -232,7 +232,7 @@ class Dispatch(unittest.TestCase):
                                   since=None, expect=None, pause_ms=0, limit=None, media=None, vote_floor=None,
                                   regional_vote_floor=None, wikipedia_floor=None, regional_wikipedia_floor=None,
                                   plan=True, spend=False, dump_docs=None, reembed_keys="keys.txt",
-                                  reembed_changed=True, refresh=False)
+                                  reembed_changed=True, refresh=False, revisit_weeks=None)
         ctx = module.context(args)
         self.assertEqual((ctx.reembed_keys, ctx.reembed_changed, ctx.plan), ("keys.txt", True, True))
         listed = den("stage", "embed", "--help").stdout
@@ -251,6 +251,17 @@ class Dispatch(unittest.TestCase):
             self.assertEqual(module.main(parser_args), 0)
         ctx = executed.call_args.args[1]
         self.assertEqual((ctx.refresh, ctx.plan), (True, True))
+
+    def test_the_weekly_slice_reaches_the_run(self):
+        """A `--revisit-weeks` the parser accepts and `Context` drops is a weekly job that revisits nothing
+        and reports success, every week, until someone counts."""
+        import importlib.machinery
+        loader = importlib.machinery.SourceFileLoader("den_entry", DEN)
+        module = importlib.util.module_from_spec(importlib.util.spec_from_loader("den_entry", loader))
+        loader.exec_module(module)
+        with mock.patch.object(module, "execute") as executed:
+            self.assertEqual(module.main(["stage", "changes", "--revisit-weeks", "8"]), 0)
+        self.assertEqual(executed.call_args.args[1].revisit_weeks, 8)
 
 
 class EndToEnd(fixture.StoreFixture, unittest.TestCase):

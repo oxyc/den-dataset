@@ -360,6 +360,13 @@ class Upstreams:
                               **_transport)
         self.hosts.add(host)
         params = params or {}
+        if host.endswith(".wikipedia.org") and path == wikipedia.API_PATH and params.get("action") == "query":
+            # `fetch --refresh`'s survey: the current revision of each page asked, as `prop=info` answers it.
+            assert {k: v for k, v in params.items() if k != "titles"} == wikipedia.REVISION_QUERY, params
+            known = self.pages.get(host.split(".")[0], {})
+            return json.dumps({"query": {"pages": [
+                {"title": title, "lastrevid": known[title]["revid"]} if title in known
+                else {"title": title, "missing": True} for title in params["titles"].split("|")]}}).encode()
         if host.endswith(".wikipedia.org") and path == wikipedia.API_PATH:
             assert {k: v for k, v in params.items() if k != "page"} == wikipedia.PARSE_QUERY, params
             page = self.pages.get(host.split(".")[0], {}).get(params["page"])

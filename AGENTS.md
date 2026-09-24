@@ -15,7 +15,7 @@ prose somewhere that can go stale without anything failing.
 
 ## The part that is still being rebuilt
 
-`pipeline/` holds **twelve** stages — `./den stages` lists them. What is left outside the order are the side passes
+`pipeline/` holds **thirteen** stages — `./den stages` lists them. What is left outside the order are the side passes
 no stage runs but the corpus join and the store read — the delta question pass (`pipeline/run_delta.py`) and the
 premise tags — and each still answers for itself in `pipeline/artifacts.py` until it lands. Beside the
 stages sit the tools an operator runs by hand, each declared in `guards/operator-tools.json`; a tool with

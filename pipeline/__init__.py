@@ -18,8 +18,9 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 
 #: The pipeline, in the order it runs. The worklist comes first because it is the universe everything after
 #: it is drawn from; the enrichment drain next, because the batches it fetches are what every later pass
-#: reads the plots and the evidence out of; the article dump after it, because it is what the classify
-#: pass reads; classification then, because nothing else here reads the articles; genres & moods after it,
+#: reads the plots and the evidence out of; the change set straight after it, because what moved since the
+#: live dataset is a question about those batches alone; the article dump after that, because it is what the
+#: classify pass reads; classification then, because nothing else here reads the articles; genres & moods after it,
 #: because the classify pass's section roles choose the premise text they are asked about, and before
 #: everything that reads a title's genres & moods; the doc facts before the embed pass, because they are
 #: two clauses of the document it composes and a run without them builds a different vector space;
@@ -36,8 +37,8 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: No stage reads what a later one writes, so a fresh out-dir starts. The one exception is by design:
 #: `worklist --mode delta` skips the titles the previous run's `genres-moods.json` names, because a delta
 #: extends an out-dir rather than starting one.
-STAGES = ("worklist", "fetch", "articles", "classify", "genres_moods", "docfacts", "embed", "finalize",
-          "facts", "corpus", "store", "publish")
+STAGES = ("worklist", "fetch", "changes", "articles", "classify", "genres_moods", "docfacts", "embed",
+          "finalize", "facts", "corpus", "store", "publish")
 
 
 def stage(name):
