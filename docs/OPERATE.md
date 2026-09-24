@@ -256,23 +256,31 @@ manifest in `out/published/` (see "The change set") and reads credentials from t
 `--revisit-weeks N` is the weekly run.
 
 `.github/workflows/daily.yml` runs it on a schedule once the repository variable `DEN_DAILY_ENABLED` is
-`true`; its header lists the secrets and variables it reads. A ready run uploads the store, the manifest
-and `checked.json` as the artifact `dataset-<run id>`.
+`true`; its header lists the secrets and variables it reads. A ready run uploads the store, the manifest,
+`checked.json` and the bundle as the artifact `dataset-<run id>`.
 
-### Where its out-dir lives
+### Where a day starts
 
-The job runs over the out-dir the live dataset was built from, and carries it between runs in the `state`
-release of a PRIVATE repository (`pipeline/state.sh`; repository variable `DEN_STATE_REPO`, secret
-`DEN_STATE_TOKEN`). Private, because pre-#53 enriched batches hold TMDB overviews. Seed it once, from the
-out-dir that built the live dataset, with a token that can write that repository's releases:
+The job keeps nothing between runs. Each run starts in an empty out-dir holding the live manifest and the
+bundle the live dataset's publish put on the `corpus-<version>` release, and `./den daily` lays that out as
+the out-dir before anything runs (`pipeline/published.py` lists the bundle and how it is laid out). The
+bundle is derived records only — no plot text, no TMDB field — which is why it can be public. The workflow
+refuses without a live manifest or its `corpus-<version>` release: a day never starts from nothing.
+
+Every publish uploads the bundle (`publish-dataset.sh` gathers it after the gates, and `--checked` holds it
+to the digests the run's check recorded). So what a day bought reaches the next day only by being
+published; an unpublished day's answers are in its `dataset-<run id>` artifact for 14 days and bought again
+by the next run. The first `corpus-<version>` release comes from one day run by hand over the out-dir the
+live dataset was built from — its refresh records every grounded title's revision, and its corpus each
+title's `source` — published as a daily run is:
 
 ```sh
-DEN_STATE_REPO=<owner>/<state repo> GH_TOKEN=<token> pipeline/state.sh save out-repass
+gh release download data-latest -p dataset.meta.json -D out-repass/published --clobber
+./den daily --out-dir out-repass
+pipeline/publish-dataset.sh out-repass --checked
 ```
 
-The stores are left out (every run rebuilds one), and so is the response cache, which the job does not need.
-On a self-hosted runner, `DEN_OUT_DIR` names a persistent out-dir instead. The job's den-embed is the image
-`DEN_EMBED_IMAGE` names, which must be the digest the box serves.
+The job's den-embed is the image `DEN_EMBED_IMAGE` names, which must be the digest the box serves.
 
 ### Publishing a daily run
 

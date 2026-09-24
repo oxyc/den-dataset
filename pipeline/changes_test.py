@@ -110,7 +110,7 @@ class Rules(unittest.TestCase):
         self.assertEqual((plan["counts"]["revised"], plan["counts"]["unchanged"]), (1, 0))
         self.assertEqual(out.read("keys.txt"), [f"movie:{n}" for n in (1, 2, 3, 4, 5)])
         self.assertEqual(out.read("withdrawn.txt"), ["movie:7"])
-        self.assertEqual(out.read("new.txt"), [], "a changed plot is not bought again")
+        self.assertEqual(out.read("new.txt"), ["movie:4"], "a changed plot is not bought again; a gained one is new")
 
     def tombstones(self, out):
         path = os.path.join(out.out, artifacts.WITHDRAWN.filename)
@@ -200,6 +200,17 @@ class Rules(unittest.TestCase):
         again = dict(prose, overview="Different words from TMDB.")
         out.add(again)
         self.assertEqual(out.plan()["changed"], {})
+
+    def test_a_seeded_record_is_compared_by_the_digest_it_carries(self):
+        """The published corpus holds each plot's digest, not its text; a record seeded from it is the same
+        title to the change set as the batch it was read from."""
+        seeded = row(1)
+        seeded["plotSha256"] = changes.fingerprint(seeded)["text"]
+        del seeded["overview"]
+        out = Batches(self)
+        out.publish(out.add(seeded, dict(seeded, tmdbId=2)))
+        out.add(row(1), row(2, plot="Something else."))
+        self.assertEqual(out.plan()["changed"], {"movie:2": ["plot"]})
 
     def test_the_plan_names_keys_and_carries_no_text(self):
         out = Batches(self)

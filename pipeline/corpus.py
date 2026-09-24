@@ -63,6 +63,8 @@ INPUTS = (
     artifacts.FACTS,
     artifacts.GENRES_MOODS.called("labels"),
     artifacts.WITHDRAWN,
+    artifacts.ENRICHED.called("enriched"),
+    artifacts.PUBLISHED_CORPUS.called("base"),
 )
 
 OUTPUTS = (artifacts.CORPUS, artifacts.ENTITIES)
@@ -80,7 +82,7 @@ def audit_bundles(ctx):
     """
     granted = []
     for artifact in AUDITED:
-        for shard in ctx.require_all(artifact):
+        for shard in shards(ctx, artifact):
             manifest_path = shard + ".manifest.json"
             if not os.path.exists(manifest_path):
                 raise StageError(
@@ -107,6 +109,14 @@ def audit_bundles(ctx):
     return granted
 
 
+def shards(ctx, artifact):
+    """A pass's shards: every one, and at least one — unless the published corpus is the base, when a day
+    that bought nothing has none and every judgement is the base's."""
+    if ctx.require(artifacts.PUBLISHED_CORPUS) is not None:
+        return ctx.paths(artifact)
+    return ctx.require_all(artifact)
+
+
 def argv(ctx):
     """The join's command line, built from the declaration.
 
@@ -118,7 +128,7 @@ def argv(ctx):
     command = [sys.executable, SCRIPT]
     for entry in (bind(e) for e in INPUTS):
         if entry.artifact.shards:
-            for path in consolidate_corpus.shard_order(ctx.require_all(entry.artifact)):
+            for path in consolidate_corpus.shard_order(shards(ctx, entry.artifact)):
                 command += [entry.flag(), path]
             continue
         path = ctx.require(entry.artifact)

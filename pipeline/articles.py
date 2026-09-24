@@ -21,6 +21,10 @@ implementation of something that already works, and wrong the first time a param
 **Resumable by re-reading its own output**, so a kill costs at most the titles in flight. Which is the
 reason the output is APPENDED rather than rewritten: 445 MB of articles is hours of polite fetching.
 
+**With a change set, only its new titles are dumped** — the ones the classify pass buys for. The rest are
+answered already, and a daily run rebuilt from the published release would otherwise fetch every article
+the corpus has.
+
 **Only a title with a Wikipedia plot is dumped.** That is the ToS rule, not a coverage decision — a title
 without one has no article recorded to fetch, and its prose would be TMDB's, which may not reach an LLM.
 
@@ -38,7 +42,7 @@ import os
 import re
 import sys
 
-from . import artifacts
+from . import artifacts, changes
 # Aliased: this module has its own `fetch`, and the stage that owns the enriched batches is only needed
 # for the rule its refusal points at.
 from . import fetch as fetch_stage
@@ -72,7 +76,7 @@ TARGET_BATCH = 100
 #: else in a row tells the two apart.
 TARGET_SOURCE = "wikidata"
 
-INPUTS = (artifacts.ENRICHED,)
+INPUTS = (artifacts.ENRICHED, artifacts.CHANGES)
 OUTPUTS = (artifacts.ARTICLES,)
 
 
@@ -284,6 +288,11 @@ def run(ctx, cache=None):
             # an enrich wrapper script until the drain became a stage, and a copy of that string would have
             # gone on sending an operator to a script the pipeline no longer runs.
             f"when it grounds a title — build the batches with: {fetch_stage.HOW}")
+    # With a live baseline, only what the classify pass will buy for: a run rebuilt from the published
+    # release has no dump of the titles it already holds, and needs none (`pipeline/changes.py`, new.txt).
+    if changes.planned(ctx) is not None:
+        new = changes.listed(ctx, "new")
+        todo = [record for record in todo if key(record) in new]
     # Applied after the refusal above, so `--limit 0` asks for nothing rather than reading as an empty
     # enrichment — and 0 means zero here, as it does to `enrich` and the embed stage.
     if ctx.limit is not None:

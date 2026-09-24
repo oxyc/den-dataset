@@ -56,9 +56,9 @@ What it writes, under `changes/`, rewritten whole every run:
 
   * `plan.json`     — the baseline, the counts, and every listed title with its reasons;
   * `keys.txt`      — added and changed: the titles every later stage runs for, but the paid ones;
-  * `new.txt`       — added, and regained: the titles the paid passes buy for. A changed plot keeps the
-    classify and critique rows it has — a decision about spend, not a claim that they still fit; a regained
-    title has none left, since its tombstone took them;
+  * `new.txt`       — the titles with no classify or critique rows, which the paid passes buy for: added,
+    gained a plot, or regained one after a tombstone took their rows. A changed plot keeps the rows it has
+    — a decision about spend, not a claim that they still fit;
   * `withdrawn.txt` — what `consolidate_corpus.py withdraw` takes;
   * `items.txt`     — the changed titles answered for by another Wikidata item, whose facts and doc facts are
     asked again (the facts and doc-facts stages evict them from their checkpoints);
@@ -106,18 +106,21 @@ def fingerprint(record):
     """What about a title a later stage reads: whether it has a plot, from which article, the plot's digest,
     the revision it was read at, and the Wikidata item answering for it.
 
-    The digest is of the plot only when `hasWikiPlot` is true. Otherwise `overview` may be TMDB's prose in
+    The digest is of the plot only when `hasWikiPlot` is true — or the `plotSha256` a record seeded from the
+    published corpus carries instead of its plot (`pipeline/published.py`), which is the same digest. Otherwise `overview` may be TMDB's prose in
     a batch written before oxyc/den-dataset#53, and nothing here has any business reading it.
     """
     grounded = bool(record.get("hasWikiPlot"))
     text = record.get("overview") if grounded else None
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest() if isinstance(text, str) else None
     revision = record.get("plotRevId")
     return {
         "plot": grounded,
         "article": record.get("plotArticle") if grounded else None,
         "language": (record.get("plotLanguage") or "en") if grounded else None,
         "revision": revision if isinstance(revision, int) and not isinstance(revision, bool) else None,
-        "text": hashlib.sha256(text.encode("utf-8")).hexdigest() if isinstance(text, str) else None,
+        # A record seeded from the published corpus carries the digest in place of the plot.
+        "text": digest or (record.get("plotSha256") if grounded else None),
         "item": record.get("wikidataItem") or None,
     }
 
@@ -294,7 +297,8 @@ def run(ctx, now=None):
     write_list(os.path.join(directory, "keys.txt"), keys)
     write_list(os.path.join(directory, "withdrawn.txt"), list(withdrawn))
     write_list(os.path.join(directory, "new.txt"),
-               sorted(set(added) | {key for key, why in changed.items() if why == [REGAINED]}, key=order))
+               sorted(set(added) | {key for key, why in changed.items() if why[0] in (GAINED, REGAINED)},
+                      key=order))
     write_list(os.path.join(directory, "items.txt"), [key for key, why in changed.items() if ITEM in why])
     stale = os.path.join(directory, "revisit.txt")
     if ctx.revisit_weeks:

@@ -243,6 +243,29 @@ PUBLISHED_META = Artifact(
     required=False,
 )
 
+#: The live dataset's corpus, as the daily job's base (`pipeline/published.py` puts it here from the
+#: `corpus-<ver>` release): the judgements of every title no shard of this run answers
+#: (`pipeline/consolidate_corpus.py`, "A published corpus as the base"). Optional: an out-dir that holds every
+#: pass shard needs none.
+PUBLISHED_CORPUS = Artifact(
+    name="published_corpus",
+    filename="published/corpus.jsonl.gz",
+    producer="pipeline/published.py",
+    how="./den daily --out-dir <dir> (it seeds a fresh out-dir from the live dataset's corpus-<ver> release)",
+    required=False,
+)
+
+#: The live dataset's genres & moods (`pipeline/published.py` puts it here from the `corpus-<ver>` release):
+#: the entries the genres & moods stage derived from answers bought on earlier days, whose answer shards a
+#: rebuilt out-dir does not hold. Optional: an out-dir that holds every answer shard needs none.
+PUBLISHED_GENRES_MOODS = Artifact(
+    name="published_genres_moods",
+    filename="published/genres-moods.json",
+    producer="pipeline/published.py",
+    how="./den daily --out-dir <dir> (it seeds a fresh out-dir from the live dataset's corpus-<ver> release)",
+    required=False,
+)
+
 #: The change set: what moved since the live dataset (`pipeline/changes.py`). `plan.json`, and the key lists
 #: the stages after it take — `keys.txt` (added and changed), `withdrawn.txt` (lost their plot, for
 #: `consolidate_corpus.py withdraw`) and, with `--revisit-weeks`, `revisit.txt`. Rewritten whole each run:
@@ -445,7 +468,8 @@ RELEASE = Artifact(
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
              COMBINED_MANIFEST, CHANGED_ARTICLES, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST,
              GENRES_MOODS, DELTA, DELTA_MANIFEST, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH,
-             PUBLISHED_META, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
+             PUBLISHED_META, PUBLISHED_CORPUS,
+             PUBLISHED_GENRES_MOODS, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
              EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
              FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISES,
              VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST,

@@ -64,6 +64,23 @@ This file is the SOURCE OF TRUTH, meant to be read by a human. The binary store 
 artifact generated from it: regenerable, never hand-edited, never the thing you debug against. Inspect a
 title with `zcat corpus-<version>.jsonl.gz | grep '"key":"tv:1399"' | python3 -m json.tool`.
 
+## A published corpus as the base
+
+The daily job rebuilds from what was published (oxyc/den-dataset#27): its out-dir holds only today's pass
+shards, so `--base corpus-<ver>.jsonl.gz` supplies the rest. A title no shard answers takes its judgements
+from its base row — the classify answers when no shard classified it, the critique answers when no shard
+critiqued it either — and a tombstone withdraws them there as it does from a shard: every tombstone in a
+rebuilt out-dir is newer than the base. Facts and genres & moods always come from this run's files. Every
+title the base holds must reach the corpus: the published dataset is never shrunk by a join.
+
+## Where each title's plot came from
+
+`--enriched` adds `source` to each row: the newest enriched record's `SOURCE` fields and `plotSha256`, the
+digest of its plot. It is what the next day's change set compares against (`pipeline/changes.py`) and what
+the grounding census reads, so a run that starts from the published corpus knows what the live dataset
+was built from without the batches. Identifiers and a digest only — never the plot. A title with no
+enriched record keeps its base row's `source`.
+
 ## What is deliberately NOT here
 
 TMDB overviews and Wikipedia article or section text. The derived judgements about that prose are ours to
@@ -86,6 +103,14 @@ AUDIENCE = ("intended_to_frighten", "made_for_children", "made_for_teens")
 # Any answer key holding source prose rather than a judgement. Belt and braces: the passes do not put
 # article text under these names today, and if one ever does it must not reach a published file.
 PROSE = ("evidence", "plot", "overview", "synopsis", "text", "sections", "article")
+#: The enriched record's fields a row's `source` carries: which article, language and revision the plot was
+#: read from, how it was chosen, and which Wikidata item answers for the title. Never `overview`.
+SOURCE = ("hasWikiPlot", "plotArticle", "plotLanguage", "plotRevId", "plotArticleRole", "plotArticleRedirected",
+          "wikidataItem", "wikidataCandidates", "animated")
+#: What a base row contributes when no shard of this run answered its title: the classify answers, and the
+#: critique answers.
+BASE_COMBINED = ("applicability", "facets", "scores", "nouls")
+BASE_DELTA = ("critique", "technique", "depicts", "audience")
 
 
 def key_of(record):
@@ -302,21 +327,63 @@ def by_key(path, label):
 #: The inputs this join reads, in the order the parser below declares them. `pipeline/corpus.py` builds
 #: the command line out of its own declaration and `pipeline/corpus_test.py` holds the two lists
 #: together, so an input can only be added or dropped in one place without something going red.
-INPUT_ARGS = ("combined", "delta", "facts", "labels", "withdrawn")
+INPUT_ARGS = ("combined", "delta", "facts", "labels", "withdrawn", "enriched", "base")
 
 
 def build_parser():
     """The argument list, so a test can hold it against `INPUT_ARGS` and run a built command line
     through the parser that will receive it rather than against a copy of it."""
     ap = argparse.ArgumentParser()
-    ap.add_argument("--combined", required=True, action="append", help="a shard of the corpus pass")
-    ap.add_argument("--delta", required=True, action="append", help="a shard of the delta pass")
+    ap.add_argument("--combined", action="append", default=[], help="a shard of the corpus pass")
+    ap.add_argument("--delta", action="append", default=[], help="a shard of the delta pass")
     ap.add_argument("--facts", required=True, help="the FULL facts file, not facts-slim")
     ap.add_argument("--labels", required=True, help="genres-moods.json: each title's genres & moods")
     ap.add_argument("--withdrawn", help="tombstones: titles whose older pass rows no longer stand")
+    ap.add_argument("--enriched", help="the enriched batch directory each row's `source` is read from")
+    ap.add_argument("--base", help="the published corpus: the judgements of every title no shard answers")
     ap.add_argument("--expect", type=int, default=None, help="required title count")
     ap.add_argument("--out", required=True, help="written gzipped when it ends .gz")
     return ap
+
+
+def plot_sha256(record):
+    """The digest of a grounded record's plot, or its recorded one. Only when `hasWikiPlot`: an old batch's
+    `overview` is TMDB's prose otherwise, and no digest of it is taken."""
+    if not record.get("hasWikiPlot"):
+        return None
+    text = record.get("overview")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest() if isinstance(text, str) else record.get("plotSha256")
+
+
+def sources(directory):
+    """`key -> source` from the newest enriched record per title — every reader's rule."""
+    import re
+    numbered = []
+    for name in os.listdir(directory):
+        found = re.match(r"^batch-([0-9]+)\.json$", name)
+        if found:
+            numbered.append((int(found.group(1)), name))
+    out = {}
+    for _number, name in sorted(numbered):
+        with open(os.path.join(directory, name), encoding="utf-8") as fh:
+            for record in json.load(fh):
+                source = {k: record[k] for k in SOURCE if k in record}
+                digest = plot_sha256(record)
+                if digest:
+                    source["plotSha256"] = digest
+                out[key_of(record)] = source
+    return out
+
+
+def base_rows(path):
+    """The published corpus, `key -> row`."""
+    out = {}
+    with gzip.open(path, "rt", encoding="utf-8") if path.endswith(".gz") else open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                row = json.loads(line)
+                out[row["key"]] = row
+    return out
 
 
 def pass_row(record):
@@ -329,7 +396,11 @@ def main():
     if sys.argv[1:2] == ["withdraw"]:
         return withdraw(sys.argv[2:])
     args = build_parser().parse_args()
+    if not (args.combined and args.delta) and not args.base:
+        sys.exit("a join with no --base needs --combined and --delta shards: without them no title has a judgement")
     withdrawals = read_withdrawals(args.withdrawn)
+    base = base_rows(args.base) if args.base else {}
+    source = sources(args.enriched) if args.enriched else {}
 
     print("reading facts …", file=sys.stderr)
     with open(args.facts, encoding="utf-8") as fh:
@@ -369,7 +440,12 @@ def main():
     # A withdrawn title keeps its place on the spine: it lost the judgements read from the wrong article,
     # not its facts or its labels, and `--expect` counts titles.
     answered = set(combined_rows) | combined_withdrawn
-    spine = sorted(answered | set(facts))
+    left = sorted(set(base) - answered - set(facts))
+    if left:
+        sys.exit(f"{len(left)} titles the published corpus holds would leave it — they are in no facts file "
+                 f"and no shard, e.g. {left[:4]}. The facts' delta pass keeps every published title.")
+    spine = sorted(answered | set(facts) | set(base))
+    from_base = 0
     try:
         for key in spine:
             record = combined_rows.get(key)
@@ -377,10 +453,13 @@ def main():
             media, tmdb = key.split(":", 1)
             record = record or {"mediaType": media, "tmdbId": int(tmdb)}
             leaked = [k for k in answers if any(p in k.lower() for p in PROSE)]
+
             if leaked:
                 sys.exit(f"{key}: refusing to write source prose ({', '.join(sorted(leaked))})")
             d = delta.get(key, {})
             fact = facts.get(key)
+            # No shard answered this title, and no tombstone took its answers: the published ones stand.
+            prior = base.get(key) if key not in combined_rows and key not in withdrawals else None
             row = {
                 "key": key,
                 "mediaType": record["mediaType"],
@@ -398,6 +477,12 @@ def main():
                 "depicts": prefixed(d, "depicts__"),
                 "audience": typed(d, AUDIENCE),
             }
+            if prior is not None:
+                row.update({name: prior.get(name) or {} for name in BASE_COMBINED + BASE_DELTA})
+                from_base += 1
+            found = source.get(key) or (base.get(key) or {}).get("source")
+            if found:
+                row["source"] = found
             line = json.dumps(row, ensure_ascii=False, sort_keys=True)
             handle.write((line + "\n").encode("utf-8") if out_path.endswith(".gz") else line + "\n")
             written += 1
@@ -436,7 +521,8 @@ def main():
 
     print(json.dumps({"titles": written, "withFacts": with_facts, "withLabels": with_labels,
                       "withDelta": with_delta,
-                      "withPass": len(combined_rows), "factsOnly": written - len(answered),
+                      "withPass": len(combined_rows), "fromBase": from_base,
+                      "factsOnly": written - len(answered) - from_base,
                       "entities": len(entities), "out": out_path, "entitiesOut": ents_path,
                       "tombstones": len(withdrawals), "combined": combined_report, "delta": delta_report},
                      indent=1))

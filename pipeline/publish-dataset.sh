@@ -36,6 +36,12 @@
 # grounding and plot-vector census, the store inputs' ownership, the quality score) ran in the check, on
 # these bytes, and cannot run without it; each one says so here rather than being skipped in silence.
 #
+# THE BUNDLE (oxyc/den-dataset#27): what this generation was built from, which the next daily run starts from
+# on a machine that keeps nothing — the store's inputs and the records the stages resume from, all derived,
+# none of it prose (`pipeline/published.py`). A publish uploads it as the `corpus-<ver>` release BEFORE the
+# manifest, so the live manifest never names a generation the next run cannot start from. `--check` gathers
+# it into OUT_DIR/bundle and records its digests; `--checked` publishes exactly those.
+#
 # Run it FROM THE REPO ROOT: the ownership guard resolves producer paths (`pipeline/…`) and
 # `git ls-files` against the working directory.
 set -euo pipefail
@@ -101,6 +107,13 @@ if meta.get("storeFile") != record.get("storeFile") or not os.path.exists(store)
     problems.append(f"the manifest names {meta.get('storeFile')!r} and the check passed {record.get('storeFile')!r}")
 elif digest(store) != record.get("storeSha256") or meta.get("storeSha256") != record.get("storeSha256"):
     problems.append(f"{record['storeFile']} is not the store the check passed")
+bundle = record.get("bundle") or {}
+for asset, sha in (bundle.get("files") or {}).items():
+    path = os.path.join(d, "bundle", asset)
+    if not os.path.exists(path) or digest(path) != sha:
+        problems.append(f"bundle/{asset} is not the file the check passed")
+if not bundle.get("files"):
+    problems.append("the check recorded no bundle, so the next run could not start from this generation")
 if problems:
     sys.exit("error: these are not the bytes the check passed: " + "; ".join(problems))
 print(f"checked: {record['storeFile']} and dataset.meta.json are what the check passed at {record.get('checkedAt')}")
@@ -184,10 +197,10 @@ echo "  $(basename "$meta")"
 # (the ~130 MB store is the usual culprit), it aborts and you can't tell what landed. Per-file keeps
 # progress and lets a transient failure retry just the slow one.
 upload_one() {
-  local f="$1" n=0
+  local f="$1" tag="${2:-data-latest}" n=0
   # </dev/null: this is called from inside a `while read` fed by $manifest_files, so anything the uploader
   # read from stdin would consume the list being iterated. gh does not today; not depending on it is free.
-  until gh release upload data-latest -R "$REPO" --clobber "$f" </dev/null; do
+  until gh release upload "$tag" -R "$REPO" --clobber "$f" </dev/null; do
     n=$((n + 1)); [ "$n" -ge 3 ] && { echo "error: failed to upload $(basename "$f") after 3 tries" >&2; return 1; }
     echo "  retry $n for $(basename "$f")…" >&2; sleep 5
   done
@@ -599,6 +612,19 @@ print(" ".join(sorted(k for k, v in old.items()
   fi
 fi
 
+# THE BUNDLE, gathered from the out-dir — or, for `--checked`, already in the artifact and verified above.
+# The daily job starts from it, so a check without one refuses. A publish typed by hand from a dir that holds
+# only the store and the manifest — legitimate since the cutover — goes out without one, and says so.
+bundle_dir="$DIR/bundle"
+if [ "$checked" -eq 0 ]; then
+  rm -rf "$bundle_dir"
+  if ! python3 "$(dirname "$0")/published.py" bundle "$DIR" "$bundle_dir"; then
+    [ "$check" -eq 1 ] && { echo "       The daily job's artifact must carry it. Nothing to publish." >&2; exit 1; }
+    echo "warning: no bundle — the next daily run cannot start from this generation (corpus-<ver> is not published)" >&2
+    bundle_dir=""
+  fi
+fi
+
 # CHECK ends here: every gate above has run and passed, and what follows only signs and uploads. A signature
 # carried forward from an older generation is dropped, as `--unsigned` drops one: it cannot verify over this
 # meta, and the publish signs it again.
@@ -618,6 +644,7 @@ record = {"datasetVersion": meta.get("datasetVersion"), "storeFile": meta.get("s
           "storeSha256": hashlib.sha256(open(os.path.join(d, meta["storeFile"]), "rb").read()).hexdigest(),
           "metaSha256": hashlib.sha256(open(meta_path, "rb").read()).hexdigest(),
           "maxBatchId": meta.get("maxBatchId"),
+          "bundle": json.load(open(os.path.join(d, "bundle", "bundle.json"))),
           "checkedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
 json.dump(record, open(os.path.join(d, "checked.json"), "w"), indent=1)
 PY
@@ -643,6 +670,18 @@ PY
 else
   DEN_DATASET_SIGNING_KEY="$signing_key" python3 "$(dirname "$0")/sign_manifest.py" sign "$meta" \
     || { echo "       Nothing uploaded." >&2; exit 1; }
+fi
+
+# 2b) THE BUNDLE, as `corpus-<ver>`, before anything on `data-latest` moves.
+if [ -n "$bundle_dir" ]; then
+  bundle_tag="corpus-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["datasetVersion"])' "$meta")"
+  gh release view "$bundle_tag" -R "$REPO" >/dev/null 2>&1 \
+    || gh release create "$bundle_tag" -R "$REPO" --title "Corpus ${bundle_tag#corpus-} (source of truth)" \
+         --notes "What dataset ${bundle_tag#corpus-} was built from, and what the next run starts from: the corpus, its entities and facts, both vector blobs and their titles, the genres & moods, the doc facts and the Wikidata checkpoints. Derived; no prose."
+  for f in "$bundle_dir"/*; do
+    echo "→ $bundle_tag/$(basename "$f")"
+    upload_one "$f" "$bundle_tag" || exit 1
+  done
 fi
 
 # 3) BLOBS — driven by the MANIFEST, not by a parallel list of globs.

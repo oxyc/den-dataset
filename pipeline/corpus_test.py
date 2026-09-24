@@ -106,6 +106,10 @@ def write_inputs(out):
     fixture.facts_file(os.path.join(out, FIXTURE_FILES["facts"][0]), list(FACTS_KEYS),
                        entities={"Q42": {"en": "Ada Director"}})
     fixture.genres_moods_file(os.path.join(out, FIXTURE_FILES["genres_moods"][0]), list(PASS_KEYS))
+    os.makedirs(os.path.join(out, "enriched"), exist_ok=True)
+    with open(os.path.join(out, "enriched", "batch-1.json"), "w", encoding="utf-8") as fh:
+        json.dump([{"tmdbId": 1, "mediaType": "movie", "hasWikiPlot": True, "overview": "A plot.",
+                    "plotArticle": "One (film)", "plotLanguage": "en", "plotRevId": 5}], fh)
 
 
 def context(out, **kwargs):
@@ -303,6 +307,7 @@ class Equivalence(unittest.TestCase):
             command += ["--delta", os.path.join(out, name)]
         command += ["--facts", os.path.join(out, FIXTURE_FILES["facts"][0]),
                     "--labels", os.path.join(out, FIXTURE_FILES["genres_moods"][0]),
+                    "--enriched", os.path.join(out, "enriched"),
                     "--expect", "4", "--out", target]
         done = subprocess.run(command, capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -410,6 +415,7 @@ class Supersede(unittest.TestCase):
             command += ["--facts", os.path.join(out, FIXTURE_FILES["facts"][0]),
                         "--labels", os.path.join(out, FIXTURE_FILES["genres_moods"][0]),
                         "--withdrawn", os.path.join(out, "withdrawn.jsonl"),
+                        "--enriched", os.path.join(out, "enriched"),
                         "--expect", "4", "--out", reference]
             self.assertNotEqual(command, corpus.argv(context(out, expect=4))[:-2] + ["--out", reference])
             done = subprocess.run(command, capture_output=True, text=True)

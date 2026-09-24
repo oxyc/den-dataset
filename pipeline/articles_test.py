@@ -108,6 +108,36 @@ class Selection(Staged):
         articles.run(self.context())
         self.assertEqual([row["tmdbId"] for row in self.dumped()], [1])
 
+    def plan(self, new, baseline=True):
+        directory = os.path.join(self.out, "changes")
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, "new.txt"), "w", encoding="utf-8") as fh:
+            fh.writelines(f"{key}\n" for key in new)
+        with open(os.path.join(directory, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"baseline": {"datasetVersion": "live", "maxBatchId": 1} if baseline else None}, fh)
+
+    def test_with_a_change_set_only_its_new_titles_are_dumped(self):
+        """A run rebuilt from the published release holds no dump of what it already answered, and fetching
+        one would be every article of the corpus. The classify pass buys for the new titles only."""
+        self.batch(1, [record(1), record(2), record(3)])
+        self.plan(["movie:2"])
+        articles.run(self.context())
+        self.assertEqual([row["tmdbId"] for row in self.dumped()], [2])
+        self.assertEqual(self.fetched, [("Article 2", "en")])
+
+    def test_a_change_set_with_nothing_new_leaves_an_empty_dump(self):
+        self.batch(1, [record(1)])
+        self.plan([])
+        articles.run(self.context())
+        self.assertTrue(os.path.exists(os.path.join(self.out, "articles.jsonl")))
+        self.assertEqual((self.dumped(), self.fetched), ([], []))
+
+    def test_a_first_generation_dumps_everything(self):
+        self.batch(1, [record(1), record(2)])
+        self.plan(["movie:2"], baseline=False)
+        articles.run(self.context())
+        self.assertEqual([row["tmdbId"] for row in self.dumped()], [1, 2])
+
     def test_a_title_whose_article_name_is_empty_is_not_dumped(self):
         self.batch(1, [record(1, article=""), record(2)])
         articles.run(self.context())
