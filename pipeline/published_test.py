@@ -42,6 +42,8 @@ def generation(out):
         target = os.path.join(out, path.format(version=VERSION))
         if required and not os.path.exists(target):
             write(target, "{}")
+    write(os.path.join(out, "facts-source-authors.json"), '{"Q30":["Q10"]}')
+    write(os.path.join(out, "facts-delta", "facts-source-authors.json"), '{"Q31":[]}')
     write(os.path.join(out, artifacts.VECTOR_LABELS.filename),
           json.dumps({"records": [{"tmdbId": 1, "mediaType": "movie", "genres": ["drama"]}]}))
     vector_blob.write(os.path.join(out, artifacts.VECTORS.filename), ["movie:1"], bytes([1, 255, 128]), 3)
@@ -82,6 +84,11 @@ class Published(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.fresh, f"facts-{VERSION}.json")))
         self.assertTrue(os.path.exists(os.path.join(self.fresh, artifacts.PUBLISHED_GENRES_MOODS.filename)))
         self.assertEqual(json.loads(self.read(artifacts.MANIFEST.filename)), self.meta)
+
+    def test_the_source_author_checkpoints_survive_a_stateless_day(self):
+        published.seed(self.fresh)
+        self.assertEqual(json.loads(self.read("facts-source-authors.json")), {"Q30": ["Q10"]})
+        self.assertEqual(json.loads(self.read("facts-delta", "facts-source-authors.json")), {"Q31": []})
 
     def test_the_seeded_batch_is_each_title_with_a_source_and_no_plot(self):
         published.seed(self.fresh)
