@@ -38,9 +38,9 @@ article it no longer has, so this stage tombstones it in `withdrawn.jsonl` — t
 stops shipping those rows. The title keeps its facts, its genres & moods and its row, as the join's
 tombstones already work. The reason names the live version it was lost against, and a title that regains
 its plot before the next publish is listed `regained` while that version is live, so it is classified
-again rather than shipping without the rows its tombstone took. A title already tombstoned is not
-tombstoned again: the file is append-only and a key is withdrawn once (`read_withdrawals`), so one that
-loses a plot a second time is counted `withdrawnBefore` in the plan and printed for a person to decide.
+again rather than shipping without the rows its tombstone took. If it loses the plot again after those
+new answers become live, another tombstone withdraws them. Planning twice against one live version does
+not append the same event twice.
 
 **The weekly slice** (oxyc/den-dataset#5). `--revisit-weeks N` adds every title whose key hashes into this
 week's slice of N, so the whole corpus is revisited once every N weeks with no state kept about what was
@@ -227,20 +227,17 @@ def withdraw(ctx, directory, withdrawn, current, changed, live, now):
     Returns `(tombstoned, withdrawn before)`. `changed` gains the regained titles."""
     path = ctx.path(artifacts.WITHDRAWN)
     standing = tombstones(path)
-    fresh = [key for key in withdrawn if key not in standing]
-    before = [key for key in withdrawn if key in standing]
+    reason = lost_since(live[0])
+    fresh = [key for key in withdrawn if standing.get(key) != reason]
+    before = [key for key in withdrawn if standing.get(key) == reason]
     listed = os.path.join(directory, "tombstoned.txt")
     write_list(listed, fresh)
     if fresh:
         with contextlib.redirect_stdout(sys.stderr):
-            consolidate_corpus.withdraw(["--keys", listed, "--reason", lost_since(live[0]), "--out", path], now=now)
+            consolidate_corpus.withdraw(["--keys", listed, "--reason", reason, "--out", path], now=now)
     for key, reason in standing.items():
         if reason == lost_since(live[0]) and current.get(key, {}).get("plot") and key not in changed:
             changed[key] = [REGAINED]
-    if before:
-        print(f"changes: {len(before)} title(s) lost a plot they were withdrawn for once already, and a key is "
-              f"withdrawn once; the corpus still ships what a later classify run answered for them: "
-              f"{', '.join(before[:10])}", file=sys.stderr)
     return fresh, before
 
 

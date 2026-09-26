@@ -43,8 +43,8 @@ them. `withdrawn.jsonl` in the out-dir says so, one title per line, written by
 and passed to the join as `--withdrawn`. A tombstone removes the rows of every run that STARTED before
 its `withdrawnAt`, so a title that later regains a plot and is answered again by a newer run comes back
 without the tombstone being edited. The title itself stays in the corpus, with its facts and labels;
-what goes is the judgements read from the wrong article. The file is append-only: a key is withdrawn
-once.
+what goes is the judgements read from the wrong article. The file is append-only. A title that regains a
+plot and later loses it again gets another, later tombstone; the latest one decides which answers stand.
 
 ## Classify and critique must have read the same article
 
@@ -181,8 +181,10 @@ def latest(paths, label, withdrawals=None, keep=lambda record: record):
 
 
 def read_withdrawals(path):
-    """`key` → when it was withdrawn, from a tombstone file. A key withdrawn twice is refused: the file
-    is append-only, and a second line for one title means two writers disagreed about it."""
+    """`key` → its latest withdrawal, from the append-only tombstone file.
+
+    A title can regain a plot, be answered by a later pass, then lose it again. Its next tombstone must be
+    later than its last: accepting an older or equal stamp would make file order decide which answers ship."""
     if not path:
         return {}
     out = {}
@@ -192,11 +194,13 @@ def read_withdrawals(path):
                 continue
             row = json.loads(line)
             key = key_of(row)
-            if key in out:
-                sys.exit(f"{path}:{number}: {key} is withdrawn twice")
             if not row.get("reason"):
                 sys.exit(f"{path}:{number}: {key} is withdrawn with no reason")
-            out[key] = timestamp(row.get("withdrawnAt"), f"{path}:{number} withdrawnAt")
+            when = timestamp(row.get("withdrawnAt"), f"{path}:{number} withdrawnAt")
+            if key in out and when <= out[key]:
+                sys.exit(f"{path}:{number}: {key} is withdrawn again at {when.isoformat()}, not after "
+                         f"its earlier withdrawal at {out[key].isoformat()}")
+            out[key] = when
     return out
 
 
@@ -221,8 +225,8 @@ def withdraw(argv=None, now=None):
     """`consolidate_corpus.py withdraw`: append a tombstone for each listed key to the withdrawn file.
 
     Each line records why, when, and which key list it came from (name and digest), so a withdrawn
-    title can be traced back to the re-fetch that decided it. A key already withdrawn is refused and
-    nothing is written.
+    title can be traced back to the re-fetch that decided it. A key can be withdrawn again only at a
+    strictly later instant, after it had a chance to regain a plot and receive newer answers.
     """
     ap = argparse.ArgumentParser(prog="consolidate_corpus.py withdraw")
     ap.add_argument("--keys", required=True, help="the titles to withdraw, one mediaType:tmdbId per line")
@@ -233,12 +237,14 @@ def withdraw(argv=None, now=None):
         sys.exit("--reason is empty")
     keys = read_keys(args.keys)
     already = read_withdrawals(args.out) if os.path.exists(args.out) else {}
-    again = [k for k in keys if k in already]
+    at = now or datetime.now(timezone.utc)
+    again = [k for k in keys if k in already and at <= already[k]]
     if again:
-        sys.exit(f"refusing: {len(again)} keys are already withdrawn in {args.out}, e.g. {again[:4]}")
+        sys.exit(f"refusing: {len(again)} keys are not withdrawn later than their last tombstone in "
+                 f"{args.out}, e.g. {again[:4]}")
     with open(args.keys, "rb") as fh:
         digest = hashlib.sha256(fh.read()).hexdigest()
-    when = (now or datetime.now(timezone.utc)).isoformat()
+    when = at.isoformat()
     with open(args.out, "a", encoding="utf-8") as fh:
         for key in keys:
             media, tmdb = key.split(":")

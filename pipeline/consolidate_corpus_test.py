@@ -442,13 +442,33 @@ class Withdrawn(unittest.TestCase):
         self.assertEqual(row["keysFile"], "A-to-plotless.txt")
         self.assertEqual(len(row["keysSha256"]), 64)
 
-    def test_a_title_is_withdrawn_once(self):
+    def test_a_title_is_not_withdrawn_twice_at_the_same_instant(self):
         self.withdraw()
         with self.assertRaises(SystemExit) as refused:
             self.withdraw()
-        self.assertIn("already withdrawn", str(refused.exception))
+        self.assertIn("not withdrawn later", str(refused.exception))
         with open(self.tombstones, encoding="utf-8") as fh:
             self.assertEqual(len(fh.readlines()), 1, "a refusal appends nothing")
+
+    def test_a_second_later_withdrawal_takes_rows_written_after_the_first(self):
+        self.withdraw()
+        again, again_d = os.path.join(self.dir, "c2.jsonl"), os.path.join(self.dir, "d2.jsonl")
+        write(again, [combined(1, answers={"tone": {"choice": "hopeful"}})])
+        write(again_d, [{"mediaType": "movie", "tmdbId": 1,
+                         "answers": {"critique__craft": {"p": 0.2}}}])
+        started(again, LATE)
+        started(again_d, LATE)
+        self.withdraw(when="2026-09-24T20:00:00+00:00")
+        done = subprocess.run([sys.executable, SCRIPT, "--combined", self.c, "--combined", again,
+                               "--delta", self.d, "--delta", again_d, "--facts", self.f,
+                               "--labels", self.l, "--out", self.out, "--withdrawn", self.tombstones],
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        rows = {r["key"]: r for r in read(self.out)}
+        self.assertEqual(rows["movie:1"]["facets"], {})
+        self.assertEqual(rows["movie:1"]["critique"], {})
+        with open(self.tombstones, encoding="utf-8") as fh:
+            self.assertEqual(len(fh.readlines()), 2, "both withdrawal events stay auditable")
 
     def test_a_tombstone_with_no_reason_is_refused(self):
         with open(self.tombstones, "w", encoding="utf-8") as fh:
