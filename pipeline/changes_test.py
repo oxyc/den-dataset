@@ -64,9 +64,9 @@ class Batches:
         with open(os.path.join(self.out, artifacts.PUBLISHED_META.filename), "w", encoding="utf-8") as fh:
             json.dump({"datasetVersion": version, "maxBatchId": through}, fh)
 
-    def plan(self, **context):
+    def plan(self, now=DAY, **context):
         with contextlib.redirect_stdout(io.StringIO()):
-            changes.run(Context(out_dir=self.out, **context), now=DAY)
+            changes.run(Context(out_dir=self.out, **context), now=now)
         return self.read("plan.json")
 
     def read(self, name):
@@ -150,7 +150,7 @@ class Rules(unittest.TestCase):
         out.publish(out.number, version="next")
         self.assertEqual(out.plan()["changed"], {}, "a later live version is past the tombstone")
 
-    def test_a_title_withdrawn_once_already_is_not_tombstoned_again(self):
+    def test_a_title_that_loses_its_plot_again_gets_a_later_tombstone(self):
         out = Batches(self)
         out.publish(out.add(row(1)))
         out.add(row(1, plot=None))
@@ -158,9 +158,14 @@ class Rules(unittest.TestCase):
         out.add(row(1, plot="back"))
         out.publish(out.number, version="next")
         out.add(row(1, plot=None))
-        plan = out.plan()
-        self.assertEqual((plan["withdrawn"], plan["counts"]["withdrawnBefore"]), ({"movie:1": "lostPlot"}, 1))
-        self.assertEqual(len(self.tombstones(out)), 1)
+        plan = out.plan(now=DAY + datetime.timedelta(days=1))
+        self.assertEqual((plan["withdrawn"], plan["counts"]["tombstoned"],
+                          plan["counts"]["withdrawnBefore"]), ({"movie:1": "lostPlot"}, 1, 0))
+        stones = self.tombstones(out)
+        self.assertEqual([stone["reason"] for stone in stones],
+                         ["lost its plot since live (den stage changes)",
+                          "lost its plot since next (den stage changes)"])
+        self.assertLess(stones[0]["withdrawnAt"], stones[1]["withdrawnAt"])
 
     def test_a_first_generation_tombstones_nothing(self):
         out = Batches(self)
