@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 
 from . import franchises
+from . import run_combined as rc
 from .contract import Context, StageError
 
 VERSION = "testver"
@@ -120,6 +121,11 @@ class Stage(unittest.TestCase):
         with open(os.path.join(self.out, "franchises.json"), encoding="utf-8") as fh:
             return json.load(fh)
 
+    def paid_files(self):
+        [answers] = [os.path.join(self.out, name) for name in os.listdir(self.out)
+                     if name.startswith("franchise-answers-v1-") and name.endswith(".jsonl")]
+        return answers, answers + ".manifest.json"
+
     def test_wikidata_alone_decides_the_nested_series_and_leaves_the_rest_unasked_without_spend(self):
         self.golden({**GOLDEN, "floors": {**GOLDEN["floors"], "togetherRecall": 0.0}})
         self.run_stage()
@@ -189,6 +195,37 @@ class Stage(unittest.TestCase):
         doc = self.derived()
         self.assertEqual(doc["derivation"]["counts"]["answered under other candidates"], 2)
         self.assertNotIn("movie:1", doc["titles"])
+
+    def test_a_paid_row_whose_article_provenance_was_changed_is_refused(self):
+        self.run_stage(spend=True)
+        answers, _ = self.paid_files()
+        with open(answers, encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh]
+        rows[0]["articleSha256"] = "0" * 64
+        with open(answers, "w", encoding="utf-8") as fh:
+            fh.write("".join(json.dumps(row) + "\n" for row in rows))
+        with self.assertRaisesRegex(StageError, "article content hash differs"):
+            self.run_stage()
+
+    def test_a_rehashed_manifest_for_other_franchise_questions_is_refused(self):
+        self.run_stage(spend=True)
+        answers, manifest_path = self.paid_files()
+        with open(manifest_path, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+        manifest["config"]["globalQuestions"]["fr__group"]["instructions"] = "A different question"
+        manifest["config"]["globalQuestionsSha256"] = rc.sha256_text(
+            rc.canonical(manifest["config"]["globalQuestions"]))
+        manifest["configSha256"] = rc.sha256_text(rc.canonical(manifest["config"]))
+        with open(manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh)
+        with open(answers, encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh]
+        for row in rows:
+            row["configSha256"] = manifest["configSha256"]
+        with open(answers, "w", encoding="utf-8") as fh:
+            fh.write("".join(json.dumps(row) + "\n" for row in rows))
+        with self.assertRaisesRegex(StageError, "does not record today's franchise questions"):
+            self.run_stage()
 
     def test_plan_writes_nothing(self):
         report = self.run_stage(plan=True)
