@@ -151,6 +151,7 @@ class CommandLine(unittest.TestCase):
                              sorted(os.path.join(out, n) for n in FIXTURE_FILES["combined"]))
             self.assertEqual(parsed.delta,
                              sorted(os.path.join(out, n) for n in FIXTURE_FILES["delta"]))
+            self.assertEqual(parsed.structural, [], "the optional lane is absent before its first backfill")
             self.assertEqual(parsed.labels, os.path.join(out, "genres-moods.json"))
             self.assertIsNone(parsed.withdrawn, "no tombstone file, no flag")
             self.assertEqual(parsed.out, os.path.join(out, f"corpus-{VERSION}.jsonl.gz"))
@@ -162,6 +163,15 @@ class CommandLine(unittest.TestCase):
             write_inputs(out)
             command = corpus.argv(context(out))
             self.assertEqual(command.count("--combined"), 2)
+
+    def test_the_optional_structural_set_is_handed_over_when_present(self):
+        with tempfile.TemporaryDirectory() as out:
+            write_inputs(out)
+            structural = os.path.join(out, "structural-v1.jsonl")
+            fixture.write(structural, [{"mediaType": "movie", "tmdbId": 1, "answers": {}}])
+            write_manifest(structural)
+            parsed = script.build_parser().parse_args(corpus.argv(context(out))[2:])
+            self.assertEqual(parsed.structural, [structural])
 
     def test_the_title_only_delta_generation_is_not_joined(self):
         """`delta-v1` rows were answered with no article text at all: the pass patched out the function
@@ -216,7 +226,7 @@ class BundleProvenance(unittest.TestCase):
     def test_the_audited_inputs_are_the_paid_passes(self):
         """The other three inputs are derived locally and carry no manifest, so there is nothing to check
         them against; claiming to audit them would be a check that always passes."""
-        self.assertEqual([a.name for a in corpus.AUDITED], ["combined", "delta"])
+        self.assertEqual([a.name for a in corpus.AUDITED], ["combined", "delta", "structural"])
 
     def test_a_clean_bundle_needs_no_allowance(self):
         with tempfile.TemporaryDirectory() as out:

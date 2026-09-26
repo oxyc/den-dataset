@@ -182,6 +182,18 @@ DELTA_MANIFEST = Artifact(
     shards=True,
 )
 
+#: Typed probabilities for recurring social units and story engines. Kept separate from DELTA because
+#: critique/depiction/audience/technique have already been bought for the whole corpus; a structural
+#: backfill must not ask those 33 questions again. Optional until the first complete pass is published.
+STRUCTURAL = Artifact(
+    name="structural",
+    filename="structural-v1*.jsonl",
+    producer="pipeline/run_structural.py",
+    how="pipeline/run_structural.py --spend",
+    shards=True,
+    required=False,
+)
+
 #: Tombstones: titles that lost their plot, whose older classify and critique rows the corpus join must
 #: stop shipping. Append-only. The change set writes them for what lost its plot since the live dataset
 #: (`pipeline/changes.py`), through `pipeline/consolidate_corpus.py withdraw`, which an operator can still
@@ -467,7 +479,7 @@ RELEASE = Artifact(
 
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
              COMBINED_MANIFEST, CHANGED_ARTICLES, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST,
-             GENRES_MOODS, DELTA, DELTA_MANIFEST, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH,
+             GENRES_MOODS, DELTA, DELTA_MANIFEST, STRUCTURAL, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH,
              PUBLISHED_META, PUBLISHED_CORPUS,
              PUBLISHED_GENRES_MOODS, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
              EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,

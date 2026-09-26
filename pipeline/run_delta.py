@@ -31,6 +31,7 @@ if not __package__:
     sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from pipeline import run_combined as rc  # noqa: E402
+from pipeline import consolidate_corpus  # noqa: E402
 from pipeline.delta_questions import delta_questions  # noqa: E402
 from pipeline.article_sections import sha256_text  # noqa: E402
 from pipeline.combined_questions import taxonomy  # noqa: E402
@@ -43,27 +44,43 @@ def corpus_states(paths, records):
     same sections; a row that did not is refused rather than skipped.
     """
     wanted = {rc.article_key(rec): rec for rec in records}
-    states = {}
-    for path in paths:
+    rows, owners = {}, {}
+    ordered = consolidate_corpus.shard_order(paths)
+    started = {path: consolidate_corpus.started_at(path) for path in ordered}
+    for path in ordered:
+        own = set()
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 row = json.loads(line)
                 key = f"{row['mediaType']}:{row['tmdbId']}"
                 if key not in wanted:
                     continue
-                if key in states:
-                    raise SystemExit(f"{path}: {key} appears in more than one --combined shard")
-                rec = wanted[key]
-                if row.get("articleSha256") != sha256_text(rec["text"]) \
-                        or [(s["id"], s["textSha256"]) for s in row["sections"]] \
-                        != [(s["id"], s["textSha256"]) for s in rc.sections_for_record(rec)]:
-                    raise SystemExit(f"{path}: {key} was classified from a different article than --articles "
-                                     "holds, so its state does not describe it")
-                states[key] = row["globalStateSectionIds"]
+                if key in own:
+                    raise SystemExit(f"{path}: {key} appears twice in one --combined shard")
+                own.add(key)
+                if (earlier := owners.get(key)) is not None:
+                    if started[earlier] is None or started[path] is None:
+                        raise SystemExit(f"{key} appears in more than one --combined shard, and one records "
+                                         "no runStartedAt to say which article state supersedes the other")
+                    if started[earlier] == started[path]:
+                        raise SystemExit(f"{key} appears in more than one --combined shard whose runs have "
+                                         f"the same runStartedAt {started[path].isoformat()}")
+                rows[key], owners[key] = row, path
+
+    states = {}
+    for key, row in rows.items():
+        rec = wanted[key]
+        if row.get("articleSha256") != sha256_text(rec["text"]) \
+                or [(s["id"], s["textSha256"]) for s in row["sections"]] \
+                != [(s["id"], s["textSha256"]) for s in rc.sections_for_record(rec)]:
+            raise SystemExit(f"{owners[key]}: {key} was classified from a different article than --articles "
+                             "holds, so its latest state does not describe it")
+        states[key] = row["globalStateSectionIds"]
     return states
 
 
-def main(argv=None):
+def run_questions(questions, argv=None):
+    """Run one global question set over the exact states the corpus pass recorded."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--articles", required=True)
     parser.add_argument("--enriched-dir")
@@ -90,7 +107,6 @@ def main(argv=None):
     if args.model.endswith("-latest") and not args.allow_mutable_model:
         raise SystemExit("refusing mutable model alias; use a pinned model or --allow-mutable-model")
 
-    questions = delta_questions()
     records, input_keys = rc.load_articles(args.articles)
     enriched_sha = rc.attach_enriched_evidence(records, args.enriched_dir)
     selected = records[: args.limit] if args.limit else records
@@ -124,6 +140,10 @@ def main(argv=None):
                            input_keys, selected, state_ids_by_key=states)
     finally:
         rc.release_output_lock(lock)
+
+
+def main(argv=None):
+    return run_questions(delta_questions(), argv)
 
 
 if __name__ == "__main__":

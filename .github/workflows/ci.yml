@@ -56,7 +56,7 @@ jobs:
         run: python3 -m py_compile pipeline/embed_canary.py pipeline/embed_docs.py pipeline/embed_premise_v2.py pipeline/import_box_vectors.py
       - name: Jev facet contracts
         run: |
-          python3 -m py_compile pipeline/run_facets.py pipeline/run_combined.py pipeline/run_delta.py pipeline/audit_combined.py pipeline/consolidate_corpus.py
+          python3 -m py_compile pipeline/run_facets.py pipeline/run_combined.py pipeline/run_delta.py pipeline/run_structural.py pipeline/audit_combined.py pipeline/consolidate_corpus.py
           # The auditor is included deliberately: it is the only thing standing between a corrupted bundle
           # and a published dataset, and the pass it audits cost $20.47 and will not be run again.
           python3 -m unittest pipeline/run_facets_test.py pipeline/run_combined_test.py pipeline/audit_combined_test.py pipeline/run_delta_test.py lib/typesafe_client_test.py

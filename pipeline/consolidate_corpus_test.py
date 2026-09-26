@@ -77,13 +77,15 @@ def genres_moods_file(path, keys):
         json.dump({"count": len(keys), "taxonomyVersion": "t02", "titles": {k: entry for k in keys}}, fh)
 
 
-def run(dir, combined_paths, delta_paths, facts, labels, out, extra=()):
+def run(dir, combined_paths, delta_paths, facts, labels, out, extra=(), structural_paths=()):
     """The script as the pipeline runs it, returning (exit code, stderr)."""
     argv = [sys.executable, SCRIPT]
     for path in combined_paths:
         argv += ["--combined", path]
     for path in delta_paths:
         argv += ["--delta", path]
+    for path in structural_paths:
+        argv += ["--structural", path]
     argv += ["--facts", facts, "--labels", labels, "--out", out, *extra]
     done = subprocess.run(argv, capture_output=True, text=True, cwd=dir)
     return done.returncode, done.stderr
@@ -494,6 +496,7 @@ class Base(unittest.TestCase):
         write(self.base, [{"key": f"movie:{n}", "mediaType": "movie", "tmdbId": n,
                            "facets": {"tone": {"choice": "old"}}, "critique": {"craft": {"p": 0.2}},
                            "applicability": {}, "scores": {}, "nouls": {}, "technique": {}, "depicts": {},
+                           "structural": {"unit__family_household": {"noul": 0.9}},
                            "audience": {}, "source": {"plotArticle": f"Old {n}", "plotSha256": "0" * 64}}
                           for n in (1, 2)])
 
@@ -508,7 +511,9 @@ class Base(unittest.TestCase):
         rows = self.rows()
         self.assertEqual(rows["movie:1"]["facets"], {"tone": {"choice": "old"}})
         self.assertEqual(rows["movie:1"]["critique"], {"craft": {"p": 0.2}})
+        self.assertEqual(rows["movie:1"]["structural"], {"unit__family_household": {"noul": 0.9}})
         self.assertEqual(rows["movie:3"]["facets"], {"tone": {"choice": "new"}})
+        self.assertEqual(rows["movie:3"]["structural"], {}, "a newly answered article inherits nothing stale")
         self.assertEqual(rows["movie:1"]["source"]["plotArticle"], "Old 1", "no batch here: the base's source")
 
     def test_a_day_that_bought_nothing_needs_no_shard(self):
@@ -628,18 +633,22 @@ class Output(unittest.TestCase):
                 "score__intensity": {"value": 3},
                 "tax__survival": {"p": 0.8},
             })])
+            s = os.path.join(dir, "structural.jsonl")
             write(d, [{"mediaType": "movie", "tmdbId": 1,
                        "answers": {"critique__craft": {"p": 0.7},
                                    "made_for_children": {"choice": "no"}}}])
+            write(s, [{"mediaType": "movie", "tmdbId": 1,
+                       "answers": {"structural__unit__family_household": {"noul": 0.95}}}])
             facts_file(f, ["movie:1"])
             labels_file(l, ["movie:1"])
-            code, err = run(dir, [c], [d], f, l, out)
+            code, err = run(dir, [c], [d], f, l, out, structural_paths=[s])
             self.assertEqual(code, 0, err)
             row = read(out)[0]
             self.assertEqual(row["facets"]["tone"]["choice"], "bleak")
             self.assertEqual(row["scores"]["intensity"], {"value": 3})
             self.assertEqual(row["nouls"]["survival"], {"p": 0.8})
             self.assertEqual(row["critique"]["craft"], {"p": 0.7})
+            self.assertEqual(row["structural"]["unit__family_household"], {"noul": 0.95})
             self.assertEqual(row["audience"]["made_for_children"]["choice"], "no")
             self.assertEqual(row["labels"]["primaryGenre"], "Crime")
             # `mediaType`/`tmdbId` are the row's own keys, not repeated inside `facts`.

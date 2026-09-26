@@ -10,7 +10,7 @@ which files the join is handed and runs it, byte for byte.
 
 What the stage adds is the declaration below, and two things it had to teach the contract:
 
-  * `combined` and `delta` are SETS. The reader takes each flag once per shard, and the set is resolved
+  * `combined`, `delta` and `structural` are SETS. The reader takes each flag once per shard, and the set is resolved
     from the declared glob — so the stage cannot hand over one shard of three, which is exactly how
     eleven titles left a derived blob for a day.
   * the corpus is the STORE's input. The two stages are in one order now, so `pipeline/check_producers.py`
@@ -60,6 +60,7 @@ SCRIPT = os.path.join(REPO, PRODUCER)
 INPUTS = (
     artifacts.COMBINED,
     artifacts.DELTA,
+    artifacts.STRUCTURAL,
     artifacts.FACTS,
     artifacts.GENRES_MOODS.called("labels"),
     artifacts.WITHDRAWN,
@@ -71,7 +72,7 @@ OUTPUTS = (artifacts.CORPUS, artifacts.ENTITIES)
 
 #: The inputs that are PAID Jev passes, each shard carrying a sidecar manifest. The other inputs are
 #: derived locally and carry no such record, so there is nothing here to check them against.
-AUDITED = (artifacts.COMBINED, artifacts.DELTA)
+AUDITED = (artifacts.COMBINED, artifacts.DELTA, artifacts.STRUCTURAL)
 
 
 def audit_bundles(ctx):

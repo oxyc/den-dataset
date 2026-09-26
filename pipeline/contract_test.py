@@ -127,6 +127,11 @@ class Shards(unittest.TestCase):
                 ctx.require_all(artifacts.COMBINED)
             self.assertIn(artifacts.COMBINED.how, str(refused.exception))
 
+    def test_an_empty_optional_set_is_absent(self):
+        with tempfile.TemporaryDirectory() as out:
+            ctx = Context(out_dir=out, dataset_version="v9")
+            self.assertEqual(ctx.require_all(artifacts.STRUCTURAL), ())
+
 
 class Validation(unittest.TestCase):
     def test_a_module_missing_part_of_the_contract_is_refused(self):

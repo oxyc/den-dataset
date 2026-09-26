@@ -13,9 +13,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-from . import article_sections, combined_questions, run_delta
+from . import article_sections, combined_questions, run_delta, run_structural
 from . import run_combined as rc
 from .delta_questions import delta_questions
+from .structural_questions import structural_questions
 from .run_combined_test import FakeClient, answer_for
 
 TEXT = "Lead paragraph.\n\n== Plot ==\n" + "A story happens. " * 40 + "\n\n== Reception ==\nIt was reviewed.\n"
@@ -134,6 +135,19 @@ class SpendGate(DeltaCase):
         per_title = article_sections.encoded_chars(state) + len(rc.canonical(delta_questions()))
         self.assertEqual(plan["roughInputTokens"], round(3 * per_title / 4))
 
+    def test_structural_affinity_is_a_closed_probability_profile(self):
+        structural = structural_questions()
+        questions = delta_questions()
+        self.assertEqual(len(structural), 18)
+        self.assertTrue(all(name.startswith("structural__") for name in structural))
+        self.assertTrue(all(question["type"] == "noul" for question in structural.values()))
+        self.assertTrue(set(structural).isdisjoint(questions), "the existing delta must not be bought twice")
+
+    def test_the_structural_entrypoint_runs_only_the_structural_questions(self):
+        with mock.patch.object(run_structural, "run_questions", return_value=17) as run:
+            self.assertEqual(run_structural.main(["--plan"]), 17)
+        run.assert_called_once_with(structural_questions(), ["--plan"])
+
 
 class DeltaSendsTheArticle(DeltaCase):
     def test_every_request_carries_the_whole_article_and_asks_only_the_delta(self):
@@ -226,6 +240,19 @@ class LongArticles(DeltaCase):
             fh.write(json.dumps(self.long_row) + "\n")
         with self.assertRaisesRegex(SystemExit, "more than one"):
             self._run("--plan", "--combined", second)
+
+    def test_a_later_manifested_shard_supersedes_an_older_article_state(self):
+        second = os.path.join(self.dir, "combined-2.jsonl")
+        old = dict(self.long_row, articleSha256="0" * 64)
+        self.write_combined([corpus_row(article(1))[0], old])
+        with open(second, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(self.long_row) + "\n")
+        for path, started in ((self.combined, "2026-01-01T00:00:00+00:00"),
+                              (second, "2026-01-02T00:00:00+00:00")):
+            with open(path + ".manifest.json", "w", encoding="utf-8") as fh:
+                json.dump({"runStartedAt": started}, fh)
+        self.assertEqual(run_delta.corpus_states([second, self.combined], [self.long]),
+                         {"movie:9": self.long_row["globalStateSectionIds"]})
 
 
 class NoTitleOnlyState(unittest.TestCase):

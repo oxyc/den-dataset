@@ -18,9 +18,9 @@ prose somewhere that can go stale without anything failing.
 
 ## The part that is still being rebuilt
 
-`pipeline/` holds **fourteen** stages — `./den stages` lists them. What is left outside the order is the side
-pass no stage runs but the store reads — the premise tags — and it still answers for itself in
-`pipeline/artifacts.py` until it lands. Beside the
+`pipeline/` holds **fourteen** stages — `./den stages` lists them. What is left outside the order are the side
+passes no stage runs but later stages read — the structural questions (`pipeline/run_structural.py`) and the
+premise tags — and each still answers for itself in `pipeline/artifacts.py` until it lands. Beside the
 stages sit the tools an operator runs by hand, each declared in `guards/operator-tools.json`; a tool with
 dependencies the pipeline does not take lives under `tools/` instead.
 

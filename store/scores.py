@@ -1,10 +1,12 @@
-"""Scores, world, nouls, critique — and the three dense tables built the same way: technique,
-depicts, audience.
+"""Scores, world, nouls, critique — and the dense tables built the same way: technique,
+depicts, structural, audience.
 
-den-spec `wire/store-v1.md` § "Scores, world, nouls, critique". Each dense table is R x N hundredths
+den-spec `wire/store-v3.md` § "Scores, world, nouls, critique". Each dense table is R x N hundredths
 with its vocabulary beside it as string ids; every title carries every axis, because an unanswered axis
 must centre to `-mean` at load rather than be skipped by a cosine's name intersection.
 """
+from pipeline.structural_questions import STRUCTURAL
+
 from .format import hundredths, score_hundredths
 
 SCORE_AXES = ("intensity", "humour", "emotional_weight", "complexity")
@@ -21,7 +23,8 @@ FANTASTICAL = [f"theme__{k}" for k in (
 #: The dense tables, in the order they are written: corpus field -> section base name. Each contributes
 #: `<name>` (R x N hundredths) and `<name>_names` (its vocabulary, as string ids).
 DENSE_TABLES = (("critique", "critique"), ("technique", "technique"),
-                ("depicts", "depicts"), ("audience", "audience"))
+                ("depicts", "depicts"), ("structural", "structural"),
+                ("audience", "audience"))
 
 
 class Scores:
@@ -33,9 +36,10 @@ class Scores:
 
     def __init__(self):
         self.names = {"noul": set(), "critique": set(), "technique": set(),
-                      "depicts": set(), "audience": set()}
+                      "depicts": set(), "structural": set(STRUCTURAL), "audience": set()}
         self.axes = {a: [] for a in SCORE_AXES}
         self.world = []
+        self.structural_has = []
         self.noul_rows = []
         self.dense = {name: bytearray() for _, name in DENSE_TABLES}
         self._noul_id = None
@@ -51,7 +55,7 @@ class Scores:
         each noul id, so it has to be fixed before any row is written."""
         for what in self.names:
             self.names[what] = sorted(self.names[what])
-        for what in ("noul", "critique", "technique", "depicts", "audience"):
+        for what in ("noul", "critique", "technique", "depicts", "structural", "audience"):
             for name in self.names[what]:
                 strings.add(name)
         self._noul_id = {name: i for i, name in enumerate(self.names["noul"])}
@@ -73,6 +77,7 @@ class Scores:
                 worst = max(worst, value)
         self.world.append(worst)
         self.noul_rows.append(pairs)
+        self.structural_has.append(1 if row.get("structural") else 0)
 
         for field, section in DENSE_TABLES:
             answers = row.get(field) or {}
@@ -92,3 +97,5 @@ class Scores:
             names = self.names[field]
             sec.put_raw(section, self.dense[section], 1, expect=rows * len(names))
             sec.put(f"{section}_names", "I", [strings.id(x) for x in names], 4, expect=len(names))
+            if section == "structural":
+                sec.put("structural_has", "B", self.structural_has, 1, expect=rows)

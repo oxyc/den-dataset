@@ -71,7 +71,7 @@ def build_store_module():
 
 class FixtureRoundTrip(unittest.TestCase):
     def test_the_writer_reproduces_the_committed_fixture(self):
-        committed = spec_or_fail("vectors", "store-v2.store")
+        committed = spec_or_fail("vectors", "store-v3.store")
         generator = spec_or_fail("tools", "store-fixture.py")
         with tempfile.TemporaryDirectory() as out:
             result = subprocess.run(
@@ -80,7 +80,7 @@ class FixtureRoundTrip(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, f"the fixture generator failed:\n{result.stderr}")
-            rebuilt = os.path.join(out, "store-v2.store")
+            rebuilt = os.path.join(out, "store-v3.store")
             self.assertTrue(os.path.isfile(rebuilt), f"generator wrote nothing:\n{result.stdout}")
             self.assertEqual(
                 sha256(rebuilt),
@@ -109,7 +109,7 @@ class FixtureRoundTrip(unittest.TestCase):
                     text=True,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                digests.append(sha256(os.path.join(out, "store-v2.store")))
+                digests.append(sha256(os.path.join(out, "store-v3.store")))
         self.assertEqual(digests[0], digests[1], "two runs of the writer disagree byte-for-byte")
 
 
@@ -1051,7 +1051,10 @@ class EverySeriesATitleIsPartOfShips(StoreFixture, unittest.TestCase):
         self.assertEqual(got, {"movie:1": [30, 20], "movie:2": [40], "movie:3": []},
                          "most specific first, deduplicated, a non-Q-id dropped, none as an empty span")
         self.assertNotIn("franchise", store.table, "the single-valued store-v1 column is gone")
-        self.assertEqual(struct.unpack("<I", store.blob[8:12])[0], 2, "a list franchise is format 2")
+        self.assertEqual(
+            struct.unpack("<I", store.blob[8:12])[0], 3,
+            "the structural profile makes this format 3; franchise remains the v2 list",
+        )
 
 
 class IconicStudiosShip(StoreFixture, unittest.TestCase):

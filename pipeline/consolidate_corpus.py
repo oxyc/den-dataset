@@ -111,6 +111,7 @@ SOURCE = ("hasWikiPlot", "plotArticle", "plotLanguage", "plotRevId", "plotArticl
 #: critique answers.
 BASE_COMBINED = ("applicability", "facets", "scores", "nouls")
 BASE_DELTA = ("critique", "technique", "depicts", "audience")
+BASE_STRUCTURAL = ("structural",)
 
 
 def key_of(record):
@@ -327,7 +328,7 @@ def by_key(path, label):
 #: The inputs this join reads, in the order the parser below declares them. `pipeline/corpus.py` builds
 #: the command line out of its own declaration and `pipeline/corpus_test.py` holds the two lists
 #: together, so an input can only be added or dropped in one place without something going red.
-INPUT_ARGS = ("combined", "delta", "facts", "labels", "withdrawn", "enriched", "base")
+INPUT_ARGS = ("combined", "delta", "structural", "facts", "labels", "withdrawn", "enriched", "base")
 
 
 def build_parser():
@@ -336,6 +337,7 @@ def build_parser():
     ap = argparse.ArgumentParser()
     ap.add_argument("--combined", action="append", default=[], help="a shard of the corpus pass")
     ap.add_argument("--delta", action="append", default=[], help="a shard of the delta pass")
+    ap.add_argument("--structural", action="append", default=[], help="a shard of the structural pass")
     ap.add_argument("--facts", required=True, help="the FULL facts file, not facts-slim")
     ap.add_argument("--labels", required=True, help="genres-moods.json: each title's genres & moods")
     ap.add_argument("--withdrawn", help="tombstones: titles whose older pass rows no longer stand")
@@ -415,17 +417,20 @@ def main():
     combined_rows, combined_report, combined_withdrawn = latest(args.combined, "combined", withdrawals,
                                                                 keep=pass_row)
     delta_rows, delta_report, _ = latest(args.delta, "delta", withdrawals, keep=pass_row)
-    unpaired = sorted(k for k, r in delta_rows.items()
+    structural_rows, structural_report, _ = latest(
+        args.structural, "structural", withdrawals, keep=pass_row)
+    unpaired = sorted(k for rows in (delta_rows, structural_rows) for k, r in rows.items()
                       if k not in combined_rows or combined_rows[k]["articleSha256"] != r["articleSha256"])
     if unpaired:
-        sys.exit(f"{len(unpaired)} titles keep a critique row whose classify row is missing or read a "
+        sys.exit(f"{len(unpaired)} titles keep a derived-pass row whose classify row is missing or read a "
                  f"different article, e.g. {unpaired[:4]} — fold a re-run in with both of its passes")
     delta = {k: r["answers"] for k, r in delta_rows.items()}
+    structural = {k: r["answers"] for k, r in structural_rows.items()}
 
     print("joining …", file=sys.stderr)
     out_path = args.out
     opener = gzip.open if out_path.endswith(".gz") else open
-    written, with_delta, with_facts, with_labels = 0, 0, 0, 0
+    written, with_delta, with_structural, with_facts, with_labels = 0, 0, 0, 0, 0
     # mtime=0 so an unchanged corpus produces byte-identical output and the publish step does not
     # re-upload an asset that did not change.
     handle = (gzip.GzipFile(filename="", mode="wb", fileobj=open(out_path, "wb"), compresslevel=9, mtime=0)
@@ -457,6 +462,7 @@ def main():
             if leaked:
                 sys.exit(f"{key}: refusing to write source prose ({', '.join(sorted(leaked))})")
             d = delta.get(key, {})
+            s = structural.get(key, {})
             fact = facts.get(key)
             # No shard answered this title, and no tombstone took its answers: the published ones stand.
             prior = base.get(key) if key not in combined_rows and key not in withdrawals else None
@@ -475,10 +481,14 @@ def main():
                 "critique": prefixed(d, "critique__"),
                 "technique": prefixed(d, "technique__"),
                 "depicts": prefixed(d, "depicts__"),
+                "structural": prefixed(s, "structural__"),
                 "audience": typed(d, AUDIENCE),
             }
             if prior is not None:
-                row.update({name: prior.get(name) or {} for name in BASE_COMBINED + BASE_DELTA})
+                row.update({
+                    name: prior.get(name) or {}
+                    for name in BASE_COMBINED + BASE_DELTA + BASE_STRUCTURAL
+                })
                 from_base += 1
             found = source.get(key) or (base.get(key) or {}).get("source")
             if found:
@@ -487,6 +497,7 @@ def main():
             handle.write((line + "\n").encode("utf-8") if out_path.endswith(".gz") else line + "\n")
             written += 1
             with_delta += 1 if d else 0
+            with_structural += 1 if row["structural"] else 0
             with_facts += 1 if fact else 0
             with_labels += 1 if row["labels"] else 0
     finally:
@@ -520,11 +531,12 @@ def main():
         eh.write(blob.encode("utf-8") if ents_path.endswith(".gz") else blob)
 
     print(json.dumps({"titles": written, "withFacts": with_facts, "withLabels": with_labels,
-                      "withDelta": with_delta,
+                      "withDelta": with_delta, "withStructural": with_structural,
                       "withPass": len(combined_rows), "fromBase": from_base,
                       "factsOnly": written - len(answered) - from_base,
                       "entities": len(entities), "out": out_path, "entitiesOut": ents_path,
-                      "tombstones": len(withdrawals), "combined": combined_report, "delta": delta_report},
+                      "tombstones": len(withdrawals), "combined": combined_report, "delta": delta_report,
+                      "structural": structural_report},
                      indent=1))
 
 

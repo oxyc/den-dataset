@@ -269,6 +269,8 @@ class Context:
         found = self.paths(artifact)
         if found:
             return found
+        if not artifact.required:
+            return ()
         pattern = self._filename(artifact)
         raise StageError(f"{artifact.name}: nothing in {self.out_dir} matches {pattern}. "
                          f"Build it with: {how_to_build(artifact)}")
