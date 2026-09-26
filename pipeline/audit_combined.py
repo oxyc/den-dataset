@@ -83,7 +83,7 @@ def role_answer(section):
 
 
 def expected_questions(global_questions, section_ids, phase):
-    if phase == "global-after-section-audit":
+    if phase in ("global", "global-after-section-audit"):
         return global_questions
     regional = {f"section__{section_id}": section_question(section_id) for section_id in section_ids}
     return {**global_questions, **regional} if phase == "combined" else regional
@@ -97,7 +97,8 @@ def validate_call(where, call, rec, sections_by_id, global_questions, pinned_mod
     if set(call) != required:
         fail(where, f"call fields differ: {sorted(set(call) ^ required)}")
     phase = call["phase"]
-    if phase != "combined" and phase != "global-after-section-audit" and not phase.startswith("section-group-"):
+    if phase not in ("combined", "global", "global-after-section-audit") \
+            and not phase.startswith("section-group-"):
         fail(where, f"unknown phase {phase!r}")
     try:
         selected = [sections_by_id[section_id] for section_id in call["sectionIds"]]
@@ -117,7 +118,12 @@ def validate_call(where, call, rec, sections_by_id, global_questions, pinned_mod
             fail(where, f"invalid {field} {call[field]!r}")
 
 
-def validate_row(row, rec, manifest, global_questions):
+def validate_row(row, rec, manifest, global_questions, state_section_ids=None):
+    """Validate one paid row against its frozen input and manifest.
+
+    `state_section_ids` is the runner's selected-state mode: another stage chose the exact sections sent,
+    so no section-role answers were bought. The manifest hashes the whole key-to-section map; the caller
+    validates that hash and hands this row's ids here."""
     key = article_key(rec)
     where = key
     if row.get("schemaVersion") != SCHEMA_VERSION:
@@ -147,20 +153,29 @@ def validate_row(row, rec, manifest, global_questions):
     if not isinstance(stored_sections, list) or len(stored_sections) != len(sections):
         fail(where, "section count differs from reconstructed article")
     section_answers = {}
-    for expected, stored in zip(sections, stored_sections):
-        answer = role_answer(stored)
-        validate_answers({f"section__{expected['id']}": answer},
-                         {f"section__{expected['id']}": section_question(expected["id"])})
-        if stored != public_section(expected, answer):
-            fail(where, f"section {expected['id']} differs from reconstructed article")
-        section_answers[expected["id"]] = answer
-
-    expected_oversized = is_oversized(rec, sections, manifest["config"]["maxStateChars"])
+    if state_section_ids is None:
+        for expected, stored in zip(sections, stored_sections):
+            answer = role_answer(stored)
+            validate_answers({f"section__{expected['id']}": answer},
+                             {f"section__{expected['id']}": section_question(expected["id"])})
+            if stored != public_section(expected, answer):
+                fail(where, f"section {expected['id']} differs from reconstructed article")
+            section_answers[expected["id"]] = answer
+        expected_oversized = is_oversized(rec, sections, manifest["config"]["maxStateChars"])
+        selected = select_global_sections(
+            rec, sections, section_answers, manifest["config"]["maxStateChars"],
+        ) if expected_oversized else sections
+    else:
+        if any(stored != public_section(expected, None) for expected, stored in zip(sections, stored_sections)):
+            fail(where, "section metadata differs from reconstructed article")
+        wanted = set(state_section_ids)
+        unknown = sorted(wanted - {section["id"] for section in sections})
+        if unknown or not wanted:
+            fail(where, f"selected state names {unknown or 'no'} sections")
+        selected = [section for section in sections if section["id"] in wanted]
+        expected_oversized = len(selected) < len(sections)
     if row.get("oversized") != expected_oversized:
         fail(where, "oversized flag differs from reconstructed state")
-    selected = select_global_sections(
-        rec, sections, section_answers, manifest["config"]["maxStateChars"],
-    ) if expected_oversized else sections
     selected_ids = [section["id"] for section in selected]
     omitted_ids = [section["id"] for section in sections if section not in selected]
     if row.get("globalStateSectionIds") != selected_ids or row.get("omittedFromGlobalState") != omitted_ids:
@@ -183,7 +198,11 @@ def validate_row(row, rec, manifest, global_questions):
     for index, call in enumerate(calls):
         validate_call(f"{where}.calls[{index}]", call, rec, by_id, global_questions,
                       manifest["config"]["requestedModel"])
-    if expected_oversized:
+    if state_section_ids is not None:
+        phase = "global-after-section-audit" if expected_oversized else "global"
+        if len(calls) != 1 or calls[0]["phase"] != phase or calls[0]["sectionIds"] != selected_ids:
+            fail(where, "selected-state row does not have exactly its one global call")
+    elif expected_oversized:
         regional_calls = calls[:-1]
         if not regional_calls or any(
             call["phase"] != f"section-group-{index}" for index, call in enumerate(regional_calls, 1)

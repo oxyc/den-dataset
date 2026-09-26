@@ -106,6 +106,15 @@ class CombinedAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "state provenance differs"):
                 audit_combined.audit([rec], output, manifest)
 
+    def test_a_selected_whole_state_has_one_auditable_global_call(self):
+        rec, manifest, _ = fixture()
+        section_ids = [section["id"] for section in run_combined.sections_for_record(rec)]
+        row = run_combined.classify(rec, FakeClient(), manifest["config"]["globalQuestions"], manifest,
+                                    110_000, state_section_ids=section_ids)
+        sections, section_answers, calls = audit_combined.validate_row(
+            row, rec, manifest, manifest["config"]["globalQuestions"], section_ids)
+        self.assertEqual((len(sections), section_answers, calls[0]["phase"]), (3, {}, "global"))
+
     def test_incomplete_artifact_fails(self):
         rec, manifest, _ = fixture()
         with tempfile.TemporaryDirectory() as directory:

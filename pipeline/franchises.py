@@ -38,7 +38,7 @@ import tempfile
 
 from lib import wikidata_facts as wd
 from lib import wikidata
-from . import artifacts, finalize
+from . import artifacts, audit_combined, finalize
 from . import eval_franchises
 from . import franchise_groups as fg
 from . import run_combined as rc
@@ -242,20 +242,9 @@ def answers_path(ctx, states_path):
     return ctx.shard(artifacts.FRANCHISE_ANSWERS)[:-len(".jsonl")] + f"-{digest}.jsonl"
 
 
-def answered_keys(paths):
-    keys = set()
-    for path in paths:
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                if line.strip():
-                    row = json.loads(line)
-                    keys.add(f"{row['mediaType']}:{row['tmdbId']}")
-    return keys
-
-
 def ask(ctx, asked, groups, titles):
     """Buy the answers for every asked title not yet answered. Returns how many were asked."""
-    answered = answered_keys(ctx.paths(artifacts.FRANCHISE_ANSWERS))
+    answered = set(read_answers(ctx))
     states_path, rows, states, skipped = write_states(ctx, asked, groups, titles, answered)
     if skipped:
         print(f"franchises: not asking {skipped}: no article", file=sys.stderr)
@@ -290,7 +279,7 @@ def ask(ctx, asked, groups, titles):
 def plan_report(ctx, asked, automatic):
     qs, _ = questions()
     articles = _article_records(ctx)
-    answered = answered_keys(ctx.paths(artifacts.FRANCHISE_ANSWERS))
+    answered = set(read_answers(ctx))
     todo = [k for k in asked if k not in answered and k in articles]
     report = {"automatic": len(automatic), "asked": len(asked), "alreadyAnswered": len(set(asked) & answered),
               "noArticle": sum(1 for k in asked if k not in articles), "ask": len(todo)}
@@ -303,7 +292,8 @@ def plan_report(ctx, asked, automatic):
 
 def read_answers(ctx):
     """`key -> (answers, candidate ids)` over every answer shard, each read beside the states shard of the
-    same digest and its manifest. A title answered twice is refused."""
+    same digest and its manifest. Every paid row is audited against that frozen state and today's exact
+    franchise questions. A title answered twice is refused."""
     out = {}
     states_by_digest = {os.path.basename(p)[:-len(".jsonl")].rpartition("-")[2]: p
                         for p in ctx.paths(artifacts.FRANCHISE_STATES)}
@@ -317,17 +307,37 @@ def read_answers(ctx):
         states = states_by_digest.get(digest)
         if states is None:
             raise StageError(f"{path} has no states shard ending -{digest}.jsonl, so its letters mean nothing")
-        with open(states, encoding="utf-8") as fh:
-            asked_with = {rc.article_key(r): _candidate_ids(r["franchiseCandidates"])
-                          for r in map(json.loads, filter(str.strip, fh))}
+        try:
+            records, _ = rc.load_articles(states)
+            evidence_sha = rc.attach_enriched_evidence(records, None)
+            audit_combined.validate_manifest(manifest, states, evidence_sha)
+        except (ValueError, SystemExit) as refusal:
+            raise StageError(f"franchises: {refusal}") from None
+        qs, mapping = questions()
+        config = manifest["config"]
+        if config.get("globalQuestions") != qs or config.get("labelQuestionMapping") != mapping:
+            raise StageError(f"franchises: {manifest_path} does not record today's franchise questions")
+        by_key = {rc.article_key(record): record for record in records}
+        asked_with = {key: _candidate_ids(record["franchiseCandidates"])
+                      for key, record in by_key.items()}
+        state_ids = {}
+        for key, record in by_key.items():
+            sections = parse_sections(record["text"], record.get("plotSections") or ())
+            state_ids[key] = [sections[0]["id"], sections[-1]["id"]]
+        if config.get("stateSectionIdsSha256") != rc.sha256_text(rc.canonical(state_ids)):
+            raise StageError(f"franchises: {manifest_path} does not describe the states shard's sections")
         with open(path, encoding="utf-8") as fh:
             for n, line in enumerate(fh, 1):
                 if not line.strip():
                     continue
                 row = json.loads(line)
                 key = rc.article_key(row)
-                if row.get("runId") != manifest["runId"] or row.get("configSha256") != manifest["configSha256"]:
-                    raise StageError(f"{path}:{n}: {key} was not bought by the run its manifest describes")
+                if key not in by_key:
+                    raise StageError(f"{path}:{n}: {key} was not in the states shard that run bought")
+                try:
+                    audit_combined.validate_row(row, by_key[key], manifest, qs, state_ids[key])
+                except (ValueError, rc.TypeSafeError) as refusal:
+                    raise StageError(f"franchises: {path}:{n}: {refusal}") from None
                 if key in out:
                     raise StageError(f"{key} is answered in two shards; the second is {path}")
                 out[key] = (row["answers"], asked_with[key])
