@@ -60,9 +60,14 @@ BUNDLE = (
     ("facts-fields.json", "facts-fields.json", True),
     ("facts-entities.json", "facts-entities.json", True),
     ("facts-source-types.json", "facts-source-types.json", False),
+    # Added by oxyc/den-dataset#121. Optional so the first daily generation can start from the last
+    # pre-#121 publish; once present it must travel with the other facts checkpoints or a stateless daily
+    # run asks Wikidata for every adapted work's authors again.
+    ("facts-source-authors.json", "facts-source-authors.json", False),
     ("facts-delta/facts-fields.json", "facts-delta.facts-fields.json", False),
     ("facts-delta/facts-entities.json", "facts-delta.facts-entities.json", False),
     ("facts-delta/facts-source-types.json", "facts-delta.facts-source-types.json", False),
+    ("facts-delta/facts-source-authors.json", "facts-delta.facts-source-authors.json", False),
 )
 
 #: The bundle's own record: the generation and each file's digest.
