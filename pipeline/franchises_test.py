@@ -126,6 +126,12 @@ class Stage(unittest.TestCase):
                      if name.startswith("franchise-answers-v1-") and name.endswith(".jsonl")]
         return answers, answers + ".manifest.json"
 
+    def keys_file(self, *keys):
+        path = os.path.join(self.dir, "pilot-keys.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("".join(key + "\n" for key in keys))
+        return path
+
     def test_wikidata_alone_decides_the_nested_series_and_leaves_the_rest_unasked_without_spend(self):
         self.golden({**GOLDEN, "floors": {**GOLDEN["floors"], "togetherRecall": 0.0}})
         self.run_stage()
@@ -133,10 +139,10 @@ class Stage(unittest.TestCase):
         self.assertEqual(Jev.sent, [], "nothing is bought without --spend")
         spider = doc["franchises"]["Qsm"]
         self.assertEqual((spider["name"], spider["source"]), ("Spider-Man in film", "wikidata"))
-        self.assertEqual([(m["key"], m["era"]) for m in spider["members"]],
-                         [("movie:5", "Spider-Man trilogy"), ("movie:6", "Spider-Man trilogy"),
-                          ("movie:7", "The Amazing Spider-Man series"),
-                          ("movie:12", "The Amazing Spider-Man series")])
+        self.assertEqual([(m["key"], m["eraId"], m["order"]) for m in spider["members"]],
+                         [("movie:5", "Qsm:era:Qraimi", 0), ("movie:6", "Qsm:era:Qraimi", 1),
+                          ("movie:7", "Qsm:era:Qwebb", 2), ("movie:12", "Qsm:era:Qwebb", 3)])
+        self.assertEqual(doc["titles"]["movie:5"], {"primary": "Qsm"})
         for key in ("movie:1", "movie:3", "movie:8"):
             self.assertNotIn(key, doc["titles"], "asked, and not answered yet")
 
@@ -152,15 +158,65 @@ class Stage(unittest.TestCase):
         doc = self.derived()
         beck = doc["franchises"]["Qbeck"]
         self.assertEqual((beck["name"], beck["source"]), ("Beck", "jev-franchise-v1"))
-        self.assertEqual([(m["key"], m["era"]) for m in beck["members"]],
-                         [("movie:3", "Martin Beck"), ("movie:4", "Martin Beck"), ("movie:1", None),
-                          ("movie:2", None)])
+        self.assertEqual([(m["key"], m["eraId"], m["order"]) for m in beck["members"]],
+                         [("movie:3", "Qbeck:era:Qnovels", 0), ("movie:4", "Qbeck:era:Qnovels", 1),
+                          ("movie:1", "Qbeck:era:main", 2), ("movie:2", "Qbeck:era:main", 3)])
+        self.assertEqual((beck["id"], beck["confidence"], beck["source"]),
+                         ("Qbeck", 0.9, "jev-franchise-v1"))
         for key in ("movie:8", "movie:9", "movie:10"):
             self.assertNotIn(key, doc["titles"])
         self.assertEqual(doc["derivation"]["eval"]["togetherRecall"], 1.0)
 
         self.run_stage(spend=True)
         self.assertEqual(len(Jev.sent), 7, "a title answered in any shard is never asked again")
+
+    def test_compact_decisions_rebuild_without_private_states_or_raw_answers(self):
+        self.run_stage(spend=True)
+        expected = self.derived()
+        compact = os.path.join(self.out, "franchise-decisions-v1.json")
+        with open(compact, encoding="utf-8") as fh:
+            durable = json.load(fh)
+        self.assertEqual(durable["usage"], {"calls": 7, "inputTokens": 6300, "outputTokens": 350,
+                                             "costUSD": 0.0002646})
+        prose = json.dumps(durable)
+        for _number, title, _year, _extra in RECORDS:
+            self.assertNotIn(title, prose)
+        for name in list(os.listdir(self.out)):
+            if name.startswith("franchise-states-") or name.startswith("franchise-answers-v1-"):
+                os.unlink(os.path.join(self.out, name))
+        self.run_stage()
+        self.assertEqual(self.derived(), expected)
+
+    def test_keys_select_an_exact_pilot_and_plan_reports_its_measured_cost(self):
+        keys = self.keys_file("movie:1", "movie:3")
+        self.run_stage(spend=True, keys=keys)
+        self.assertEqual(len(Jev.sent), 2)
+        with open(os.path.join(self.out, "franchise-decisions-v1.json"), encoding="utf-8") as fh:
+            durable = json.load(fh)
+        self.assertEqual(set(durable["decisions"]), {"movie:1", "movie:3"})
+        self.assertEqual(durable["usage"]["costUSD"], 0.0000756)
+        said = self.run_stage(plan=True, keys=keys)
+        self.assertIn("0 titles to ask", said)
+
+    def test_keys_refuse_a_title_that_does_not_need_judgment(self):
+        with self.assertRaisesRegex(StageError, "need no franchise judgment"):
+            self.run_stage(spend=True, keys=self.keys_file("movie:5"))
+        self.assertEqual(Jev.sent, [])
+
+    def test_an_umbrella_is_a_title_label_not_an_exclusion_for_every_franchise_member(self):
+        titles = {"movie:1": franchises.fg.Title("movie:1", "One", 2001),
+                  "movie:2": franchises.fg.Title("movie:2", "Two", 2002)}
+        groups = {"Qprimary": franchises.fg.Group("Qprimary", "series", "Primary", titles),
+                  "Quniverse": franchises.fg.Group("Quniverse", "franchise", "Universe", ["movie:1"])}
+        grouped = {"Qprimary": {"name": "Primary", "source": franchises.JEV, "confidence": 0.899,
+                                "umbrellaOf": {"movie:1": "Quniverse"},
+                                "members": {"movie:1": None, "movie:2": None}}}
+        doc, title_rows = franchises.document(grouped, groups, titles, {})
+        self.assertEqual(title_rows["movie:1"],
+                         {"primary": "Qprimary", "umbrella": {"id": "Quniverse", "name": "Universe"}})
+        self.assertEqual(title_rows["movie:2"], {"primary": "Qprimary"})
+        self.assertNotIn("umbrella", doc["Qprimary"])
+        self.assertEqual(doc["Qprimary"]["confidence"], 0.89)
 
     def test_below_a_floor_nothing_is_written(self):
         self.golden({**GOLDEN, "apart": [["movie:5", "movie:7"]]})

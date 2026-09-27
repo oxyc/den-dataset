@@ -158,6 +158,9 @@ class Context:
     #: never shrinks, so a long-lived den-embed creeps up until it OOMs the machine; the run is segmented
     #: to let the service be restarted between segments, and the store is what makes that free.
     limit: int | None = None
+    #: Exact title keys for a paid stage's targeted pilot, one `movie:<id>` / `tv:<id>` per line. Empty
+    #: means the whole worklist. A stage that supports it validates the keys before making any call.
+    keys: str = ""
     #: Validate and report, buying nothing. The classify pass is the one stage whose cost is money rather
     #: than time — $20.47 for the shipped corpus — so its launch procedure is written around a dry run
     #: that proves the input parses and prints the call plan before anything is paid for.

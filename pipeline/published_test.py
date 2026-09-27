@@ -44,6 +44,10 @@ def generation(out):
             write(target, "{}")
     write(os.path.join(out, "facts-source-authors.json"), '{"Q30":["Q10"]}')
     write(os.path.join(out, "facts-delta", "facts-source-authors.json"), '{"Q31":[]}')
+    write(os.path.join(out, artifacts.FRANCHISE_DECISIONS.filename),
+          '{"schema":1,"decisions":{"movie:1":{"candidates":["Q1"]}}}')
+    write(os.path.join(out, artifacts.FRANCHISES.filename),
+          '{"schema":2,"titles":{"movie:1":{"primary":"Q1"}}}')
     write(os.path.join(out, artifacts.VECTOR_LABELS.filename),
           json.dumps({"records": [{"tmdbId": 1, "mediaType": "movie", "genres": ["drama"]}]}))
     vector_blob.write(os.path.join(out, artifacts.VECTORS.filename), ["movie:1"], bytes([1, 255, 128]), 3)
@@ -89,6 +93,13 @@ class Published(unittest.TestCase):
         published.seed(self.fresh)
         self.assertEqual(json.loads(self.read("facts-source-authors.json")), {"Q30": ["Q10"]})
         self.assertEqual(json.loads(self.read("facts-delta", "facts-source-authors.json")), {"Q31": []})
+
+    def test_franchise_decisions_and_derived_rows_survive_without_private_states(self):
+        published.seed(self.fresh)
+        self.assertEqual(json.loads(self.read(artifacts.FRANCHISE_DECISIONS.filename))["schema"], 1)
+        self.assertEqual(json.loads(self.read(artifacts.FRANCHISES.filename))["schema"], 2)
+        self.assertNotIn("franchise-states", self.record["files"])
+        self.assertFalse(any(name.startswith("franchise-answers") for name in self.record["files"]))
 
     def test_the_seeded_batch_is_each_title_with_a_source_and_no_plot(self):
         published.seed(self.fresh)
