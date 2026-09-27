@@ -126,6 +126,20 @@ class Stage(unittest.TestCase):
         with self.assertRaisesRegex(StageError, "another document"):
             plot_length.run(Context(out_dir=self.out))
 
+    def test_a_pre_transform_stateless_seed_refuses_at_the_named_migration_boundary(self):
+        self.write("published/dataset.meta.json",
+                   {"datasetVersion": "f0506bd528d0", "maxBatchId": 202})
+        self.write("enriched/batch-202.json", [{"tmdbId": 1, "mediaType": "movie", "hasWikiPlot": True,
+                                                 "plotSha256": "1" * 64}])
+        with self.assertRaisesRegex(StageError, "pre-transform-baseline.*f0506bd528d0.*combined full rebuild"):
+            plot_length.run(Context(out_dir=self.out))
+
+    def test_an_old_manifest_does_not_block_a_full_rebuild_that_has_plot_prose(self):
+        self.write("published/dataset.meta.json",
+                   {"datasetVersion": "f0506bd528d0", "maxBatchId": 1})
+        self.assertEqual(plot_length.run(Context(out_dir=self.out)),
+                         os.path.join(self.out, artifacts.PLOT_LENGTH_TRANSFORM.filename))
+
 
 if __name__ == "__main__":
     unittest.main()

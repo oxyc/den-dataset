@@ -35,6 +35,7 @@ class Recorded(unittest.TestCase):
         self.plan = {"baseline": {"datasetVersion": "live", "maxBatchId": 1}, "counts": {"added": 1},
                      "added": ["movie:1"], "changed": {}, "withdrawn": {}, "revisit": None}
         self.check_refuses = False
+        self.migration_refuses = False
         patch = mock.patch.object(daily, "load", self.stage)
         patch.start()
         self.addCleanup(patch.stop)
@@ -52,6 +53,8 @@ class Recorded(unittest.TestCase):
                     json.dump(self.plan, fh)
             if name == "publish" and self.check_refuses:
                 raise StageError("publish: pipeline/publish-dataset.sh exited 1")
+            if name == "plot_length" and self.migration_refuses:
+                raise StageError("plot_length: pre-transform-baseline: live baseline live predates the transform")
             return name
         return types.SimpleNamespace(NAME=name, INPUTS=(), OUTPUTS=(), run=run)
 
@@ -145,6 +148,20 @@ class Refusals(Recorded):
         self.assertEqual((code, report["ready"]), (1, False))
         with open(os.path.join(self.out, daily.SUMMARY), encoding="utf-8") as fh:
             self.assertIn("Not ready", fh.read())
+
+    def test_the_pre_transform_boundary_is_machine_readable_in_both_reports(self):
+        self.migration_refuses = True
+        code, report = self.day({"DEN_EMBED_URL": "http://embed.invalid"})
+        self.assertEqual((code, report["ready"]), (1, False))
+        self.assertEqual(report["migrationBoundary"], {
+            "kind": "pre-transform-baseline", "blockingStage": "plot_length",
+            "baselineDatasetVersion": "live",
+            "requiredMigration": ("one combined full rebuild that creates and bundles "
+                                  "index/plot-length-transform-v1.json and vectors-bge-m3.raw.bin"),
+            "afterMigration": "rerun the no-spend smoke before enabling DEN_DAILY_ENABLED",
+        })
+        with open(os.path.join(self.out, daily.SUMMARY), encoding="utf-8") as handle:
+            self.assertIn("**Migration boundary**", handle.read())
 
 
 class DeltaIds(unittest.TestCase):
