@@ -31,12 +31,13 @@ class Listing(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         # The order, and that it is the real one: the universe is built before anything is drawn from it,
         # the titles are enriched before anything reads their plots, the articles dumped before the pass
-        # that reads them, classified before the vectors are embedded, the vectors finalized into the
-        # labels file the facts passes scrape the ids of, the merged facts before the franchises grouped
-        # from them and the corpus that joins them, the corpus before the store built from it, and the
-        # publish that uploads the store is last.
+        # that reads them, classified before the vectors are embedded, the plot-length direction fitted
+        # before those vectors are finalized into the labels file the facts passes scrape the ids of, the
+        # merged facts before the franchises grouped from them and the corpus that joins them, the corpus
+        # before the store built from it, and the publish that uploads the store is last.
         expected = ("worklist", "fetch", "changes", "articles", "classify", "critique", "genres_moods",
-                    "docfacts", "embed", "finalize", "facts", "franchises", "corpus", "store", "publish")
+                    "docfacts", "embed", "plot_length", "finalize", "facts", "franchises", "corpus", "store",
+                    "publish")
         for position, name in enumerate(expected, start=1):
             self.assertIn(f"{position}. {name}", result.stdout)
         order = [result.stdout.index(f"{n}. {s}") for n, s in enumerate(expected, start=1)]
