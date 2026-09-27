@@ -40,6 +40,7 @@ for the same stable key, so harmless alias or metadata corrections do not invali
 python3 tools/rulers/more_like_gate.py prepare \
   --ruler /private/path/step9d-export.json \
   --articles out-repass/articles.jsonl \
+  --enriched-dir out-repass/enriched \
   --work /private/path/more-like-gate
 
 python3 tools/rulers/more_like_gate.py run \
@@ -73,3 +74,8 @@ for article minus title-and-year, and above zero for article minus plot. A failu
 A pass only makes that precompute eligible: `rail-eval`, `rail-ab`, row-shape cases, movies/TV reporting, and
 deterministic fallback remain required. The gate itself measures movies with at least 50 MovieLens likes;
 it establishes nothing about TV or the long tail.
+
+Older article dumps contain every heading as `sections`, but not the extractor's chosen story headings as
+`plotSections`. `prepare` reconstructs the latter from newest-wins enriched batches, exactly as the paid
+classify path does, and hashes that metadata into the preregistration. It refuses an old dump when
+`--enriched-dir` is omitted; silently sending only the lead is not equivalent evidence.

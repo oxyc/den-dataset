@@ -117,16 +117,21 @@ def _work_key(row):
     return f"{row['mediaType']}:{row['tmdbId']}"
 
 
-def load_articles(path):
+def load_articles(path, enriched_dir=None, wanted=None):
+    records = [row for row in read_jsonl(path) if wanted is None or _work_key(row) in wanted]
+    # Old article dumps intentionally lack target year and the extractor's plot/story headings.  The paid
+    # classify path backfills them from newest-wins enriched batches; the gate must reconstruct the same
+    # evidence instead of quietly reducing every work to its lead.
+    evidence_metadata_sha = combined.attach_enriched_evidence(records, enriched_dir)
     rows = {}
-    for row in read_jsonl(path):
+    for row in records:
         key = _work_key(row)
         if key in rows:
             raise ValueError(f"{path}: duplicate article key {key}")
         if not isinstance(row.get("text"), str) or not row["text"].strip():
             raise ValueError(f"{path}: {key} has no article text")
         rows[key] = row
-    return rows
+    return rows, evidence_metadata_sha
 
 
 def evidence(row):
@@ -221,14 +226,16 @@ def build_state(case, articles):
     return state, positive_label
 
 
-def prepare(ruler_path, articles_path, work, sample_size=SAMPLE_SIZE, minimum_population=MIN_POPULATION):
+def prepare(ruler_path, articles_path, work, sample_size=SAMPLE_SIZE, minimum_population=MIN_POPULATION,
+            enriched_dir=None):
     with open(ruler_path, encoding="utf-8") as fh:
         blob = json.load(fh)
     cases = _chosen(_ruler(blob, minimum_population, require_prior=False), sample_size)
     missing_prior = [case["pairId"] for case in cases if case.get("titleYear") is None]
     if missing_prior:
         raise ValueError(f"ruler lacks fresh title+year prior scores for {len(missing_prior)} selected cases")
-    articles = load_articles(articles_path)
+    wanted = {case[role]["key"] for case in cases for role in ("anchor", "positive", "negative")}
+    articles, evidence_metadata_sha = load_articles(articles_path, enriched_dir, wanted)
     qs = questions()
     os.makedirs(work, exist_ok=True)
     rows = []
@@ -246,6 +253,7 @@ def prepare(ruler_path, articles_path, work, sample_size=SAMPLE_SIZE, minimum_po
         "model": MODEL, "sampleMethod": "smallest sha256('den-dataset#132-v1\\0' + pairId)",
         "sampleSize": len(rows), "populationSize": len(blob["cases"]),
         "rulerSha256": file_digest(ruler_path), "articlesSha256": file_digest(articles_path),
+        "evidenceMetadataSha256": evidence_metadata_sha,
         "worklistSha256": worklist_sha, "questionsSha256": digest(qs),
         "questions": {"axes": list(AXES), "verdicts": list(VERDICTS)},
         "primaryScore": "overall Noul; verdict and five component axes are diagnostics only",
@@ -459,6 +467,7 @@ def main(argv=None):
     prep = sub.add_parser("prepare")
     prep.add_argument("--ruler", required=True)
     prep.add_argument("--articles", required=True)
+    prep.add_argument("--enriched-dir", help="newest-wins enriched batches for an older article dump")
     prep.add_argument("--work", required=True)
     ask = sub.add_parser("run")
     ask.add_argument("--work", required=True)
@@ -472,7 +481,7 @@ def main(argv=None):
     scoring.add_argument("--answers", required=True)
     args = parser.parse_args(argv)
     if args.command == "prepare":
-        result = prepare(args.ruler, args.articles, args.work)
+        result = prepare(args.ruler, args.articles, args.work, enriched_dir=args.enriched_dir)
     elif args.command == "run":
         result = run(args.work, args.out, args.spend, max_spend=args.max_spend_usd,
                      workers=args.workers, env_path=args.env)
