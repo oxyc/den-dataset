@@ -26,7 +26,8 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: they are asked about, and before
 #: everything that reads a title's genres & moods; the doc facts before the embed pass, because they are
 #: two clauses of the document it composes and a run without them builds a different vector space;
-#: finalize straight after the embedding, because it turns the embed stores into `labels-t02.json`, the
+#: plot-length fit straight after embedding (reused on daily runs), then finalize, because it turns the raw
+#: embed stores and that direction into `labels-t02.json`, the
 #: vector blob and the manifest; the facts after that, because the corpus facts pass scrapes the ids in
 #: that labels file; the facts before the corpus join and the store, because both of them read the merged
 #: facts; the franchises straight after the facts, because they are grouped from them; and publishing is
@@ -41,7 +42,7 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: `worklist --mode delta` skips the titles the previous run's `genres-moods.json` names, because a delta
 #: extends an out-dir rather than starting one.
 STAGES = ("worklist", "fetch", "changes", "articles", "classify", "critique", "genres_moods", "docfacts",
-          "embed", "finalize", "facts", "franchises", "corpus", "store", "publish")
+          "embed", "plot_length", "finalize", "facts", "franchises", "corpus", "store", "publish")
 
 
 def stage(name):

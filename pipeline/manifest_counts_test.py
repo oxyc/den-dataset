@@ -230,6 +230,9 @@ class Consistency(unittest.TestCase):
             {"labelsFile": "l.json", "labelsSha256": "a", "labelsBytes": 1, "labelsRecords": 1,
              "storeFile": "s.store", "storeRecords": 2, "maxBatchId": 173}, {}), [])
 
+    def test_the_plot_transform_checksum_describes_the_vector_space_not_a_sidecar_file(self):
+        self.assertEqual(mc.inconsistencies({"plotVectorTransformSha256": "a" * 64}, {}), [])
+
     def test_a_missing_number_is_not_a_mismatch(self):
         self.assertEqual(mc.inconsistencies({"count": 10}, {}), [])
 

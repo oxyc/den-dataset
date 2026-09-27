@@ -369,6 +369,15 @@ EMBEDDING_SPACE = Artifact(
     required=False,
 )
 
+#: The fitted plot-length direction and the observations/provenance that produced it. A stateless daily
+#: run reuses the published generation's fit: its seeded enrichment carries plot digests rather than plot
+#: prose, and the direction describes the embedding space/document shape rather than one day's additions.
+PLOT_LENGTH_TRANSFORM = Artifact(
+    name="plot_length_transform",
+    filename="index/plot-length-transform-v1.json",
+    dedicated=False,
+)
+
 #: The corpus pass's scrape: the titles that have a vector, stamped `hasVector`. Named with the suffix
 #: `doc-facts.pre-merge.json` and `labels-t02.pre-classify.json` already use for the copy of an artifact
 #: from before the step that consumes it — the merge's output takes `facts-<version>.json`.
@@ -409,6 +418,15 @@ VECTORS = Artifact(
     name="vectors",
     filename="vectors-bge-m3.bin",
     manifest_key="vectorsFile",
+)
+
+#: The compact, untransformed den-embed rows. It never reaches `data-latest` or the serving store; the
+#: corpus bundle keeps it so the next stateless daily run resumes in the raw embedding space and applies
+#: the plot transform exactly once. Reconstructing the append store from `VECTORS` would project old rows
+#: again on every generation.
+RAW_VECTORS = Artifact(
+    name="raw_vectors",
+    filename="vectors-bge-m3.raw.bin",
 )
 
 #: The plot vectors' titles, each with this run's genres & moods from `genres-moods.json`. Not the vectors'
@@ -482,7 +500,7 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              GENRES_MOODS, DELTA, DELTA_MANIFEST, STRUCTURAL, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH,
              PUBLISHED_META, PUBLISHED_CORPUS,
              PUBLISHED_GENRES_MOODS, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
-             EMBEDDER, EMBEDDING_SPACE, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
+             EMBEDDER, EMBEDDING_SPACE, PLOT_LENGTH_TRANSFORM, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
              FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISES,
-             VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST,
+             VECTORS, RAW_VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST,
              RELEASE)

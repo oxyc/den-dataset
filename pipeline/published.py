@@ -17,8 +17,8 @@ for the publish; `seed` lays them back out as an out-dir the stages run over as 
     and the grounding census and the plot-vector gate read it as they read any batch;
   * `enrich-checkpoint.json` — every title processed and the next batch after it, so the drain asks only
     what is new;
-  * `index/labels.jsonl` and `index/vectors.jsonl` — every published plot vector with its title's genres &
-    moods, in the blob's order, so `finalize` writes the whole blob again with today's vectors after them;
+  * `index/labels.jsonl` and `index/vectors.jsonl` — every raw den-embed plot vector with its title's genres
+    & moods, reconstructed from the bundle's raw blob so `finalize` applies the plot transform exactly once;
   * the facts, doc facts, genres & moods, premise blob and embedder records under the names the stages
     read, and the live corpus and genres & moods under `published/`, as the corpus join's and the genres &
     moods stage's base.
@@ -50,6 +50,10 @@ BUNDLE = (
     ("facts-{version}.json", "facts.json", True),
     ("labels-t02.json", "labels-t02.json", True),
     ("vectors-bge-m3.bin", "vectors-bge-m3.bin", True),
+    # Optional only for the last pre-transform generation. Once the manifest declares the transform,
+    # `bundle()` below requires both: the raw blob is the only safe source for the next append store.
+    ("vectors-bge-m3.raw.bin", "vectors-bge-m3.raw.bin", False),
+    ("index/plot-length-transform-v1.json", "index.plot-length-transform-v1.json", False),
     ("labels-premise.json", "labels-premise.json", True),
     ("vectors-premise.bin", "vectors-premise.bin", False),
     ("genres-moods.json", "genres-moods.json", True),
@@ -99,6 +103,13 @@ def bundle(out_dir, dest):
     if missing:
         raise StageError(f"published: {out_dir} holds no {', '.join(missing)}, so the next run could not start "
                          f"from this generation. Every one is written by a stage of the run that built it.")
+    with open(os.path.join(out_dir, artifacts.MANIFEST.filename), encoding="utf-8") as fh:
+        transformed = bool(json.load(fh).get("plotVectorTransform"))
+    transform_assets = ("vectors-bge-m3.raw.bin", "index.plot-length-transform-v1.json")
+    absent = [asset for asset in transform_assets if asset not in files]
+    if transformed and absent:
+        raise StageError(f"published: transformed plot vectors require {', '.join(absent)} in the corpus "
+                         "bundle; without the raw rows the next daily run would project old rows again")
     record = {"datasetVersion": version, "files": files}
     with open(os.path.join(dest, RECORD), "w", encoding="utf-8") as fh:
         json.dump(record, fh, indent=1, sort_keys=True)
@@ -140,6 +151,13 @@ def seed(out_dir):
         raise StageError(f"published: {out_dir} already holds enriched batches; a seed is for an empty out-dir")
     if not isinstance(through, int):
         raise StageError("published: the live manifest records no maxBatchId, so no batch number is the baseline")
+    transformed = bool(meta.get("plotVectorTransform"))
+    if transformed:
+        needed = ("vectors-bge-m3.raw.bin", "index.plot-length-transform-v1.json")
+        missing = [asset for asset in needed if asset not in record["files"]]
+        if missing:
+            raise StageError(f"published: transformed generation has no {', '.join(missing)}; seeding from "
+                             "the projected blob would project every old row twice")
 
     for path, asset, _required in BUNDLE:
         if asset in record["files"] and asset != "corpus.jsonl.gz":
@@ -167,7 +185,8 @@ def seed(out_dir):
     # The embed stores, in the blob's row order: each vector beside its title's published label record.
     with open(os.path.join(out_dir, artifacts.VECTOR_LABELS.filename), encoding="utf-8") as fh:
         labels = {f"{r['mediaType']}:{r['tmdbId']}": r for r in json.load(fh)["records"]}
-    _count, dims, keys, blob, base = vector_blob.read(os.path.join(out_dir, artifacts.VECTORS.filename))
+    source_vectors = artifacts.RAW_VECTORS if transformed else artifacts.VECTORS
+    _count, dims, keys, blob, base = vector_blob.read(os.path.join(out_dir, source_vectors.filename))
     label_lines, vector_lines = [], []
     for row, key in enumerate(keys):
         if key not in labels:

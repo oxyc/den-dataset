@@ -43,6 +43,11 @@ import sys
 # The blob prefixes `data-latest` still carries.
 PUBLISHED = ("store",)
 
+# A checksum of a property of the vector section inside the store, not a sidecar blob claim. It stays for
+# the same reason `dims` and `quantization` do, and its `Sha256` spelling makes the dataset signature cover
+# it automatically.
+DATASET_CHECKSUMS = ("plotVectorTransformSha256",)
+
 # Numbers that describe a retired blob rather than the dataset. They are not shaped like blob claims, so
 # the suffix rule below cannot see them: `premiseCount` and `premiseDims` are the premise index's row count
 # and geometry, and `premiseEmbeddingModel` names the space it was embedded in. With no premise blob
@@ -66,6 +71,8 @@ def retired(meta):
     """The keys that describe an artifact this release no longer publishes."""
     out = []
     for key in meta:
+        if key in DATASET_CHECKSUMS:
+            continue
         if key in RETIRED_SCALARS:
             out.append(key)
             continue

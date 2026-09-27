@@ -97,6 +97,9 @@ VECTOR_LAYOUTS = (
     ("v1", 8, 0),
 )
 
+# Checksums of properties inside the published store rather than claims about sibling files.
+DATASET_CHECKSUMS = ("plotVectorTransformSha256",)
+
 
 def vector_rows(size, dims):
     """`(rows, layout)` for a vector blob of `size` bytes at `dims`, or `(None, None)`.
@@ -212,6 +215,8 @@ def inconsistencies(meta, counts):
     # artifact that is not there.
     named = {k[: -len("File")] for k in meta if k.endswith("File")}
     for key in sorted(meta):
+        if key in DATASET_CHECKSUMS:
+            continue
         for suffix in ("Sha256", "Bytes", "Records"):
             if key.endswith(suffix) and key[: -len(suffix)] not in named:
                 out.append(f"{key}: describes {key[: -len(suffix)]}File, which the manifest does not name")

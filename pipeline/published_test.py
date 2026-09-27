@@ -104,6 +104,28 @@ class Published(unittest.TestCase):
         self.assertEqual(labels, [{"tmdbId": 1, "mediaType": "movie", "genres": ["drama"]}])
         self.assertEqual(vectors, [{"tmdbId": 1, "v": [1, -1, -128]}])
 
+    def test_a_transformed_generation_seeds_the_next_day_from_raw_rows(self):
+        """Generation two must not take generation one's projected bytes and project them again."""
+        vector_blob.write(os.path.join(self.out, artifacts.RAW_VECTORS.filename), ["movie:1"],
+                          bytes([9, 8, 7]), 3)
+        write(os.path.join(self.out, artifacts.PLOT_LENGTH_TRANSFORM.filename), '{"schema":1}')
+        transformed = {**self.meta, "plotVectorTransform": {"schema": 1}}
+        write(os.path.join(self.out, artifacts.MANIFEST.filename), json.dumps(transformed))
+        fresh = os.path.join(self.tmp, "transformed")
+        published.bundle(self.out, os.path.join(fresh, "published"))
+        shutil.copy(os.path.join(self.out, artifacts.MANIFEST.filename),
+                    os.path.join(fresh, artifacts.PUBLISHED_META.filename))
+        published.seed(fresh)
+        with open(os.path.join(fresh, artifacts.EMBED_VECTORS.filename), encoding="utf-8") as fh:
+            self.assertEqual(json.loads(fh.readline())["v"], [9, 8, 7])
+
+    def test_a_transformed_bundle_without_raw_rows_is_refused(self):
+        write(os.path.join(self.out, artifacts.PLOT_LENGTH_TRANSFORM.filename), '{"schema":1}')
+        write(os.path.join(self.out, artifacts.MANIFEST.filename),
+              json.dumps({**self.meta, "plotVectorTransform": {"schema": 1}}))
+        with self.assertRaisesRegex(StageError, "vectors-bge-m3.raw.bin"):
+            published.bundle(self.out, os.path.join(self.tmp, "missing-raw"))
+
     def test_a_seed_refuses_a_bundle_of_another_generation(self):
         write(os.path.join(self.fresh, artifacts.PUBLISHED_META.filename),
               json.dumps({**self.meta, "datasetVersion": "ba9876543210"}))

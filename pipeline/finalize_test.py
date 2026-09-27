@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""The finalize stage — the bytes it ships and the refusals that stand between a torn store and a release.
+"""The finalize stage — its raw and transformed bytes and the refusals before a release.
 
 The goldens below are not round trips through this module. They are what the Swift `taxonomy-backfill
 finalize` wrote for the same fixture (merge base 4169e60), pasted in: the labels artifact is hashed into
 `datasetVersion`, so any drift in its bytes is a new dataset version for no reason. The same comparison over
 the real `out-repass` index stores — 47,539 titles — was byte-identical on every file, the manifest's two
-clock fields and the gzip header's mtime aside (oxyc/den-dataset#27).
+clock fields and the gzip header's mtime aside (oxyc/den-dataset#27). The raw blob remains that golden;
+the plot blob intentionally moves after the length transform.
 """
+import base64
 import calendar
 import hashlib
 import json
@@ -14,10 +16,11 @@ import os
 import tempfile
 import time
 import unittest
+import struct
 
 import pipeline
 
-from . import artifacts, enrich, finalize
+from . import artifacts, enrich, finalize, plot_length
 from .contract import Context, StageError, bind
 
 #: The Swift run's clock, so the manifest golden is comparable byte for byte.
@@ -132,6 +135,7 @@ GOLDEN_REPORT = """{
 }"""
 
 VECTORS_SHA = "2d827280a25bd55a41322157dd6b48961f7da3844411cf92de3d4e37c3394a44"
+PROJECTED_VECTORS_SHA = "3055eaaf862c17d7f10982cb42811cc2330dfa8e30f0f53d2cdbcaa19bc20d54"
 
 
 def vector(i):
@@ -164,6 +168,20 @@ def lay_down(out, records=RECORDS, vectors=None, previous=PREVIOUS, embedder=Tru
     if space:
         with open(os.path.join(index, "embedding-space.json"), "w", encoding="utf-8") as fh:
             json.dump({"spaceId": "canary-v1:abc", "canarySet": "canary-v1"}, fh)
+    with open(os.path.join(index, "composition.json"), "w", encoding="utf-8") as fh:
+        json.dump({"docShape": "lean", "dropDirector": True, "plotCap": 3500}, fh)
+    direction = b"".join(struct.pack("<f", 1.0 if i == 0 else 0.0) for i in range(1024))
+    transform = {
+        "schema": 1, "algorithm": plot_length.ALGORITHM, "fitMethod": plot_length.FIT_METHOD,
+        "dims": 1024, "inputEmbeddingSpace": "canary-v1:abc" if space else "legacy-unrecorded",
+        "directionEncoding": plot_length.ENCODING,
+        "directionBase64": base64.b64encode(direction).decode("ascii"),
+        "directionSha256": hashlib.sha256(direction).hexdigest(),
+        "compositionSha256": plot_length.sha256(os.path.join(index, "composition.json")),
+        "inputs": {}, "fit": {"observations": 3}, "observations": [],
+    }
+    with open(os.path.join(index, "plot-length-transform-v1.json"), "wb") as fh:
+        fh.write(plot_length.canonical(transform) + b"\n")
     if previous is not None:
         with open(os.path.join(out, "dataset.meta.json"), "w", encoding="utf-8") as fh:
             json.dump(previous, fh)
@@ -199,10 +217,27 @@ class Bytes(Staged):
         lay_down(self.out)
         self.run_stage()
         self.assertEqual(read(os.path.join(self.out, "labels-t02.json")), GOLDEN_LABELS)
+        self.assertEqual(hashlib.sha256(read(os.path.join(self.out, "vectors-bge-m3.raw.bin"), "rb")).hexdigest(),
+                         VECTORS_SHA, "the resumable raw rows are the old finalize bytes")
         self.assertEqual(hashlib.sha256(read(os.path.join(self.out, "vectors-bge-m3.bin"), "rb")).hexdigest(),
-                         VECTORS_SHA)
-        self.assertEqual(read(os.path.join(self.out, "dataset.meta.json")), GOLDEN_MANIFEST)
+                         PROJECTED_VECTORS_SHA)
+        meta = json.loads(read(os.path.join(self.out, "dataset.meta.json")))
+        self.assertEqual(meta["datasetVersion"], "0989d9094945")
+        self.assertEqual(meta["vectorsSha256"], PROJECTED_VECTORS_SHA)
+        self.assertEqual(meta["plotVectorTransform"]["algorithm"], plot_length.ALGORITHM)
+        self.assertEqual(meta["plotVectorTransformSha256"], hashlib.sha256(
+            plot_length.canonical(meta["plotVectorTransform"])).hexdigest())
         self.assertEqual(read(os.path.join(self.out, "report.json")), GOLDEN_REPORT)
+
+    def test_premise_vectors_are_outside_the_plot_transform(self):
+        lay_down(self.out)
+        premise = os.path.join(self.out, artifacts.PREMISE_VECTORS.filename)
+        original = b"premise-space-bytes\x00\xff"
+        with open(premise, "wb") as fh:
+            fh.write(original)
+        self.run_stage()
+        self.assertEqual(read(premise, "rb"), original)
+        self.assertNotIn(artifacts.PREMISE_VECTORS, finalize.INPUTS)
 
     def test_the_precompressed_labels_are_not_written(self):
         """`labels-t02.json.gz` was the copy den-atlas served to clients asking for gzip. The blobs were
@@ -280,7 +315,7 @@ class Store(Staged):
         shipped = json.loads(read(os.path.join(self.out, "labels-t02.json")))["records"]
         self.assertEqual([(r["mediaType"], r["tmdbId"], r["primaryGenre"]) for r in shipped],
                          [("tv", 5, "Comedy"), ("movie", 7, "Horror"), ("movie", 5, "Thriller")])
-        blob = read(os.path.join(self.out, "vectors-bge-m3.bin"), "rb")
+        blob = read(os.path.join(self.out, "vectors-bge-m3.raw.bin"), "rb")
         last_row = blob[-1024:]
         self.assertEqual(list(last_row), [x & 0xFF for x in (max(-128, min(127, v)) for v in vector(3))])
 
@@ -383,7 +418,8 @@ class ShipGuard(unittest.TestCase):
 
 class Topology(unittest.TestCase):
     def test_it_runs_between_the_embedding_and_the_facts(self):
-        self.assertEqual(pipeline.STAGES.index("finalize"), pipeline.STAGES.index("embed") + 1)
+        self.assertEqual(pipeline.STAGES.index("plot_length"), pipeline.STAGES.index("embed") + 1)
+        self.assertEqual(pipeline.STAGES.index("finalize"), pipeline.STAGES.index("plot_length") + 1)
         self.assertEqual(pipeline.STAGES.index("facts"), pipeline.STAGES.index("finalize") + 1)
 
     def test_it_owns_what_it_writes(self):
@@ -392,7 +428,7 @@ class Topology(unittest.TestCase):
             self.assertEqual(artifact.producer, "")
             self.assertEqual(pipeline.producers()[artifact.name][0], finalize.PRODUCER)
         self.assertEqual([bind(e).name for e in finalize.OUTPUTS],
-                         ["vector_labels", "vectors", "manifest", "finalize_report"])
+                         ["vector_labels", "raw_vectors", "vectors", "manifest", "finalize_report"])
 
     def test_every_file_it_touches_is_declared(self):
         """Run it over a fixture and compare what changed on disk with the declaration. An undeclared read
