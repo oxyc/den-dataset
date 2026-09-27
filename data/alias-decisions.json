@@ -115,6 +115,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 122229,
+      "alias": "City Hunter",
+      "why": "City Hunter is a separate franchise/work; this 1971 film is Le Saut de lange / Angels Leap and its genuine alternate titles are Codename Cobra and Operation: Cobra."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 138697,
       "alias": "Don Juan",
       "why": "Don Jon was retitled from Don Jon's Addiction; Don Juan is a different work"
@@ -166,6 +172,12 @@
       "tmdbId": 352199,
       "alias": "Anna",
       "why": "the lead character's name (Valeria Golino's Anna), not a release title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 355111,
+      "alias": "Barbie and her Sisters in a Puppy Chase",
+      "why": "This is the canonical title of the separate 2016 sequel (TMDB 417047), not an alternate title of Barbie in Rock N Royals (2015)."
     },
     {
       "mediaType": "movie",
@@ -579,6 +591,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 4968,
+      "alias": "The Target",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 5204,
       "alias": "Control",
       "why": "TMDB records it as an alternative title"
@@ -588,6 +606,12 @@
       "tmdbId": 5482,
       "alias": "Kidnapped",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 5511,
+      "alias": "The Samurai",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -756,6 +780,12 @@
       "tmdbId": 11421,
       "alias": "CRAZY",
       "why": "its own title without the dots"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 11490,
+      "alias": "Child",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -1005,6 +1035,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 20894,
+      "alias": "Visitor from the Future",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 21135,
       "alias": "The Eclipse",
       "why": "TMDB records it as an alternative title"
@@ -1098,6 +1134,12 @@
       "tmdbId": 24580,
       "alias": "The Quatermass Experiment",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 24920,
+      "alias": "The Gates of Hell",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -1251,6 +1293,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 28072,
+      "alias": "The Possessed",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 28162,
       "alias": "Stairway to Heaven",
       "why": "the US release title"
@@ -1290,6 +1338,12 @@
       "tmdbId": 29161,
       "alias": "Creepers",
       "why": "the cut US release title of Argento's Phenomena"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 29535,
+      "alias": "Emmanuelle Forever",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -1377,6 +1431,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 31378,
+      "alias": "Bushido",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 31633,
       "alias": "Too Hot to Handle",
       "why": "TMDB records it as an alternative title"
@@ -1422,6 +1482,12 @@
       "tmdbId": 32941,
       "alias": "Heat Wave",
       "why": "the US release title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 33404,
+      "alias": "Nothing Personal",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -1515,6 +1581,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 37340,
+      "alias": "The Paris Express",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 37773,
       "alias": "History Is Made at Night",
       "why": "TMDB records it as an alternative title"
@@ -1524,6 +1596,12 @@
       "tmdbId": 37820,
       "alias": "Nothing to Lose",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 37977,
+      "alias": "The Black Cat",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -1593,6 +1671,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 40210,
+      "alias": "'Til Death Do Us Part",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 40213,
       "alias": "Dragon Inn",
       "why": "a Wikidata rdfs:label for this item in some language"
@@ -1608,6 +1692,12 @@
       "tmdbId": 40258,
       "alias": "The Evil Within",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 40465,
+      "alias": "Chain Reaction",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -1650,6 +1740,12 @@
       "tmdbId": 41889,
       "alias": "The Devil's Advocate",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 41924,
+      "alias": "Night Watch",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -1698,6 +1794,12 @@
       "tmdbId": 43102,
       "alias": "Dangerous Liaisons",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 43360,
+      "alias": "House of Pleasure",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -1881,6 +1983,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 50785,
+      "alias": "The Little Soldier",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 51447,
       "alias": "Trophy Wife",
       "why": "TMDB records it as an alternative title"
@@ -2013,6 +2121,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 58437,
+      "alias": "Mary Magdalene",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 58658,
       "alias": "Mafia",
       "why": "TMDB records it as an alternative title"
@@ -2040,6 +2154,12 @@
       "tmdbId": 59843,
       "alias": "Shanghai Express",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 60049,
+      "alias": "Come Mi Vuoi",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -2151,9 +2271,21 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 65869,
+      "alias": "Attraction",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 66212,
       "alias": "Above the Law",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 67314,
+      "alias": "Proie",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -2199,9 +2331,33 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 71097,
+      "alias": "Baby Love",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 71138,
       "alias": "Female Convict Scorpion: Jailhouse 41",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 71456,
+      "alias": "Under Pressure",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 71575,
+      "alias": "Between Us",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 72909,
+      "alias": "Premonition",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -2214,6 +2370,12 @@
       "tmdbId": 73832,
       "alias": "Bounty Killer",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 74078,
+      "alias": "Scar",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -2277,6 +2439,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 79816,
+      "alias": "The Wedding Party",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 79827,
       "alias": "Shame",
       "why": "TMDB records it as an alternative title"
@@ -2337,9 +2505,21 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 85429,
+      "alias": "Bad Girls",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 86331,
       "alias": "Desire",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 86379,
+      "alias": "The Train Robbers",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -2397,6 +2577,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 93851,
+      "alias": "Greed",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 96454,
       "alias": "The Visitor",
       "why": "the English translation of La visita"
@@ -2436,6 +2622,18 @@
       "tmdbId": 102629,
       "alias": "Bullet",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 103655,
+      "alias": "Le temps des secrets",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 104947,
+      "alias": "Macabre",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -2490,6 +2688,12 @@
       "tmdbId": 115665,
       "alias": "Ecstasy",
       "why": "English translation of Extasis"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 116946,
+      "alias": "La llorona",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -2562,6 +2766,36 @@
       "tmdbId": 133063,
       "alias": "Haunted Castle",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 133463,
+      "alias": "Inhuman Resources",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 138521,
+      "alias": "Beyond the Darkness",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 139743,
+      "alias": "La Traversee",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 139743,
+      "alias": "La Traversée",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 142410,
+      "alias": "Room 205",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -2640,6 +2874,12 @@
       "tmdbId": 161056,
       "alias": "8 Ball Bunny",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 162528,
+      "alias": "Le petit soldat",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -2733,6 +2973,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 189019,
+      "alias": "La fleur de l'âge",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 193348,
       "alias": "Jump",
       "why": "reviewed: a real alternate or translated title"
@@ -2748,6 +2994,12 @@
       "tmdbId": 199420,
       "alias": "Hustlers",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 199914,
+      "alias": "Homeland",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -2769,6 +3021,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 207270,
+      "alias": "The Bunker",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 207649,
       "alias": "The Last Dance",
       "why": "TMDB records it as an alternative title"
@@ -2784,6 +3042,12 @@
       "tmdbId": 209350,
       "alias": "The Weekend",
       "why": "a Wikidata rdfs:label for this item in some language"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 210052,
+      "alias": "Wolf Children",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -2853,6 +3117,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 228177,
+      "alias": "Till Luck Do Us Part 2",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 233208,
       "alias": "The Captive",
       "why": "TMDB records it as an alternative title"
@@ -2901,6 +3171,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 256277,
+      "alias": "Friend Request",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 256476,
       "alias": "The Glass House",
       "why": "reviewed: a real alternate or translated title"
@@ -2919,6 +3195,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 257724,
+      "alias": "Above Suspicion",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 257816,
       "alias": "Playing the Field",
       "why": "the English release title of L'arbitro"
@@ -2928,6 +3210,12 @@
       "tmdbId": 258313,
       "alias": "When a Man Loves a Woman",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 258392,
+      "alias": "Top Dog",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -2955,6 +3243,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 269141,
+      "alias": "Love Today",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 270771,
       "alias": "The Well",
       "why": "TMDB records it as an alternative title"
@@ -2970,6 +3264,12 @@
       "tmdbId": 277154,
       "alias": "Admiral",
       "why": "the English release title of Michiel de Ruyter"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 277685,
+      "alias": "Offline",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -3135,6 +3435,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 325039,
+      "alias": "Bathory",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 327317,
+      "alias": "Corruption",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 333348,
       "alias": "Let It Snow",
       "why": "TMDB records it as an alternative title"
@@ -3144,6 +3456,24 @@
       "tmdbId": 335778,
       "alias": "Resurrection",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 335788,
+      "alias": "Lake",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 335788,
+      "alias": "The Lake",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 336226,
+      "alias": "Heatwave",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -3159,9 +3489,21 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 341035,
+      "alias": "Little Devil",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 343173,
       "alias": "Generation Z",
       "why": "a release title of The Rezort: Wikidata's es label is Generación Z"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 345628,
+      "alias": "Night Ride",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -3243,6 +3585,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 372749,
+      "alias": "The Gambler",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 373546,
       "alias": "Bleeder",
       "why": "TMDB records it as an alternative title"
@@ -3261,6 +3609,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 378112,
+      "alias": "Day of the Dead",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 380764,
+      "alias": "Love",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 388096,
       "alias": "One Day",
       "why": "reviewed: a real alternate or translated title"
@@ -3276,6 +3636,12 @@
       "tmdbId": 391626,
       "alias": "The Offering",
       "why": "a Wikidata rdfs:label for this item in some language"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 391773,
+      "alias": "A Good Kill",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -3351,6 +3717,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 417587,
+      "alias": "Sob Pressão",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 419314,
+      "alias": "Seven Days",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 419504,
       "alias": "Messy Christmas",
       "why": "the international English title; Wikidata carries Messy Christmas as its es label as well as an en altLabel"
@@ -3399,6 +3777,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 427337,
+      "alias": "Malevolent",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 430005,
+      "alias": "Ladies",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 430988,
       "alias": "Vamps",
       "why": "a release title of Вурдалаки: Wikidata's fr label is Vamps"
@@ -3432,6 +3822,24 @@
       "tmdbId": 437557,
       "alias": "The Pact",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 438463,
+      "alias": "Mother",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 443072,
+      "alias": "Delivered",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 443072,
+      "alias": "The Delivered",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -3480,6 +3888,12 @@
       "tmdbId": 466980,
       "alias": "The Guardian",
       "why": "the English translation of 大护法 (Dahufa, great guardian)"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 468261,
+      "alias": "Eternal Love",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -3537,6 +3951,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 500915,
+      "alias": "Werewolf",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 501929,
       "alias": "Connected",
       "why": "TMDB records it as an alternative title"
@@ -3558,6 +3978,12 @@
       "tmdbId": 509467,
       "alias": "The Body",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 510456,
+      "alias": "Team Spirit",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -3606,6 +4032,12 @@
       "tmdbId": 542202,
       "alias": "Don't Let Go",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 544398,
+      "alias": "Moving On",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -3681,6 +4113,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 581392,
+      "alias": "Bando",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 582494,
+      "alias": "The Messenger",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 582895,
       "alias": "Lullaby",
       "why": "Chanson douce translates as Lullaby, the title Slimani's novel carries in the UK; the film's en label is Perfect Nanny"
@@ -3717,6 +4161,24 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 633836,
+      "alias": "Last Dance",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 633836,
+      "alias": "The Last Dance",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 641900,
+      "alias": "Stella",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 643534,
       "alias": "Good News",
       "why": "a Wikidata rdfs:label for this item in some language"
@@ -3738,6 +4200,18 @@
       "tmdbId": 652483,
       "alias": "Fala Sério Mãe",
       "why": "a Wikidata rdfs:label for this item in some language"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 655297,
+      "alias": "Powder Keg",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 655524,
+      "alias": "Xoxo",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "movie",
@@ -3801,6 +4275,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 766358,
+      "alias": "Conductor",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 768757,
       "alias": "Fire",
       "why": "TMDB records it as an alternative title"
@@ -3810,6 +4290,12 @@
       "tmdbId": 774021,
       "alias": "Unlocked",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 777236,
+      "alias": "Appointment With Death",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -3981,6 +4467,18 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 1001089,
+      "alias": "Brothers",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1001472,
+      "alias": "Sisterhood",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 1007757,
       "alias": "Powerless",
       "why": "reviewed: a real alternate or translated title"
@@ -3990,6 +4488,12 @@
       "tmdbId": 1013406,
       "alias": "Modigliani",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1047016,
+      "alias": "The Commander",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -4005,6 +4509,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 1142518,
+      "alias": "Freedom",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 1146577,
       "alias": "Control",
       "why": "TMDB records it as an alternative title"
@@ -4014,6 +4524,12 @@
       "tmdbId": 1147710,
       "alias": "Hijacking",
       "why": "reviewed: a real alternate or translated title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1154662,
+      "alias": "Sunny",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -4044,6 +4560,12 @@
       "tmdbId": 1275779,
       "alias": "The Dish",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1278099,
+      "alias": "El candidato honesto",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "movie",
@@ -4080,6 +4602,12 @@
       "tmdbId": 1413976,
       "alias": "The Dark Knight",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1571470,
+      "alias": "Riff Raff",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "tv",
@@ -4140,6 +4668,12 @@
       "tmdbId": 4562,
       "alias": "7 Days",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 6647,
+      "alias": "B&B",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "tv",
@@ -4233,6 +4767,12 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 37567,
+      "alias": "Doctor Slump",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 42444,
       "alias": "Knights of the Zodiac",
       "why": "the English title of Saint Seiya"
@@ -4278,6 +4818,12 @@
       "tmdbId": 62602,
       "alias": "Blue Spring Ride",
       "why": "the English title of Ao Haru Ride"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 62875,
+      "alias": "Summer Camp",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "tv",
@@ -4341,6 +4887,18 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 70618,
+      "alias": "The River",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 70865,
+      "alias": "La Promesa",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 71886,
       "alias": "The Deep",
       "why": "reviewed: a real alternate or translated title"
@@ -4356,6 +4914,12 @@
       "tmdbId": 72690,
       "alias": "Rescue Me",
       "why": "the English translation of 구해줘 (Save Me)"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 73010,
+      "alias": "Under Pressure",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "tv",
@@ -4443,9 +5007,21 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 98889,
+      "alias": "Sirene",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 99047,
       "alias": "The Moment",
       "why": "unsure: only Wikidata's en altLabel supports it as an English title of Record of Youth; kept because a wrong keep only adds a result"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 100868,
+      "alias": "Legacy",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "tv",
@@ -4521,9 +5097,21 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 133979,
+      "alias": "Two Summers",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 134095,
       "alias": "Retreat",
       "why": "TMDB records it as an alternative title"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 153282,
+      "alias": "Sissi",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
     },
     {
       "mediaType": "tv",
@@ -4551,9 +5139,33 @@
     },
     {
       "mediaType": "tv",
+      "tmdbId": 203276,
+      "alias": "The Brigade",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 203616,
+      "alias": "High Tides",
+      "why": "TMDB alternative-title data corroborated this exact alias during the issue #16 publish review."
+    },
+    {
+      "mediaType": "tv",
       "tmdbId": 204370,
       "alias": "The Path",
       "why": "an English title of Travessia; its French title is Le Chemin de la vérité"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 208878,
+      "alias": "Violet",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 209085,
+      "alias": "Perfect Love",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "tv",
@@ -4644,6 +5256,12 @@
       "tmdbId": 286255,
       "alias": "The Forsyte Saga",
       "why": "TMDB records it as this series' US title; the 2025 adaptation of Galsworthy's novels shares the name of the 2002 series (tv:19077)"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 294282,
+      "alias": "Delirium",
+      "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
     },
     {
       "mediaType": "tv",

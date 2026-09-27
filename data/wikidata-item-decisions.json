@@ -7,9 +7,9 @@
     "item's statements. `upstream` names what is wrong on Wikidata, for someone to fix there."
   ],
   "decisions": [
-    {"mediaType": "movie", "tmdbId": 226857, "item": "Q14396397",
-     "why": "TMDB: Endless Love, released 2014-02-12, 104 min, IMDb tt2318092. Q14396397 is the 2014 film directed by Shana Feste, P577 2014-02-12, 24 sitelinks. Q109155536 is a 2014 Burmese film of the same name, P577 year-only.",
-     "upstream": "Q109155536 (the Burmese film) states P4947 226857 and P345 tt2318092, both the American film's."},
+    {"mediaType": "tv", "tmdbId": 296285, "item": "Q140478842",
+     "why": "TMDB: Oasis, a 2026 Spanish miniseries, IMDb tt38734636. Both items state that IMDb and TMDB id; Q140478842 is the developed series item with 23 claims (episodes, seasons, dates, broadcaster, genre and language) and four Wikipedia sitelinks, against Q140305861's 7 identifiers and no sitelinks.",
+     "upstream": "Q140305861 and Q140478842 are duplicate items for the same series and should be merged."},
     {"mediaType": "tv", "tmdbId": 814, "item": "Q735749",
      "why": "TMDB: Hornblower, first aired 1998-10-07, 3 seasons, 8 episodes. Q735749 is the series: P580 1998-10-07, P2437 3, P1113 8. Q7732641 is The Even Chance, its first television film (P179 Hornblower).",
      "upstream": "Q7732641 (The Even Chance) states P4983 814, the series' TMDB id; its own is P4947 19493."},
