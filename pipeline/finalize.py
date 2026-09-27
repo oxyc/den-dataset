@@ -28,8 +28,10 @@ the label line instead would carry forward what the genres & moods stage no long
 **A re-embed supersedes, it does not duplicate.** A key that appears twice keeps its LAST record and that
 record's vector, which is what makes an incremental top-up an append rather than a rebuild.
 
-**The bytes are the Swift's.** `labels-t02.json`'s sha is half of `datasetVersion`, so it is written by
-`pipeline/jsonbytes.py`'s `JSONEncoder` spelling; the manifest keeps `JSONSerialization`'s.
+**Labels are still the Swift's bytes; plot vectors deliberately are not.** `labels-t02.json`'s sha is half
+of `datasetVersion`, so it is written by `pipeline/jsonbytes.py`'s `JSONEncoder` spelling. The raw vector
+blob is kept for stateless resume, while the serving blob removes the fitted plot-length direction before
+its sha becomes the other half of `datasetVersion`.
 
 **There is no `labels-t02.json.gz`.** It was the precompressed copy den-atlas served to clients sending
 `Accept-Encoding: gzip`, and that stopped when the blobs were retired for the store (oxyc/den#113):
@@ -50,7 +52,7 @@ import os
 import sys
 import time
 
-from . import artifacts, jsonbytes
+from . import artifacts, jsonbytes, plot_length
 from .contract import REPO, StageError, bind
 from lib import cache as caching
 from store import vector_blob  # the DENVEC02 layout, one definition shared with the store writer
@@ -74,8 +76,10 @@ QUANTIZATION = "int8-symmetric-x127"
 #: also read `classify-checkpoint.json` for a fourth, `noPrimary`; the only thing that wrote that file was
 #: the vote-pass `assemble`, deleted in #48, so it is not read here and the counter is gone with it.
 INPUTS = (artifacts.EMBED_LABELS, artifacts.EMBED_VECTORS, artifacts.GENRES_MOODS, artifacts.EMBEDDER,
-          artifacts.EMBEDDING_SPACE, artifacts.ENRICH_CHECKPOINT)
-OUTPUTS = (artifacts.VECTOR_LABELS, artifacts.VECTORS, artifacts.MANIFEST, artifacts.FINALIZE_REPORT)
+          artifacts.EMBEDDING_SPACE, artifacts.COMPOSITION, artifacts.PLOT_LENGTH_TRANSFORM,
+          artifacts.ENRICH_CHECKPOINT)
+OUTPUTS = (artifacts.VECTOR_LABELS, artifacts.RAW_VECTORS, artifacts.VECTORS, artifacts.MANIFEST,
+           artifacts.FINALIZE_REPORT)
 
 #: What the enrichment's checkpoint tallies. The Swift decoded all four, so a malformed one of them made the
 #: whole checkpoint unreadable, which the report shows as zeros. `noOverview` was the fourth and is gone
@@ -91,7 +95,7 @@ OWNED = frozenset((
     "datasetVersion", "taxonomyVersion", "embeddingModel", "dims", "count", "quantization", "labelsFile",
     "vectorsFile", "labelsGzFile", "labelsSha256", "labelsBytes", "vectorsSha256", "vectorsBytes",
     "builtAt", "lastModifiedHttp", "metadataFile", "metadataSha256", "metadataBytes", "embedderRuntime",
-    "embedderMaxTokens", "embeddingSpace"))
+    "embedderMaxTokens", "embeddingSpace", "plotVectorTransform", "plotVectorTransformSha256"))
 
 #: Field names that carry expressive prose. A published artifact holds labels, ids and numbers — TMDB's
 #: terms bar shipping their text, and a CC0 plot belongs in the corpus and the embedding, not in an
@@ -284,6 +288,26 @@ def current(records, genres_moods_path):
             for rec, key in zip(records, keys)]
 
 
+def _round_away(value):
+    """Rust/f64 ``round``: halves away from zero (Python's built-in uses ties-to-even)."""
+    return math.floor(value + 0.5) if value >= 0 else math.ceil(value - 0.5)
+
+
+def project_row(row, direction):
+    """Atlas-compatible unit projection, renormalisation and symmetric-x127 quantisation."""
+    values = [float(value) for value in row]
+    # Plain left-to-right sums intentionally mirror Rust iterator `sum::<f64>()`; `math.fsum` can move a
+    # component across an int8 rounding boundary and make the build differ from Atlas's #83 transform.
+    norm = math.sqrt(sum(value * value for value in values))
+    if norm:
+        values = [value / norm for value in values]
+        along = sum(value * component for value, component in zip(values, direction))
+        values = [value - along * component for value, component in zip(values, direction)]
+    norm = math.sqrt(sum(value * value for value in values))
+    scale = 127.0 / norm if norm else 0.0
+    return [max(-127, min(127, _round_away(value * scale))) for value in values]
+
+
 def run(ctx, now=None):
     """Write the shipped artifacts from the index stores. Returns the manifest's path."""
     records, vectors = read_store(ctx.require(artifacts.EMBED_LABELS), ctx.require(artifacts.EMBED_VECTORS))
@@ -303,6 +327,12 @@ def run(ctx, now=None):
                          f"({embedder['runtime']}) but its vectors are {dim}-dim — refusing to ship a "
                          f"manifest that would misdescribe them.")
     space = read_identity(ctx.path(artifacts.EMBEDDING_SPACE), (("spaceId", str),))
+    transform_path = ctx.require(artifacts.PLOT_LENGTH_TRANSFORM)
+    transform, transform_artifact_sha = plot_length.read(
+        transform_path, ctx.path(artifacts.COMPOSITION), ctx.path(artifacts.EMBEDDING_SPACE))
+    direction = plot_length.decode_direction(transform)
+    if len(direction) != dim:
+        raise StageError(f"finalize: plot transform is {len(direction)}-dimensional but vectors are {dim}-dimensional")
 
     labels = {"count": len(records), "records": records, "taxonomyVersion": TAXONOMY}
     words = prohibited(labels)
@@ -314,14 +344,22 @@ def run(ctx, now=None):
     if len(set(keys)) != len(keys):
         raise StageError("finalize: the key column repeats a title — two rows claiming one title is not a "
                          "join any reader can resolve")
-    vectors_blob = vector_blob.header(keys, dim) + bytes(x & 0xFF for row in vectors for x in row)
+    raw_vectors_blob = vector_blob.header(keys, dim) + bytes(x & 0xFF for row in vectors for x in row)
+    # One row at a time: `vectors` is already ~53 million Python integers on the full corpus. Keeping a
+    # second list-of-lists until the blob is joined costs another ~1.5 GB for no change in output bytes.
+    projected = bytearray()
+    for row in vectors:
+        projected.extend(value & 0xFF for value in project_row(row, direction))
+    vectors_blob = vector_blob.header(keys, dim) + projected
 
-    labels_path, vectors_path = ctx.path(artifacts.VECTOR_LABELS), ctx.path(artifacts.VECTORS)
+    labels_path = ctx.path(artifacts.VECTOR_LABELS)
+    raw_vectors_path, vectors_path = ctx.path(artifacts.RAW_VECTORS), ctx.path(artifacts.VECTORS)
     meta_path = ctx.path(artifacts.MANIFEST)
     report_path = ctx.path(artifacts.FINALIZE_REPORT)
-    for path in (labels_path, vectors_path, meta_path, report_path):
+    for path in (labels_path, raw_vectors_path, vectors_path, meta_path, report_path):
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     caching.write_atomically(labels_path, labels_blob)
+    caching.write_atomically(raw_vectors_path, raw_vectors_blob)
     caching.write_atomically(vectors_path, vectors_blob)
 
     labels_sha = hashlib.sha256(labels_blob).hexdigest()
@@ -339,6 +377,9 @@ def run(ctx, now=None):
         meta["embedderMaxTokens"] = embedder["maxTokens"]
     if space:
         meta["embeddingSpace"] = space["spaceId"]
+    public_transform = plot_length.public_record(transform, transform_artifact_sha)
+    meta["plotVectorTransform"] = public_transform
+    meta["plotVectorTransformSha256"] = hashlib.sha256(plot_length.canonical(public_transform)).hexdigest()
     existing = None
     if os.path.exists(meta_path):
         with open(meta_path, "rb") as handle:

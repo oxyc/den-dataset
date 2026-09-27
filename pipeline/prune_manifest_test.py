@@ -41,6 +41,7 @@ LIVE = {
     "labelsSha256": "1d",
     "lastModifiedHttp": "Sun, 20 Sep 2026 11:24:16 GMT",
     "maxBatchId": 199,
+    "plotVectorTransformSha256": "pt",
     "metadataBytes": 5933843,
     "metadataFile": "metadata-5b1c3213b6a1.json",
     "metadataGzFile": "metadata-5b1c3213b6a1.json.gz",
@@ -78,6 +79,7 @@ KEPT = {
     "builtAt", "datasetVersion", "dims", "embedderMaxTokens", "embedderRuntime",
     "embeddingModel", "lastModifiedHttp", "maxBatchId", "quantization", "storeBytes", "storeFile",
     "storeRecords", "storeSha256", "taxonomyVersion",
+    "plotVectorTransformSha256",
 }
 
 
@@ -115,6 +117,8 @@ class PruneManifest(unittest.TestCase):
         after = pruned(LIVE)
         named = {k[: -len("File")] for k in after if k.endswith("File")}
         for key in after:
+            if key in pm.DATASET_CHECKSUMS:
+                continue
             for suffix in ("Sha256", "Bytes", "Records"):
                 if key.endswith(suffix):
                     self.assertIn(key[: -len(suffix)], named, f"{key} describes a file nothing names")

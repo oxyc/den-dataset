@@ -72,7 +72,7 @@ class Skips(Recorded):
     def test_with_no_credential_every_stage_that_needs_none_runs_and_the_rest_are_named(self):
         code, report = self.day(mode="delta")
         self.assertEqual(code, 0)
-        self.assertEqual(self.ran(), ["refresh", "changes", "articles", "genres_moods", "docfacts", "finalize",
+        self.assertEqual(self.ran(), ["refresh", "changes", "articles", "genres_moods", "docfacts", "plot_length", "finalize",
                                       "facts", "franchises", "corpus", "store", "publish"])
         self.assertEqual([s["stage"] for s in report["skipped"]],
                          ["worklist", "fetch", "classify", "critique", "genres_moods (ask)", "embed"])
