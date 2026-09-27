@@ -24,7 +24,12 @@ def questions_sha(questions):
 
 
 def _candidate_json(ids):
-    return [list(candidate) if isinstance(candidate, tuple) else candidate for candidate in ids]
+    # Character-overlap candidates are ``("characters", (<key>, ...))``.  Normalize
+    # both tuple levels now: a JSON write/read does that implicitly, and leaving the
+    # inner tuple alive made a freshly reconstructed raw decision compare unequal to
+    # the identical durable decision loaded from JSON.
+    return [[candidate[0], list(candidate[1])] if isinstance(candidate, tuple) else candidate
+            for candidate in ids]
 
 
 def _candidate_ids(stored, where):
