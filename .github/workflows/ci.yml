@@ -91,7 +91,7 @@ jobs:
       # Appending a premise generation run to the committed `data/premise-tags-v2.json`: the repairs apply,
       # a key already there is refused, and the file's metadata and formatting survive.
       - name: The premise tags merge
-        run: python3 -m unittest pipeline/merge_premise_tags_test.py
+        run: python3 -m unittest pipeline/merge_premise_tags_test.py pipeline/premise_concepts_test.py
       # The pipeline skeleton (oxyc/den-dataset#27): the stage contract, the artifact catalogue, the
       # producer registry derived from the stage order, the corpus, embed and store stages against the
       # rules they wrap, and `den`.

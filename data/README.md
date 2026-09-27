@@ -20,6 +20,7 @@ are Wikidata. Licences per file are in [`LICENSES.md`](../LICENSES.md).
 | `genres-moods-rule.json` | the per-label thresholds the `genres_moods` stage derives with, fitted on golden half A | ~$0.31 of Jev plus the fitting |
 | `premise-tags-v1.json` | 37,533 titles × 8–12 structural premise tags, the first generation | a full LLM pass |
 | `premise-tags-v2.json` | 44,697 titles — every title the premise index covers, plus 166 appended 2026-09-22 and not yet embedded | a full LLM pass; later runs append with `merge_premise_tags.py --into` |
+| `premise-concepts-v1.json` | complete raw premise surface-form → discrete concept map, with occurrence and title-deduplicated counts | `canonicalize_premise_tags.py`: canary-checked local embed, candidates at cosine ≥0.95, Jev Choice, independent Jev relation verification, then materialize (~$0.03 for this generation) |
 | `premise-tags-v1.SPEC.md`, `-v2.SPEC.md` | the prompts those tags were generated under; the tag files' `derivedFrom` cites them | — |
 | `plots-sidecar-v1.json` | 38,460 plot identities (`plotSHA`, length, shipped) and no prose | ~38k article fetches |
 | `embed-canary.json` | fixed texts and the exact int8 vectors den-embed must return for them | only when the space is meant to move (`docs/OPERATE.md`) |
@@ -48,6 +49,12 @@ half, below).
 - **A premise vector blob aligns to the `labels-premise.json` built beside it**, never to a tags file. The
   live one has 44,531 rows.
 - Keys are `mediaType:tmdbId`, never a bare id: movie 95 is *Armageddon*, tv 95 is *Buffy*.
+- **Concepts are a separate discrete view.** `premise-concepts-v1.json` preserves all 299,597 raw forms as
+  keys, maps the singleton tail to itself, and merges only reusable forms that cleared both bounded Jev
+  passes. `conceptOccurrences` counts tag uses; `conceptTitles` de-duplicates forms that collapse inside one
+  title. Raw tags remain the embedding input. Rebuild with the five CLI phases shown by
+  `pipeline/canonicalize_premise_tags.py --help`; the artifact records the source and decision-file digests,
+  models, threshold, and decision counts.
 
 ## Plots
 
