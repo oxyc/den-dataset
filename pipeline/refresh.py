@@ -15,32 +15,31 @@ it names no revision. Before counting one as changed, the body the action API le
 is asked (`lib/plot.cached_plot`): a body whose plot is EXACTLY the record's text is the revision that text
 came from, and that revision is recorded instead of a re-fetch. Anything short of an exact match is unknown.
 
-**A changed title is enriched again, not patched.** `enrich.reground` runs over its candidates — the English
-article, its other-language sitelinks, the source work — as it did the first time, with every Wikipedia
-read going to the network (`Fresh`): the cache would answer with the revision that was just found stale.
-What comes back replaces the record in a NEW batch, which every reader already resolves newest-first.
-Titles the refresh only recorded a revision for go into the same batches, so the next refresh has it.
+**Observation is not replacement permission.** `enrich.reground` runs over the candidates with fresh network
+reads, but a differing plot/article (including a disappeared plot) is recorded only in the prose-free
+`source-review.json`: hashes, articles and revisions, never candidate text. The old enriched plot,
+its judgements and its vector remain one coherent canonical set. The review artifact travels in the
+published bundle, so the same observed revision is not fetched again on the next stateless weekly run.
+
+An unchanged plot/article may safely land in a new batch with its newer revision. A reviewed candidate may
+replace the canonical row only when an operator names its key in `--approved-source-keys`; that explicit
+approval is carried by the change set into both model and embedding worklists. Revision drift alone never
+causes a Haiku/Jev call or a re-embed.
 
 **What it hands downstream**, per run under `refresh/<UTC stamp>/`:
 
-  * `changed.txt`  — the titles whose plot text is different now. `./den stage embed --reembed-keys` takes
-    it as it is; the classify pass takes it through a supersede run (`pipeline/consolidate_corpus.py`:
-    the run that started later wins, by key). Which of them to re-classify is a cosine decision #5 leaves
-    to the embedding, not to this list.
-  * `plotless.txt` — titles that had a plot and have none now. Their classify and critique rows were read
-    from an article they no longer have and no new run will answer them, so they are withdrawn:
-    `pipeline/consolidate_corpus.py withdraw --keys …/plotless.txt`.
+  * `changed.txt`  — differing candidates quarantined for review, not an inference worklist;
+  * `plotless.txt` — disappeared-plot candidates quarantined the same way;
   * `report.json`  — the counts.
 
 A title whose revision moved and whose plot did not (an edit to its Reception section) is in neither
 list: its record takes the new revision and nothing downstream has anything to redo.
 
-Keys are appended to the lists BEFORE the batch they describe is written, so a kill can list a title whose
-batch never landed — re-embedding it then finds the same document and does nothing — but never land a
-batch whose change no list names.
+The durable review artifact is written atomically after the bounded pass. Candidate prose is never written.
 """
 import concurrent.futures
 import datetime
+import hashlib
 import json
 import os
 import sys
@@ -115,7 +114,7 @@ def recorded(record, cache):
 
 
 def survey(records, cache, ask=wikipedia.revisions):
-    """`{key: (verdict, record, revision)}` for every grounded title, and the requests it took.
+    """`{key: (verdict, record, backfill, current revision)}` for every grounded title, and requests.
 
     One request per `lib/wikipedia.REVISION_BATCH` articles of one Wikipedia, asked in language order. The
     revision is the one to record: the backfilled one for an unchanged title, the stored one otherwise.
@@ -143,17 +142,65 @@ def survey(records, cache, ask=wikipedia.revisions):
             verdict = MOVED
         else:
             verdict = UNCHANGED
-        out[label] = (verdict, record, revision if backfilled and verdict == UNCHANGED else None)
+        out[label] = (verdict, record, revision if backfilled and verdict == UNCHANGED else None, now)
     return out, requests
 
 
 def counts(surveyed, requests):
     tally = {verdict: 0 for verdict in (UNCHANGED, MOVED, GONE, UNKNOWN)}
-    for verdict, _record, _backfill in surveyed.values():
+    for verdict, _record, _backfill, _current in surveyed.values():
         tally[verdict] += 1
     return dict(tally, grounded=len(surveyed), revisionRequests=requests,
                 toFetch=tally[MOVED] + tally[GONE] + tally[UNKNOWN],
-                toRecord=sum(backfill is not None for _v, _r, backfill in surveyed.values()))
+                toRecord=sum(backfill is not None for _v, _r, backfill, _c in surveyed.values()))
+
+
+def read_review(path):
+    """The durable, prose-free source-review state; absent is the first run."""
+    if not os.path.exists(path):
+        return {"schema": "source-review-v1", "titles": {}}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            found = json.load(handle)
+    except (OSError, ValueError) as error:
+        raise StageError(f"refresh: {path} is not readable source-review-v1 JSON ({error})") from None
+    if found.get("schema") != "source-review-v1" or not isinstance(found.get("titles"), dict):
+        raise StageError(f"refresh: {path} is not a source-review-v1 artifact")
+    return found
+
+
+def approved_keys(ctx):
+    """Validated, explicitly operator-approved review keys. Empty means no replacement permission."""
+    if not ctx.approved_source_keys:
+        return set()
+    out = set()
+    try:
+        with open(ctx.approved_source_keys, encoding="utf-8") as handle:
+            for number, line in enumerate(handle, 1):
+                key = line.strip()
+                if not key:
+                    continue
+                media, separator, ident = key.partition(":")
+                if separator != ":" or media not in ("movie", "tv") or not (ident.isascii() and ident.isdigit()):
+                    raise StageError(f"refresh: {ctx.approved_source_keys}:{number} is not a "
+                                     f"mediaType:tmdbId key: {key[:80]!r}")
+                out.add(key)
+    except OSError as error:
+        raise StageError(f"refresh: cannot read approved source keys {ctx.approved_source_keys} ({error})") from None
+    return out
+
+
+def plot_summary(record):
+    """Review evidence with no Wikipedia prose."""
+    text = record.get("overview") if record.get("hasWikiPlot") else None
+    digest = (hashlib.sha256(text.encode("utf-8")).hexdigest()
+              if isinstance(text, str) else record.get("plotSha256"))
+    return {
+        "article": record.get("plotArticle"),
+        "language": (record.get("plotLanguage") or "en") if record.get("hasWikiPlot") else None,
+        "revision": record.get("plotRevId"),
+        "plotSha256": digest,
+    }
 
 
 def base(record):
@@ -238,8 +285,20 @@ def stamp(now=None):
 
 
 def run(ctx, cache=None, ask=wikipedia.revisions, now=None):
-    """Survey, and unless `ctx.plan`, re-fetch what changed. Returns the report."""
+    """Survey, and unless `ctx.plan`, re-fetch what changed. Returns the report.
+
+    A bounded run takes the first stable key-ordered stale slice. A candidate whose plot/article differs
+    is quarantined in the durable prose-free review artifact: the canonical enriched row, its judgements
+    and its vector stay one coherent set. An unchanged reviewed revision is not fetched again.
+    """
     enriched = ctx.require(artifacts.ENRICHED)
+    review_path = ctx.path(artifacts.SOURCE_REVIEW)
+    review = read_review(review_path)
+    approved = approved_keys(ctx)
+    unknown_approvals = sorted(approved - set(review["titles"]))
+    if unknown_approvals:
+        raise StageError(f"refresh: approved source keys are not in {review_path}: {unknown_approvals[:5]}. "
+                         "A revision observation is not replacement permission; review it first.")
     cache = wikipedia.cache_for() if cache is None else cache
     try:
         surveyed, requests = survey(latest(enriched), cache, ask)
@@ -247,6 +306,21 @@ def run(ctx, cache=None, ask=wikipedia.revisions, now=None):
         raise StageError(f"refresh: asking Wikipedia for the current revisions failed ({error}). Nothing "
                          f"was fetched or written; run it again.") from None
     report = counts(surveyed, requests)
+    detected = report["toFetch"]
+    # A numeric revision is a stable observation, as is GONE when a previously revisioned page has no
+    # current identity. UNKNOWN + None proves neither: an unrevisioned canonical row and an inconclusive
+    # lookup must remain retryable rather than being quarantined forever after one transient failure.
+    awaiting = {key for key, (verdict, _record, _backfill, current) in surveyed.items()
+                if verdict != UNCHANGED and (isinstance(current, int) or verdict == GONE)
+                and (review["titles"].get(key) or {}).get("observedRevision") == current}
+    pending = [(key, record) for key, (verdict, record, _backfill, _current) in surveyed.items()
+               if verdict != UNCHANGED and (key not in awaiting or key in approved)]
+    pending.sort(key=lambda item: (item[0] not in approved, item[0]))
+    all_stale = [record for _key, record in pending]
+    limit = ctx.refresh_limit
+    stale = all_stale if limit is None else all_stale[:limit]
+    report.update(detected=detected, awaitingReview=len(awaiting), toFetch=len(all_stale),
+                  selected=len(stale), remaining=len(all_stale) - len(stale))
     if ctx.plan:
         print(json.dumps(dict(report, plan=True), sort_keys=True), flush=True)
         return report
@@ -256,9 +330,9 @@ def run(ctx, cache=None, ask=wikipedia.revisions, now=None):
     lists = {name: os.path.join(run_dir, f"{name}.txt") for name in ("changed", "plotless")}
     for path in lists.values():
         open(path, "w", encoding="utf-8").close()
-    report.update(changed=0, revised=0, plotless=0, deferred=0, recorded=0, batches=[], candidateFailures=[])
+    report.update(changed=0, revised=0, plotless=0, deferred=0, recorded=0, reviewQueued=0, approved=0,
+                  batches=[], candidateFailures=[])
 
-    stale = [record for verdict, record, _b in surveyed.values() if verdict != UNCHANGED]
     for start in range(0, len(stale), BATCH):
         chunk = stale[start:start + BATCH]
         rows, listed = [], {"changed": [], "plotless": []}
@@ -283,9 +357,31 @@ def run(ctx, cache=None, ask=wikipedia.revisions, now=None):
             report[outcome] += 1
             if outcome == "deferred":
                 continue
-            rows.append(record)
             if outcome in listed:
                 listed[outcome].append(label)
+                if label in approved:
+                    rows.append(record)
+                    review["titles"].pop(label, None)
+                    report["approved"] += 1
+                    continue
+                old = surveyed[label][1]
+                before, candidate = plot_summary(old), plot_summary(record)
+                reasons = (["lostPlot"] if outcome == "plotless" else
+                           (["article"] if (before["article"], before["language"]) !=
+                            (candidate["article"], candidate["language"]) else []) +
+                           (["plot"] if before["plotSha256"] != candidate["plotSha256"] else []))
+                review["titles"][label] = {
+                    "reasons": reasons,
+                    "observedRevision": surveyed[label][3],
+                    "before": before,
+                    "candidate": candidate,
+                }
+                report["reviewQueued"] += 1
+                continue
+            # Same canonical plot and article: advancing the recorded revision cannot desynchronise the
+            # plot from its existing judgements/vector, and clears an older review if the source reverted.
+            rows.append(record)
+            review["titles"].pop(label, None)
         for name, keys in listed.items():
             append(lists[name], keys)
         if rows:
@@ -293,11 +389,13 @@ def run(ctx, cache=None, ask=wikipedia.revisions, now=None):
         print(f"  refresh: {min(start + BATCH, len(stale))} of {len(stale)} re-fetched", file=sys.stderr)
 
     backfilled = [enrich.written(dict(record, plotRevId=revision))
-                  for _v, record, revision in surveyed.values() if revision is not None]
+                  for _v, record, revision, _current in surveyed.values() if revision is not None]
     for start in range(0, len(backfilled), BATCH):
         report["batches"].append(os.path.basename(write_batch(ctx.out_dir, backfilled[start:start + BATCH])))
     report["recorded"] = len(backfilled)
     report["run"] = run_dir
+    review["count"] = len(review["titles"])
+    caching.write_atomically(review_path, (json.dumps(review, indent=1, sort_keys=True) + "\n").encode("utf-8"))
     caching.write_atomically(os.path.join(run_dir, "report.json"),
                              (json.dumps(report, indent=1, sort_keys=True) + "\n").encode("utf-8"))
     print(json.dumps(report, sort_keys=True), flush=True)

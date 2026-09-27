@@ -8,9 +8,8 @@ it as the job does, on two days:
   * **day one** — `den run` into an empty out-dir, then `den stage publish --plan`: every gate the publisher
     runs, nothing signed or uploaded. The manifest it leaves is "published": copied to `published/`, where
     the next day's change set and gates read the live dataset from.
-  * **day two** — one film's plot is rewritten upstream. `den run --refresh` re-reads it, the change set
-    names it, and the stages after redo it and nothing else; the gates run again, now against the live
-    manifest, so the record-count and store-identity guards compare two generations.
+  * **day two** — one film's plot is rewritten upstream. The bounded weekly review observes it but keeps
+    the old plot, judgements and vector coherent; no inference or embedding worklist names it.
   * **day two, from the release** — the same day again, in an out-dir that holds only the bundle day one's
     publish put beside the dataset (`pipeline/published.py`): no plots, no shards, no answers. It has to
     build the same corpus and the same store, since that is how the job runs — it keeps nothing between runs.
@@ -63,10 +62,12 @@ class DenDaily(fixture.DenRun):
         page = cls.upstreams.pages["en"][LEDGER]
         page["revid"] += 1
         page["wikitext"] = page["wikitext"].replace("rows to the mainland", "sails to the mainland")
-        cls.day_two_code, cls.day_two_said = cls.den(den, "daily", "--out-dir", cls.out, "--mode", "export")
+        cls.day_two_code, cls.day_two_said = cls.den(
+            den, "daily", "--out-dir", cls.out, "--mode", "export", "--revisit-weeks", "8")
         cls.day_two = cls.snapshot()
         cls.check_two = cls.check()
-        cls.seeded_code, cls.seeded_said = cls.den(den, "daily", "--out-dir", cls.seeded, "--mode", "export")
+        cls.seeded_code, cls.seeded_said = cls.den(
+            den, "daily", "--out-dir", cls.seeded, "--mode", "export", "--revisit-weeks", "8")
         cls.facts_refusal = cls.den(den, "stage", "facts", *common, "--dataset-version", fixture.GIVEN_VERSION)
 
     @classmethod
@@ -167,13 +168,15 @@ class DenDaily(fixture.DenRun):
     def test_the_report_names_what_moved_and_what_was_skipped(self):
         report = self.report()
         self.assertEqual(report["baseline"]["datasetVersion"], self.day_one["version"])
-        self.assertEqual((report["added"], report["changed"]), ([], {EDITED: ["plot"]}))
+        self.assertEqual((report["added"], report["changed"]), ([], {}))
+        self.assertEqual(report["sourceReview"]["count"], 1)
+        self.assertEqual((report["refresh"]["reviewQueued"], report["refresh"]["approved"]), (1, 0))
         self.assertEqual(report["datasetVersion"], self.day_two["version"])
         self.assertEqual([s["stage"] for s in report["skipped"]], ["classify", "critique", "genres_moods (ask)"])
         self.assertEqual(report["spend"], {"inputTokens": 0, "usd": 0.0})
         with open(os.path.join(self.out, "daily-report.md"), encoding="utf-8") as fh:
             summary = fh.read()
-        self.assertIn(f"{EDITED} (plot)", summary)
+        self.assertIn("source candidates awaiting explicit review: 1", summary)
         self.assertIn("Not ready", summary)
 
     def test_the_delta_ids_are_written_by_the_documented_rule(self):
@@ -183,15 +186,18 @@ class DenDaily(fixture.DenRun):
         self.assertFalse(ids & self.labels())
         self.assertIn("tv:900006", ids, "the premise-only title with no plot vector")
 
-    def test_the_change_set_is_the_edit(self):
+    def test_the_source_edit_is_review_only_and_absent_from_every_inference_worklist(self):
         plan = self.plan()
         self.assertEqual(plan["baseline"]["datasetVersion"], self.day_one["version"])
-        self.assertEqual((plan["added"], plan["changed"], plan["withdrawn"]), ([], {EDITED: ["plot"]}, {}))
+        self.assertEqual((plan["added"], plan["changed"], plan["withdrawn"]), ([], {}, {}))
+        for name in ("keys.txt", "new.txt"):
+            with open(os.path.join(self.out, "changes", name), encoding="utf-8") as fh:
+                self.assertNotIn(EDITED, fh.read().split())
 
-    def test_only_the_changed_title_is_embedded_again(self):
+    def test_the_reviewed_title_is_not_embedded_again(self):
         again = self.day_two["embedded"][len(self.day_one["embedded"]):]
         self.assertEqual(self.day_two["embedded"][:len(self.day_one["embedded"])], self.day_one["embedded"])
-        self.assertEqual(again, [EDITED])
+        self.assertEqual(again, [])
 
     # ---- the same day, from the release ------------------------------------------------------------------
 
@@ -208,7 +214,7 @@ class DenDaily(fixture.DenRun):
         self.assertEqual((meta["datasetVersion"], meta.get("storeSha256")),
                          (self.day_two["version"], self.day_two["storeSha256"]))
         self.assertEqual(self.seeded_code, self.day_two_code)
-        for artifact in (artifacts.FRANCHISE_DECISIONS, artifacts.FRANCHISES):
+        for artifact in (artifacts.FRANCHISE_DECISIONS, artifacts.FRANCHISES, artifacts.SOURCE_REVIEW):
             with open(os.path.join(self.seeded, artifact.filename), encoding="utf-8") as fh:
                 seeded = json.load(fh)
             with open(os.path.join(self.out, artifact.filename), encoding="utf-8") as fh:
@@ -217,7 +223,7 @@ class DenDaily(fixture.DenRun):
 
     def test_the_seed_carries_no_plot(self):
         """The bundle is published beside the dataset, so what it lays out holds a plot's digest, never its
-        text: the edited title's plot is in the seeded out-dir only because day two fetched it again."""
+        text: day two may fetch an edited candidate for review, but never makes it canonical."""
         with open(enrich_batch(self.seeded, self.day_one_batch()), encoding="utf-8") as fh:
             seeded = json.load(fh)
         self.assertTrue(seeded)
@@ -229,9 +235,9 @@ class DenDaily(fixture.DenRun):
         with open(os.path.join(self.seeded, artifacts.PUBLISHED_META.filename), encoding="utf-8") as fh:
             return json.load(fh)["maxBatchId"]
 
-    def test_a_new_generation_is_built(self):
-        self.assertNotEqual(self.day_two["version"], self.day_one["version"])
-        self.assertNotEqual(self.day_two["storeSha256"], self.day_one["storeSha256"])
+    def test_review_only_source_drift_does_not_move_the_generation(self):
+        self.assertEqual(self.day_two["version"], self.day_one["version"])
+        self.assertEqual(self.day_two["storeSha256"], self.day_one["storeSha256"])
 
 
 if __name__ == "__main__":

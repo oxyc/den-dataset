@@ -54,7 +54,7 @@ INPUTS = (UNIVERSES["movie"], UNIVERSES["tv"])
 #:
 #: And, with `--refresh`, what the refresh re-fetched (`pipeline/refresh.py`). The refresh is this stage's
 #: rather than one of its own because what it writes is more enriched batches, and one stage owns those.
-OUTPUTS = (artifacts.ENRICHED, artifacts.ENRICH_CHECKPOINT, artifacts.REFRESH)
+OUTPUTS = (artifacts.ENRICHED, artifacts.ENRICH_CHECKPOINT, artifacts.REFRESH, artifacts.SOURCE_REVIEW)
 
 #: Ids per batch — the size `enrich-all.sh` drained a full run at. The batch is the unit of resume: the
 #: checkpoint is written once per batch, so a smaller one buys only more checkpoint writes and a larger one
@@ -212,7 +212,8 @@ def check_outputs(ctx):
     splits the batches from the state that says which ids they cover, and the next run then re-enriches
     everything the missing checkpoint no longer accounts for.
     """
-    for entry in (bind(e) for e in OUTPUTS if ctx.refresh or e is not artifacts.REFRESH):
+    optional_refresh = (artifacts.REFRESH, artifacts.SOURCE_REVIEW)
+    for entry in (bind(e) for e in OUTPUTS if ctx.refresh or e not in optional_refresh):
         path = ctx.path(entry.artifact)
         if not os.path.exists(path):
             raise StageError(f"fetch: the run finished and wrote no {entry.name} at {path}. An empty "

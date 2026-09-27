@@ -76,6 +76,9 @@ BUNDLE = (
     # provider rows are deliberately not in this bundle.
     ("franchise-decisions-v1.json", "franchise-decisions-v1.json", False),
     ("franchises.json", "franchises.json", False),
+    # Optional for the first generation after source review became durable. Hashes and revisions only: a
+    # fetched candidate's prose is deliberately not in the published bundle.
+    ("source-review.json", "source-review.json", False),
 )
 
 #: The bundle's own record: the generation and each file's digest.

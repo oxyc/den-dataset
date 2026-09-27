@@ -40,8 +40,9 @@ have torn: past that it is a corrupt store, and truncating it would destroy hour
 live queries rather than the vectors coming back from a different one. It needs no service.
 
 **A re-embed appends a superseding row; it never rewrites one.** Resume skips every key the stores hold,
-so a title whose document changed (new genres & moods, a new plot) keeps its old vector unless it is asked
-for: `--reembed-keys FILE` (one `mediaType:tmdbId` per line), the change set's `keys.txt`, which is read
+so a title whose document changed keeps its old vector unless it is asked for: `--reembed-keys FILE` (one
+`mediaType:tmdbId` per line), the change set's `keys.txt` (new, newly plot-bearing, or explicitly approved
+source corrections only), which is read
 without being named (`pipeline/changes.py`), or `--reembed-changed` (every title whose document differs
 from the one its vector was made from). The new row goes at the end of both stores and
 `finalize` ships the LAST row per key (`finalize_test`'s `test_the_newest_record_per_title_ships_with_its_
@@ -392,8 +393,8 @@ def run(ctx):
     os.makedirs(os.path.abspath(ctx.out_dir), exist_ok=True)
     labels, enriched, doc_facts, translations = inputs(ctx)
     listed = listed_keys(ctx.reembed_keys) if ctx.reembed_keys else set()
-    # The change set's titles are a re-embed list the daily run does not have to be handed: a title whose
-    # plot moved is re-embedded, and one it names that the stores lack is embedded as any new title is.
+    # The change set's titles are the coherent re-embed list the daily run does not have to be handed: new,
+    # newly plot-bearing, or explicitly approved source replacements. Observation alone never lists one.
     listed |= changes.listed(ctx, "keys")
     unlabelled = listed - labels.keys()
     if unlabelled:

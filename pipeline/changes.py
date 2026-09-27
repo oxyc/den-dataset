@@ -55,10 +55,11 @@ job always has one: it downloads `dataset.meta.json` from the `data-latest` rele
 What it writes, under `changes/`, rewritten whole every run:
 
   * `plan.json`     — the baseline, the counts, and every listed title with its reasons;
-  * `keys.txt`      — added and changed: the titles every later stage runs for, but the paid ones;
-  * `new.txt`       — the titles with no classify or critique rows, which the paid passes buy for: added,
-    gained a plot, or regained one after a tombstone took their rows. A changed plot keeps the rows it has
-    — a decision about spend, not a claim that they still fit;
+  * `keys.txt`      — titles that need a model artifact and vector: added, gained a plot, or regained one
+    after a tombstone took its rows. An existing title's source-text drift is deliberately not here;
+  * `new.txt`       — the same automatic model worklist. The paid passes consume only this list;
+  * `review.txt`    — existing titles whose plot text or article moved. Source drift is evidence to review,
+    not permission to replace a model judgement or vector;
   * `withdrawn.txt` — what `consolidate_corpus.py withdraw` takes;
   * `items.txt`     — the changed titles answered for by another Wikidata item, whose facts and doc facts are
     asked again (the facts and doc-facts stages evict them from their checkpoints);
@@ -66,6 +67,10 @@ What it writes, under `changes/`, rewritten whole every run:
 
 Keys only. The plan carries no text: an old batch's `overview` is TMDB's prose when `hasWikiPlot` is false,
 so the digest is taken of grounded records only, and never leaves this process.
+
+`--approved-source-keys FILE` is the sole exception for an existing plot/article change. The refresh first
+refuses keys absent from its durable review artifact; after it appends an approved candidate, this stage
+puts that key in both `new.txt` and `keys.txt`, so new prose cannot pair with old judgements or a stale vector.
 """
 import contextlib
 import datetime
@@ -76,7 +81,7 @@ import sys
 
 from lib import cache as caching
 
-from . import artifacts, consolidate_corpus, enrich
+from . import artifacts, consolidate_corpus, enrich, refresh
 from .contract import StageError, how_to_build
 
 NAME = "changes"
@@ -280,25 +285,30 @@ def run(ctx, now=None):
         revisit = [key for key in sorted(current, key=order)
                    if key not in listed and in_slice(key, ctx.revisit_weeks, week(today))]
 
-    keys = sorted(set(added) | set(changed), key=order)
+    approved = refresh.approved_keys(ctx) & set(changed)
+    required = ({key for key, why in changed.items() if any(reason in (GAINED, REGAINED) for reason in why)}
+                | approved)
+    review = {key for key, why in changed.items() if any(reason in (PLOT, ARTICLE) for reason in why)}
+    keys = sorted(set(added) | required, key=order)
     plan = {
         "baseline": {"datasetVersion": live[0], "maxBatchId": live[1]} if live else None,
         "throughBatch": numbers[-1],
         "counts": {"titles": len(current), "added": len(added), "changed": len(changed),
                    "withdrawn": len(withdrawn), "tombstoned": len(tombstoned), "withdrawnBefore": len(again),
                    "revised": revised, "unchanged": unchanged,
-                   "keys": len(keys), "revisit": len(revisit)},
+                   "keys": len(keys), "approved": len(approved), "review": len(review - approved),
+                   "revisit": len(revisit)},
         "revisit": ({"weeks": ctx.revisit_weeks, "slice": week(today) % ctx.revisit_weeks,
                      "date": today.isoformat()} if ctx.revisit_weeks else None),
         "added": added,
         "changed": changed,
         "withdrawn": withdrawn,
+        "approved": sorted(approved, key=order),
     }
     write_list(os.path.join(directory, "keys.txt"), keys)
     write_list(os.path.join(directory, "withdrawn.txt"), list(withdrawn))
-    write_list(os.path.join(directory, "new.txt"),
-               sorted(set(added) | {key for key, why in changed.items() if why[0] in (GAINED, REGAINED)},
-                      key=order))
+    write_list(os.path.join(directory, "new.txt"), keys)
+    write_list(os.path.join(directory, "review.txt"), sorted(review - approved, key=order))
     write_list(os.path.join(directory, "items.txt"), [key for key, why in changed.items() if ITEM in why])
     stale = os.path.join(directory, "revisit.txt")
     if ctx.revisit_weeks:
@@ -329,7 +339,7 @@ def planned(ctx):
 
 
 #: The lists a later stage can ask for, by the file each is written to.
-LISTS = ("keys", "new", "withdrawn", "items", "revisit")
+LISTS = ("keys", "new", "review", "withdrawn", "items", "revisit")
 
 
 def listed(ctx, *names):

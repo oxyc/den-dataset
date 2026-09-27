@@ -21,6 +21,7 @@ NOW = datetime.datetime(2026, 9, 24, 3, 23, tzinfo=datetime.timezone.utc)
 
 def args(out, **kwargs):
     return argparse.Namespace(**dict({"out_dir": out, "mode": "export", "since": None, "revisit_weeks": None,
+                                      "refresh_limit": daily.REFRESH_LIMIT, "approved_source_keys": "",
                                       "spend": False}, **kwargs))
 
 
@@ -32,6 +33,7 @@ class Recorded(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.out = self.directory.name
         self.calls = []
+        self.refresh_limits = []
         self.plan = {"baseline": {"datasetVersion": "live", "maxBatchId": 1}, "counts": {"added": 1},
                      "added": ["movie:1"], "changed": {}, "withdrawn": {}, "revisit": None}
         self.check_refuses = False
@@ -42,7 +44,8 @@ class Recorded(unittest.TestCase):
             stub = mock.patch.object(daily, name, (lambda *a: 0) if name == "write_delta_ids" else (lambda c: c))
             stub.start()
             self.addCleanup(stub.stop)
-        refresh = mock.patch.object(daily.refresh, "run", lambda ctx: self.calls.append(("refresh",)) or {})
+        refresh = mock.patch.object(daily.refresh, "run", lambda ctx: (
+            self.refresh_limits.append(ctx.refresh_limit), self.calls.append(("refresh",)))[1] or {})
         refresh.start()
         self.addCleanup(refresh.stop)
 
@@ -72,17 +75,18 @@ class Skips(Recorded):
     def test_with_no_credential_every_stage_that_needs_none_runs_and_the_rest_are_named(self):
         code, report = self.day(mode="delta")
         self.assertEqual(code, 0)
-        self.assertEqual(self.ran(), ["refresh", "changes", "articles", "genres_moods", "docfacts", "plot_length", "finalize",
+        self.assertEqual(self.ran(), ["changes", "articles", "genres_moods", "docfacts", "plot_length", "finalize",
                                       "facts", "franchises", "corpus", "store", "publish"])
         self.assertEqual([s["stage"] for s in report["skipped"]],
                          ["worklist", "fetch", "classify", "critique", "genres_moods (ask)", "embed"])
         self.assertTrue(report["ready"])
+        self.assertEqual(self.refresh_limits, [], "an ordinary day never lets old source drift starve new titles")
 
     def test_with_every_credential_and_spend_every_stage_runs_and_the_paid_ones_buy(self):
         env = {"TMDB_API_KEY": "t", "TYPESAFE_API_KEY": "j", "DEN_EMBED_URL": "http://embed.invalid"}
         self.day(env, spend=True)
         # No universe was written by the recorded worklist, so the fetch is its refresh alone.
-        self.assertEqual(self.ran(), ["worklist", "refresh", *STAGES[STAGES.index("changes"):]])
+        self.assertEqual(self.ran(), ["worklist", *STAGES[STAGES.index("changes"):]])
         spent = {name for name, spend, _plan in (c for c in self.calls if len(c) == 3) if spend}
         self.assertEqual(spent, {"classify", "critique", "genres_moods"})
         self.assertEqual([c for c in self.calls if c[0] == "publish"], [("publish", False, True)],
@@ -120,6 +124,17 @@ class Skips(Recorded):
         with mock.patch.object(daily, "load", stage):
             self.day({"TMDB_API_KEY": "t"}, mode=None, revisit_weeks=8)
         self.assertEqual(modes, ["catalogue"])
+
+    def test_the_weekly_run_bounds_the_source_review_backfill(self):
+        self.day(mode=None, revisit_weeks=8)
+        self.assertEqual(self.refresh_limits, [daily.REFRESH_LIMIT])
+
+
+class Arguments(unittest.TestCase):
+    def test_refresh_limit_must_be_positive(self):
+        self.assertEqual(daily.positive("1"), 1)
+        with self.assertRaisesRegex(argparse.ArgumentTypeError, "at least 1"):
+            daily.positive("0")
 
 
 class Refusals(Recorded):

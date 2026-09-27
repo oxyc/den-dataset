@@ -108,7 +108,10 @@ class Rules(unittest.TestCase):
                                            "movie:5": ["item"]})
         self.assertEqual(plan["withdrawn"], {"movie:7": "lostPlot"})
         self.assertEqual((plan["counts"]["revised"], plan["counts"]["unchanged"]), (1, 0))
-        self.assertEqual(out.read("keys.txt"), [f"movie:{n}" for n in (1, 2, 3, 4, 5)])
+        self.assertEqual(out.read("keys.txt"), ["movie:4"])
+        self.assertEqual(out.read("review.txt"), ["movie:1", "movie:2", "movie:3"])
+        self.assertEqual(out.read("items.txt"), ["movie:5"])
+        self.assertEqual((plan["counts"]["keys"], plan["counts"]["review"]), (1, 3))
         self.assertEqual(out.read("withdrawn.txt"), ["movie:7"])
         self.assertEqual(out.read("new.txt"), ["movie:4"], "a changed plot is not bought again; a gained one is new")
 
@@ -363,20 +366,22 @@ class OnTheFixtureCorpus(unittest.TestCase):
         plan = self.plan()
         self.assertEqual(plan["baseline"]["datasetVersion"], "fixture-live")
         self.assertEqual(plan["added"], ["tv:900001", "tv:900005"])
-        self.assertEqual(plan["changed"], {"movie:900001": ["plot"]})
+        self.assertEqual(plan["changed"], {}, "a candidate source rewrite did not replace the canonical plot")
         self.assertEqual((plan["withdrawn"], plan["counts"]["revised"]), ({}, 1))
         with open(os.path.join(self.out, "changes", "keys.txt"), encoding="utf-8") as fh:
-            self.assertEqual(fh.read().split(), ["movie:900001", "tv:900001", "tv:900005"])
+            self.assertEqual(fh.read().split(), ["tv:900001", "tv:900005"])
+        with open(os.path.join(self.out, artifacts.SOURCE_REVIEW.filename), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["titles"]["movie:900001"]["reasons"], ["plot"])
 
         # Published again; then the film's article loses its plot section altogether.
         self.publish_through_now()
         self.edit("The Lighthouse Ledger", ledger.split("== Plot ==")[0] + "== Production ==\nSix weeks.\n")
         self.den("stage", "fetch", "--refresh")
         plan = self.plan()
-        self.assertEqual((plan["added"], plan["changed"]), ([], {}))
-        self.assertEqual(plan["withdrawn"], {"movie:900001": "lostPlot"})
-        with open(os.path.join(self.out, artifacts.WITHDRAWN.filename), encoding="utf-8") as fh:
-            self.assertEqual([json.loads(line)["tmdbId"] for line in fh], [900001])
+        self.assertEqual((plan["added"], plan["changed"], plan["withdrawn"]), ([], {}, {}))
+        with open(os.path.join(self.out, artifacts.SOURCE_REVIEW.filename), encoding="utf-8") as fh:
+            review = json.load(fh)
+        self.assertEqual(review["titles"]["movie:900001"]["reasons"], ["lostPlot"])
 
 
 if __name__ == "__main__":

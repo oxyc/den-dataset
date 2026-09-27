@@ -48,6 +48,8 @@ def generation(out):
           '{"schema":1,"decisions":{"movie:1":{"candidates":["Q1"]}}}')
     write(os.path.join(out, artifacts.FRANCHISES.filename),
           '{"schema":2,"titles":{"movie:1":{"primary":"Q1"}}}')
+    write(os.path.join(out, artifacts.SOURCE_REVIEW.filename),
+          '{"schema":"source-review-v1","count":1,"titles":{"movie:1":{"observedRevision":8}}}')
     write(os.path.join(out, artifacts.VECTOR_LABELS.filename),
           json.dumps({"records": [{"tmdbId": 1, "mediaType": "movie", "genres": ["drama"]}]}))
     vector_blob.write(os.path.join(out, artifacts.VECTORS.filename), ["movie:1"], bytes([1, 255, 128]), 3)
@@ -100,6 +102,12 @@ class Published(unittest.TestCase):
         self.assertEqual(json.loads(self.read(artifacts.FRANCHISES.filename))["schema"], 2)
         self.assertNotIn("franchise-states", self.record["files"])
         self.assertFalse(any(name.startswith("franchise-answers") for name in self.record["files"]))
+
+    def test_source_review_survives_a_stateless_day_without_candidate_prose(self):
+        published.seed(self.fresh)
+        review = json.loads(self.read(artifacts.SOURCE_REVIEW.filename))
+        self.assertEqual(review["titles"]["movie:1"]["observedRevision"], 8)
+        self.assertNotIn("overview", json.dumps(review))
 
     def test_the_seeded_batch_is_each_title_with_a_source_and_no_plot(self):
         published.seed(self.fresh)

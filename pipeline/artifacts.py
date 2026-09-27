@@ -236,14 +236,23 @@ ENRICH_CHECKPOINT = Artifact(
     required=False,
 )
 
-#: What each `fetch --refresh` found, one directory per run named by its UTC start: `changed.txt` (titles
-#: whose plot text is different now — what `embed --reembed-keys` and a supersede classify run take),
-#: `plotless.txt` (titles that lost their plot — what `consolidate_corpus.py withdraw --keys` takes) and
-#: `report.json`. A directory per run rather than one file, so a second refresh cannot overwrite the lists
-#: of a first one nothing has consumed yet. See `pipeline/refresh.py`.
+#: What each `fetch --refresh` observed, one directory per run named by its UTC start: `changed.txt`,
+#: `plotless.txt` and `report.json`. These are inspection records, never automatic model/embed worklists;
+#: differing candidates stay out of enriched batches and accumulate in SOURCE_REVIEW.
 REFRESH = Artifact(
     name="refresh",
     filename="refresh",
+    dedicated=False,
+    required=False,
+)
+
+#: Prose-free review state for Wikipedia candidates that differ from the coherent plot + judgements +
+#: vector set currently published. It travels in the stateless daily bundle so an unchanged candidate is
+#: not fetched again every week. Approval is explicit; merely observing source drift never replaces the
+#: canonical plot or triggers inference.
+SOURCE_REVIEW = Artifact(
+    name="source_review",
+    filename="source-review.json",
     dedicated=False,
     required=False,
 )
@@ -505,6 +514,7 @@ RELEASE = Artifact(
 CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COMBINED,
              COMBINED_MANIFEST, CHANGED_ARTICLES, GENRES_MOODS_ANSWERS, GENRES_MOODS_ANSWERS_MANIFEST,
              GENRES_MOODS, DELTA, DELTA_MANIFEST, STRUCTURAL, WITHDRAWN, ENRICHED, ENRICH_CHECKPOINT, REFRESH,
+             SOURCE_REVIEW,
              PUBLISHED_META, PUBLISHED_CORPUS,
              PUBLISHED_GENRES_MOODS, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
              EMBEDDER, EMBEDDING_SPACE, PLOT_LENGTH_TRANSFORM, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,

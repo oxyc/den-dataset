@@ -3,15 +3,15 @@
 ending at "ready to publish" (oxyc/den-dataset#27).
 
     ./den daily --out-dir DIR [--mode delta|catalogue|export] [--since YYYY-MM-DD]
-                [--revisit-weeks N] [--spend]
+                [--revisit-weeks N] [--refresh-limit N] [--approved-source-keys FILE] [--spend]
 
 It is the stages in `STAGES` order with the choices a scheduled run has to make written down once, here,
 rather than in a workflow file: which stages a missing credential skips, what it refuses to buy, and what it
 reports. `.github/workflows/daily.yml` runs this and nothing else, and `den_daily_test.py` runs it over the
 fixture corpus, so the job CI proves is the job that is scheduled.
 
-**What a day is.** New titles from TMDB's delta (`worklist`, TMDB's key), enriched with every grounded
-title's changed article re-read (`fetch --refresh`); the change set since the live dataset (`changes`,
+**What a day is.** New titles from TMDB's delta (`worklist`, TMDB's key), then the change set since the
+live dataset (`changes`,
 against `published/dataset.meta.json`, which the caller downloads); the stages after it over that set; and
 every publish gate (`publish --plan`). Nothing is signed or uploaded: the signing key is the owner's, and
 `docs/OPERATE.md` says how the result is published.
@@ -22,7 +22,7 @@ the out-dir first (`pipeline/published.py`).
 
 **What a missing credential skips**, each named in the report so a skipped stage is never a quiet one:
 
-  * no `TMDB_API_KEY` — no delta worklist: no new titles are discovered; the refresh still runs;
+  * no `TMDB_API_KEY` — no delta worklist: no new titles are discovered;
   * no `--spend` or no `TYPESAFE_API_KEY` — the classify and critique passes, and the genres & moods ask.
     A changed title then keeps its old rows, and a new one has none; the report says which;
   * no `DEN_EMBED_URL` — the embed pass. Any den-embed will do whose canary answers match
@@ -40,6 +40,7 @@ the out-dir first (`pipeline/published.py`).
 rule: the titles the live facts file carries, and the ids the list already names, less the titles the new
 labels carry. An id added to the list by hand stays until it has a vector.
 """
+import argparse
 import dataclasses
 import datetime
 import json
@@ -59,8 +60,20 @@ SUMMARY = "daily-report.md"
 #: How far back a delta worklist looks when no `--since` is given. The delta skips what the out-dir already
 #: labels, so looking back further than a day costs little and a day the job did not run is not lost.
 DAYS_BACK = 7
+#: A hosted run gets six hours. The first revision-aware day measured 18,938 stale rows: refresh took two
+#: hours, then its 7,424 real changes were still embedding four hours later when GitHub killed the job.
+#: Five thousand stale rows is a conservative weekly inspection slice. Exact revision updates and durable
+#: review observations make the next stateless weekly run advance without replacing unapproved prose.
+REFRESH_LIMIT = 5_000
 
 PAID = ("classify", "critique")
+
+
+def positive(value):
+    value = int(value)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return value
 
 
 def when(now=None):
@@ -123,8 +136,12 @@ class Day:
             directory = mode
             overrides = {"universe_movie": os.path.join(out, directory, "universe-movie.json"),
                          "universe_tv": os.path.join(out, directory, "universe-tv.json")}
+        approved = getattr(args, "approved_source_keys", "") or ""
+        weekly = bool(args.revisit_weeks)
         self.ctx = Context(out_dir=out, overrides=overrides, stamp_meta=os.path.join(out, "dataset.meta.json"),
-                           mode=mode, since=since if mode == "delta" else "", refresh=True,
+                           mode=mode, since=since if mode == "delta" else "", refresh=weekly or bool(approved),
+                           refresh_limit=getattr(args, "refresh_limit", REFRESH_LIMIT),
+                           approved_source_keys=approved,
                            revisit_weeks=args.revisit_weeks, spend=False)
         self.skipped, self.ran = [], []
         self.can_buy = bool(args.spend and environ.get("TYPESAFE_API_KEY"))
@@ -186,10 +203,12 @@ def run_day(day):
             universes = [ctx.path(artifacts.UNIVERSE_MOVIE), ctx.path(artifacts.UNIVERSE_TV)]
             if all(os.path.exists(path) for path in universes):
                 day.stage(name)
-            else:
+            elif ctx.refresh:
                 # Nothing to drain: the refresh alone, which is the fetch stage's own rule for it.
                 day.skip(name, "no worklist to drain; every grounded title's article was still re-read")
                 print(json.dumps(refresh.run(ctx), sort_keys=True), file=sys.stderr)
+            else:
+                day.skip(name, "no worklist to drain; source refresh is the bounded weekly review pass")
         elif name == "changes":
             day.stage(name)
             if day.args.spend and changes.planned(ctx) is None:
@@ -243,6 +262,19 @@ def report(day, ready, why, tokens):
     if os.path.exists(ctx.stamp_meta):
         with open(ctx.stamp_meta, encoding="utf-8") as handle:
             meta = json.load(handle)
+    source_review = {}
+    source_review_path = ctx.path(artifacts.SOURCE_REVIEW)
+    if os.path.exists(source_review_path):
+        with open(source_review_path, encoding="utf-8") as handle:
+            source_review = json.load(handle)
+    refresh_report = None
+    refresh_dir = ctx.path(artifacts.REFRESH)
+    if os.path.isdir(refresh_dir):
+        reports = [os.path.join(refresh_dir, name, "report.json") for name in sorted(os.listdir(refresh_dir))]
+        reports = [path for path in reports if os.path.exists(path)]
+        if reports:
+            with open(reports[-1], encoding="utf-8") as handle:
+                refresh_report = json.load(handle)
     rate = 0.042 / 1_000_000  # lib/typesafe_client.TypeSafe.RATE_PER_INPUT_TOKEN, not imported: it is a client
     out = {
         "date": day.now.date().isoformat(), "ready": ready, "verdict": why,
@@ -250,6 +282,7 @@ def report(day, ready, why, tokens):
         "store": {key: meta.get(key) for key in ("storeFile", "storeSha256", "storeBytes", "storeRecords")},
         "counts": plan.get("counts"), "added": plan.get("added", []), "changed": plan.get("changed", {}),
         "withdrawn": plan.get("withdrawn", {}), "revisit": plan.get("revisit"),
+        "sourceReview": {"count": len(source_review.get("titles") or {})}, "refresh": refresh_report,
         "seeded": getattr(day, "seeded", None), "ran": day.ran, "skipped": day.skipped,
         "spend": {"inputTokens": tokens, "usd": round(tokens * rate, 4)},
     }
@@ -259,7 +292,12 @@ def report(day, ready, why, tokens):
              f"**{'Ready to publish' if ready else 'Not ready'}** — {why.splitlines()[0] if why else ''}", "",
              f"- live dataset: {(out['baseline'] or {}).get('datasetVersion') or 'none (a first generation)'}",
              f"- built: {out['datasetVersion']} ({out['store'].get('storeRecords')} rows)",
-             f"- spend: ${out['spend']['usd']:.2f} ({tokens:,} input tokens)", ""]
+             f"- spend: ${out['spend']['usd']:.2f} ({tokens:,} input tokens)",
+             f"- source candidates awaiting explicit review: {out['sourceReview']['count']:,}", ""]
+    if refresh_report:
+        lines += [f"- weekly source review: selected {refresh_report.get('selected', 0):,}, "
+                  f"queued {refresh_report.get('reviewQueued', 0):,}, already awaiting "
+                  f"{refresh_report.get('awaitingReview', 0):,}, remaining {refresh_report.get('remaining', 0):,}", ""]
     counts = out["counts"] or {}
     lines += [f"| added | changed | withdrawn | revised | revisited |", "|---|---|---|---|---|",
               f"| {counts.get('added', 0)} | {counts.get('changed', 0)} | {counts.get('withdrawn', 0)} | "
@@ -300,6 +338,10 @@ def register(commands):
     sub.add_argument("--since", help=f"the delta's window, YYYY-MM-DD (default: {DAYS_BACK} days ago)")
     sub.add_argument("--revisit-weeks", type=int, metavar="N",
                      help="also revisit this week's slice of an N-week cycle (the weekly run)")
+    sub.add_argument("--refresh-limit", type=positive, default=REFRESH_LIMIT, metavar="N",
+                     help=f"re-fetch at most N stale grounded titles this day (default: {REFRESH_LIMIT})")
+    sub.add_argument("--approved-source-keys", metavar="FILE",
+                     help="explicitly approve reviewed source candidates for replacement and model/vector work")
     sub.add_argument("--spend", action="store_true",
                      help="buy the classify, critique and genres & moods answers for what moved "
                           "(needs TYPESAFE_API_KEY and a live baseline)")
