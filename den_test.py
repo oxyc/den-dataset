@@ -284,9 +284,9 @@ class EndToEnd(fixture.StoreFixture, unittest.TestCase):
             overrides = []
             for name, filename in FIXTURE_FILES.items():
                 overrides += ["--set", f"{name}={os.path.join(out, filename)}"]
-            result = den("stage", "store", "--out-dir", out, "--dataset-version", "den", *overrides)
+            result = den("stage", "store", "--out-dir", out, "--dataset-version", "test", *overrides)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue(os.path.isfile(os.path.join(out, "den-den.store")),
+            self.assertTrue(os.path.isfile(os.path.join(out, "den-test.store")),
                             f"no store in {os.listdir(out)}")
             self.assertIn("==> store", result.stderr)
 

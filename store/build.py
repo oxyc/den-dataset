@@ -17,8 +17,8 @@ import json
 import os
 import sys
 
-from . import (aliases, awards, cards, entities, facets, facts, format, identity, labels, makers, scores,
-               studios, vectors)
+from . import (aliases, awards, cards, entities, facets, facts, format, franchises, identity, labels, makers,
+               scores, studios, vectors)
 from .inputs import corpus_rows, labels_by_key, read_json
 
 
@@ -110,6 +110,9 @@ def run(args, inputs, prose_check, provenance_check):
           f"{award_columns.record['applied']} merges in data/award-ceremony-merges.json applied, "
           f"{len(award_columns.record['stale'])} name a ceremony no title does", file=sys.stderr)
 
+    franchise_columns = franchises.Franchises(args.franchises, keys, args.dataset_version)
+    franchise_columns.intern(strings)
+
     ordered_strings = strings.freeze()
     prose_complaint = prose_check(ordered_strings)
     if prose_complaint:
@@ -144,6 +147,7 @@ def run(args, inputs, prose_check, provenance_check):
     makers.put(sec, fact_columns.makers)
     studio_list.put(sec, strings)
     award_columns.put(sec, strings)
+    franchise_columns.put(sec, strings)
 
     plot_hits, plot_rows, premise_hits, premise_rows = vectors.put(
         sec, keys, args, labels_source, premise_labels_source)

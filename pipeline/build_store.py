@@ -79,9 +79,10 @@ from store.inputs import (INPUT_ARGS, build_inputs, input_digest,  # noqa: E402
 #:                which is the id (Wikidata's P345) — an `identifier`.
 SOURCES = {"wikidata", "wikipedia", "llm", "ours", "identifier", "tmdb", "imdb"}
 
-#: Every section, and its source. Asserted at assembly as `set(PROVENANCE) == set(sec.order)`, which
-#: fails in BOTH directions: a new section with no entry here is fatal, and so is an entry for a section
-#: that is no longer written. Listed in the order the writer emits them.
+#: Every section, and its source. Asserted at assembly against the sections actually written; a new
+#: section with no entry here is fatal, and so is a stale required entry. Optional section groups may be
+#: wholly absent for backwards-compatible builds, but may never be partially written. Listed in writer
+#: order.
 PROVENANCE = {
     "keys": "identifier",
     # The dictionary is a container, not a source: each string's provenance is the section that
@@ -167,11 +168,24 @@ PROVENANCE = {
     # P166/P1411, each award filed under its ceremony by Wikidata's own P361/P31/P1027.
     "ceremony_qid": "wikidata", "ceremony_name": "wikidata",
     "award_v": "wikidata", "award_w": "wikidata", "award_o": "wikidata",
+    # The franchise stage's own grouping judgement over Wikidata evidence. IDs/order are bookkeeping;
+    # names and source labels are emitted by that same stage, never fetched from a vendor.
+    "fr_primary": "ours", "fr_id": "ours", "fr_name": "ours", "fr_conf": "ours",
+    "fr_source": "ours", "fr_umb_id": "ours", "fr_umb_name": "ours",
+    "fr_era_id": "ours", "fr_era_name": "ours", "fr_era_order": "ours", "fr_era_o": "ours",
+    "fr_mem_row": "ours", "fr_mem_era": "ours", "fr_mem_order": "ours", "fr_mem_o": "ours",
     # Embeddings of the article's plot text, and of the premise tags a model wrote from it.
     "vec_plot": "wikipedia",
     "vec_premise": "llm",
     "vec_premise_has": "ours", "vec_plot_has": "ours",
 }
+
+CURATED_FRANCHISE_SECTIONS = frozenset({
+    "fr_primary", "fr_id", "fr_name", "fr_conf", "fr_source", "fr_umb_id", "fr_umb_name",
+    "fr_era_id", "fr_era_name", "fr_era_order", "fr_era_o", "fr_mem_row", "fr_mem_era",
+    "fr_mem_order", "fr_mem_o",
+})
+OPTIONAL_PROVENANCE_GROUPS = (CURATED_FRANCHISE_SECTIONS,)
 
 #: The sources that are a vendor's CONTENT. `identifier` is deliberately not one: an id is a join key,
 #: which is the one thing both catalogue licences leave us.
@@ -212,7 +226,7 @@ def check_provenance(names):
     `names` is `sec.order`, so what is checked is what is about to be written rather than what this
     file appears to write.
     """
-    written, declared = set(names), set(PROVENANCE)
+    written, declared = set(names), expected_provenance(names)
     if written != declared:
         undeclared, stale = sorted(written - declared), sorted(declared - written)
         sys.exit(f"provenance: {len(undeclared)} section(s) declare no source ({undeclared}) and "
@@ -232,6 +246,16 @@ def check_provenance(names):
         sys.exit(f"provenance: VENDOR_ALLOWED still permits {sorted(VENDOR_ALLOWED - vendor)}, which no "
                  f"section declares as vendor-sourced. Drop it from the allowlist — a permission for a "
                  f"column that no longer exists makes the remaining list read as longer than it is.")
+
+
+def expected_provenance(names):
+    """The declared section set for this store, allowing an optional group only when wholly absent."""
+    written = set(names)
+    declared = set(PROVENANCE)
+    for group in OPTIONAL_PROVENANCE_GROUPS:
+        if not written.intersection(group):
+            declared.difference_update(group)
+    return declared
 
 
 def prose_in_the_dictionary(ordered):
@@ -271,6 +295,7 @@ def build_parser():
     ap.add_argument("--premise-labels", required=True,
                     help="labels-premise.json — the PREMISE vectors' key set, checked the same way. Its "
                          "genres & moods are a copy of the plot labels and are not read.")
+    ap.add_argument("--franchises", help="franchises.json schema 2; absent writes no curated sections")
     ap.add_argument("--dataset-version", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--stamp-meta",

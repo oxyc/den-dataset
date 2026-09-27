@@ -46,6 +46,7 @@ FIXTURE_FILES = {
     "vector_labels": "plot-labels.json",
     "premise_vectors": "premise.bin",
     "premise_labels": "premise-labels.json",
+    "franchises": "franchises.json",
 }
 
 

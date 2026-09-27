@@ -43,6 +43,7 @@ INPUTS = (
     artifacts.VECTOR_LABELS,
     artifacts.PREMISE_VECTORS,
     artifacts.PREMISE_LABELS,
+    artifacts.FRANCHISES,
 )
 
 OUTPUTS = (artifacts.STORE,)
