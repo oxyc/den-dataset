@@ -252,13 +252,18 @@ when recorded: `pipeline/eval_taxonomy.py out/labels-t02.json --record` after an
 
 ## The daily job
 
-`./den daily --out-dir out` is one day: TMDB's delta worklist, the drain and the refresh, the change set
+`./den daily --out-dir out` is one day: TMDB's delta worklist and drain, the change set
 since the live dataset, the stages after it over what moved, and every publish gate. It ends at "ready to
 publish" and signs and uploads nothing; `out/daily-report.md` says what moved, what was skipped for want of a
 credential, and what was bought. `pipeline/daily.py` is what it runs, skips and refuses. It needs the live
 manifest in `out/published/` (see "The change set") and reads credentials from the environment:
 `TMDB_API_KEY`, `TYPESAFE_API_KEY` with `--spend`, and `DEN_EMBED_URL` — a den-embed whose canary answers match.
 `--revisit-weeks N` is the weekly run.
+
+Neither the daily nor weekly schedule surveys existing Wikipedia prose. New titles are automatic; the
+weekly option revisits cheap facts and doc-facts only. Wikipedia revision/rewording alone therefore never
+authorizes Haiku, Jev or embedding work, and cannot starve the new-title pipeline. A deliberate correction
+to an existing title requires the evidence-bound transaction tracked in den-dataset#145.
 
 `.github/workflows/daily.yml` runs it on a schedule once the repository variable `DEN_DAILY_ENABLED` is
 `true`; its header lists the secrets and variables it reads. A ready run uploads the store, the manifest,
@@ -276,8 +281,7 @@ Every publish uploads the bundle (`publish-dataset.sh` gathers it after the gate
 to the digests the run's check recorded). So what a day bought reaches the next day only by being
 published; an unpublished day's answers are in its `dataset-<run id>` artifact for 14 days and bought again
 by the next run. The first `corpus-<version>` release comes from one day run by hand over the out-dir the
-live dataset was built from — its refresh records every grounded title's revision, and its corpus each
-title's `source` — published as a daily run is:
+live dataset was built from — its corpus records each title's source — published as a daily run is:
 
 ```sh
 gh release download data-latest -p dataset.meta.json -D out-repass/published --clobber
@@ -299,25 +303,19 @@ pipeline/publish-dataset.sh daily-<run id> --checked
 `--checked` refuses unless the store and the manifest are the bytes the run's check passed, compares them
 again with the release as it is now, signs, and uploads — the manifest last.
 
-## The weekly refresh
+## The operator-only source refresh
 
 `./den stage fetch --refresh --out-dir out` drains the worklists as usual, then asks Wikipedia for the current
 revision of every grounded title's article, 50 a request, and re-fetches only the titles whose revision moved,
 whose page is gone, or whose revision is unknown. `--plan` does the asking and reports the counts; it drains
-nothing and fetches nothing. The re-fetched records land in new batches, and `out/refresh/<stamp>/` hands the
-rest of the week's work on. The change set (below) reads the same batches, so a run through `./den stage
-changes` needs neither list by hand: it re-embeds, re-classifies and withdraws what moved. By hand, without
-one:
-
-```sh
-./den stage embed --out-dir out --reembed-keys out/refresh/<stamp>/changed.txt
-pipeline/consolidate_corpus.py withdraw --keys out/refresh/<stamp>/plotless.txt \
-    --reason "lost its plot in the <stamp> refresh" --out out/withdrawn.jsonl
-```
+nothing and fetches nothing. This command is not part of daily or weekly automation. Re-fetched records land
+in new batches for inspection, but `den stage changes` refuses any post-baseline plot bytes or article
+identity change before writing worklists or tombstones: publishing new prose beside old model artifacts is
+incoherent. den-dataset#145 tracks the deliberate correction transaction that will replace this manual gap.
 
 A title whose article was edited outside its plot is in neither list.
 
-The first refresh of an out-dir also records a revision for titles the Enterprise path grounded (it names
+The first operator refresh of an out-dir also records a revision for titles the Enterprise path grounded (it names
 none): where the cached action-API body yields exactly the stored text, that body's revision is recorded;
 the rest count as unknown and are re-fetched once. On out-repass that is ~9,700 recorded and ~7,300 re-fetched.
 
@@ -334,8 +332,9 @@ gh release download data-latest -p dataset.meta.json -D out/published --clobber
 
 Without `out/published/dataset.meta.json` every title is new, which is right for a fresh out-dir and
 wrong for any other: check that `plan.json` names a `baseline`. Without a baseline the stages after it do
-what they always did. With one, classify and critique buy only the new titles (a changed plot keeps its
-rows), embed re-embeds every listed title, facts and doc-facts ask again the titles answered for by another
+what they always did. With one, classify, critique and embed run only for added, gained-plot or
+regained-plot titles. Item changes and the weekly slice refresh only cheap facts/doc-facts; they never
+enter model or vector worklists. Facts and doc-facts ask again the titles answered for by another
 Wikidata item, and the titles that lost their plot are tombstoned in `withdrawn.jsonl`. `--revisit-weeks N` also lists this week's slice of an
 N-week cycle (`revisit.txt`), whose facts and doc facts are asked again, so a weekly run revisits the whole
 corpus once per cycle.

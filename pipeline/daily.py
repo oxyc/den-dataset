@@ -10,8 +10,8 @@ rather than in a workflow file: which stages a missing credential skips, what it
 reports. `.github/workflows/daily.yml` runs this and nothing else, and `den_daily_test.py` runs it over the
 fixture corpus, so the job CI proves is the job that is scheduled.
 
-**What a day is.** New titles from TMDB's delta (`worklist`, TMDB's key), enriched with every grounded
-title's changed article re-read (`fetch --refresh`); the change set since the live dataset (`changes`,
+**What a day is.** New titles from TMDB's delta (`worklist`, TMDB's key), then the change set since the
+live dataset (`changes`,
 against `published/dataset.meta.json`, which the caller downloads); the stages after it over that set; and
 every publish gate (`publish --plan`). Nothing is signed or uploaded: the signing key is the owner's, and
 `docs/OPERATE.md` says how the result is published.
@@ -22,7 +22,7 @@ the out-dir first (`pipeline/published.py`).
 
 **What a missing credential skips**, each named in the report so a skipped stage is never a quiet one:
 
-  * no `TMDB_API_KEY` — no delta worklist: no new titles are discovered; the refresh still runs;
+  * no `TMDB_API_KEY` — no delta worklist: no new titles are discovered;
   * no `--spend` or no `TYPESAFE_API_KEY` — the classify and critique passes, and the genres & moods ask.
     A changed title then keeps its old rows, and a new one has none; the report says which;
   * no `DEN_EMBED_URL` — the embed pass. Any den-embed will do whose canary answers match
@@ -48,7 +48,7 @@ import sys
 
 from lib import cache as caching
 
-from . import artifacts, changes, finalize, load, published, refresh
+from . import artifacts, changes, finalize, load, published
 from .contract import Context, StageError
 from . import STAGES
 
@@ -59,7 +59,6 @@ SUMMARY = "daily-report.md"
 #: How far back a delta worklist looks when no `--since` is given. The delta skips what the out-dir already
 #: labels, so looking back further than a day costs little and a day the job did not run is not lost.
 DAYS_BACK = 7
-
 PAID = ("classify", "critique")
 
 
@@ -124,7 +123,7 @@ class Day:
             overrides = {"universe_movie": os.path.join(out, directory, "universe-movie.json"),
                          "universe_tv": os.path.join(out, directory, "universe-tv.json")}
         self.ctx = Context(out_dir=out, overrides=overrides, stamp_meta=os.path.join(out, "dataset.meta.json"),
-                           mode=mode, since=since if mode == "delta" else "", refresh=True,
+                           mode=mode, since=since if mode == "delta" else "", refresh=False,
                            revisit_weeks=args.revisit_weeks, spend=False)
         self.skipped, self.ran = [], []
         self.can_buy = bool(args.spend and environ.get("TYPESAFE_API_KEY"))
@@ -187,9 +186,7 @@ def run_day(day):
             if all(os.path.exists(path) for path in universes):
                 day.stage(name)
             else:
-                # Nothing to drain: the refresh alone, which is the fetch stage's own rule for it.
-                day.skip(name, "no worklist to drain; every grounded title's article was still re-read")
-                print(json.dumps(refresh.run(ctx), sort_keys=True), file=sys.stderr)
+                day.skip(name, "no worklist to drain; existing Wikipedia sources are operator-only")
         elif name == "changes":
             day.stage(name)
             if day.args.spend and changes.planned(ctx) is None:

@@ -102,15 +102,18 @@ class Rules(unittest.TestCase):
                 row(5, item="Q2"),                                                 # another Wikidata item
                 row(6, revision=9),                                                # an edit outside the plot
                 row(7, plot=None))                                                 # the plot is gone
-        plan = out.plan()
-        self.assertEqual(plan["changed"], {"movie:1": ["plot"], "movie:2": ["article"],
-                                           "movie:3": ["article"], "movie:4": ["gainedPlot"],
-                                           "movie:5": ["item"]})
-        self.assertEqual(plan["withdrawn"], {"movie:7": "lostPlot"})
-        self.assertEqual((plan["counts"]["revised"], plan["counts"]["unchanged"]), (1, 0))
-        self.assertEqual(out.read("keys.txt"), [f"movie:{n}" for n in (1, 2, 3, 4, 5)])
-        self.assertEqual(out.read("withdrawn.txt"), ["movie:7"])
-        self.assertEqual(out.read("new.txt"), ["movie:4"], "a changed plot is not bought again; a gained one is new")
+        before = changes.snapshot(os.path.join(out.out, "enriched"), through=1)
+        current = changes.snapshot(os.path.join(out.out, "enriched"))
+        _added, changed, withdrawn, revised, unchanged = changes.diff(before, current)
+        self.assertEqual(changed, {"movie:1": ["plot"], "movie:2": ["article"],
+                                   "movie:3": ["article"], "movie:4": ["gainedPlot"],
+                                   "movie:5": ["item"]})
+        self.assertEqual(withdrawn, {"movie:7": "lostPlot"})
+        self.assertEqual((revised, unchanged), (1, 0))
+        with self.assertRaisesRegex(StageError, "source drift canonical"):
+            out.plan()
+        self.assertFalse(os.path.exists(os.path.join(out.out, "changes")),
+                         "refusal happens before worklists or tombstones can make the state look usable")
 
     def tombstones(self, out):
         path = os.path.join(out.out, artifacts.WITHDRAWN.filename)
@@ -210,15 +213,28 @@ class Rules(unittest.TestCase):
         out = Batches(self)
         out.publish(out.add(seeded, dict(seeded, tmdbId=2)))
         out.add(row(1), row(2, plot="Something else."))
-        self.assertEqual(out.plan()["changed"], {"movie:2": ["plot"]})
+        before = changes.snapshot(os.path.join(out.out, "enriched"), through=1)
+        current = changes.snapshot(os.path.join(out.out, "enriched"))
+        self.assertEqual(changes.diff(before, current)[1], {"movie:2": ["plot"]})
+        with self.assertRaisesRegex(StageError, "source drift canonical"):
+            out.plan()
 
     def test_the_plan_names_keys_and_carries_no_text(self):
         out = Batches(self)
         out.publish(out.add(row(1, plot="A secret plot sentence.")))
-        out.add(row(1, plot="Another secret plot sentence."))
+        out.add(row(1, plot="A secret plot sentence.", item="Q2"))
         out.plan()
         with open(os.path.join(out.out, "changes", "plan.json"), encoding="utf-8") as fh:
             self.assertNotIn("secret plot sentence", fh.read())
+
+    def test_an_item_change_refreshes_only_cheap_facts(self):
+        out = Batches(self)
+        out.publish(out.add(row(1)))
+        out.add(row(1, item="Q2"))
+        plan = out.plan()
+        self.assertEqual(plan["changed"], {"movie:1": ["item"]})
+        self.assertEqual((out.read("keys.txt"), out.read("new.txt")), ([], []))
+        self.assertEqual(out.read("items.txt"), ["movie:1"])
 
     def test_a_manifest_that_names_no_batch_is_refused(self):
         out = Batches(self)
@@ -263,7 +279,7 @@ class WeeklySlice(unittest.TestCase):
     def test_the_slice_leaves_out_what_is_already_listed(self):
         out = Batches(self)
         out.publish(out.add(*(row(n) for n in range(1, 41))))
-        out.add(row(1, plot="rewritten"))
+        out.add(row(1, item="Q2"))
         slices = []
         for days in (0, 7):
             with contextlib.redirect_stdout(io.StringIO()):
@@ -360,23 +376,14 @@ class OnTheFixtureCorpus(unittest.TestCase):
         self.edit("The Lighthouse Ledger", ledger.replace("rows to the mainland", "sails to the mainland"))
         self.edit("Le Jardin d'hiver", language="fr")
         self.den("stage", "fetch", "--refresh")
-        plan = self.plan()
-        self.assertEqual(plan["baseline"]["datasetVersion"], "fixture-live")
-        self.assertEqual(plan["added"], ["tv:900001", "tv:900005"])
-        self.assertEqual(plan["changed"], {"movie:900001": ["plot"]})
-        self.assertEqual((plan["withdrawn"], plan["counts"]["revised"]), ({}, 1))
-        with open(os.path.join(self.out, "changes", "keys.txt"), encoding="utf-8") as fh:
-            self.assertEqual(fh.read().split(), ["movie:900001", "tv:900001", "tv:900005"])
-
-        # Published again; then the film's article loses its plot section altogether.
-        self.publish_through_now()
-        self.edit("The Lighthouse Ledger", ledger.split("== Plot ==")[0] + "== Production ==\nSix weeks.\n")
-        self.den("stage", "fetch", "--refresh")
-        plan = self.plan()
-        self.assertEqual((plan["added"], plan["changed"]), ([], {}))
-        self.assertEqual(plan["withdrawn"], {"movie:900001": "lostPlot"})
-        with open(os.path.join(self.out, artifacts.WITHDRAWN.filename), encoding="utf-8") as fh:
-            self.assertEqual([json.loads(line)["tmdbId"] for line in fh], [900001])
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said), contextlib.redirect_stdout(said):
+            code = self.den_module.main(["stage", "changes", "--out-dir", self.out])
+        self.assertEqual(code, 1)
+        self.assertIn("source drift canonical", said.getvalue())
+        self.assertIn("#145", said.getvalue())
+        self.assertFalse(os.path.exists(os.path.join(self.out, artifacts.WITHDRAWN.filename)),
+                         "the refusal precedes tombstones as well as model/vector worklists")
 
 
 if __name__ == "__main__":

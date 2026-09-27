@@ -42,9 +42,6 @@ class Recorded(unittest.TestCase):
             stub = mock.patch.object(daily, name, (lambda *a: 0) if name == "write_delta_ids" else (lambda c: c))
             stub.start()
             self.addCleanup(stub.stop)
-        refresh = mock.patch.object(daily.refresh, "run", lambda ctx: self.calls.append(("refresh",)) or {})
-        refresh.start()
-        self.addCleanup(refresh.stop)
 
     def stage(self, name):
         def run(ctx):
@@ -72,7 +69,7 @@ class Skips(Recorded):
     def test_with_no_credential_every_stage_that_needs_none_runs_and_the_rest_are_named(self):
         code, report = self.day(mode="delta")
         self.assertEqual(code, 0)
-        self.assertEqual(self.ran(), ["refresh", "changes", "articles", "genres_moods", "docfacts", "plot_length", "finalize",
+        self.assertEqual(self.ran(), ["changes", "articles", "genres_moods", "docfacts", "plot_length", "finalize",
                                       "facts", "franchises", "corpus", "store", "publish"])
         self.assertEqual([s["stage"] for s in report["skipped"]],
                          ["worklist", "fetch", "classify", "critique", "genres_moods (ask)", "embed"])
@@ -82,7 +79,7 @@ class Skips(Recorded):
         env = {"TMDB_API_KEY": "t", "TYPESAFE_API_KEY": "j", "DEN_EMBED_URL": "http://embed.invalid"}
         self.day(env, spend=True)
         # No universe was written by the recorded worklist, so the fetch is its refresh alone.
-        self.assertEqual(self.ran(), ["worklist", "refresh", *STAGES[STAGES.index("changes"):]])
+        self.assertEqual(self.ran(), ["worklist", *STAGES[STAGES.index("changes"):]])
         spent = {name for name, spend, _plan in (c for c in self.calls if len(c) == 3) if spend}
         self.assertEqual(spent, {"classify", "critique", "genres_moods"})
         self.assertEqual([c for c in self.calls if c[0] == "publish"], [("publish", False, True)],
@@ -120,6 +117,10 @@ class Skips(Recorded):
         with mock.patch.object(daily, "load", stage):
             self.day({"TMDB_API_KEY": "t"}, mode=None, revisit_weeks=8)
         self.assertEqual(modes, ["catalogue"])
+
+    def test_the_weekly_run_does_not_refresh_existing_wikipedia_sources(self):
+        self.day(mode=None, revisit_weeks=8)
+        self.assertNotIn(("refresh",), self.calls)
 
 
 class Refusals(Recorded):

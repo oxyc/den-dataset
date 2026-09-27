@@ -55,10 +55,10 @@ job always has one: it downloads `dataset.meta.json` from the `data-latest` rele
 What it writes, under `changes/`, rewritten whole every run:
 
   * `plan.json`     — the baseline, the counts, and every listed title with its reasons;
-  * `keys.txt`      — added and changed: the titles every later stage runs for, but the paid ones;
+  * `keys.txt`      — added, gained-plot and regained-plot titles for model/vector stages;
   * `new.txt`       — the titles with no classify or critique rows, which the paid passes buy for: added,
-    gained a plot, or regained one after a tombstone took their rows. A changed plot keeps the rows it has
-    — a decision about spend, not a claim that they still fit;
+    gained a plot, or regained one after a tombstone took their rows. Existing plot/article drift is
+    refused before any list is written;
   * `withdrawn.txt` — what `consolidate_corpus.py withdraw` takes;
   * `items.txt`     — the changed titles answered for by another Wikidata item, whose facts and doc facts are
     asked again (the facts and doc-facts stages evict them from their checkpoints);
@@ -66,6 +66,10 @@ What it writes, under `changes/`, rewritten whole every run:
 
 Keys only. The plan carries no text: an old batch's `overview` is TMDB's prose when `hasWikiPlot` is false,
 so the digest is taken of grounded records only, and never leaves this process.
+
+An existing title whose grounded plot bytes or article identity changed after the live baseline is refused.
+The automatic pipeline never refreshes existing Wikipedia prose; seeing such a batch means an operator path
+already made new prose canonical without the transactional artifact regeneration tracked in #145.
 """
 import contextlib
 import datetime
@@ -258,6 +262,12 @@ def run(ctx, now=None):
     current = snapshot(enriched)
     before = snapshot(enriched, through=live[1]) if live else {}
     added, changed, withdrawn, revised, unchanged = diff(before, current)
+    unexplained = {key: why for key, why in changed.items()
+                   if any(reason in (PLOT, ARTICLE) for reason in why)}
+    if live and unexplained:
+        raise StageError(f"changes: post-baseline batches already made Wikipedia source drift canonical for "
+                         f"{list(sorted(unexplained, key=order))[:5]}; restore the live canonical rows. "
+                         "Existing source prose requires the evidence-bound correction transaction in #145.")
     directory = ctx.path(artifacts.CHANGES)
     os.makedirs(directory, exist_ok=True)
     listed_before = set(changed)
@@ -280,7 +290,8 @@ def run(ctx, now=None):
         revisit = [key for key in sorted(current, key=order)
                    if key not in listed and in_slice(key, ctx.revisit_weeks, week(today))]
 
-    keys = sorted(set(added) | set(changed), key=order)
+    model_keys = {key for key, why in changed.items() if why[0] in (GAINED, REGAINED)}
+    keys = sorted(set(added) | model_keys, key=order)
     plan = {
         "baseline": {"datasetVersion": live[0], "maxBatchId": live[1]} if live else None,
         "throughBatch": numbers[-1],
@@ -296,9 +307,7 @@ def run(ctx, now=None):
     }
     write_list(os.path.join(directory, "keys.txt"), keys)
     write_list(os.path.join(directory, "withdrawn.txt"), list(withdrawn))
-    write_list(os.path.join(directory, "new.txt"),
-               sorted(set(added) | {key for key, why in changed.items() if why[0] in (GAINED, REGAINED)},
-                      key=order))
+    write_list(os.path.join(directory, "new.txt"), keys)
     write_list(os.path.join(directory, "items.txt"), [key for key, why in changed.items() if ITEM in why])
     stale = os.path.join(directory, "revisit.txt")
     if ctx.revisit_weeks:
