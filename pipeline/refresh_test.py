@@ -274,6 +274,14 @@ class Run(Refresh):
                 self.refreshed()
         self.assertEqual(self.listing(), ["batch-1.json"])
 
+    def test_candidate_queries_are_chunked_below_the_wdqs_limit(self):
+        records = [grounded(number, PLOT, 1) for number in range(refresh.CANDIDATE_BATCH + 1)]
+        replacement = lambda record, _facts, _cache, _token: ("noPlot", dict(record, hasWikiPlot=False), None)
+        with mock.patch.object(enrich, "reground", side_effect=replacement):
+            refresh.refetch(records, self.cache)
+        self.assertEqual([len(ids) for ids, _excluded in self.candidate_calls],
+                         [refresh.CANDIDATE_BATCH, 1])
+
     def test_an_unanswered_revision_check_writes_nothing(self):
         def down(titles, language="en"):
             raise http.HTTPError(0, "en.wikipedia.org")
