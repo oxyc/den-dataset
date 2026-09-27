@@ -66,6 +66,18 @@ HEADING = "Franchise candidates (from Wikidata)"
 WIKIDATA, JEV = "wikidata", "jev-franchise-v1"
 #: An answer at or above this is taken; under it the title is left without a franchise.
 TAKE = 0.5
+#: A group flagged as a possible catalogue needs a clear verdict across its own members. Per-title
+#: borderline choices otherwise turn exactly the thematic companion sets this flag exists for into a
+#: franchise (the completed corpus pass exposed the Three Flavours Cornetto trilogy at 0.51--0.77).
+CATALOGUE_TAKE = 0.8
+#: ``separate adaptation`` is an era boundary, not a membership vote. Jev tends to call every film based
+#: on a different novel a separate adaptation at about 0.5, splitting a continuing film series title by
+#: title. Reserve that boundary for a clear answer.
+SEPARATE_TAKE = 0.75
+#: A source-only candidate plus a clear separate-adaptation answer is weak franchise evidence. Require a
+#: correspondingly clear group choice; this leaves a loose relocation such as The Laughing Policeman out,
+#: while a confidently recognised reboot remains a separate era.
+SEPARATE_SOURCE_TAKE = 0.85
 
 SECTION = f"the `{HEADING}` section"
 EVIDENCE = ("Judge the requested work (film or series) from the supplied article lead and what is widely known "
@@ -394,6 +406,18 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
     counts = collections.Counter(automatic=len(automatic))
     one = collections.defaultdict(list)
     separate = set()
+    catalogue_votes = collections.defaultdict(list)
+    for key, listed in asked.items():
+        if key not in answers:
+            continue
+        got, answered_with = answers[key]
+        if listed != answered_with:
+            continue
+        for index, gid in enumerate(listed):
+            if isinstance(gid, str) and flagged.get(gid) == "catalogue" and key in groups[gid].members:
+                letter = fg.LETTERS[index]
+                catalogue_votes[gid].append(got["fr__group"]["probabilities"][letter])
+    catalogue_support = {gid: sum(votes) / len(votes) for gid, votes in catalogue_votes.items()}
     for key in sorted(asked):
         if key not in answers:
             counts["not answered"] += 1
@@ -409,6 +433,15 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
             continue
         chosen = listed[fg.LETTERS.index(letter)]
         gid = f"characters:{min(chosen[1])}" if isinstance(chosen, tuple) else chosen
+        separate_vote = got["fr__separate_adaptation"]["noul"]
+        if isinstance(chosen, str) and flagged.get(gid) == "catalogue" \
+                and catalogue_support.get(gid, 0.0) < CATALOGUE_TAKE:
+            counts["no franchise"] += 1
+            continue
+        if isinstance(chosen, str) and groups[gid].kind == "book-series" \
+                and separate_vote >= SEPARATE_TAKE and choice["confidence"] < SEPARATE_SOURCE_TAKE:
+            counts["no franchise"] += 1
+            continue
         if isinstance(chosen, tuple) and gid not in groups:
             groups[gid] = fg.Group(gid, "characters", titles[min(chosen[1], key=lambda k: fg.order_key(titles[k]))].name,
                                    chosen[1])
@@ -423,7 +456,7 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
         for other in listed:
             if not isinstance(other, tuple) and other != chosen:
                 one[frozenset((gid, other))].append(got["fr__one_franchise"]["noul"])
-        if got["fr__separate_adaptation"]["noul"] >= TAKE:
+        if separate_vote >= SEPARATE_TAKE:
             separate.add(key)
     # Groups the titles listing both say are one franchise are merged, the bigger one absorbing the other.
     merged, merge_confidence = {}, {}
@@ -436,6 +469,10 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
     for pair, votes in sorted(one.items(), key=lambda kv: sorted(kv[0])):
         agreement = sum(votes) / len(votes)
         if agreement < TAKE:
+            continue
+        # A shared universe is useful title metadata, never a primary-franchise merge. Otherwise a 0.5-ish
+        # answer from a crossover collapses Thor, Iron Man and every other MCU story into one row.
+        if any(flagged.get(gid) == "universe" for gid in pair):
             continue
         a, b = sorted((top(g) for g in pair), key=lambda g: (-len(groups[g].members), g))
         if a != b:
@@ -458,6 +495,9 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
             era = gid
         else:
             era = era_of.get(key) or fg.era(key, groups[root], groups)
+            if era is None and titles[key].media == "tv" \
+                    and any(titles[member].media == "movie" for member in groups[root].members):
+                era = f"adaptation:{key}"
         entry = out.setdefault(root, {"name": names.get(root) or groups[root].name, "source": WIKIDATA,
                                       "confidence": 1.0, "umbrellaOf": {}, "members": {}})
         if source.get(gid) == JEV:

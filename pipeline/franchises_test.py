@@ -45,6 +45,13 @@ GOLDEN = {
 }
 
 
+def decision(choice="A", confidence=0.9, probability=0.9, one=0.1, separate=0.1):
+    return {"fr__group": {"type": "choice", "choice": choice, "confidence": confidence,
+                           "probabilities": {choice: probability}},
+            "fr__one_franchise": {"type": "noul", "noul": one},
+            "fr__separate_adaptation": {"type": "noul", "noul": separate}}
+
+
 class Jev:
     """The provider: a title whose candidates name a studio answers `none`; every other title takes group A
     and says the listed groups are one franchise."""
@@ -187,6 +194,21 @@ class Stage(unittest.TestCase):
         self.run_stage()
         self.assertEqual(self.derived(), expected)
 
+    def test_character_candidates_have_one_canonical_durable_shape(self):
+        row = {"answers": {
+                   "fr__group": {"type": "choice", "choice": "none", "confidence": 0.9,
+                                  "probabilities": {"A": 0.01, "B": 0.01, "C": 0.01, "D": 0.01,
+                                                    "none": 0.94, "other": 0.01,
+                                                    "not-stated": 0.01}},
+                   "fr__one_franchise": {"type": "noul", "noul": 0.1},
+                   "fr__separate_adaptation": {"type": "noul", "noul": 0.1}},
+               "calls": [{"responseModel": franchises.PINNED_MODEL,
+                           "inputTokens": 123, "outputTokens": 4}]}
+        made = franchises.decisions.from_paid_row(
+            "movie:1", row, [("characters", ("movie:1", "tv:2"))])
+        self.assertEqual(made["candidates"], [["characters", ["movie:1", "tv:2"]]])
+        self.assertEqual(json.loads(json.dumps(made)), made)
+
     def test_keys_select_an_exact_pilot_and_plan_reports_its_measured_cost(self):
         keys = self.keys_file("movie:1", "movie:3")
         self.run_stage(spend=True, keys=keys)
@@ -217,6 +239,50 @@ class Stage(unittest.TestCase):
         self.assertEqual(title_rows["movie:2"], {"primary": "Qprimary"})
         self.assertNotIn("umbrella", doc["Qprimary"])
         self.assertEqual(doc["Qprimary"]["confidence"], 0.89)
+
+    def test_a_flagged_catalogue_needs_clear_support_across_its_members(self):
+        titles = {f"movie:{i}": franchises.fg.Title(f"movie:{i}", f"Part {i}", 2000 + i)
+                  for i in range(1, 4)}
+        groups = {"Qtheme": franchises.fg.Group("Qtheme", "series", "Theme trilogy", titles)}
+        asked = {key: ["Qtheme"] for key in titles}
+        answers = {key: (decision(confidence=0.7, probability=0.7), ["Qtheme"]) for key in titles}
+        got, counts = franchises.resolve(titles, groups, {"Qtheme": "catalogue"}, {}, asked, answers, {})
+        self.assertEqual(got, {})
+        self.assertEqual(counts["no franchise"], 3)
+
+    def test_a_shared_universe_is_never_merged_into_a_primary_franchise(self):
+        titles = {"movie:1": franchises.fg.Title("movie:1", "Iron", 2008),
+                  "movie:2": franchises.fg.Title("movie:2", "Thunder", 2011)}
+        groups = {"Quniverse": franchises.fg.Group("Quniverse", "franchise", "Universe", titles),
+                  "Qstory": franchises.fg.Group("Qstory", "series", "Thunder", ["movie:2"])}
+        asked = {"movie:1": ["Quniverse"], "movie:2": ["Quniverse", "Qstory"]}
+        answers = {"movie:1": (decision(), ["Quniverse"]),
+                   "movie:2": (decision(choice="B", one=0.99), ["Quniverse", "Qstory"])}
+        got, _ = franchises.resolve(titles, groups, {"Quniverse": "universe"}, {}, asked, answers, {})
+        self.assertEqual(got["Quniverse"]["members"], {"movie:1": None})
+        self.assertEqual(got["Qstory"]["members"], {"movie:2": None})
+        self.assertEqual(got["Qstory"]["umbrellaOf"], {"movie:2": "Quniverse"})
+
+    def test_an_uncertain_source_only_separate_adaptation_is_left_out(self):
+        titles = {"movie:1": franchises.fg.Title("movie:1", "Loose relocation", 1973),
+                  "movie:2": franchises.fg.Title("movie:2", "Recognised reboot", 2011)}
+        groups = {"Qbooks": franchises.fg.Group("Qbooks", "book-series", "The books", titles)}
+        asked = {key: ["Qbooks"] for key in titles}
+        answers = {"movie:1": (decision(confidence=0.8, separate=0.9), ["Qbooks"]),
+                   "movie:2": (decision(confidence=0.9, separate=0.9), ["Qbooks"])}
+        got, counts = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
+        self.assertEqual(got["Qbooks"]["members"], {"movie:2": "adaptation:movie:2"})
+        self.assertEqual(counts["no franchise"], 1)
+
+    def test_a_tv_title_in_a_mixed_group_gets_its_own_era(self):
+        titles = {"movie:1": franchises.fg.Title("movie:1", "The film", 2000),
+                  "tv:2": franchises.fg.Title("tv:2", "The series", 2001)}
+        groups = {"Qmixed": franchises.fg.Group("Qmixed", "franchise", "Mixed", titles)}
+        got, _ = franchises.resolve(titles, groups, {},
+                                    {"movie:1": ("Qmixed", None), "tv:2": ("Qmixed", None)},
+                                    {}, {}, {})
+        self.assertEqual(got["Qmixed"]["members"],
+                         {"movie:1": None, "tv:2": "adaptation:tv:2"})
 
     def test_below_a_floor_nothing_is_written(self):
         self.golden({**GOLDEN, "apart": [["movie:5", "movie:7"]]})

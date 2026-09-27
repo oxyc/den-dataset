@@ -19,6 +19,24 @@ The top-level `usage` totals the rows and records exact spend at the pinned Jev 
 raw answer is audited in full before it can enter this file. On later days its candidates must still equal
 the current candidates or the decision is set aside.
 
+## Derivation thresholds
+
+The typed answers are evidence, not an instruction to merge every borderline candidate:
+
+- an ordinary group choice is accepted at `0.5`;
+- a possible catalogue needs average support of `0.8` across its own answered members, preventing a few
+  borderline title-level choices from turning a thematic companion set into a franchise;
+- a possible shared universe is never merged into a primary franchise (it can be the title's optional
+  umbrella instead);
+- `separate adaptation` makes an era only at `0.75`; when the selected group is a book series, a
+  separate adaptation also needs a `0.85` group choice to join at all;
+- a TV title in a mixed film/TV franchise gets a distinct era when Wikidata supplies no narrower child
+  group.
+
+These thresholds are pinned by the golden controls, including the full corpus-visible Beck group, the
+relocated 1973 *The Laughing Policeman*, the Three Flavours Cornetto trilogy, and MCU primary-versus-
+umbrella titles.
+
 ## Derived franchises schema 2
 
 `franchises.json` is rebuilt from facts plus the durable decisions and held to the franchise golden set.
