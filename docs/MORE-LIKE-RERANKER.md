@@ -86,3 +86,22 @@ without a model and pass a private `jev-more-like-evidence-overrides-v1` file co
 `article`, `language`, `articleRevId`, and the refreshed `plotSections`; identity and revision must match.
 The overrides file hash is part of evidence provenance. Silently sending only the lead, or mixing headings
 from different article text, is not equivalent evidence.
+
+## Compact-card arm
+
+`tools/rulers/more_like_card.py` prices cheaper evidence on the same pairs. A card is a title's premise tags,
+its plot facets under the store's own publication gates, its genres & moods, and its article lead with no
+story sections. It is built once per title. `prepare` takes pairs, blinding, and title/year from a frozen
+story-arm work directory, and it refuses an article whose text differs from the one the story arm sent. The
+questions are the story arm's. The work directory is therefore an ordinary gate plan: `more_like_gate.py
+run` and `score` run it unchanged, and `compare` reports the paired card-minus-story AUC and tokens per call.
+
+```sh
+python3 tools/rulers/more_like_card.py prepare --story-work /private/path/more-like-gate \
+  --articles out-repass/articles.jsonl --premise-tags data/premise-tags-v2.json \
+  --genres-moods out-repass/genres-moods.json --corpus out-repass/corpus-<ver>.jsonl.gz \
+  --work /private/path/more-like-card
+python3 tools/rulers/more_like_card.py compare --card-work /private/path/more-like-card \
+  --card-answers /private/path/card-answers.jsonl --story-work /private/path/more-like-gate \
+  --story-answers /private/path/more-like-gate/answers.jsonl
+```
