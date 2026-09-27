@@ -76,6 +76,9 @@ deterministic fallback remain required. The gate itself measures movies with at 
 it establishes nothing about TV or the long tail.
 
 Older article dumps contain every heading as `sections`, but not the extractor's chosen story headings as
-`plotSections`. `prepare` reconstructs the latter from newest-wins enriched batches, exactly as the paid
-classify path does, and hashes that metadata into the preregistration. It refuses an old dump when
-`--enriched-dir` is omitted; silently sending only the lead is not equivalent evidence.
+`plotSections`. `prepare` reconstructs the latter from the newest retained enriched batch whose article
+and language exactly match the frozen prose, and hashes the metadata and source-batch identity into the
+preregistration. This differs deliberately from classify's newest-wins join: a later grounding may name a
+different article, whose headings cannot describe the old dump. Preparation also refuses a selected
+heading that no longer exists in the dumped revision. Silently sending only the lead, or mixing headings
+from different article text, is not equivalent evidence.

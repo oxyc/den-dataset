@@ -161,7 +161,7 @@ class MoreLikeGateTest(unittest.TestCase):
         with open(os.path.join(enriched, "batch-000.json"), "w", encoding="utf-8") as fh:
             json.dump(batch, fh)
 
-        with self.assertRaisesRegex(SystemExit, "article differs"):
+        with self.assertRaisesRegex(SystemExit, "no retained article/language-matching record"):
             gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6,
                          enriched_dir=enriched)
 

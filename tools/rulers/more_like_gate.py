@@ -12,8 +12,10 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import threading
+from collections import Counter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
@@ -117,12 +119,80 @@ def _work_key(row):
     return f"{row['mediaType']}:{row['tmdbId']}"
 
 
+def attach_matching_evidence(records, directory):
+    """Attach extractor metadata from the newest retained batch for this exact dumped article.
+
+    A frozen article dump can legitimately predate a later grounding change.  `classify` wants the newest
+    enriched row, but a retrospective gate needs the newest historical row whose article AND language match
+    the prose it is about to send.  Mixing headings from the new grounding with old prose is invalid; so is
+    silently ignoring a selected heading that no longer exists in the dumped article revision.
+    """
+    missing = {_work_key(rec) for rec in records if "year" not in rec or "plotSections" not in rec}
+    source_batches = {}
+    if missing:
+        if not directory:
+            raise SystemExit(
+                f"article dump lacks year/plotSections for {len(missing):,} rows; pass --enriched-dir")
+        try:
+            names = os.listdir(directory)
+        except OSError as exc:
+            raise SystemExit(f"cannot read --enriched-dir {directory}: {exc}") from None
+        batches = [(int(match.group(1)), name) for name in names
+                   if (match := re.fullmatch(r"batch-(\d+)\.json", name))]
+        wanted = {key: rec for rec in records if (key := _work_key(rec)) in missing}
+        found = {}
+        for _, name in sorted(batches, reverse=True):
+            with open(os.path.join(directory, name), encoding="utf-8") as fh:
+                batch = json.load(fh)
+            for item in batch:
+                key = f"{item.get('mediaType')}:{item.get('tmdbId')}"
+                rec = wanted.get(key)
+                if rec is None or key in found:
+                    continue
+                if item.get("plotArticle") == rec.get("article") \
+                        and (item.get("plotLanguage") or "en") == (rec.get("language") or "en"):
+                    found[key] = item
+                    source_batches[key] = name
+            if len(found) == len(missing):
+                break
+        absent = missing - set(found)
+        if absent:
+            raise SystemExit(
+                f"--enriched-dir has no retained article/language-matching record for {len(absent):,} rows")
+        for rec in records:
+            if (item := found.get(_work_key(rec))) is not None:
+                if "year" not in rec:
+                    rec["year"] = item.get("year")
+                if "plotSections" not in rec:
+                    rec["plotSections"] = item.get("plotSections") or []
+                rec["extractorArticleRevId"] = item.get("plotRevId")
+
+    for rec in records:
+        selected = Counter(rec.get("plotSections") or ())
+        available = Counter(section["heading"] for section in parse_sections(rec["text"])[1:])
+        if absent := selected - available:
+            raise SystemExit(
+                f"{_work_key(rec)} extractor headings differ from dumped article: {dict(absent)}")
+
+    evidence = {
+        _work_key(rec): {
+            "year": rec.get("year"), "plotSections": rec.get("plotSections") or [],
+            "article": rec.get("article"), "language": rec.get("language") or "en",
+            "articleRevId": rec.get("revId"),
+            "extractorArticleRevId": rec.get("extractorArticleRevId", rec.get("revId")),
+            "enrichedBatch": source_batches.get(_work_key(rec)),
+        }
+        for rec in records
+    }
+    return digest(evidence)
+
+
 def load_articles(path, enriched_dir=None, wanted=None):
     records = [row for row in read_jsonl(path) if wanted is None or _work_key(row) in wanted]
-    # Old article dumps intentionally lack target year and the extractor's plot/story headings.  The paid
-    # classify path backfills them from newest-wins enriched batches; the gate must reconstruct the same
-    # evidence instead of quietly reducing every work to its lead.
-    evidence_metadata_sha = combined.attach_enriched_evidence(records, enriched_dir)
+    # Old article dumps intentionally lack target year and the extractor's plot/story headings.  Recover
+    # those from retained metadata for the exact dumped article, rather than quietly reducing every work
+    # to its lead or mixing in the headings of a newer grounding.
+    evidence_metadata_sha = attach_matching_evidence(records, enriched_dir)
     rows = {}
     for row in records:
         key = _work_key(row)
