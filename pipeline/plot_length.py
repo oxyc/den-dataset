@@ -38,6 +38,9 @@ INPUTS = (
     artifacts.EMBED_VECTORS,
     artifacts.COMPOSITION,
     artifacts.EMBEDDING_SPACE,
+    # Optional. It distinguishes the one pre-transform live generation's stateless seed from a real full
+    # rebuild that has enough old plot prose to fit the first transform.
+    artifacts.PUBLISHED_META,
 )
 OUTPUTS = (artifacts.PLOT_LENGTH_TRANSFORM,)
 
@@ -45,6 +48,7 @@ SCHEMA = 1
 ALGORITHM = "unit-orthogonal-projection-v1"
 FIT_METHOD = "ols-unit-int8-on-ln-english-plot-chars-v1"
 ENCODING = "base64-f32-le"
+PRE_TRANSFORM_BOUNDARY = "pre-transform-baseline"
 
 
 def sha256(path):
@@ -220,6 +224,37 @@ def read(path, composition_path=None, space_path=None):
     return record, hashlib.sha256(blob).hexdigest()
 
 
+def pre_transform_seed(ctx):
+    """The live generation before this artifact existed, when laid out as a prose-free stateless seed.
+
+    A full rebuild may also carry an old published manifest for comparison, but its baseline batch has plot
+    prose. The migration boundary is specifically the seed: plot digests in place of that prose.
+    """
+    meta_path = ctx.path(artifacts.PUBLISHED_META)
+    if not os.path.exists(meta_path):
+        return None
+    try:
+        with open(meta_path, encoding="utf-8") as handle:
+            meta = json.load(handle)
+    except (OSError, ValueError, TypeError):
+        return None  # The change stage owns the manifest readability refusal.
+    if meta.get("plotVectorTransform"):
+        return None
+    through = meta.get("maxBatchId")
+    if not isinstance(through, int) or isinstance(through, bool):
+        return None
+    path = os.path.join(ctx.path(artifacts.ENRICHED), f"batch-{through}.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            rows = json.load(handle)
+    except (OSError, ValueError, TypeError):
+        return None
+    if any(row.get("hasWikiPlot") and isinstance(row.get("plotSha256"), str)
+           and not isinstance(row.get("overview"), str) for row in rows):
+        return {"datasetVersion": meta.get("datasetVersion"), "maxBatchId": through}
+    return None
+
+
 def run(ctx):
     destination = ctx.path(artifacts.PLOT_LENGTH_TRANSFORM)
     composition_path, space_path = ctx.require(artifacts.COMPOSITION), ctx.require(artifacts.EMBEDDING_SPACE)
@@ -229,6 +264,15 @@ def run(ctx):
         read(destination, composition_path, space_path)
         print(f"  plot_length: reusing {destination}", file=os.sys.stderr)
         return destination
+
+    if boundary := pre_transform_seed(ctx):
+        raise StageError(
+            f"plot_length: {PRE_TRANSFORM_BOUNDARY}: live baseline {boundary['datasetVersion']} "
+            f"(batch {boundary['maxBatchId']}) predates plot-length-transform-v1. Its stateless bundle "
+            "correctly carries plot digests, not the old plot prose needed to fit a corpus-wide direction. "
+            "This generation cannot be migrated by an incremental day: run the single combined full rebuild "
+            "tracked in #129 so it creates and bundles index/plot-length-transform-v1.json plus "
+            "vectors-bge-m3.raw.bin, then rerun the no-spend smoke before enabling the schedule.")
 
     labels_path, vectors_path = ctx.require(artifacts.EMBED_LABELS), ctx.require(artifacts.EMBED_VECTORS)
     rows = latest_rows(labels_path, vectors_path)

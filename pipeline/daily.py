@@ -48,7 +48,7 @@ import sys
 
 from lib import cache as caching
 
-from . import artifacts, changes, finalize, load, published
+from . import artifacts, changes, finalize, load, plot_length, published
 from .contract import Context, StageError
 from . import STAGES
 
@@ -241,6 +241,17 @@ def report(day, ready, why, tokens):
         with open(ctx.stamp_meta, encoding="utf-8") as handle:
             meta = json.load(handle)
     rate = 0.042 / 1_000_000  # lib/typesafe_client.TypeSafe.RATE_PER_INPUT_TOKEN, not imported: it is a client
+    boundary = None
+    if plot_length.PRE_TRANSFORM_BOUNDARY in why:
+        baseline = plan.get("baseline") or {}
+        boundary = {
+            "kind": plot_length.PRE_TRANSFORM_BOUNDARY,
+            "blockingStage": "plot_length",
+            "baselineDatasetVersion": baseline.get("datasetVersion") or live_version(ctx),
+            "requiredMigration": ("one combined full rebuild that creates and bundles "
+                                  "index/plot-length-transform-v1.json and vectors-bge-m3.raw.bin"),
+            "afterMigration": "rerun the no-spend smoke before enabling DEN_DAILY_ENABLED",
+        }
     out = {
         "date": day.now.date().isoformat(), "ready": ready, "verdict": why,
         "baseline": plan.get("baseline"), "datasetVersion": meta.get("datasetVersion"),
@@ -248,6 +259,7 @@ def report(day, ready, why, tokens):
         "counts": plan.get("counts"), "added": plan.get("added", []), "changed": plan.get("changed", {}),
         "withdrawn": plan.get("withdrawn", {}), "revisit": plan.get("revisit"),
         "seeded": getattr(day, "seeded", None), "ran": day.ran, "skipped": day.skipped,
+        "migrationBoundary": boundary,
         "spend": {"inputTokens": tokens, "usd": round(tokens * rate, 4)},
     }
     caching.write_atomically(os.path.join(ctx.out_dir, REPORT),
@@ -267,6 +279,10 @@ def report(day, ready, why, tokens):
             lines += [f"**{title}** ({len(keys)}): " + ", ".join(keys[:50]) + (" …" if len(keys) > 50 else ""), ""]
     if day.skipped:
         lines += ["**Skipped**", ""] + [f"- `{s['stage']}` — {s['why']}" for s in day.skipped] + [""]
+    if boundary:
+        lines += ["**Migration boundary**", "", f"- kind: `{boundary['kind']}`",
+                  f"- required: {boundary['requiredMigration']}",
+                  f"- after: {boundary['afterMigration']}", ""]
     caching.write_atomically(os.path.join(ctx.out_dir, SUMMARY), "\n".join(lines).encode("utf-8"))
     return out
 

@@ -277,6 +277,14 @@ the out-dir before anything runs (`pipeline/published.py` lists the bundle and h
 bundle is derived records only — no plot text, no TMDB field — which is why it can be public. The workflow
 refuses without a live manifest or its `corpus-<version>` release: a day never starts from nothing.
 
+There is one explicit migration boundary. The last generation from before
+`index/plot-length-transform-v1.json` carries only plot digests in its stateless seed, so an incremental day
+cannot fit the first corpus-wide direction from a handful of new plots. `plot_length` reports
+`pre-transform-baseline`, names the live version/batch, and stops with a machine-readable
+`daily-report.json.migrationBoundary`; this is not a retryable daily failure. The one combined full rebuild
+tracked in #129 must create and bundle both the transform and `vectors-bge-m3.raw.bin`. Rerun the no-spend
+smoke against that generation before setting `DEN_DAILY_ENABLED=true`.
+
 Every publish uploads the bundle (`publish-dataset.sh` gathers it after the gates, and `--checked` holds it
 to the digests the run's check recorded). So what a day bought reaches the next day only by being
 published; an unpublished day's answers are in its `dataset-<run id>` artifact for 14 days and bought again
