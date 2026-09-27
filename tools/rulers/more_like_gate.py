@@ -12,8 +12,10 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import threading
+from collections import Counter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
@@ -117,16 +119,145 @@ def _work_key(row):
     return f"{row['mediaType']}:{row['tmdbId']}"
 
 
-def load_articles(path):
+LANG_HEADING = re.compile(r"\{\{\s*lang(?:-[^|}]+)?\s*\|[^|{}]+\|([^{}]+)\}\}", re.IGNORECASE)
+
+
+def comparable_heading(heading):
+    """Bridge headings cleaned by Enterprise with old action-API headings that retain wiki emphasis."""
+    while True:
+        replaced = LANG_HEADING.sub(r"\1", heading)
+        if replaced == heading:
+            break
+        heading = replaced
+    return re.sub(r"''+", "", heading).strip().casefold()
+
+
+def load_evidence_overrides(path):
+    if not path:
+        return {}, None
+    with open(path, encoding="utf-8") as fh:
+        blob = json.load(fh)
+    if blob.get("schema") != "jev-more-like-evidence-overrides-v1" \
+            or not isinstance(blob.get("rows"), list):
+        raise ValueError(f"{path}: invalid evidence-override schema")
     rows = {}
-    for row in read_jsonl(path):
+    for row in blob["rows"]:
+        key = row.get("key") if isinstance(row, dict) else None
+        if not isinstance(key, str) or key in rows or not isinstance(row.get("plotSections"), list) \
+                or any(not isinstance(heading, str) for heading in row["plotSections"]):
+            raise ValueError(f"{path}: malformed or duplicate evidence override")
+        rows[key] = row
+    return rows, file_digest(path)
+
+
+def attach_matching_evidence(records, directory, evidence_overrides=None):
+    """Attach extractor metadata from the newest retained batch for this exact dumped article.
+
+    A frozen article dump can legitimately predate a later grounding change.  `classify` wants the newest
+    enriched row, but a retrospective gate needs the newest historical row whose article AND language match
+    the prose it is about to send.  Mixing headings from the new grounding with old prose is invalid; so is
+    silently ignoring a selected heading that no longer exists in the dumped article revision.
+    """
+    missing = {_work_key(rec) for rec in records if "year" not in rec or "plotSections" not in rec}
+    source_batches = {}
+    if missing:
+        if not directory:
+            raise SystemExit(
+                f"article dump lacks year/plotSections for {len(missing):,} rows; pass --enriched-dir")
+        try:
+            names = os.listdir(directory)
+        except OSError as exc:
+            raise SystemExit(f"cannot read --enriched-dir {directory}: {exc}") from None
+        batches = [(int(match.group(1)), name) for name in names
+                   if (match := re.fullmatch(r"batch-(\d+)\.json", name))]
+        wanted = {key: rec for rec in records if (key := _work_key(rec)) in missing}
+        found = {}
+        for _, name in sorted(batches, reverse=True):
+            with open(os.path.join(directory, name), encoding="utf-8") as fh:
+                batch = json.load(fh)
+            for item in batch:
+                key = f"{item.get('mediaType')}:{item.get('tmdbId')}"
+                rec = wanted.get(key)
+                if rec is None or key in found:
+                    continue
+                if item.get("plotArticle") == rec.get("article") \
+                        and (item.get("plotLanguage") or "en") == (rec.get("language") or "en"):
+                    found[key] = item
+                    source_batches[key] = name
+            if len(found) == len(missing):
+                break
+        absent = missing - set(found)
+        if absent:
+            raise SystemExit(
+                f"--enriched-dir has no retained article/language-matching record for {len(absent):,} rows")
+        for rec in records:
+            if (item := found.get(_work_key(rec))) is not None:
+                if "year" not in rec:
+                    rec["year"] = item.get("year")
+                if "plotSections" not in rec:
+                    rec["plotSections"] = item.get("plotSections") or []
+                rec["extractorArticleRevId"] = item.get("plotRevId")
+
+    overrides, overrides_sha = load_evidence_overrides(evidence_overrides)
+    for rec in records:
+        key = _work_key(rec)
+        if (override := overrides.get(key)) is not None:
+            expected = {"article": rec.get("article"), "language": rec.get("language") or "en",
+                        "articleRevId": rec.get("revId")}
+            if any(override.get(field) != value for field, value in expected.items()):
+                raise ValueError(f"{evidence_overrides}: {key} override identity/revision mismatch")
+            rec["extractorPlotSectionsOriginal"] = list(rec.get("plotSections") or ())
+            rec["plotSections"] = list(override["plotSections"])
+            rec["extractorArticleRevId"] = override["articleRevId"]
+            source_batches[key] = f"override:{overrides_sha}"
+
+        original = list(rec.get("plotSections") or ())
+        available = [section["heading"] for section in parse_sections(rec["text"])[1:]]
+        by_comparable = {}
+        for heading in available:
+            by_comparable.setdefault(comparable_heading(heading), []).append(heading)
+        matched, absent = [], []
+        for heading in original:
+            choices = by_comparable.get(comparable_heading(heading)) or []
+            (matched if choices else absent).append(choices.pop(0) if choices else heading)
+        if absent:
+            raise SystemExit(
+                f"{_work_key(rec)} extractor headings differ from dumped article: "
+                f"{dict(Counter(absent))}; pass a revision-matched --evidence-overrides refresh")
+        if matched != original:
+            rec["extractorPlotSectionsOriginal"] = original
+            rec["plotSections"] = matched
+
+    evidence = {
+        _work_key(rec): {
+            "year": rec.get("year"), "plotSections": rec.get("plotSections") or [],
+            "extractorPlotSectionsOriginal": rec.get("extractorPlotSectionsOriginal"),
+            "article": rec.get("article"), "language": rec.get("language") or "en",
+            "articleRevId": rec.get("revId"),
+            "extractorArticleRevId": rec.get("extractorArticleRevId", rec.get("revId")),
+            "enrichedBatch": source_batches.get(_work_key(rec)),
+        }
+        for rec in records
+    }
+    evidence["_overridesSha256"] = overrides_sha
+    return digest(evidence)
+
+
+def load_articles(path, enriched_dir=None, wanted=None, evidence_overrides=None):
+    records = [row for row in read_jsonl(path) if wanted is None or _work_key(row) in wanted]
+    # Old article dumps intentionally lack target year and the extractor's plot/story headings.  Recover
+    # those from retained metadata for the exact dumped article, rather than quietly reducing every work
+    # to its lead or mixing in the headings of a newer grounding.
+    evidence_metadata_sha = attach_matching_evidence(records, enriched_dir, evidence_overrides)
+    rows = {}
+    for row in records:
         key = _work_key(row)
         if key in rows:
             raise ValueError(f"{path}: duplicate article key {key}")
         if not isinstance(row.get("text"), str) or not row["text"].strip():
             raise ValueError(f"{path}: {key} has no article text")
         rows[key] = row
-    return rows
+    return rows, evidence_metadata_sha
 
 
 def evidence(row):
@@ -221,14 +352,17 @@ def build_state(case, articles):
     return state, positive_label
 
 
-def prepare(ruler_path, articles_path, work, sample_size=SAMPLE_SIZE, minimum_population=MIN_POPULATION):
+def prepare(ruler_path, articles_path, work, sample_size=SAMPLE_SIZE, minimum_population=MIN_POPULATION,
+            enriched_dir=None, evidence_overrides=None):
     with open(ruler_path, encoding="utf-8") as fh:
         blob = json.load(fh)
     cases = _chosen(_ruler(blob, minimum_population, require_prior=False), sample_size)
     missing_prior = [case["pairId"] for case in cases if case.get("titleYear") is None]
     if missing_prior:
         raise ValueError(f"ruler lacks fresh title+year prior scores for {len(missing_prior)} selected cases")
-    articles = load_articles(articles_path)
+    wanted = {case[role]["key"] for case in cases for role in ("anchor", "positive", "negative")}
+    articles, evidence_metadata_sha = load_articles(
+        articles_path, enriched_dir, wanted, evidence_overrides)
     qs = questions()
     os.makedirs(work, exist_ok=True)
     rows = []
@@ -246,6 +380,7 @@ def prepare(ruler_path, articles_path, work, sample_size=SAMPLE_SIZE, minimum_po
         "model": MODEL, "sampleMethod": "smallest sha256('den-dataset#132-v1\\0' + pairId)",
         "sampleSize": len(rows), "populationSize": len(blob["cases"]),
         "rulerSha256": file_digest(ruler_path), "articlesSha256": file_digest(articles_path),
+        "evidenceMetadataSha256": evidence_metadata_sha,
         "worklistSha256": worklist_sha, "questionsSha256": digest(qs),
         "questions": {"axes": list(AXES), "verdicts": list(VERDICTS)},
         "primaryScore": "overall Noul; verdict and five component axes are diagnostics only",
@@ -459,6 +594,9 @@ def main(argv=None):
     prep = sub.add_parser("prepare")
     prep.add_argument("--ruler", required=True)
     prep.add_argument("--articles", required=True)
+    prep.add_argument("--enriched-dir", help="newest-wins enriched batches for an older article dump")
+    prep.add_argument("--evidence-overrides",
+                      help="revision-matched no-model extractor refreshes for changed dumped articles")
     prep.add_argument("--work", required=True)
     ask = sub.add_parser("run")
     ask.add_argument("--work", required=True)
@@ -472,7 +610,8 @@ def main(argv=None):
     scoring.add_argument("--answers", required=True)
     args = parser.parse_args(argv)
     if args.command == "prepare":
-        result = prepare(args.ruler, args.articles, args.work)
+        result = prepare(args.ruler, args.articles, args.work, enriched_dir=args.enriched_dir,
+                         evidence_overrides=args.evidence_overrides)
     elif args.command == "run":
         result = run(args.work, args.out, args.spend, max_spend=args.max_spend_usd,
                      workers=args.workers, env_path=args.env)
