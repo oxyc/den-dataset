@@ -268,11 +268,17 @@ class Run(Refresh):
         self.assertEqual(state["nextBatch"], 10)
         self.assertEqual(len(state["processed"]), 5, "nothing else in the checkpoint moves")
 
-    def test_a_wikidata_failure_stops_the_refresh_before_its_chunk_is_written(self):
+    def test_a_wikidata_failure_defers_the_chunk_without_replacing_its_old_rows(self):
         with mock.patch.object(enrich, "candidates", side_effect=http.HTTPError(0, "wdqs")):
-            with self.assertRaises(StageError):
-                self.refreshed()
-        self.assertEqual(self.listing(), ["batch-1.json"])
+            report = self.refreshed()
+        self.assertEqual(self.listing(), ["batch-1.json", "batch-2.json"],
+                         "the independent exact revision backfill can still land")
+        self.assertEqual(report["deferred"], 5)
+        failure = report["candidateFailures"][0]
+        self.assertEqual({key: failure[key] for key in ("from", "to")}, {"from": 0, "to": 5})
+        surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
+        self.assertEqual(refresh.counts(surveyed, 0)["toFetch"], 5,
+                         "the failed candidates stay stale and are asked again next time")
 
     def test_candidate_queries_are_chunked_below_the_wdqs_limit(self):
         records = [grounded(number, PLOT, 1) for number in range(refresh.CANDIDATE_BATCH + 1)]

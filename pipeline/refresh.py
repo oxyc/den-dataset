@@ -256,16 +256,29 @@ def run(ctx, cache=None, ask=wikipedia.revisions, now=None):
     lists = {name: os.path.join(run_dir, f"{name}.txt") for name in ("changed", "plotless")}
     for path in lists.values():
         open(path, "w", encoding="utf-8").close()
-    report.update(changed=0, revised=0, plotless=0, deferred=0, recorded=0, batches=[])
+    report.update(changed=0, revised=0, plotless=0, deferred=0, recorded=0, batches=[], candidateFailures=[])
 
     stale = [record for verdict, record, _b in surveyed.values() if verdict != UNCHANGED]
     for start in range(0, len(stale), BATCH):
+        chunk = stale[start:start + BATCH]
         rows, listed = [], {"changed": [], "plotless": []}
         try:
-            outcomes = refetch(stale[start:start + BATCH], cache)
+            outcomes = refetch(chunk, cache)
         except enrich.Aborted as error:
-            raise StageError(f"{error}. The {len(report['batches'])} batch(es) before it are written and "
-                             f"listed in {run_dir}.") from None
+            # A daily refresh is incremental, and keeping the old rows is the safe answer to an upstream
+            # outage. Abort used to throw away forty minutes of completed chunks on an ephemeral runner;
+            # the next run then started from the same published bundle and repeated every one. Defer this
+            # chunk instead: no replacement row is written, so every title remains stale and is retried on
+            # the next day. The report names the incomplete range and failure rather than calling it done.
+            report["deferred"] += len(chunk)
+            report["candidateFailures"].append({
+                "from": start,
+                "to": start + len(chunk),
+                "error": str(error),
+            })
+            print(f"  refresh: deferred {start + 1}-{start + len(chunk)} of {len(stale)}: {error}",
+                  file=sys.stderr)
+            continue
         for label, outcome, record in outcomes:
             report[outcome] += 1
             if outcome == "deferred":
