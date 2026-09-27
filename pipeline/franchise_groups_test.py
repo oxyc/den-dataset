@@ -63,6 +63,22 @@ class Plan(unittest.TestCase):
         groups = fg.build(titles, {"Qhg": "The Hunger Games"})
         self.assertEqual(fg.flags(groups, titles), {})
 
+    def test_a_thematic_trilogy_with_preceded_by_links_is_still_asked(self):
+        """P155/P156 also links companion works; it does not prove one continuing fictional world."""
+        titles = {
+            "movie:1": fg.Title("movie:1", "Shaun of the Dead", 2004, series=["Qcornetto"],
+                                follows=["movie:2"]),
+            "movie:2": fg.Title("movie:2", "Hot Fuzz", 2007, series=["Qcornetto"],
+                                follows=["movie:1", "movie:3"]),
+            "movie:3": fg.Title("movie:3", "The World's End", 2013, series=["Qcornetto"],
+                                follows=["movie:2"]),
+        }
+        groups = fg.build(titles, {"Qcornetto": "Three Flavours Cornetto trilogy"})
+        self.assertEqual(fg.flags(groups, titles), {"Qcornetto": "catalogue"})
+        automatic, asked = fg.plan(titles, groups)
+        self.assertEqual(automatic, {})
+        self.assertEqual(asked["movie:2"], ["Qcornetto"])
+
     def test_a_shared_universe_of_separate_stories_is_asked_about(self):
         titles = {
             "movie:1": fg.Title("movie:1", "Iron Man", 2008, series=["Qironman", "Qmcu"], characters=["Qtony"]),

@@ -159,16 +159,19 @@ def name_share(group, titles):
 
 
 def shared_evidence(group, titles):
-    """Whether two of the group's titles share a character or a media franchise, or two have a sequel link:
-    what one story leaves and a studio's catalogue does not."""
+    """Whether two titles share a character or a media franchise: evidence of one fictional world.
+
+    P155/P156 is deliberately not enough. Wikidata uses those links for thematic sequences too (the
+    Three Flavours Cornetto films link to one another), so treating a link as story continuity turned the
+    exact thematic trilogy in the golden set into an automatic franchise when the property was backfilled.
+    A low-name-share group with links alone is asked; Jev can distinguish a sequel from a companion work.
+    """
     characters, franchises = collections.Counter(), collections.Counter()
-    linked = 0
     for k in group.members:
         t = titles[k]
         characters.update(set(t.characters))
         franchises.update(set(t.franchises) - {group.id})
-        linked += any(o in group.members for o in t.follows)
-    return linked >= 2 or any(n >= 2 for n in characters.values()) or any(n >= 2 for n in franchises.values())
+    return any(n >= 2 for n in characters.values()) or any(n >= 2 for n in franchises.values())
 
 
 def children(group, groups):
