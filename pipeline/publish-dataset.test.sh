@@ -1073,7 +1073,7 @@ if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
   fi
   teardown
 
-  for tamper in store meta record bundle; do
+  for tamper in store meta corrections record bundle; do
     setup
     write_meta
     publish_baseline
@@ -1085,13 +1085,28 @@ import json, sys
 meta = json.load(open(sys.argv[1])); meta["datasetVersion"] = "bbbbbbbbbbbb"; json.dump(meta, open(sys.argv[1], "w"))
 PY
                 ;;
+        corrections) python3 - "$ARTIFACT" <<'PY'
+import hashlib, json, os, sys
+d = sys.argv[1]
+meta_path, checked_path = os.path.join(d, "dataset.meta.json"), os.path.join(d, "checked.json")
+meta = json.load(open(meta_path))
+meta["sourceCorrections"] = [{"correctionDigestSha256": "0" * 64, "applyBatch": 1,
+                              "proofs": {"vector": "1" * 64},
+                              "nativeArtifacts": {"vector": "2" * 64}}]
+json.dump(meta, open(meta_path, "w"))
+checked = json.load(open(checked_path))
+# Even recomputing the outer manifest digest cannot change which correction map the check witnessed.
+checked["metaSha256"] = hashlib.sha256(open(meta_path, "rb").read()).hexdigest()
+json.dump(checked, open(checked_path, "w"))
+PY
+                ;;
         record) rm "$ARTIFACT/checked.json" ;;
         bundle) printf 'x' >> "$ARTIFACT/bundle/facts.json" ;;
       esac
       if run_checked; then
         bad "--checked published an artifact whose $tamper changed after the check"
       else
-        grep -qE "not the bytes the check passed|no checked.json" "$WORK/err.log" \
+        grep -qE "not the bytes the check passed|no checked.json|sourceCorrections is not" "$WORK/err.log" \
           && ok "--checked refuses an artifact whose $tamper is not what the check passed" \
           || bad "refused, but not for the $tamper: $(tail -3 "$WORK/err.log")"
       fi
