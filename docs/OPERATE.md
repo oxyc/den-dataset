@@ -319,6 +319,49 @@ The first operator refresh of an out-dir also records a revision for titles the 
 none): where the cached action-API body yields exactly the stored text, that body's revision is recorded;
 the rest count as unknown and are re-fetched once. On out-repass that is ~9,700 recorded and ~7,300 re-fetched.
 
+### A reviewed source correction
+
+`pipeline/source_corrections.py` is the deliberately separate transaction for a correction. It calls no
+Wikipedia, model, embedding, or publishing service. In particular, preparing a transaction is not permission to
+apply it, applying it is not permission to spend, and a transaction with missing receipts cannot publish.
+
+Prepare it from four inspected JSON files: the live baseline enriched row, the candidate enriched row, the exact
+candidate article input (the whole row a classify pass will read), and a non-empty review entry:
+
+```sh
+python3 pipeline/source_corrections.py prepare --root out/corrections \
+  --baseline baseline.json --candidate candidate.json \
+  --article-input candidate-article.json --review review.json
+```
+
+The resulting `awaiting` directory freezes all four files. Its evidence names the key, revision,
+article/language identity, plot digest, article-input digest, candidate digest, baseline digest, and review-entry
+digest. An approval is a separately controlled JSON object with `decision: approve`, that exact `key`, `evidence`,
+and `reviewEntrySha256`; extra audit fields such as reviewer and time may be present. Application requires the
+source to be observed again and given as `--observed` plus `--article-input`. If either differs, application writes
+nothing to `enriched/`, leaves the reviewed transaction awaiting, and queues the new bytes as another `awaiting`
+transaction.
+
+```sh
+python3 pipeline/source_corrections.py apply out/corrections/movie-7-… \
+  --enriched-dir out/enriched --approval approval.json \
+  --observed candidate-now.json --article-input candidate-article-now.json
+```
+
+Application writes one reserved numeric batch and moves to `appliedPending`. A retry accepts that batch only when
+its bytes are exact, covering a kill after the batch rename but before the state rename. It never runs the derived
+passes. Each later pass must emit a receipt for `attach-proof` that binds the transaction's key and
+`sourceDigestSha256`; classify, critique, genres/moods, and premise also bind `articleInputSha256`. The composed
+document receipt binds the digests of all four receipts and its exact text, and the vector receipt binds that
+document digest. A lost-plot correction instead requires both a withdrawal receipt and a watcher receipt retaining
+the old article/language, so a regain can become a new review candidate.
+
+`python3 pipeline/source_corrections.py gate TRANSACTION` is read-only and refuses until the exact required set is
+present. `record-published` additionally requires the publisher's returned dataset version, a `maxBatchId` that
+includes the reserved batch, and the gate's exact correction/proof map. Only then does state become `published`.
+The ordinary change-set refusal remains in force for all unexplained post-baseline source batches; this tool does
+not make an old manual refresh canonical merely because its files exist.
+
 ## The change set
 
 `./den stage changes --out-dir out` lists what moved since the live dataset: titles added, changed and
