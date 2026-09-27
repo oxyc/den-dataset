@@ -87,7 +87,7 @@ jobs:
       # gate's rule that a tie fails. Its suite was in no CI step and errored on import, so none of that
       # was checked by anything.
       - name: The ranking metrics
-        run: python3 -m unittest tools/rulers/reco_metrics_test.py tools/rulers/more_like_gate_test.py
+        run: python3 -m unittest tools/rulers/reco_metrics_test.py tools/rulers/more_like_gate_test.py tools/rulers/more_like_prior_test.py
       # Appending a premise generation run to the committed `data/premise-tags-v2.json`: the repairs apply,
       # a key already there is refused, and the file's metadata and formatting survive.
       - name: The premise tags merge
