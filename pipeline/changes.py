@@ -285,10 +285,13 @@ def run(ctx, now=None):
         revisit = [key for key in sorted(current, key=order)
                    if key not in listed and in_slice(key, ctx.revisit_weeks, week(today))]
 
-    approved = refresh.approved_keys(ctx) & set(changed)
+    requested_approvals = refresh.approved_keys(ctx)
+    approved = requested_approvals & set(changed)
     required = ({key for key, why in changed.items() if any(reason in (GAINED, REGAINED) for reason in why)}
                 | approved)
-    review = {key for key, why in changed.items() if any(reason in (PLOT, ARTICLE) for reason in why)}
+    # Quarantined candidates intentionally never enter an enriched batch, so `changed` cannot name them.
+    # The durable review artifact is the authority for the operator-visible queue.
+    review = refresh.review_keys(ctx.path(artifacts.SOURCE_REVIEW)) - requested_approvals
     keys = sorted(set(added) | required, key=order)
     plan = {
         "baseline": {"datasetVersion": live[0], "maxBatchId": live[1]} if live else None,
@@ -296,7 +299,7 @@ def run(ctx, now=None):
         "counts": {"titles": len(current), "added": len(added), "changed": len(changed),
                    "withdrawn": len(withdrawn), "tombstoned": len(tombstoned), "withdrawnBefore": len(again),
                    "revised": revised, "unchanged": unchanged,
-                   "keys": len(keys), "approved": len(approved), "review": len(review - approved),
+                   "keys": len(keys), "approved": len(approved), "review": len(review),
                    "revisit": len(revisit)},
         "revisit": ({"weeks": ctx.revisit_weeks, "slice": week(today) % ctx.revisit_weeks,
                      "date": today.isoformat()} if ctx.revisit_weeks else None),
@@ -308,7 +311,7 @@ def run(ctx, now=None):
     write_list(os.path.join(directory, "keys.txt"), keys)
     write_list(os.path.join(directory, "withdrawn.txt"), list(withdrawn))
     write_list(os.path.join(directory, "new.txt"), keys)
-    write_list(os.path.join(directory, "review.txt"), sorted(review - approved, key=order))
+    write_list(os.path.join(directory, "review.txt"), sorted(review, key=order))
     write_list(os.path.join(directory, "items.txt"), [key for key, why in changed.items() if ITEM in why])
     stale = os.path.join(directory, "revisit.txt")
     if ctx.revisit_weeks:

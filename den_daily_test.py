@@ -193,6 +193,8 @@ class DenDaily(fixture.DenRun):
         for name in ("keys.txt", "new.txt"):
             with open(os.path.join(self.out, "changes", name), encoding="utf-8") as fh:
                 self.assertNotIn(EDITED, fh.read().split())
+        with open(os.path.join(self.out, "changes", "review.txt"), encoding="utf-8") as fh:
+            self.assertEqual(fh.read().split(), [EDITED])
 
     def test_the_reviewed_title_is_not_embedded_again(self):
         again = self.day_two["embedded"][len(self.day_one["embedded"]):]

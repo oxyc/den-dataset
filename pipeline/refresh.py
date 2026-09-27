@@ -190,6 +190,19 @@ def approved_keys(ctx):
     return out
 
 
+def review_keys(path):
+    """Validated title keys currently quarantined in the durable review artifact."""
+    keys = set(read_review(path)["titles"])
+    invalid = []
+    for key in keys:
+        media, separator, ident = key.partition(":")
+        if separator != ":" or media not in ("movie", "tv") or not (ident.isascii() and ident.isdigit()):
+            invalid.append(key)
+    if invalid:
+        raise StageError(f"refresh: {path} contains invalid title keys: {sorted(invalid)[:5]}")
+    return keys
+
+
 def plot_summary(record):
     """Review evidence with no Wikipedia prose."""
     text = record.get("overview") if record.get("hasWikiPlot") else None

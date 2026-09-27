@@ -64,6 +64,10 @@ class Batches:
         with open(os.path.join(self.out, artifacts.PUBLISHED_META.filename), "w", encoding="utf-8") as fh:
             json.dump({"datasetVersion": version, "maxBatchId": through}, fh)
 
+    def review(self, *keys):
+        with open(os.path.join(self.out, artifacts.SOURCE_REVIEW.filename), "w", encoding="utf-8") as fh:
+            json.dump({"schema": "source-review-v1", "titles": {key: {} for key in keys}}, fh)
+
     def plan(self, now=DAY, **context):
         with contextlib.redirect_stdout(io.StringIO()):
             changes.run(Context(out_dir=self.out, **context), now=now)
@@ -102,6 +106,7 @@ class Rules(unittest.TestCase):
                 row(5, item="Q2"),                                                 # another Wikidata item
                 row(6, revision=9),                                                # an edit outside the plot
                 row(7, plot=None))                                                 # the plot is gone
+        out.review("movie:1", "movie:2", "movie:3")
         plan = out.plan()
         self.assertEqual(plan["changed"], {"movie:1": ["plot"], "movie:2": ["article"],
                                            "movie:3": ["article"], "movie:4": ["gainedPlot"],
