@@ -45,8 +45,12 @@ def evaluate(derived, golden, corpus=None):
     """The figures, over the keys the golden set names that `corpus` holds (every one, without it)."""
     if corpus is not None:
         golden = present(golden, corpus)
-    of = derived.get("titles") or {}
-    era = {m["key"]: m.get("era") for f in (derived.get("franchises") or {}).values() for m in f["members"]}
+    title_rows = derived.get("titles") or {}
+    # schema 1 mapped a title straight to its franchise id; schema 2 names the primary and can also carry
+    # an informational shared-universe umbrella, which never counts as the franchise for this gate.
+    of = {key: (row.get("primary") if isinstance(row, dict) else row) for key, row in title_rows.items()}
+    era = {m["key"]: m.get("eraId", m.get("era"))
+           for f in (derived.get("franchises") or {}).values() for m in f["members"]}
     pairs = hits = 0
     era_pairs = era_hits = 0
     for case in golden["cases"]:

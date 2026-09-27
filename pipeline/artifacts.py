@@ -153,6 +153,13 @@ FRANCHISE_ANSWERS_MANIFEST = Artifact(
     shards=True,
 )
 
+#: The paid franchise decisions without the private article state or provider audit envelope: candidate ids,
+#: three typed answers, pinned model and token usage. This is the resume state a stateless daily run carries.
+FRANCHISE_DECISIONS = Artifact(
+    name="franchise_decisions",
+    filename="franchise-decisions-v1.json",
+)
+
 #: Every franchise, its members in release order with their era, and each title's franchise
 #: (oxyc/den-atlas#92). Rebuilt on every run from the facts and the answers, behind the golden set.
 FRANCHISES = Artifact(
@@ -501,6 +508,6 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              PUBLISHED_META, PUBLISHED_CORPUS,
              PUBLISHED_GENRES_MOODS, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
              EMBEDDER, EMBEDDING_SPACE, PLOT_LENGTH_TRANSFORM, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
-             FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISES,
+             FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISE_DECISIONS, FRANCHISES,
              VECTORS, RAW_VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST,
              RELEASE)

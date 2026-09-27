@@ -241,6 +241,16 @@ class Dispatch(unittest.TestCase):
         for flag in ("--reembed-keys", "--reembed-changed"):
             self.assertIn(flag, listed)
 
+    def test_the_targeted_keys_reach_the_franchise_stage(self):
+        import importlib.machinery
+        loader = importlib.machinery.SourceFileLoader("den_entry", DEN)
+        module = importlib.util.module_from_spec(importlib.util.spec_from_loader("den_entry", loader))
+        loader.exec_module(module)
+        with mock.patch.object(module, "execute") as executed:
+            self.assertEqual(module.main(["stage", "franchises", "--keys", "pilot.txt", "--plan"]), 0)
+        ctx = executed.call_args.args[1]
+        self.assertEqual((ctx.keys, ctx.plan), ("pilot.txt", True))
+
     def test_the_refresh_reaches_the_run(self):
         """A `--refresh` the parser accepts and `Context` drops is a weekly job that drains new titles,
         re-fetches nothing, and reports success."""

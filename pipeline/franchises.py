@@ -40,6 +40,7 @@ from lib import wikidata_facts as wd
 from lib import wikidata
 from . import artifacts, audit_combined, finalize
 from . import eval_franchises
+from . import franchise_decisions as decisions
 from . import franchise_groups as fg
 from . import run_combined as rc
 from .article_sections import parse_sections
@@ -57,7 +58,7 @@ FREE_WITHOUT_SPEND = True
 
 INPUTS = (artifacts.FACTS, artifacts.ARTICLES, artifacts.MANIFEST)
 OUTPUTS = (artifacts.FRANCHISE_STATES, artifacts.FRANCHISE_ANSWERS, artifacts.FRANCHISE_ANSWERS_MANIFEST,
-           artifacts.FRANCHISES)
+           artifacts.FRANCHISE_DECISIONS, artifacts.FRANCHISES)
 
 GOLDEN = os.path.join(REPO, "data", "franchise-golden.json")
 HEADING = "Franchise candidates (from Wikidata)"
@@ -276,13 +277,32 @@ def ask(ctx, asked, groups, titles):
     return min(len(rows), ctx.limit) if ctx.limit else len(rows)
 
 
+def selected(ctx, asked):
+    """The exact asked titles named for a pilot, or every asked title. Refuse typos before any call."""
+    if not ctx.keys:
+        return asked
+    try:
+        with open(ctx.keys, encoding="utf-8") as fh:
+            keys = {token for line in fh for token in line.replace(",", " ").split()}
+    except OSError as exc:
+        raise StageError(f"franchises: cannot read --keys {ctx.keys}: {exc}") from None
+    if not keys:
+        raise StageError("franchises: --keys file is empty")
+    unknown = sorted(keys - set(asked))
+    if unknown:
+        raise StageError(f"franchises: --keys contains {len(unknown)} title(s) that need no franchise "
+                         f"judgment, e.g. {', '.join(unknown[:5])}")
+    return {key: asked[key] for key in sorted(keys)}
+
+
 def plan_report(ctx, asked, automatic):
-    qs, _ = questions()
     articles = _article_records(ctx)
-    answered = set(read_answers(ctx))
+    answered, durable = load_answers(ctx, persist=False)
     todo = [k for k in asked if k not in answered and k in articles]
-    report = {"automatic": len(automatic), "asked": len(asked), "alreadyAnswered": len(set(asked) & answered),
-              "noArticle": sum(1 for k in asked if k not in articles), "ask": len(todo)}
+    report = {"automatic": len(automatic), "asked": len(asked),
+              "alreadyAnswered": len(set(asked) & set(answered)),
+              "noArticle": sum(1 for k in asked if k not in articles), "ask": len(todo),
+              **decisions.projection(durable, len(todo))}
     print(json.dumps(report, indent=2))
     return report
 
@@ -290,11 +310,18 @@ def plan_report(ctx, asked, automatic):
 # --------------------------------------------------------------------------------------------- derive
 
 
-def read_answers(ctx):
+def load_answers(ctx, persist=True):
     """`key -> (answers, candidate ids)` over every answer shard, each read beside the states shard of the
     same digest and its manifest. Every paid row is audited against that frozen state and today's exact
     franchise questions. A title answered twice is refused."""
-    out = {}
+    qs, _ = questions()
+    compact_path = ctx.path(artifacts.FRANCHISE_DECISIONS)
+    durable, _ = decisions.read(compact_path, qs, PINNED_MODEL)
+    out = {key: decisions.validate_decision(key, decision, qs, PINNED_MODEL,
+                                            os.path.basename(compact_path))
+           for key, decision in durable.items()}
+    durable = dict(durable)
+    raw_seen = set()
     states_by_digest = {os.path.basename(p)[:-len(".jsonl")].rpartition("-")[2]: p
                         for p in ctx.paths(artifacts.FRANCHISE_STATES)}
     for path in ctx.paths(artifacts.FRANCHISE_ANSWERS):
@@ -338,20 +365,32 @@ def read_answers(ctx):
                     audit_combined.validate_row(row, by_key[key], manifest, qs, state_ids[key])
                 except (ValueError, rc.TypeSafeError) as refusal:
                     raise StageError(f"franchises: {path}:{n}: {refusal}") from None
-                if key in out:
+                decision = decisions.from_paid_row(key, row, asked_with[key])
+                if key in raw_seen:
                     raise StageError(f"{key} is answered in two shards; the second is {path}")
+                if key in durable and durable[key] != decision:
+                    raise StageError(f"{key} differs between {compact_path} and {path}")
+                raw_seen.add(key)
+                durable[key] = decision
                 out[key] = (row["answers"], asked_with[key])
-    return out
+    if persist:
+        decisions.write(compact_path, durable, qs, PINNED_MODEL)
+    return out, durable
 
 
-def resolve(titles, groups, automatic, asked, answers, names):
+def read_answers(ctx, persist=True):
+    return load_answers(ctx, persist)[0]
+
+
+def resolve(titles, groups, flagged, automatic, asked, answers, names):
     """`({franchise id: {name, source, members: {key: era}}}, counts)`: the automatic franchises, then each
     answered title's choice, then the groups its titles say are one franchise merged."""
-    franchise_of, era_of, source = {}, {}, {}
+    franchise_of, era_of, source, confidence, umbrella_of = {}, {}, {}, {}, {}
     for key, (root, era) in automatic.items():
         franchise_of[key] = root
         era_of[key] = era
         source.setdefault(root, WIKIDATA)
+        confidence[key] = 1.0
     counts = collections.Counter(automatic=len(automatic))
     one = collections.defaultdict(list)
     separate = set()
@@ -375,6 +414,11 @@ def resolve(titles, groups, automatic, asked, answers, names):
                                    chosen[1])
         franchise_of[key] = gid
         source[gid] = JEV
+        confidence[key] = choice["confidence"]
+        umbrellas = [other for other in listed if isinstance(other, str) and other != gid
+                     and flagged.get(other) == "universe" and key in groups[other].members]
+        if umbrellas:
+            umbrella_of[key] = min(umbrellas, key=lambda group: (len(groups[group].members), group))
         counts["answered"] += 1
         for other in listed:
             if not isinstance(other, tuple) and other != chosen:
@@ -382,7 +426,7 @@ def resolve(titles, groups, automatic, asked, answers, names):
         if got["fr__separate_adaptation"]["noul"] >= TAKE:
             separate.add(key)
     # Groups the titles listing both say are one franchise are merged, the bigger one absorbing the other.
-    merged = {}
+    merged, merge_confidence = {}, {}
 
     def top(g):
         while g in merged:
@@ -390,14 +434,24 @@ def resolve(titles, groups, automatic, asked, answers, names):
         return g
 
     for pair, votes in sorted(one.items(), key=lambda kv: sorted(kv[0])):
-        if sum(votes) / len(votes) < TAKE:
+        agreement = sum(votes) / len(votes)
+        if agreement < TAKE:
             continue
         a, b = sorted((top(g) for g in pair), key=lambda g: (-len(groups[g].members), g))
         if a != b:
             merged[b] = a
+            merge_confidence[b] = agreement
+
+    def root_and_confidence(gid):
+        held = 1.0
+        while gid in merged:
+            held = min(held, merge_confidence[gid])
+            gid = merged[gid]
+        return gid, held
+
     out = {}
     for key, gid in franchise_of.items():
-        root = top(gid)
+        root, merge_conf = root_and_confidence(gid)
         if key in separate:
             era = f"adaptation:{key}"
         elif gid != root:
@@ -405,9 +459,12 @@ def resolve(titles, groups, automatic, asked, answers, names):
         else:
             era = era_of.get(key) or fg.era(key, groups[root], groups)
         entry = out.setdefault(root, {"name": names.get(root) or groups[root].name, "source": WIKIDATA,
-                                      "members": {}})
+                                      "confidence": 1.0, "umbrellaOf": {}, "members": {}})
         if source.get(gid) == JEV:
             entry["source"] = JEV
+        entry["confidence"] = min(entry["confidence"], confidence.get(key, 1.0), merge_conf)
+        if key in umbrella_of and umbrella_of[key] != root:
+            entry["umbrellaOf"][key] = umbrella_of[key]
         entry["members"][key] = era
     return out, counts
 
@@ -422,24 +479,41 @@ def era_name(era, groups, titles, names):
 
 
 def document(franchises, groups, titles, names):
-    """`franchises.json`'s `franchises` and `titles`: members in release order, each with its era's name."""
+    """`franchises.json`'s `franchises` and `titles`: stable eras and release-ordered mixed members."""
     out, of = {}, {}
     for fid in sorted(franchises):
         entry = franchises[fid]
         members = sorted(entry["members"], key=lambda k: fg.order_key(titles[k]))
         if len(members) < 2:
             continue
-        out[fid] = {"name": entry["name"], "source": entry["source"],
+        positions = {key: order for order, key in enumerate(members)}
+        by_era = collections.defaultdict(list)
+        for key in members:
+            by_era[entry["members"][key]].append(key)
+        era_tokens = sorted(by_era, key=lambda era: (positions[by_era[era][0]], str(era or "")))
+        era_ids = {era: f"{fid}:era:{era or 'main'}" for era in era_tokens}
+        eras = [{"id": era_ids[era], "name": era_name(era, groups, titles, names) or entry["name"],
+                 "order": order,
+                 "members": by_era[era]}
+                for order, era in enumerate(era_tokens)]
+        # The wire stores exact hundredths. Never round a confidence upward across an acceptance boundary.
+        confidence = int(entry["confidence"] * 100 + 1e-9) / 100
+        franchise = {"id": fid, "name": entry["name"], "confidence": confidence,
+                     "source": entry["source"], "eras": eras,
                     "members": [{"key": k, "year": titles[k].year,
-                                 "era": era_name(entry["members"][k], groups, titles, names)} for k in members]}
+                                 "eraId": era_ids[entry["members"][k]], "order": positions[k]}
+                                for k in members]}
+        out[fid] = franchise
         for k in members:
-            of[k] = fid
+            of[k] = {"primary": fid}
+            if uid := entry["umbrellaOf"].get(k):
+                of[k]["umbrella"] = {"id": uid, "name": names.get(uid) or groups[uid].name}
     return out, of
 
 
-def derive(ctx, titles, groups, automatic, asked, names):
+def derive(ctx, titles, groups, automatic, asked, names, flagged):
     answers = read_answers(ctx)
-    franchises, counts = resolve(titles, groups, automatic, asked, answers, names)
+    franchises, counts = resolve(titles, groups, flagged, automatic, asked, answers, names)
     doc, of = document(franchises, groups, titles, names)
     with open(GOLDEN, encoding="utf-8") as fh:
         golden = json.load(fh)
@@ -450,7 +524,7 @@ def derive(ctx, titles, groups, automatic, asked, names):
                          "\n  ".join(failures) + f"\n{json.dumps(result, indent=2)}")
     with open(GOLDEN, "rb") as fh:
         golden_sha = hashlib.sha256(fh.read()).hexdigest()
-    blob = {"schema": 1, "datasetVersion": ctx.dataset_version, "franchises": doc, "titles": of,
+    blob = {"schema": 2, "datasetVersion": ctx.dataset_version, "franchises": doc, "titles": of,
             "derivation": {"golden": os.path.relpath(GOLDEN, REPO), "goldenSha256": golden_sha,
                            "eval": result, "counts": dict(counts), "model": PINNED_MODEL}}
     path = ctx.path(artifacts.FRANCHISES)
@@ -472,10 +546,17 @@ def run(ctx, cache=None):
     except StageError as refusal:
         raise StageError(f"franchises: {refusal}") from None
     titles, groups, flagged, automatic, asked, names = grouped(ctx, cache)
+    pilot = selected(ctx, asked)
     if ctx.plan:
-        report = plan_report(ctx, asked, automatic)
+        report = plan_report(ctx, pilot, automatic)
         return f"planned only — {report['ask']:,} titles to ask; nothing written"
-    bought = ask(ctx, asked, groups, titles) if ctx.spend else 0
-    counts, written = derive(ctx, titles, groups, automatic, asked, names)
+    bought = ask(ctx, pilot, groups, titles) if ctx.spend else 0
+    if ctx.spend and ctx.keys:
+        _answers, durable = load_answers(ctx)
+        usage = decisions.totals(durable)
+        return (f"targeted pilot — asked {bought:,}; {usage['calls']:,} durable decisions, "
+                f"{usage['inputTokens']:,} exact input tokens, ${usage['costUSD']:.8f}; "
+                "franchises.json not rebuilt from a partial pilot")
+    counts, written = derive(ctx, titles, groups, automatic, asked, names, flagged)
     return (f"{ctx.path(artifacts.FRANCHISES)} — {written:,} franchises; asked {bought:,}; " +
             ", ".join(f"{name} {n:,}" for name, n in sorted(counts.items()) if n))

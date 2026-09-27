@@ -190,6 +190,11 @@ where it leaves one answer; every other title is asked Jev with its candidate gr
 ./den stage franchises --out-dir out --spend
 ```
 
+For a representative pilot, put the exact `movie:<id>` / `tv:<id>` keys in a file and pass `--keys FILE`
+to both `--plan` and `--spend`. Unlike `--limit`, this cannot silently buy the alphabetically first titles.
+The plan prints exact completed calibration tokens/cost and a clearly labelled projection for the selected
+calls. The durable/public shapes and the raw files that must remain private are in `docs/FRANCHISES.md`.
+
 A title answered in any shard is never asked again, and its answer counts only while its candidates are the
 ones it was asked with (`answered under other candidates` in the derivation's counts). The golden set's
 floors start just under what Wikidata alone scored over the whole corpus (recall 0.20, era agreement 0.83,

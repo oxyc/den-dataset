@@ -107,6 +107,7 @@ def context(args):
                             overrides=overrides, stamp_meta=args.stamp_meta or "",
                             mode=args.mode or "", since=args.since or "",
                             expect=args.expect, pause_ms=args.pause_ms, limit=args.limit,
+                            keys=getattr(args, "keys", None) or "",
                             media=args.media or "", vote_floor=args.vote_floor,
                             regional_vote_floor=args.regional_vote_floor,
                             wikipedia_floor=args.wikipedia_floor,
@@ -142,6 +143,8 @@ def main(argv=None):
         sub.add_argument("--pause-ms", type=int, default=0,
                          help="milliseconds the embed pass idles between requests")
         sub.add_argument("--limit", type=int, help="stop the embed pass after N new titles")
+        sub.add_argument("--keys", metavar="FILE",
+                         help="for a stage that supports it, operate on exactly these mediaType:tmdbId keys")
         sub.add_argument("--media", choices=("movie", "tv"),
                          help="enrich only this media type; without it both worklists are drained")
         sub.add_argument("--vote-floor", type=int,

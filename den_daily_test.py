@@ -208,6 +208,12 @@ class DenDaily(fixture.DenRun):
         self.assertEqual((meta["datasetVersion"], meta.get("storeSha256")),
                          (self.day_two["version"], self.day_two["storeSha256"]))
         self.assertEqual(self.seeded_code, self.day_two_code)
+        for artifact in (artifacts.FRANCHISE_DECISIONS, artifacts.FRANCHISES):
+            with open(os.path.join(self.seeded, artifact.filename), encoding="utf-8") as fh:
+                seeded = json.load(fh)
+            with open(os.path.join(self.out, artifact.filename), encoding="utf-8") as fh:
+                kept = json.load(fh)
+            self.assertEqual(seeded, kept, f"stateless day changed {artifact.name}")
 
     def test_the_seed_carries_no_plot(self):
         """The bundle is published beside the dataset, so what it lays out holds a plot's digest, never its

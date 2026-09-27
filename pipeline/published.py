@@ -72,6 +72,10 @@ BUNDLE = (
     ("facts-delta/facts-entities.json", "facts-delta.facts-entities.json", False),
     ("facts-delta/facts-source-types.json", "facts-delta.facts-source-types.json", False),
     ("facts-delta/facts-source-authors.json", "facts-delta.facts-source-authors.json", False),
+    # Optional for the last pre-franchise-resume generation. Prose-free: the private article states and raw
+    # provider rows are deliberately not in this bundle.
+    ("franchise-decisions-v1.json", "franchise-decisions-v1.json", False),
+    ("franchises.json", "franchises.json", False),
 )
 
 #: The bundle's own record: the generation and each file's digest.
