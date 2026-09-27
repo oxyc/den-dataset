@@ -2,7 +2,8 @@
 """THE DAILY JOB — `./den daily`: one day of the pipeline since the live dataset,
 ending at "ready to publish" (oxyc/den-dataset#27).
 
-    ./den daily --out-dir DIR [--mode delta|export] [--since YYYY-MM-DD] [--revisit-weeks N] [--spend]
+    ./den daily --out-dir DIR [--mode delta|catalogue|export] [--since YYYY-MM-DD]
+                [--revisit-weeks N] [--spend]
 
 It is the stages in `STAGES` order with the choices a scheduled run has to make written down once, here,
 rather than in a workflow file: which stages a missing credential skips, what it refuses to buy, and what it
@@ -111,13 +112,17 @@ class Day:
     def __init__(self, args, environ, now):
         self.args, self.environ, self.now = args, environ, now
         out = args.out_dir
-        mode = args.mode or "delta"
+        # The weekly run is the full vote-floor diff: an old title can cross the floor without entering a
+        # release-date delta. An explicit mode remains an operator override.
+        mode = args.mode or ("catalogue" if args.revisit_weeks else "delta")
         since = args.since or (now.date() - datetime.timedelta(days=DAYS_BACK)).isoformat()
         overrides = {}
-        if mode == "delta":
-            # A delta's lists live under delta/: written over the full ones, they END the enrich run.
-            overrides = {"universe_movie": os.path.join(out, "delta", "universe-movie.json"),
-                         "universe_tv": os.path.join(out, "delta", "universe-tv.json")}
+        if mode in ("delta", "catalogue"):
+            # Incremental lists must not overwrite a full run's universe. Catalogue is a full TMDB survey,
+            # but its output is only the unpublished difference, so it has the same constraint as delta.
+            directory = mode
+            overrides = {"universe_movie": os.path.join(out, directory, "universe-movie.json"),
+                         "universe_tv": os.path.join(out, directory, "universe-tv.json")}
         self.ctx = Context(out_dir=out, overrides=overrides, stamp_meta=os.path.join(out, "dataset.meta.json"),
                            mode=mode, since=since if mode == "delta" else "", refresh=True,
                            revisit_weeks=args.revisit_weeks, spend=False)
@@ -173,7 +178,7 @@ def run_day(day):
     refuse_a_first_generation_by_accident(ctx)
     for name in STAGES:
         if name == "worklist":
-            if ctx.mode == "delta" and not env.get("TMDB_API_KEY"):
+            if ctx.mode in ("delta", "catalogue") and not env.get("TMDB_API_KEY"):
                 day.skip(name, "no TMDB_API_KEY, so no new titles were discovered")
                 continue
             day.stage(name)
@@ -289,8 +294,9 @@ def register(commands):
     """`den daily`'s arguments."""
     sub = commands.add_parser("daily", help="one day of the pipeline, ending at 'ready to publish'")
     sub.add_argument("--out-dir", default="out")
-    sub.add_argument("--mode", choices=("delta", "export"),
-                     help="the worklist: TMDB's delta since --since (default), or the daily export dump")
+    sub.add_argument("--mode", choices=("delta", "catalogue", "export"),
+                     help="the worklist: TMDB's release delta (daily), full vote-floor diff (weekly), or "
+                          "the daily export dump")
     sub.add_argument("--since", help=f"the delta's window, YYYY-MM-DD (default: {DAYS_BACK} days ago)")
     sub.add_argument("--revisit-weeks", type=int, metavar="N",
                      help="also revisit this week's slice of an N-week cycle (the weekly run)")

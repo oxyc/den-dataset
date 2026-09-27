@@ -38,8 +38,8 @@ def api_key(env=None):
     return key
 
 
-def discover_params(media, vote_count_gte=None, release_date_gte=None, sort_by="popularity.desc",
-                    include_adult=False, origin_countries=None):
+def discover_params(media, vote_count_gte=None, release_date_gte=None, release_date_lte=None,
+                    sort_by="popularity.desc", include_adult=False, origin_countries=None):
     """The `/discover/{movie,tv}` parameters, without `api_key` or `page`.
 
     The date field is named for the media: TMDB calls it `primary_release_date` for a film and
@@ -52,6 +52,9 @@ def discover_params(media, vote_count_gte=None, release_date_gte=None, sort_by="
     if release_date_gte:
         date_key = "first_air_date" if media == "tv" else "primary_release_date"
         params[f"{date_key}.gte"] = release_date_gte
+    if release_date_lte:
+        date_key = "first_air_date" if media == "tv" else "primary_release_date"
+        params[f"{date_key}.lte"] = release_date_lte
     if origin_countries:
         params["with_origin_country"] = "|".join(sorted(origin_countries))
     return params

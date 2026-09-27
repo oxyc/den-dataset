@@ -35,6 +35,16 @@ class Query(unittest.TestCase):
         self.assertEqual(series["first_air_date.gte"], "2026-01-01")
         self.assertNotIn("first_air_date.gte", movie)
 
+    def test_a_bounded_window_names_both_ends_in_the_medias_own_fields(self):
+        movie = tmdb_api.discover_params("movie", release_date_gte="1999-01-01",
+                                        release_date_lte="1999-12-31")
+        series = tmdb_api.discover_params("tv", release_date_gte="1999-01-01",
+                                         release_date_lte="1999-12-31")
+        self.assertEqual((movie["primary_release_date.gte"], movie["primary_release_date.lte"]),
+                         ("1999-01-01", "1999-12-31"))
+        self.assertEqual((series["first_air_date.gte"], series["first_air_date.lte"]),
+                         ("1999-01-01", "1999-12-31"))
+
     def test_a_query_with_no_filters_carries_only_what_it_must(self):
         self.assertEqual(tmdb_api.discover_params("movie"),
                          {"sort_by": "popularity.desc", "include_adult": "false"})
