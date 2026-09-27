@@ -3,14 +3,14 @@
 
 Three of these are the failures the stage exists for, and each one exited 0 when it happened:
 
-  * **the mode is chosen, never inherited.** The three modes are three different catalogues, and the one
+  * **the mode is chosen, never inherited.** The four modes are four different catalogues, and the one
     a default picks is the pilot's 500 titles. Enrichment is billed per title;
   * **a delta is handed the published labels.** Without them it re-enriches the whole catalogue — the one
     cost the pass exists to avoid — and reports an ordinary-looking count while doing it;
   * **a short universe is refused rather than written.** A truncated dump, a still-gzipped file or a saved
     error page parses to nothing or to half a catalogue, and `enrich` drains either as a finished run.
 
-`discover` and `delta` are driven through a fake client that answers pages: what is under test here is the
+`discover`, `delta` and `catalogue` are driven through a fake client that answers pages: what is under test here is the
 paging, the de-dup and the skip, not TMDB. Their equivalence against the Swift command was measured
 separately (oxyc/den-dataset#27) over live `/discover`, which CI has neither the key nor the toolchain
 for; `export` is offline and deterministic, and was diffed byte for byte over a real 1,247,062-line daily
@@ -23,6 +23,7 @@ import os
 import re
 import tempfile
 import unittest
+from unittest import mock
 
 import pipeline
 
@@ -137,7 +138,7 @@ class Mode(Staged):
         for mode in worklist.MODES:
             self.assertIn(mode, str(refused.exception))
 
-    def test_a_mode_that_is_not_one_of_the_three_is_refused(self):
+    def test_a_mode_that_is_not_one_of_the_four_is_refused(self):
         with self.assertRaises(StageError) as refused:
             worklist.universe(context(self.out, mode="daily"), "movie")
         self.assertIn("--mode", str(refused.exception))
@@ -324,6 +325,49 @@ class Delta(Staged):
         self.assertEqual(ctx.path(artifacts.UNIVERSE_TV), os.path.join("out", "delta", "universe-tv.json"))
         self.assertEqual(ctx.path(artifacts.GENRES_MOODS), os.path.join("out", artifacts.GENRES_MOODS.filename))
         self.assertIn(artifacts.GENRES_MOODS, [bind(e).artifact for e in worklist.INPUTS])
+
+
+class Catalogue(Staged):
+    WINDOWS = (("1999-01-01", "1999-12-31"), ("2000-01-01", "2000-12-31"))
+
+    def test_it_surveys_bounded_years_and_returns_only_unpublished_titles(self):
+        # movie:11 is already published by the fixture. Each scripted page is returned in each window;
+        # the catalogue de-duplicates that boundary-shaped overlap before subtracting the known set.
+        client = FakeTMDB({"movie": [[(11, 80), (12, 55)]]}, regional={"movie": [[(12, 55)]]})
+        with mock.patch.object(worklist, "catalogue_windows", return_value=self.WINDOWS):
+            rows = worklist.universe(context(self.out, mode="catalogue"), "movie", client)
+        self.assertEqual(rows, [{"tmdbId": 12, "mediaType": "movie", "voteCount": 55,
+                                "regional": True}])
+        whole = [params for _media, params, _page in client.asked if "with_origin_country" not in params]
+        self.assertEqual([(p["primary_release_date.gte"], p["primary_release_date.lte"]) for p in whole],
+                         list(self.WINDOWS))
+        self.assertTrue(all(p["vote_count.gte"] == str(worklist.VOTE_FLOOR) for p in whole))
+
+    def test_a_quiet_catalogue_diff_is_a_valid_empty_worklist(self):
+        client = FakeTMDB({"movie": [[(11, 80)]], "tv": [[(1399, 90)]]})
+        with mock.patch.object(worklist, "catalogue_windows", return_value=self.WINDOWS):
+            made = worklist.run(context(self.out, mode="catalogue"), client)
+        self.assertIn("universe-movie.json", made)
+        self.assertEqual(self.universe(os.path.join(self.out, "universe-movie.json")), [])
+        self.assertEqual(self.universe(os.path.join(self.out, "universe-tv.json")), [])
+
+    def test_an_empty_upstream_catalogue_is_refused_before_it_can_look_like_a_quiet_diff(self):
+        with mock.patch.object(worklist, "catalogue_windows", return_value=self.WINDOWS):
+            with self.assertRaisesRegex(StageError, "empty upstream catalogue"):
+                worklist.universe(context(self.out, mode="catalogue"), "movie", FakeTMDB({"movie": [[]]}))
+
+    def test_a_slice_over_tmdbs_page_ceiling_is_refused_not_truncated(self):
+        client = FakeTMDB({"movie": [[] for _ in range(worklist.tmdb_api.MAX_PAGES)]})
+        with self.assertRaisesRegex(StageError, "silently truncate"):
+            worklist.full_catalogue(client, "movie", self.WINDOWS[:1])
+
+    def test_the_weekly_job_uses_the_catalogue_diff_without_overwriting_a_full_universe(self):
+        now = datetime.datetime(2026, 9, 24, 3, 23, tzinfo=datetime.timezone.utc)
+        args = argparse.Namespace(out_dir="out", mode=None, since=None, revisit_weeks=8, spend=False)
+        ctx = daily.Day(args, {}, now).ctx
+        self.assertEqual((ctx.mode, ctx.since), ("catalogue", ""))
+        self.assertEqual(ctx.path(artifacts.UNIVERSE_MOVIE),
+                         os.path.join("out", "catalogue", "universe-movie.json"))
 
 
 class Written(Staged):

@@ -106,6 +106,21 @@ class Skips(Recorded):
             self.day(revisit_weeks=8)
         self.assertEqual(seen, [8])
 
+    def test_the_weekly_run_uses_the_full_catalogue_diff(self):
+        modes = []
+        original = self.stage
+
+        def stage(name):
+            module = original(name)
+            inner = module.run
+            if name == "worklist":
+                module.run = lambda ctx: modes.append(ctx.mode) or inner(ctx)
+            return module
+
+        with mock.patch.object(daily, "load", stage):
+            self.day({"TMDB_API_KEY": "t"}, mode=None, revisit_weeks=8)
+        self.assertEqual(modes, ["catalogue"])
+
 
 class Refusals(Recorded):
     def test_an_out_dir_with_batches_and_no_live_manifest_runs_nothing(self):

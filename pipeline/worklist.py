@@ -4,38 +4,43 @@
 Which ids exist, in which order, and which of them are already published. The rule used to live in
 `taxonomy-backfill worklist` and this module handed it files; it is the rule now (oxyc/den-dataset#27).
 
-**The universe is three different questions, and `--mode` asks whichever one is wanted.**
+**The universe is four different questions, and `--mode` asks whichever one is wanted.**
 
   * `export` — TMDB's daily id dump, parsed. Every id that exists: the full run's universe. Offline, and
     the only mode that is deterministic end to end.
   * `discover` — `/discover` sorted `vote_count.desc`, the highest-vote titles first. The pilot seed.
   * `delta` — titles released since `--since` that clear the discovery floor and have no genres & moods
     yet. The daily job, `den daily` (`pipeline/daily.py`), asks for this one.
+  * `catalogue` — the same published-title diff without a release-date cutoff. The weekly job asks for it,
+    because an older title can cross the vote floor without being newly released. TMDB caps one discover
+    query at 10,000 titles, so this mode enumerates bounded release-year slices and refuses any slice that
+    still reaches the cap rather than silently calling a prefix the catalogue.
 
 **The mode is not defaulted.** For a full run the cheapest-looking answer means enriching the 500
 highest-vote titles and calling that the catalogue; for a delta it means re-enriching everything already
 published. Enrichment is the step that costs money per title, so a run that did not say which universe it
 is building is refused rather than given one.
 
-**An empty worklist is a refusal in every mode but `delta`.** A truncated dump, an error page saved as
+**An empty worklist is a refusal in every mode but `delta` and `catalogue`.** A truncated dump, an error page saved as
 one, or a still-gzipped file parses to nothing and writes `[]` — and `enrich` reads an empty worklist as a
-finished run, which is exactly what a successful pass looks like. In `delta` an empty list is the answer
-on a quiet day, so refusing it there would fail the daily pass for doing its job. For `export` the same
+finished run, which is exactly what a successful pass looks like. In either incremental mode an empty list
+is the answer on a quiet day, so refusing it there would fail the job for doing its job. For `export` the same
 silence is checked one line finer: the ids written against the dump's own line count, because a dump that
 arrived half-written parses to half a catalogue, and half a catalogue looks like a catalogue.
 
-**A `discover` or `delta` row carries the vote count `/discover` stated, and whether it is regional.**
+**A `discover`, `delta` or `catalogue` row carries the vote count `/discover` stated, and whether it is regional.**
 The admission gate needs both (`pipeline/floors.py`), and this stage is where TMDB answers them — `enrich`
 asks TMDB nothing (oxyc/den-dataset#53). `regional` is whether the same query, narrowed to the regional
 origins, names the title too: one more paged query per media rather than a question per title. An
 `export` row has neither: the daily dump states popularity, not votes or origins.
 
-**A delta writes the same two filenames as a full run**, which is why `pipeline/daily.py` keeps its
-lists in `<out-dir>/delta/`. Point the two outputs there with `--set` rather than moving the whole out-dir,
-so the genres & moods a delta must skip are still found beside everything else: forty delta rows written over a
-47k-title one do not corrupt anything — they end the full run, quietly, as a batch that reports nothing
-remaining.
+**An incremental diff writes the same two filenames as a full run**, which is why `pipeline/daily.py` keeps
+its lists under `<out-dir>/<mode>/`. Point the two outputs there with `--set` rather than moving the whole
+out-dir, so the genres & moods it must skip are still found beside everything else: forty delta rows
+written over a 47k-title one do not corrupt anything — they end the full run, quietly, as a batch that
+reports nothing remaining.
 """
+import datetime
 import json
 import os
 import sys
@@ -57,9 +62,13 @@ PUBLISHES = False
 #: rather than defaulted: the size is the choice, not the running.
 SPENDS = False
 
-DISCOVER, EXPORT, DELTA = "discover", "export", "delta"
+DISCOVER, EXPORT, DELTA, CATALOGUE = "discover", "export", "delta", "catalogue"
 #: In the order the stage's own refusal lists them.
-MODES = (DISCOVER, EXPORT, DELTA)
+MODES = (DISCOVER, EXPORT, DELTA, CATALOGUE)
+
+#: Motion pictures predate this only as experiments that TMDB does not catalogue as released screen works.
+#: One year per query keeps each answer below TMDB's 500-page ceiling; a year that does not fit is refused.
+CATALOGUE_FIRST_YEAR = 1870
 
 #: The TMDB count `/discover` enumerates at: the LOWEST floor any admission tier uses (`pipeline/floors.py`),
 #: not the worldwide 50. Discovery only enumerates; `enrich` admits, on TMDB's count or the number of
@@ -84,9 +93,9 @@ MEDIA = {
     "tv": (artifacts.EXPORT_TV, artifacts.UNIVERSE_TV),
 }
 
-#: `genres-moods.json` is `--known` here: the titles already labelled, which a delta skips. Only a delta
-#: reads it, and it is the previous run's — a delta extends an out-dir, while an export or discover universe
-#: reads nothing, so a fresh out-dir starts.
+#: `genres-moods.json` is `--known` here: the titles already labelled, which an incremental diff skips.
+#: Delta and catalogue read it, and it is the previous run's — they extend an out-dir, while an export or
+#: discover universe reads nothing, so a fresh out-dir starts.
 INPUTS = (
     artifacts.EXPORT_MOVIE.called("file"),
     artifacts.EXPORT_TV.called("file"),
@@ -104,7 +113,8 @@ def mode(ctx):
         raise StageError(
             f"worklist: --mode is {ctx.mode or 'unset'}, and it decides which universe this builds: "
             f"{EXPORT} (every id in TMDB's daily dump — the full run), {DISCOVER} (the highest-vote "
-            f"titles, the pilot seed), {DELTA} (what is new since --since and not already published). "
+            f"titles, the pilot seed), {DELTA} (what is new since --since and not already published), "
+            f"{CATALOGUE} (everything now above the discovery floor and not already published). "
             f"Enrichment is billed per title, so this is not defaulted.")
     return ctx.mode
 
@@ -147,7 +157,7 @@ def parse_export(path, media):
 
 
 def known_ids(path, media):
-    """The tmdbIds of this media that already have genres & moods — the titles a delta must skip.
+    """The tmdbIds of this media that already have genres & moods — an incremental diff's known titles.
 
     Without them the pass re-enriches the whole published catalogue, at the per-title price the vote floor
     exists to bound, and nothing in its output says that is what happened. A file with no titles is not
@@ -174,6 +184,11 @@ def collect(client, media, params, limit=None):
     rows, seen, page = [], set(), 1
     while page <= tmdb_api.MAX_PAGES and (limit is None or len(rows) < limit):
         items, _page, total = client.discover(media, params, page)
+        if limit is None and total >= tmdb_api.MAX_PAGES:
+            raise StageError(
+                f"worklist: /discover/{media} reports {total} pages, at TMDB's "
+                f"{tmdb_api.MAX_PAGES}-page ceiling. Reading it may silently truncate the universe; "
+                f"narrow the query.")
         for item in items:
             tmdb_id = item.get("id")
             if isinstance(tmdb_id, int) and tmdb_id not in seen:
@@ -201,6 +216,36 @@ def discovered(client, media, limit=None, **query):
     return [dict(row, regional=row["tmdbId"] in regional) for row in rows]
 
 
+def catalogue_windows(today=None):
+    """Release-year slices through next year, as inclusive ISO-date pairs.
+
+    Next year admits announced titles whose date is already recorded. Fixed year boundaries make a retry
+    ask the same cache-free questions; the query itself is refused if even one year exceeds TMDB's cap.
+    """
+    final = (today or datetime.datetime.now(datetime.timezone.utc).date()).year + 1
+    return [(f"{year:04d}-01-01", f"{year:04d}-12-31")
+            for year in range(CATALOGUE_FIRST_YEAR, final + 1)]
+
+
+def full_catalogue(client, media, windows=None):
+    """Every row currently discoverable at the lowest admission floor, across bounded date slices."""
+    found = {}
+    for start, end in windows or catalogue_windows():
+        rows = discovered(client, media, vote_count_gte=VOTE_FLOOR, release_date_gte=start,
+                          release_date_lte=end, sort_by=SORT_BY)
+        for row in rows:
+            previous = found.get(row["tmdbId"])
+            if previous is None:
+                found[row["tmdbId"]] = row
+            else:
+                # A boundary duplicate, or a TMDB correction during the pull: retain the strongest current
+                # evidence and never lose regional admission because the other occurrence lacked it.
+                previous["regional"] = previous.get("regional", False) or row.get("regional", False)
+                if row.get("voteCount", -1) > previous.get("voteCount", -1):
+                    previous["voteCount"] = row["voteCount"]
+    return sorted(found.values(), key=lambda row: (-(row.get("voteCount") or -1), row["tmdbId"]))
+
+
 def universe(ctx, media, client=None):
     """The rows for one media, in the mode this run asked for."""
     chosen = mode(ctx)
@@ -225,6 +270,14 @@ def universe(ctx, media, client=None):
     if chosen == DISCOVER:
         return discovered(client, media, limit=DISCOVER_COUNT, vote_count_gte=VOTE_FLOOR, sort_by=SORT_BY)
 
+    known = known_ids(ctx.require(BOUND[artifacts.GENRES_MOODS.name].artifact), media)
+    if chosen == CATALOGUE:
+        rows = full_catalogue(client, media)
+        if not rows:
+            raise StageError(f"worklist: catalogue found no {media} titles across its bounded release-year "
+                             f"queries. That is not a quiet diff; it is an empty upstream catalogue.")
+        return [row for row in rows if row["tmdbId"] not in known]
+
     if not ctx.since:
         raise StageError("worklist: --mode delta needs --since YYYY-MM-DD — the window it collects titles "
                          "from. There is no default window: a delta with no date is either every title "
@@ -234,7 +287,6 @@ def universe(ctx, media, client=None):
     # of them are below the floor. A dated `vote_count.desc` slice selects the same titles in a few paged
     # calls. The trade: a re-release or a late metadata fix on an OLD title is not picked up — acceptable,
     # because a periodic full pass covers drift and paying per id daily does not scale.
-    known = known_ids(ctx.require(BOUND[artifacts.GENRES_MOODS.name].artifact), media)
     return [row for row in discovered(client, media, vote_count_gte=VOTE_FLOOR, release_date_gte=ctx.since,
                                       sort_by=SORT_BY)
             if row["tmdbId"] not in known]
@@ -267,7 +319,7 @@ def run(ctx, client=None):
     built = []
     for media, (_export, artifact) in MEDIA.items():
         rows = universe(ctx, media, client)
-        if not rows and chosen != DELTA:
+        if not rows and chosen not in (DELTA, CATALOGUE):
             raise StageError(
                 f"worklist: {chosen} built an empty {media} universe, so there is nothing to enrich. "
                 f"`enrich` reads an empty worklist as a finished run rather than as a failure.")

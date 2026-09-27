@@ -16,7 +16,7 @@ Options (both run forms):
                                    given here that disagrees. Needed only by such a stage run in an
                                    out-dir with no manifest
     --stamp-meta PATH              the manifest to declare the outputs in
-    --mode MODE                    which universe the worklist builds: export, discover or delta
+    --mode MODE                    which universe the worklist builds: export, discover, delta or catalogue
     --since YYYY-MM-DD             the window a delta worklist collects titles from
     --expect N                     the title count the corpus join is held to
     --pause-ms N                   milliseconds the embed pass idles between requests
@@ -136,7 +136,7 @@ def main(argv=None):
         # is read from the manifest (`execute`), and a value given here is held to it.
         sub.add_argument("--dataset-version", default="")
         sub.add_argument("--stamp-meta")
-        sub.add_argument("--mode", help="which universe the worklist builds: export, discover or delta")
+        sub.add_argument("--mode", help="which universe the worklist builds: export, discover, delta or catalogue")
         sub.add_argument("--since", help="the window a delta worklist collects titles from, YYYY-MM-DD")
         sub.add_argument("--expect", type=int, help="the title count the corpus join is held to")
         sub.add_argument("--pause-ms", type=int, default=0,
