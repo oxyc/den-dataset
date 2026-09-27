@@ -357,8 +357,13 @@ document digest. A lost-plot correction instead requires both a withdrawal recei
 the old article/language, so a regain can become a new review candidate.
 
 `python3 pipeline/source_corrections.py gate TRANSACTION` is read-only and refuses until the exact required set is
-present. `record-published` additionally requires the publisher's returned dataset version, a `maxBatchId` that
-includes the reserved batch, and the gate's exact correction/proof map. Only then does state become `published`.
+present. Receipts alone cannot satisfy the real publisher: `check_source_corrections.py` discovers every durable
+`appliedPending` transaction and resolves each receipt to a restricted native output name under the out-dir,
+checks that file's hash, then checks its title row against the frozen article revision/hash (and the aligned
+document/vector hashes). The publisher runs that check before its other mutations, stamps the complete native
+artifact map into `dataset.meta.json`, and refuses on any missing or old row. After the manifest upload—the
+publication commit point—it records the publisher's dataset version, a `maxBatchId` that includes the reserved
+batch, and that exact gate result; only then does state become `published`.
 The ordinary change-set refusal remains in force for all unexplained post-baseline source batches; this tool does
 not make an old manual refresh canonical merely because its files exist.
 

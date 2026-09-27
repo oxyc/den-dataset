@@ -84,6 +84,11 @@ if [ "$check" -eq 0 ] && [ "$unsigned" -eq 0 ] && [ ! -f "$signing_key" ]; then
   exit 1
 fi
 
+# A correction batch is deliberately not enough to publish. The durable transaction must find every native
+# derived row made from its frozen evidence; this also stamps their exact hashes into the manifest. `--checked`
+# verifies that already-checked manifest byte for byte below and therefore must not trust a relocated state dir.
+[ "$checked" -eq 1 ] || python3 "$(dirname "$0")/check_source_corrections.py" "$DIR" --stamp
+
 shopt -s nullglob
 meta="$DIR/dataset.meta.json"
 
@@ -739,6 +744,9 @@ done < "$manifest_files"
 # consumers keep serving the last-good dataset instead of a version that 404s. NEVER upload the meta on its own.
 echo "→ dataset.meta.json (commit)"
 upload_one "$meta" || exit 1
+# Publication is the state transition's commit point too. If the checked artifact carries the durable state,
+# move each exact transaction to `published`; without it, the manifest still permanently records the gate.
+[ -d "$DIR/corrections" ] && python3 "$(dirname "$0")/check_source_corrections.py" "$DIR" --record-published
 # den-atlas is the only thing that fetches the release. The Den app does not: it reads den-atlas's
 # /dataset.json and queries den-atlas for everything the store holds.
 echo "done — consumer: den-atlas (scripts/fetch-dataset.sh). The Den app reads it through den-atlas's /dataset.json."

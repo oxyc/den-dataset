@@ -34,6 +34,11 @@ def digest(value):
     return hashlib.sha256(canonical(value).encode("utf-8")).hexdigest()
 
 
+def file_digest(path):
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
 def read(path):
     try:
         with open(path, encoding="utf-8") as handle:

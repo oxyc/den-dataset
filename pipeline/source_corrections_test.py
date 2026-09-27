@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from . import enrich, source_corrections as corrections
+from . import check_source_corrections, enrich, source_corrections as corrections
 from .contract import StageError
 
 
@@ -167,6 +167,65 @@ class CorrectionTransaction(unittest.TestCase):
         corrections.write(os.path.join(self.tx, "state.json"), state)
         with self.assertRaisesRegex(StageError, "state evidence no longer describes"):
             corrections.load(self.tx)
+
+    def test_real_publish_gate_discovers_native_rows_and_stamps_manifest(self):
+        self.apply()
+        with self.assertRaisesRegex(StageError, "no-spend/publish refusal"):
+            check_source_corrections.check(self.out)
+        evidence = self.state()["evidence"]
+        article_sha = hashlib.sha256(self.input["text"].encode()).hexdigest()
+
+        def artifact(relative, value, jsonl=True):
+            path = os.path.join(self.out, relative)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                if jsonl:
+                    handle.write(json.dumps(value) + "\n")
+                else:
+                    json.dump([value], handle)
+            return {"artifact": relative, "artifactSha256": corrections.file_digest(path)}
+
+        native_row = {"mediaType": "movie", "tmdbId": 7, "article": "Example (film)",
+                      "language": "en", "articleRevId": 2, "articleSha256": article_sha}
+        for kind, relative in (("classify", "combined-v1-r2-correction.jsonl"),
+                               ("critique", "delta-v2-correction.jsonl"),
+                               ("genresMoods", "genres-moods-v1-correction.jsonl")):
+            proof = self.proof(kind, **artifact(relative, native_row))
+            corrections.attach_proof(self.tx, kind, proof)
+        premise_row = {"key": "movie:7", "sourceDigestSha256": evidence["sourceDigestSha256"],
+                       "tags": ["returning home"]}
+        corrections.attach_proof(self.tx, "premise", self.proof(
+            "premise", **artifact("premise-increment/gen/out/batch-0000.json", premise_row, False)))
+
+        label = {"mediaType": "movie", "tmdbId": 7, "primaryGenre": "drama", "subgenres": [],
+                 "moods": [], "source": "llm", "animated": False}
+        text = "the exact composed document"
+        doc_sha = hashlib.sha256(text.encode()).hexdigest()
+        inputs = {kind: self.state()["proofs"][kind]
+                  for kind in ("classify", "critique", "genresMoods", "premise")}
+        corrections.attach_proof(self.tx, "document", self.proof(
+            "document", text=text, documentSha256=doc_sha, inputs=inputs,
+            nativeRowSha256=corrections.digest(label), **artifact("index/labels.jsonl", label)))
+        vector = {"tmdbId": 7, "docSha256": doc_sha, "v": [1, -1]}
+        corrections.attach_proof(self.tx, "vector", self.proof(
+            "vector", documentSha256=doc_sha, **artifact("index/vectors.jsonl", vector)))
+        with open(os.path.join(self.out, "dataset.meta.json"), "w", encoding="utf-8") as handle:
+            json.dump({"datasetVersion": "next", "maxBatchId": 1}, handle)
+
+        gates = check_source_corrections.check(self.out, stamp=True)
+        self.assertEqual(len(gates), 1)
+        self.assertEqual(set(gates[0]["nativeArtifacts"]),
+                         {"classify", "critique", "genresMoods", "premise", "document", "vector"})
+        meta = corrections.read(os.path.join(self.out, "dataset.meta.json"))
+        self.assertEqual(meta["sourceCorrections"], gates)
+        check_source_corrections.check(self.out, record_published=True)
+        self.assertEqual(self.state()["state"], "published")
+
+    def test_real_publish_gate_rejects_a_receipt_over_old_native_labels(self):
+        self.apply()
+        self.attach_all()
+        with self.assertRaisesRegex(StageError, "recognized native stage output|native artifact"):
+            check_source_corrections.check(self.out)
 
 
 class LostAndRegained(unittest.TestCase):
