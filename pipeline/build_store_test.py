@@ -212,7 +212,7 @@ class StoreFixture:
 
     def build(self, out_dir, titles=None, plot_keys=("movie:1",), premise_keys=("movie:2",),
               plot_labels=None, premise_labels=None, write_plot_vectors=None, stamp=None,
-              build_store=BUILD_STORE, entities=None):
+              build_store=BUILD_STORE, entities=None, franchises=True):
         """`*_keys` are the blob's OWN key column; `*_labels` the labels artifact's records, which
         default to the same thing. Passing them apart is how the key-set assert is exercised;
         `write_plot_vectors` swaps in a writer of another format. `stamp` asks the writer to record
@@ -223,6 +223,20 @@ class StoreFixture:
         plot_keys, premise_keys = list(plot_keys), list(premise_keys)
         plot_labels = plot_keys if plot_labels is None else list(plot_labels)
         premise_labels = premise_keys if premise_labels is None else list(premise_labels)
+
+        franchise_doc = None
+        if franchises:
+            member_keys = sorted(t["key"] for t in titles)[:2]
+            fid, eid = "fixture:alpha", "fixture:alpha:era:main"
+            franchise_doc = {"schema": 2, "datasetVersion": "test",
+                              "franchises": {fid: {"id": fid, "name": "Alpha series", "confidence": 0.85,
+                                                    "source": "fixture", "eras": [
+                                                        {"id": eid, "name": "Original run", "order": 0,
+                                                         "members": member_keys}],
+                                                    "members": [
+                                                        {"key": key, "eraId": eid, "order": order}
+                                                        for order, key in enumerate(member_keys)]}},
+                              "titles": {key: {"primary": fid} for key in member_keys}}
 
         def dump(name, value):
             path = os.path.join(out_dir, name)
@@ -265,6 +279,7 @@ class StoreFixture:
              "--vector-labels", dump("plot-labels.json", rows_file(plot_labels)),
              "--premise-vectors", vectors(os.path.join(out_dir, "premise.bin"), premise_keys, 200),
              "--premise-labels", dump("premise-labels.json", rows_file(premise_labels)),
+             *(["--franchises", dump("franchises.json", franchise_doc)] if franchise_doc else []),
              "--dataset-version", "test", "--out", store,
              *(["--stamp-meta", stamp] if stamp else [])],
             capture_output=True, text=True)
@@ -867,10 +882,17 @@ class EverySectionDeclaresWhereItsBytesCameFrom(StoreFixture, unittest.TestCase)
         with tempfile.TemporaryDirectory() as out:
             store, _ = self.build(out)
         self.assertEqual(
-            set(store.table), set(mod.PROVENANCE),
+            set(store.table), mod.expected_provenance(store.table),
             "the sections in the built store and the sections PROVENANCE declares have diverged. A "
             "section with no entry is a column nothing reviewed; an entry with no section is a table "
             "describing a store that does not exist.")
+
+    def test_an_optional_group_may_be_wholly_absent_but_not_partial(self):
+        mod = build_store_module()
+        without_franchises = set(mod.PROVENANCE) - mod.CURATED_FRANCHISE_SECTIONS
+        mod.check_provenance(without_franchises)
+        with self.assertRaisesRegex(SystemExit, "fr_name"):
+            mod.check_provenance(set(mod.PROVENANCE) - {"fr_name"})
 
     def test_a_section_with_no_declared_source_stops_the_build(self):
         """The case this exists for, end to end: the writer emits a section the table does not know
