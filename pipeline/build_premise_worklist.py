@@ -4,9 +4,16 @@
   pipeline/build_premise_worklist.py --combined out-repass/combined-v1-r2.jsonl \
       --articles out-repass/articles.jsonl --out-dir out-premise-v2
 
+  # An increment: only newly admitted/regained titles, with an explicit token ceiling.
+  pipeline/build_premise_worklist.py --combined out/combined-v1-r2.jsonl \
+      --articles out/articles.jsonl --changes out/changes/plan.json \
+      --token-ceiling 50000 --out-dir out/premise-increment
+
 Premise tags are free-form strings, so they are the one artifact a decision-only model cannot produce and
 the only remaining paid step in this corpus rebuild. That makes it worth spending care on *which* titles are
 sent and *what* they are shown, because both decide the bill and neither is recoverable after the fact.
+An incremental run takes admission from `changes/plan.json`; Wikipedia prose drift is deliberately not an
+admission reason and cannot enter its worklist.
 
 ## Which titles
 
@@ -40,11 +47,51 @@ shown a Reception section will write tags about reviews.
 emitted as their own list: regenerating them would pay twice for text already on disk.
 """
 import argparse
+import hashlib
 import json
 import os
 import sys
 
 ROLE_KEEP = ("story-premise", "theme-subject")
+
+
+def digest(path):
+    """SHA-256 of an input, so a generated row can be traced to immutable evidence."""
+    hashed = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hashed.update(chunk)
+    return hashed.hexdigest()
+
+
+def title_key(row):
+    return (row["mediaType"] != "movie", int(row["tmdbId"]))
+
+
+def incremental_keys(path):
+    """Newly admitted or legitimately regained titles from a published-baseline change plan.
+
+    In particular, `gainedPlot`, `plot`, `article`, `item` and weekly revisit reasons are excluded. A
+    source edit is not admission to the corpus and must never turn into a premise-generation bill.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            plan = json.load(handle)
+    except (OSError, ValueError) as error:
+        sys.exit(f"{path} is not a readable changes plan ({error})")
+    if not isinstance(plan, dict) or not isinstance(plan.get("baseline"), dict):
+        sys.exit(f"{path} has no published baseline; refusing to interpret a full generation as new titles")
+    added, changed = plan.get("added"), plan.get("changed")
+    if not isinstance(added, list) or not isinstance(changed, dict):
+        sys.exit(f"{path} has no added/changed key sets")
+    keys = set(added)
+    keys.update(key for key, reasons in changed.items()
+                if isinstance(reasons, list) and "regained" in reasons)
+    for key in keys:
+        media, separator, ident = key.partition(":") if isinstance(key, str) else ("", "", "")
+        if separator != ":" or media not in ("movie", "tv") or not (ident.isascii() and ident.isdigit()):
+            sys.exit(f"{path} carries an invalid title key: {key!r}")
+    return keys
 
 
 def keys_of(doc):
@@ -88,10 +135,19 @@ ap.add_argument("--combined", required=True, action="append",
                 help="a shard of the Jev bundle; repeat for each (incl. the token-fallback shards)")
 ap.add_argument("--articles", required=True, help="the articles stage's output, for the section text")
 ap.add_argument("--out-dir", required=True)
+ap.add_argument("--changes", help="changes/plan.json; restrict generation to added and regained titles")
+ap.add_argument("--token-ceiling", type=int,
+                help="with --changes, explicit maximum estimated input + output tokens for this worklist")
 args = ap.parse_args()
+
+if bool(args.changes) != bool(args.token_ceiling):
+    sys.exit("--changes and a positive --token-ceiling are required together")
+if args.token_ceiling is not None and args.token_ceiling < 1:
+    sys.exit("--token-ceiling must be positive")
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 have = load_have(root)
+eligible = incremental_keys(args.changes) if args.changes else None
 os.makedirs(args.out_dir, exist_ok=True)
 
 # The article text, keyed for section slicing. One pass, kept as offsets rather than copies.
@@ -110,9 +166,15 @@ def bundle(paths):
                     yield json.loads(line)
 
 
-work, review, skipped = [], [], {"hasTags": 0, "badValidity": 0, "nonNarrative": 0, "noArticleText": 0}
+work, review, seen = [], [], set()
+skipped = {"hasTags": 0, "badValidity": 0, "nonNarrative": 0, "noArticleText": 0}
 for r in bundle(args.combined):
     key = f"{r['mediaType']}:{r['tmdbId']}"
+    if eligible is not None and key not in eligible:
+        continue
+    if key in seen:
+        sys.exit(f"{key} occurs in more than one combined shard; refusing an ambiguous source record")
+    seen.add(key)
     if key in have:
         skipped["hasTags"] += 1
         continue
@@ -140,9 +202,14 @@ for r in bundle(args.combined):
         "applicability": applic,
         "sections": [s["heading"] for s in kept],
         "storyPremiseSections": len(premise_only),
-        "evidenceChars": len(evidence), "evidence": evidence,
+        "evidenceChars": len(evidence),
+        "sourceDigestSha256": hashlib.sha256(evidence.encode("utf-8")).hexdigest(),
+        "evidence": evidence,
     }
     (work if premise_only else review).append(row)
+
+work.sort(key=title_key)
+review.sort(key=title_key)
 
 # Tags on disk, vector never merged: no model needed, and regenerating would pay twice.
 v1 = json.load(open(os.path.join(root, "data/premise-tags-v1.json"), encoding="utf-8"))
@@ -187,6 +254,33 @@ json.dump({"titles": len(work), "batches": batches, "perBatch": PER_BATCH,
 in_tokens = (chars + batches * SPEC_CHARS) / 3.8
 # 8-12 tags, ~28 chars each plus JSON scaffolding, per title.
 out_tokens = len(work) * (12 * 34 + 40) / 3.8
+estimated_total = round(in_tokens + out_tokens)
+if args.token_ceiling is not None and estimated_total > args.token_ceiling:
+    sys.exit(f"estimated {estimated_total} tokens exceeds --token-ceiling {args.token_ceiling}; "
+             "nothing is authorized to generate")
+
+manifest_path = os.path.join(args.out_dir, "gen", "manifest.json")
+with open(manifest_path, encoding="utf-8") as handle:
+    manifest = json.load(handle)
+manifest.update({
+    "worklistSha256": digest(os.path.join(args.out_dir, "worklist.jsonl")),
+    "sourceInputs": {
+        "articlesSha256": digest(args.articles),
+        "combinedSha256": [digest(path) for path in args.combined],
+        "changesSha256": digest(args.changes) if args.changes else None,
+        "specSha256": digest(os.path.join(root, "data/premise-tags-v1.SPEC.md")),
+    },
+    "selection": "added-or-regained-only" if args.changes else "legacy-full-gap",
+    "eligibleKeys": len(eligible) if eligible is not None else None,
+    "eligibleMissingFromCombined": sorted(eligible - seen) if eligible is not None else [],
+    "estimatedInputTokens": round(in_tokens),
+    "estimatedOutputTokens": round(out_tokens),
+    "estimatedTotalTokens": estimated_total,
+    "tokenCeiling": args.token_ceiling,
+    "generationAuthorized": False,
+})
+with open(manifest_path, "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, indent=2, sort_keys=True)
 
 print(json.dumps({
     "worklist": len(work), "reviewQueue": len(review), "mergeOnly": len(merge_only),
@@ -195,6 +289,9 @@ print(json.dumps({
         sorted(r["evidenceChars"] for r in work)[len(work) // 2] if work else 0,
     "batches": batches, "perBatch": PER_BATCH,
     "estInputTokens": round(in_tokens), "estOutputTokens": round(out_tokens),
-    "estTotalTokens": round(in_tokens + out_tokens),
+    "estTotalTokens": estimated_total, "tokenCeiling": args.token_ceiling,
+    "eligibleNewOrRegained": len(eligible) if eligible is not None else None,
+    "eligibleMissingFromCombined": len(eligible - seen) if eligible is not None else None,
+    "generationAuthorized": False,
     "outDir": args.out_dir,
 }, indent=2))

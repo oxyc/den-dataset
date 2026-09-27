@@ -343,6 +343,25 @@ corpus once per cycle.
 `./den stage publish --out-dir out --plan` then runs every gate the publish runs, against the same
 `published/dataset.meta.json`, and stops before signing: nothing is uploaded.
 
+### Premise tags for a daily increment
+
+Premise generation is never triggered by a Wikipedia revision or rewording. Prepare it only from a change
+plan with a published baseline; the builder admits `added` and legitimately `regained` keys and rejects a
+first-generation plan. `plot`, `article`, `gainedPlot`, `item`, and weekly revisit reasons are excluded.
+
+```sh
+pipeline/build_premise_worklist.py \
+  --combined out/combined-v1-r2.jsonl --articles out/articles.jsonl \
+  --changes out/changes/plan.json --token-ceiling 50000 --out-dir out/premise-increment
+```
+
+This makes no model call. Each row records the digest of the exact evidence shown, and the generation
+manifest records the source, spec, worklist, token estimate, and operator-set ceiling. It always records
+`generationAuthorized: false`: preparing or publishing an ordinary daily run does not authorize Haiku.
+When a generation is deliberately run, validate every response batch with
+`pipeline/validate_premise_batch.py`; it refuses missing, duplicate, and foreign keys and reports the
+placeholder/storytelling-property quality failures before `merge_premise_tags.py` can append anything.
+
 ## Reading an enrich report
 
 A title is admitted when its TMDB vote count clears its TMDB floor **or** the number of Wikipedias with an
