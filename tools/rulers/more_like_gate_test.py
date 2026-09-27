@@ -68,6 +68,15 @@ class MoreLikeGateTest(unittest.TestCase):
         self.temp.cleanup()
 
     def test_prepare_is_deterministic_and_run_without_spend_calls_nothing(self):
+        # MovieLens and the catalogue legitimately spell some titles differently; the title-only arm keeps
+        # the former, while article evidence must expose the current canonical catalogue identity.
+        with open(self.ruler, encoding="utf-8") as fh:
+            ruler = json.load(fh)
+        ruler["cases"][0]["anchor"]["title"] = "Title 1, The"
+        with open(self.ruler, "w", encoding="utf-8") as fh:
+            json.dump(ruler, fh)
+        state, _ = gate.build_state(ruler["cases"][0], gate.load_articles(self.articles))
+        self.assertEqual(state["works"]["anchor"]["title"], "Title 1")
         first = gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6)
         before = gate.file_digest(os.path.join(self.work, "worklist.jsonl"))
         second = gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6)
@@ -83,7 +92,7 @@ class MoreLikeGateTest(unittest.TestCase):
     def test_fake_provider_resume_and_score(self):
         gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6)
         out = os.path.join(self.temp.name, "answers.jsonl")
-        result = gate.run(self.work, out, spend=True, client=FakeJev())
+        result = gate.run(self.work, out, spend=True, client=FakeJev(), workers=2)
         self.assertEqual(result["written"], 4)
         self.assertEqual(gate.run(self.work, out)["callsPlanned"], 0)
         report = gate.score(self.work, out)

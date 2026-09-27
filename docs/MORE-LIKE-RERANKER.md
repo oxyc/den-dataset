@@ -17,9 +17,24 @@ The export is one JSON object with schema `issue18-step9d-export-v1`, the step-9
 - `controls.yearGapEqual=true`, `controls.seedGenreEqual=true`, and the absolute
   `controls.popularityLogGap` (at most 0.12).
 
+If the old per-case title prior is unavailable, rerun it honestly on the same deterministic sample; do not
+invent scores from its published aggregate. `more_like_prior.py prepare` freezes two title/year-only calls
+per selected case, `run` is dry without `--spend`, and `merge` writes the resulting scores into a new private
+ruler export:
+
+```sh
+python3 tools/rulers/more_like_prior.py prepare --source /private/ruler.json --work /private/prior
+python3 tools/rulers/more_like_prior.py run --work /private/prior --out /private/prior/answers.jsonl
+# inspect the ceiling, then repeat run with --spend
+python3 tools/rulers/more_like_prior.py merge --source /private/ruler.json --work /private/prior \
+  --answers /private/prior/answers.jsonl --out /private/ruler-with-prior.json
+```
+
 Preparation selects exactly 512 cases by a fixed hash of `pairId`. It joins current Wikipedia articles,
 uses the lead and extractor-selected story sections, caps each work's evidence equally, blinds positive and
-negative as candidate A/B, and writes exact state, question, input, and selection hashes:
+negative as candidate A/B, and writes exact state, question, input, and selection hashes. MovieLens
+title/year values remain in the ruler for the prior arm; article state uses the current catalogue title/year
+for the same stable key, so harmless alias or metadata corrections do not invalidate a case:
 
 ```sh
 python3 tools/rulers/more_like_gate.py prepare \
@@ -29,16 +44,19 @@ python3 tools/rulers/more_like_gate.py prepare \
 
 python3 tools/rulers/more_like_gate.py run \
   --work /private/path/more-like-gate \
-  --out /private/path/more-like-gate/answers.jsonl
+  --out /private/path/more-like-gate/answers.jsonl \
+  --max-spend-usd 1
 ```
 
 The second command is the dry run. Read its exact call and state-character counts before replacing it with
 `--spend`. The paid path is pinned to `jev-1.13.0`, resumes append-only, and defaults to a hard $1 spend
-cap. Before each request it reserves a deliberately pessimistic ceiling: every UTF-8 byte of the exact JSON
+cap. Before the first request it reserves the entire remaining run at a deliberately pessimistic ceiling:
+every UTF-8 byte of each exact JSON
 request counted as one token, plus 1,024 tokens for the provider wrapper (the measured fixed component was
 about 265). Usage returned by completed calls is stored per row and counted again after a resume. The dry plan
 reports whether all remaining calls fit even if every one reaches that ceiling; raise the explicit cap only
-after reading that number.
+after reading that number. `--workers` may parallelize calls without weakening the whole-run reservation;
+`--env` may point to the operator's `den.env` without copying its key into any gate artifact.
 
 Each call carries one anchor and two blinded candidates. Jev returns six bounded Nouls and one bounded
 Choice per candidate; it generates no prose. The overall Noul is preregistered as the only ranking score.

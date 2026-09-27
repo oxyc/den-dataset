@@ -6,18 +6,20 @@ explicit 9d export plus ``articles.jsonl`` into a frozen work directory before a
 without ``--spend`` only validates that directory and reports its exact call/state size.
 """
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import math
 import os
 import random
 import sys
+import threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from lib.typesafe_client import TypeSafe  # noqa: E402
+from lib.typesafe_client import TypeSafe, api_key  # noqa: E402
 from pipeline import run_combined as combined  # noqa: E402
 from pipeline.article_sections import parse_sections  # noqa: E402
 
@@ -137,7 +139,7 @@ def evidence(row):
     return text[:MAX_EVIDENCE_CHARS]
 
 
-def _ruler(blob, minimum_population=MIN_POPULATION):
+def _ruler(blob, minimum_population=MIN_POPULATION, require_prior=True):
     if blob.get("schema") != RULER_SCHEMA:
         raise ValueError(f"ruler schema must be {RULER_SCHEMA!r}")
     if blob.get("sourceComment") != SOURCE_COMMENT:
@@ -158,11 +160,13 @@ def _ruler(blob, minimum_population=MIN_POPULATION):
             if not item["key"].startswith("movie:"):
                 raise ValueError(f"{pair_id}: 9d is movies-only")
         prior = case.get("titleYear")
-        if not isinstance(prior, dict) or any(not isinstance(prior.get(k), (int, float))
-                                              for k in ("positive", "negative")):
+        if prior is None and not require_prior:
+            prior = None
+        elif not isinstance(prior, dict) or any(not isinstance(prior.get(k), (int, float))
+                                                for k in ("positive", "negative")):
             raise ValueError(f"{pair_id}: missing title+year prior scores")
-        if any(isinstance(prior[k], bool) or not math.isfinite(prior[k]) or not 0 <= prior[k] <= 1
-               for k in ("positive", "negative")):
+        if prior is not None and any(isinstance(prior[k], bool) or not math.isfinite(prior[k])
+                                     or not 0 <= prior[k] <= 1 for k in ("positive", "negative")):
             raise ValueError(f"{pair_id}: invalid title+year prior scores")
         plot = case.get("plot")
         if not isinstance(plot, dict) or any(isinstance(plot.get(k), bool)
@@ -195,10 +199,12 @@ def build_state(case, articles):
         row = articles.get(item["key"])
         if row is None:
             raise ValueError(f"{case['pairId']}: {item['key']} has no article")
-        if item.get("title") != row.get("title") or item.get("year") != row.get("year"):
-            raise ValueError(f"{case['pairId']}: {role} title/year differs from articles.jsonl")
         article = evidence(row)
-        works[role] = {"key": item["key"], "title": item["title"], "year": item["year"],
+        # The ruler deliberately retains the MovieLens title/year used by the title-only arm.  Article state
+        # uses the current catalogue's canonical identity: aliases and year corrections must not make a valid
+        # ruler key unusable, and the two arms remain independently hashable in the worklist.
+        works[role] = {"key": item["key"], "title": row.get("title") or item["title"],
+                       "year": row.get("year") or item["year"],
                        "wikipediaTitle": row.get("article"), "articleEvidence": article,
                        "articleSha256": hashlib.sha256(row["text"].encode()).hexdigest(),
                        "evidenceSha256": hashlib.sha256(article.encode()).hexdigest()}
@@ -218,7 +224,10 @@ def build_state(case, articles):
 def prepare(ruler_path, articles_path, work, sample_size=SAMPLE_SIZE, minimum_population=MIN_POPULATION):
     with open(ruler_path, encoding="utf-8") as fh:
         blob = json.load(fh)
-    cases = _chosen(_ruler(blob, minimum_population), sample_size)
+    cases = _chosen(_ruler(blob, minimum_population, require_prior=False), sample_size)
+    missing_prior = [case["pairId"] for case in cases if case.get("titleYear") is None]
+    if missing_prior:
+        raise ValueError(f"ruler lacks fresh title+year prior scores for {len(missing_prior)} selected cases")
     articles = load_articles(articles_path)
     qs = questions()
     os.makedirs(work, exist_ok=True)
@@ -289,7 +298,7 @@ def _validate(answers, qs):
     combined.validate_answers(answers, qs)
 
 
-def run(work, out, spend=False, client=None, max_spend=DEFAULT_SPEND_CAP):
+def run(work, out, spend=False, client=None, max_spend=DEFAULT_SPEND_CAP, workers=1, env_path=None):
     if not math.isfinite(max_spend) or max_spend <= 0:
         raise ValueError("max spend must be a positive finite dollar amount")
     registration, rows = load_plan(work)
@@ -328,32 +337,52 @@ def run(work, out, spend=False, client=None, max_spend=DEFAULT_SPEND_CAP):
                 (prior_tokens + sum(upper_tokens)) * rate <= max_spend}
     if not spend:
         return plan
-    client = client or TypeSafe(model=MODEL)
-    with open(out, "a", encoding="utf-8") as fh:
-        for row, next_upper_tokens in zip(todo, upper_tokens):
-            actual_tokens = getattr(client, "input_tokens", 0)
-            if isinstance(actual_tokens, bool) or not isinstance(actual_tokens, int) or actual_tokens < 0:
-                raise ValueError("provider client reports invalid input-token usage")
-            if (prior_tokens + actual_tokens + next_upper_tokens) * rate > max_spend:
-                raise RuntimeError(
-                    f"refusing the next request: its ${next_upper_tokens * rate:.6f} conservative ceiling "
-                    f"would cross the ${max_spend:.2f} spend cap")
-            answers, metadata = client.ask_with_metadata(row["state"], qs)
-            _validate(answers, qs)
-            if metadata.get("model") != MODEL:
-                raise ValueError(f"provider returned {metadata.get('model')!r}, expected {MODEL!r}")
-            usage = metadata.get("usage") or {}
-            if isinstance(usage.get("input_tokens"), bool) \
-                    or not isinstance(usage.get("input_tokens"), int) or usage["input_tokens"] < 0:
-                raise ValueError("provider returned invalid input-token usage")
-            if usage["input_tokens"] > next_upper_tokens:
-                raise ValueError("provider usage exceeded the preregistered per-request token ceiling")
-            result = {"pairId": row["pairId"], "stateSha256": row["stateSha256"],
-                      "questionsSha256": registration["questionsSha256"], "model": metadata["model"],
-                      "requestedModel": MODEL, "answers": answers, "usage": usage,
-                      "requestTokenUpperBound": next_upper_tokens}
+    if not isinstance(workers, int) or workers < 1:
+        raise ValueError("workers must be a positive integer")
+    # Reserve the entire remaining serialized request ceiling before starting. This makes parallel calls safe:
+    # no in-flight set can overshoot the cap, even if every request reaches its byte-level upper bound.
+    if (prior_tokens + sum(upper_tokens)) * rate > max_spend:
+        next_upper_tokens = upper_tokens[0] if upper_tokens else 0
+        raise RuntimeError(
+            f"refusing the next request: the remaining requests' ${sum(upper_tokens) * rate:.6f} "
+            f"conservative ceiling would cross the ${max_spend:.2f} spend cap")
+    client = client or TypeSafe(key=api_key(env_path), model=MODEL)
+    lock = threading.Lock()
+    fh = open(out, "a", encoding="utf-8")
+
+    def one(row, next_upper_tokens):
+        actual_tokens = getattr(client, "input_tokens", 0)
+        if isinstance(actual_tokens, bool) or not isinstance(actual_tokens, int) or actual_tokens < 0:
+            raise ValueError("provider client reports invalid input-token usage")
+        # The whole-run reservation above is load-bearing. Keep the request-local validation too, so a resume
+        # records and checks exactly the same ceiling as a single-worker run.
+        if (prior_tokens + actual_tokens + next_upper_tokens) * rate > max_spend:
+            raise RuntimeError(
+                f"refusing the next request: its ${next_upper_tokens * rate:.6f} conservative ceiling "
+                f"would cross the ${max_spend:.2f} spend cap")
+        answers, metadata = client.ask_with_metadata(row["state"], qs)
+        _validate(answers, qs)
+        if metadata.get("model") != MODEL:
+            raise ValueError(f"provider returned {metadata.get('model')!r}, expected {MODEL!r}")
+        usage = metadata.get("usage") or {}
+        if isinstance(usage.get("input_tokens"), bool) \
+                or not isinstance(usage.get("input_tokens"), int) or usage["input_tokens"] < 0:
+            raise ValueError("provider returned invalid input-token usage")
+        if usage["input_tokens"] > next_upper_tokens:
+            raise ValueError("provider usage exceeded the preregistered per-request token ceiling")
+        result = {"pairId": row["pairId"], "stateSha256": row["stateSha256"],
+                  "questionsSha256": registration["questionsSha256"], "model": metadata["model"],
+                  "requestedModel": MODEL, "answers": answers, "usage": usage,
+                  "requestTokenUpperBound": next_upper_tokens}
+        with lock:
             fh.write(canonical(result) + "\n")
             fh.flush()
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(lambda args: one(*args), zip(todo, upper_tokens)))
+    finally:
+        fh.close()
     return {**plan, "written": len(todo), "inputTokens": getattr(client, "input_tokens", 0),
             "spendUSD": getattr(client, "spend", 0.0)}
 
@@ -436,6 +465,8 @@ def main(argv=None):
     ask.add_argument("--out", required=True)
     ask.add_argument("--spend", action="store_true")
     ask.add_argument("--max-spend-usd", type=float, default=DEFAULT_SPEND_CAP)
+    ask.add_argument("--workers", type=int, default=1)
+    ask.add_argument("--env", help="optional den.env path (the key is never written to gate artifacts)")
     scoring = sub.add_parser("score")
     scoring.add_argument("--work", required=True)
     scoring.add_argument("--answers", required=True)
@@ -443,7 +474,8 @@ def main(argv=None):
     if args.command == "prepare":
         result = prepare(args.ruler, args.articles, args.work)
     elif args.command == "run":
-        result = run(args.work, args.out, args.spend, max_spend=args.max_spend_usd)
+        result = run(args.work, args.out, args.spend, max_spend=args.max_spend_usd,
+                     workers=args.workers, env_path=args.env)
     else:
         result = score(args.work, args.answers)
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
