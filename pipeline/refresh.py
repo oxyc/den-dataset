@@ -53,6 +53,10 @@ from .contract import StageError
 #: Titles per batch the refresh writes: the fetch stage's batch size, for the same reasons.
 BATCH = 500
 
+#: The WDQS mapping query is the enrichment path's widest and least reliable request. Keep its refresh
+#: chunks at the same proven ceiling as ordinary enrichment while still writing 500-row output batches.
+CANDIDATE_BATCH = enrich.LIMIT
+
 #: What a refreshed record keeps from the one it replaces: its key, its `animated` flag and the Wikidata
 #: item it was resolved to. Everything else is `reground`'s to write again — and a field left over from the
 #: old grounding (a `plotArticle` on a title that lost its plot) would be a lie about the new one. Older
@@ -175,8 +179,11 @@ def refetch(records, cache):
     written, and the next refresh finds the same titles changed.
     """
     titles = [base(record) for record in records]
+    facts = {}
     try:
-        facts = enrich.candidates(titles, cache, excluded_items(titles))
+        for start in range(0, len(titles), CANDIDATE_BATCH):
+            chunk = titles[start:start + CANDIDATE_BATCH]
+            facts.update(enrich.candidates(chunk, cache, excluded_items(chunk)))
     except (http.HTTPError, wikidata.WikidataError) as error:
         raise enrich.Aborted(f"refresh: the Wikidata candidate lookup failed ({error}); nothing of this "
                              f"chunk was written — the next refresh finds it again") from error
