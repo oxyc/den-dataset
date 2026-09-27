@@ -165,6 +165,38 @@ class MoreLikeGateTest(unittest.TestCase):
             gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6,
                          enriched_dir=enriched)
 
+    def test_historical_heading_markup_is_matched_and_revision_override_refreshes_empty_plot(self):
+        rows = list(gate.read_jsonl(self.articles))
+        enriched = os.path.join(self.temp.name, "enriched")
+        os.mkdir(enriched)
+        rows[0]["text"] = "Lead.\n== {{Lang|fr|Mise-en-scène}} and cinematography ==\nVisuals."
+        rows[0].pop("plotSections")
+        rows[1]["text"] = "Lead only.\n== Production ==\nMade.\n== Reception ==\nReviewed."
+        rows[1]["revId"] = 456
+        rows[1].pop("plotSections")
+        batch = []
+        for index, row in enumerate(rows):
+            batch.append({"mediaType": row["mediaType"], "tmdbId": row["tmdbId"],
+                          "year": row["year"], "plotArticle": row["article"], "plotRevId": 123,
+                          "plotSections": (["Mise-en-scène and cinematography"] if index == 0 else
+                                           ["Plot"] if index == 1 else row["plotSections"])})
+        with open(self.articles, "w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        with open(os.path.join(enriched, "batch-000.json"), "w", encoding="utf-8") as fh:
+            json.dump(batch, fh)
+        overrides = os.path.join(self.temp.name, "overrides.json")
+        with open(overrides, "w", encoding="utf-8") as fh:
+            json.dump({"schema": "jev-more-like-evidence-overrides-v1", "rows": [{
+                "key": "movie:2", "article": "Title 2 (film)", "language": "en",
+                "articleRevId": 456, "plotSections": [],
+            }]}, fh)
+
+        articles, _ = gate.load_articles(self.articles, enriched, evidence_overrides=overrides)
+        self.assertEqual(articles["movie:1"]["plotSections"],
+                         ["{{Lang|fr|Mise-en-scène}} and cinematography"])
+        self.assertEqual(articles["movie:2"]["plotSections"], [])
+
     def test_spend_cap_is_reserved_before_a_provider_call(self):
         gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6)
         _, rows = gate.load_plan(self.work)

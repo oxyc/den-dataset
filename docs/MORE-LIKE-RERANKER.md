@@ -41,6 +41,7 @@ python3 tools/rulers/more_like_gate.py prepare \
   --ruler /private/path/step9d-export.json \
   --articles out-repass/articles.jsonl \
   --enriched-dir out-repass/enriched \
+  --evidence-overrides /private/path/evidence-overrides.json \
   --work /private/path/more-like-gate
 
 python3 tools/rulers/more_like_gate.py run \
@@ -80,5 +81,8 @@ Older article dumps contain every heading as `sections`, but not the extractor's
 and language exactly match the frozen prose, and hashes the metadata and source-batch identity into the
 preregistration. This differs deliberately from classify's newest-wins join: a later grounding may name a
 different article, whose headings cannot describe the old dump. Preparation also refuses a selected
-heading that no longer exists in the dumped revision. Silently sending only the lead, or mixing headings
+heading that no longer exists in the dumped revision. Refresh such a row from the exact dumped revision
+without a model and pass a private `jev-more-like-evidence-overrides-v1` file containing `rows` with `key`,
+`article`, `language`, `articleRevId`, and the refreshed `plotSections`; identity and revision must match.
+The overrides file hash is part of evidence provenance. Silently sending only the lead, or mixing headings
 from different article text, is not equivalent evidence.
