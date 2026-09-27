@@ -112,6 +112,16 @@ if meta.get("storeFile") != record.get("storeFile") or not os.path.exists(store)
     problems.append(f"the manifest names {meta.get('storeFile')!r} and the check passed {record.get('storeFile')!r}")
 elif digest(store) != record.get("storeSha256") or meta.get("storeSha256") != record.get("storeSha256"):
     problems.append(f"{record['storeFile']} is not the store the check passed")
+corrections = meta.get("sourceCorrections") or []
+if corrections != (record.get("sourceCorrections") or []):
+    problems.append("sourceCorrections is not the exact native-artifact gate map the check passed")
+for number, correction in enumerate(corrections, 1):
+    required = ("correctionDigestSha256", "applyBatch", "proofs", "nativeArtifacts")
+    if not isinstance(correction, dict) or any(not correction.get(key) for key in required):
+        problems.append(f"sourceCorrections entry {number} is not a complete checked native-artifact gate")
+        continue
+    if set(correction["proofs"]) != set(correction["nativeArtifacts"]):
+        problems.append(f"sourceCorrections entry {number} does not bind every proof to a native artifact")
 bundle = record.get("bundle") or {}
 for asset, sha in (bundle.get("files") or {}).items():
     path = os.path.join(d, "bundle", asset)
@@ -649,6 +659,7 @@ record = {"datasetVersion": meta.get("datasetVersion"), "storeFile": meta.get("s
           "storeSha256": hashlib.sha256(open(os.path.join(d, meta["storeFile"]), "rb").read()).hexdigest(),
           "metaSha256": hashlib.sha256(open(meta_path, "rb").read()).hexdigest(),
           "maxBatchId": meta.get("maxBatchId"),
+          "sourceCorrections": meta.get("sourceCorrections") or [],
           "bundle": json.load(open(os.path.join(d, "bundle", "bundle.json"))),
           "checkedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
 json.dump(record, open(os.path.join(d, "checked.json"), "w"), indent=1)
