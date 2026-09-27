@@ -5,7 +5,12 @@ import concurrent.futures
 import json
 import math
 import os
+import sys
 import threading
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
 
 from more_like_gate import (MODEL, RULER_SCHEMA, SAMPLE_SIZE, SOURCE_COMMENT, TypeSafe, _chosen, _ruler,
                             canonical, digest, file_digest, read_jsonl)

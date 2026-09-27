@@ -75,7 +75,8 @@ class MoreLikeGateTest(unittest.TestCase):
         ruler["cases"][0]["anchor"]["title"] = "Title 1, The"
         with open(self.ruler, "w", encoding="utf-8") as fh:
             json.dump(ruler, fh)
-        state, _ = gate.build_state(ruler["cases"][0], gate.load_articles(self.articles))
+        articles, _ = gate.load_articles(self.articles)
+        state, _ = gate.build_state(ruler["cases"][0], articles)
         self.assertEqual(state["works"]["anchor"]["title"], "Title 1")
         first = gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6)
         before = gate.file_digest(os.path.join(self.work, "worklist.jsonl"))
@@ -107,6 +108,94 @@ class MoreLikeGateTest(unittest.TestCase):
             json.dump(blob, fh)
         with self.assertRaisesRegex(ValueError, "year and genre"):
             gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6)
+
+    def test_old_article_dump_requires_enriched_metadata(self):
+        rows = list(gate.read_jsonl(self.articles))
+        for row in rows:
+            row.pop("plotSections")
+        with open(self.articles, "w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        with self.assertRaisesRegex(SystemExit, "pass --enriched-dir"):
+            gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6)
+
+    def test_old_article_dump_backfills_exact_extractor_evidence(self):
+        rows = list(gate.read_jsonl(self.articles))
+        enriched = os.path.join(self.temp.name, "enriched")
+        os.mkdir(enriched)
+        batch = []
+        for row in rows:
+            row.pop("plotSections")
+            batch.append({"mediaType": row["mediaType"], "tmdbId": row["tmdbId"],
+                          "year": row["year"], "plotArticle": row["article"], "plotRevId": 123,
+                          "plotSections": ["Plot"]})
+        with open(self.articles, "w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        with open(os.path.join(enriched, "batch-000.json"), "w", encoding="utf-8") as fh:
+            json.dump(batch, fh)
+
+        registration = gate.prepare(self.ruler, self.articles, self.work, sample_size=4,
+                                    minimum_population=6, enriched_dir=enriched)
+        self.assertRegex(registration["evidenceMetadataSha256"], r"^[0-9a-f]{64}$")
+        _, planned = gate.load_plan(self.work)
+        for row in planned:
+            for work in row["state"]["works"].values():
+                self.assertIn("Story ", work["articleEvidence"])
+
+    def test_old_article_dump_refuses_stale_enriched_article_identity(self):
+        rows = list(gate.read_jsonl(self.articles))
+        enriched = os.path.join(self.temp.name, "enriched")
+        os.mkdir(enriched)
+        batch = []
+        for row in rows:
+            row.pop("plotSections")
+            batch.append({"mediaType": row["mediaType"], "tmdbId": row["tmdbId"],
+                          "year": row["year"], "plotArticle": row["article"], "plotRevId": 123,
+                          "plotSections": ["Plot"]})
+        for item in batch:
+            item["plotArticle"] = "Different article"
+        with open(self.articles, "w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        with open(os.path.join(enriched, "batch-000.json"), "w", encoding="utf-8") as fh:
+            json.dump(batch, fh)
+
+        with self.assertRaisesRegex(SystemExit, "no retained article/language-matching record"):
+            gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6,
+                         enriched_dir=enriched)
+
+    def test_historical_heading_markup_is_matched_and_revision_override_refreshes_empty_plot(self):
+        rows = list(gate.read_jsonl(self.articles))
+        enriched = os.path.join(self.temp.name, "enriched")
+        os.mkdir(enriched)
+        rows[0]["text"] = "Lead.\n== {{Lang|fr|Mise-en-scène}} and cinematography ==\nVisuals."
+        rows[0].pop("plotSections")
+        rows[1]["text"] = "Lead only.\n== Production ==\nMade.\n== Reception ==\nReviewed."
+        rows[1]["revId"] = 456
+        rows[1].pop("plotSections")
+        batch = []
+        for index, row in enumerate(rows):
+            batch.append({"mediaType": row["mediaType"], "tmdbId": row["tmdbId"],
+                          "year": row["year"], "plotArticle": row["article"], "plotRevId": 123,
+                          "plotSections": (["Mise-en-scène and cinematography"] if index == 0 else
+                                           ["Plot"] if index == 1 else row["plotSections"])})
+        with open(self.articles, "w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row) + "\n")
+        with open(os.path.join(enriched, "batch-000.json"), "w", encoding="utf-8") as fh:
+            json.dump(batch, fh)
+        overrides = os.path.join(self.temp.name, "overrides.json")
+        with open(overrides, "w", encoding="utf-8") as fh:
+            json.dump({"schema": "jev-more-like-evidence-overrides-v1", "rows": [{
+                "key": "movie:2", "article": "Title 2 (film)", "language": "en",
+                "articleRevId": 456, "plotSections": [],
+            }]}, fh)
+
+        articles, _ = gate.load_articles(self.articles, enriched, evidence_overrides=overrides)
+        self.assertEqual(articles["movie:1"]["plotSections"],
+                         ["{{Lang|fr|Mise-en-scène}} and cinematography"])
+        self.assertEqual(articles["movie:2"]["plotSections"], [])
 
     def test_spend_cap_is_reserved_before_a_provider_call(self):
         gate.prepare(self.ruler, self.articles, self.work, sample_size=4, minimum_population=6)
