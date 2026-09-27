@@ -114,8 +114,7 @@ def context(args):
                             regional_wikipedia_floor=args.regional_wikipedia_floor, plan=args.plan,
                             spend=args.spend, dump_docs=args.dump_docs or "",
                             reembed_keys=args.reembed_keys or "", reembed_changed=args.reembed_changed,
-                            refresh=args.refresh, revisit_weeks=args.revisit_weeks,
-                            approved_source_keys=getattr(args, "approved_source_keys", None) or "")
+                            refresh=args.refresh, revisit_weeks=args.revisit_weeks)
 
 
 def execute(module, ctx):
@@ -172,8 +171,6 @@ def main(argv=None):
         sub.add_argument("--refresh", action="store_true",
                          help="the fetch stage re-fetches every grounded title whose Wikipedia article "
                               "changed since its recorded revision; with --plan it only counts them")
-        sub.add_argument("--approved-source-keys", metavar="FILE",
-                         help="explicitly approve reviewed source candidates for replacement")
         sub.add_argument("--revisit-weeks", type=int, metavar="N",
                          help="the change set also lists this week's slice of an N-week cycle")
         sub.add_argument("--set", action="append", default=[], metavar="NAME=PATH")

@@ -15,7 +15,7 @@ from unittest import mock
 
 from lib import cache as caching, http
 
-from . import artifacts, changes, enrich, fetch, refresh
+from . import artifacts, enrich, fetch, refresh
 from .contract import Context, StageError
 
 NOW = datetime.datetime(2026, 9, 22, 12, 0, tzinfo=datetime.timezone.utc)
@@ -94,9 +94,8 @@ class Refresh(unittest.TestCase):
                                                "wikitext": text_wikitext}}).encode())
 
     def refreshed(self, **kwargs):
-        now = kwargs.pop("now", NOW)
         ctx = Context(out_dir=self.out, **kwargs)
-        return refresh.run(ctx, cache=self.cache, ask=self.ask, now=now)
+        return refresh.run(ctx, cache=self.cache, ask=self.ask, now=NOW)
 
     def listing(self):
         return sorted(os.listdir(os.path.join(self.out, "enriched")))
@@ -121,7 +120,7 @@ class Survey(Refresh):
         self.current = {("en", "Film 1"): 100, ("en", "Film 2"): 101, ("en", "Film 3"): None,
                         ("en", "Film 4"): 555}
         surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
-        self.assertEqual({key: verdict for key, (verdict, _r, _b, _c) in surveyed.items()},
+        self.assertEqual({key: verdict for key, (verdict, _r, _b) in surveyed.items()},
                          {"movie:1": refresh.UNCHANGED, "movie:2": refresh.MOVED, "movie:3": refresh.GONE,
                           "movie:4": refresh.UNKNOWN},
                          "unknown counts as changed, and a plotless title has no article to ask about")
@@ -148,15 +147,15 @@ class Survey(Refresh):
         self.batch(1, [grounded(1, PLOT.strip(), None), grounded(2, PLOT.strip(), None)])
         self.current = {("en", "Film 1"): 77, ("en", "Film 2"): 78}
         surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
-        self.assertEqual((surveyed["movie:1"][0], surveyed["movie:1"][2]), (refresh.UNCHANGED, 77))
-        self.assertEqual((surveyed["movie:2"][0], surveyed["movie:2"][2]), (refresh.UNKNOWN, None))
+        self.assertEqual(surveyed["movie:1"][0::2], (refresh.UNCHANGED, 77))
+        self.assertEqual(surveyed["movie:2"][0::2], (refresh.UNKNOWN, None))
 
     def test_a_backfilled_revision_that_moved_since_is_fetched(self):
         self.cached("Film 1", f"Lead.\n== Plot ==\n{PLOT}", 77)
         self.batch(1, [grounded(1, PLOT.strip(), None)])
         self.current = {("en", "Film 1"): 80}
         surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
-        self.assertEqual((surveyed["movie:1"][0], surveyed["movie:1"][2]), (refresh.MOVED, None))
+        self.assertEqual(surveyed["movie:1"][0::2], (refresh.MOVED, None))
 
 
 class Plan(Refresh):
@@ -167,7 +166,6 @@ class Plan(Refresh):
         report = self.refreshed(plan=True)
         self.assertEqual((report["unchanged"], report["moved"], report["unknown"], report["toFetch"]),
                          (1, 1, 1, 2))
-        self.assertEqual((report["selected"], report["remaining"]), (2, 0))
         self.assertEqual((self.plot_calls, self.candidate_calls), ([], []))
         self.assertEqual(self.listing(), before)
         self.assertFalse(os.path.exists(os.path.join(self.out, "refresh")))
@@ -191,32 +189,26 @@ class Run(Refresh):
                       "Film 4": http.HTTPError(503, "x"),
                       "Film 6": found(PLOT, "Film 6", 106)}
 
-    def test_changed_or_lost_candidates_are_reviewed_without_replacing_the_canonical_rows(self):
+    def test_what_changed_is_rewritten_in_a_new_batch_and_listed(self):
         report = self.refreshed()
         self.assertEqual(self.listing(), ["batch-1.json", "batch-2.json", "batch-3.json"])
         rows = self.latest()
-        self.assertEqual((rows["movie:1"]["overview"], rows["movie:1"]["plotRevId"]), (PLOT, 100))
-        self.assertTrue(rows["movie:3"]["hasWikiPlot"])
+        self.assertEqual((rows["movie:1"]["overview"], rows["movie:1"]["plotRevId"]), ("Rewritten: " + PLOT, 101))
         self.assertEqual(self.lists(), {"changed": ["movie:1"], "plotless": ["movie:3"]})
         self.assertEqual((report["changed"], report["revised"], report["plotless"], report["deferred"],
                           report["recorded"]), (1, 2, 1, 1, 1))
-        with open(os.path.join(self.out, artifacts.SOURCE_REVIEW.filename), encoding="utf-8") as fh:
-            review = json.load(fh)
-        self.assertEqual(review["count"], 2)
-        self.assertEqual(review["titles"]["movie:1"]["reasons"], ["plot"])
-        self.assertEqual(review["titles"]["movie:3"]["reasons"], ["lostPlot"])
-        self.assertNotIn(PLOT, json.dumps(review), "the durable review artifact carries no source prose")
 
     def test_an_edit_that_left_the_plot_alone_takes_the_new_revision_and_is_in_no_list(self):
         self.refreshed()
         self.assertEqual(self.latest()["movie:2"]["plotRevId"], 102)
         self.assertNotIn("movie:2", sum(self.lists().values(), []))
 
-    def test_a_title_that_lost_its_plot_keeps_the_old_coherent_grounding_until_review(self):
+    def test_a_title_that_lost_its_plot_carries_nothing_from_the_old_grounding(self):
         self.refreshed()
         row = self.latest()["movie:3"]
-        self.assertTrue(row["hasWikiPlot"])
-        self.assertEqual((row["plotArticle"], row["plotRevId"]), ("Film 3", 100))
+        self.assertFalse(row["hasWikiPlot"])
+        for name in ("plotArticle", "plotRevId", "plotLanguage", "plotArticleRole"):
+            self.assertNotIn(name, row)
 
     def test_a_failed_fetch_keeps_the_old_record_and_is_asked_again_next_time(self):
         self.refreshed()
@@ -237,28 +229,10 @@ class Run(Refresh):
                          set())
         self.assertEqual((row["overview"], row["animated"]), (PLOT.strip(), True))
 
-    def test_a_second_refresh_skips_unchanged_reviewed_revisions_and_finds_only_the_failure(self):
+    def test_a_second_refresh_finds_nothing_left_but_the_failure(self):
         self.refreshed()
-        report = self.refreshed(now=NOW + datetime.timedelta(seconds=1))
-        self.assertEqual((report["awaitingReview"], report["toFetch"]), (2, 1))
-
-    def test_an_unknown_revision_with_no_current_identity_is_retried(self):
-        self.batch(2, [grounded(7, PLOT, None)])
-        self.plots["Film 7"] = None
-        self.refreshed()
-        first_reads = sum(article == "Film 7" for article, _language, _cache, _token in self.plot_calls)
-        report = self.refreshed(now=NOW + datetime.timedelta(seconds=1))
-        second_reads = sum(article == "Film 7" for article, _language, _cache, _token in self.plot_calls)
-        self.assertEqual((first_reads, second_reads), (1, 2))
-        self.assertGreaterEqual(report["selected"], 1)
-
-    def test_a_limit_records_review_and_leaves_the_unselected_slice_for_the_next_published_day(self):
-        report = self.refreshed(refresh_limit=2)
-        self.assertEqual((report["toFetch"], report["selected"], report["remaining"]), (5, 2, 3))
-        self.assertEqual([ids for ids, _excluded in self.candidate_calls], [[1, 2]])
-        report = self.refreshed(refresh_limit=2, now=NOW + datetime.timedelta(seconds=1))
-        self.assertEqual((report["awaitingReview"], report["toFetch"], report["selected"], report["remaining"]),
-                         (1, 3, 2, 1))
+        surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
+        self.assertEqual(refresh.counts(surveyed, 0)["toFetch"], 1)
 
     def test_every_wikipedia_read_goes_to_the_network_and_its_answer_replaces_the_cached_body(self):
         """The cache would answer with the revision the survey just found stale."""
@@ -274,9 +248,9 @@ class Run(Refresh):
         self.assertEqual({token for _a, _l, _c, token in self.plot_calls}, {None},
                          "the action API, which records a revision; Enterprise names none")
 
-    def test_a_safe_revision_update_keeps_its_animated_flag_and_item_and_drops_every_tmdb_field(self):
+    def test_a_refreshed_record_keeps_its_animated_flag_and_item_and_drops_every_tmdb_field(self):
         self.refreshed()
-        row = self.latest()["movie:2"]
+        row = self.latest()["movie:1"]
         self.assertIs(row["animated"], True)
         self.assertEqual({"title", "keywords", "voteCount", "originalLanguage", "originCountry", "genreIDs"} & set(row),
                          set())
@@ -321,44 +295,6 @@ class Run(Refresh):
             refresh.run(Context(out_dir=self.out), cache=self.cache, ask=down, now=NOW)
         self.assertEqual(self.listing(), ["batch-1.json"])
         self.assertFalse(os.path.exists(os.path.join(self.out, "refresh")))
-
-
-class Approval(Refresh):
-    def test_only_an_explicit_review_approval_replaces_the_plot_and_enters_model_and_embed_worklists(self):
-        self.batch(1, [grounded(1, PLOT, 100)])
-        self.current = {("en", "Film 1"): 101}
-        self.plots = {"Film 1": found("Rewritten: " + PLOT, "Film 1", 101)}
-
-        first = self.refreshed()
-        self.assertEqual((first["reviewQueued"], self.latest()["movie:1"]["plotRevId"]), (1, 100))
-        approved = os.path.join(self.out, "approved.txt")
-        with open(approved, "w", encoding="utf-8") as fh:
-            fh.write("movie:1\n")
-        second = self.refreshed(approved_source_keys=approved, now=NOW + datetime.timedelta(seconds=1))
-        self.assertEqual((second["approved"], self.latest()["movie:1"]["plotRevId"]), (1, 101))
-        with open(os.path.join(self.out, artifacts.SOURCE_REVIEW.filename), encoding="utf-8") as fh:
-            self.assertEqual(json.load(fh)["titles"], {})
-
-        os.makedirs(os.path.join(self.out, "published"), exist_ok=True)
-        with open(os.path.join(self.out, artifacts.PUBLISHED_META.filename), "w", encoding="utf-8") as fh:
-            json.dump({"datasetVersion": "live", "maxBatchId": 1}, fh)
-        with mock.patch("sys.stdout", io.StringIO()):
-            changes.run(Context(out_dir=self.out, approved_source_keys=approved), now=NOW)
-        directory = os.path.join(self.out, "changes")
-        for name in ("keys.txt", "new.txt"):
-            with open(os.path.join(directory, name), encoding="utf-8") as fh:
-                self.assertEqual(fh.read().split(), ["movie:1"])
-        with open(os.path.join(directory, "plan.json"), encoding="utf-8") as fh:
-            self.assertEqual(json.load(fh)["approved"], ["movie:1"])
-
-    def test_an_unreviewed_key_cannot_be_approved(self):
-        self.batch(1, [grounded(1, PLOT, 100)])
-        self.current = {("en", "Film 1"): 101}
-        approved = os.path.join(self.out, "approved.txt")
-        with open(approved, "w", encoding="utf-8") as fh:
-            fh.write("movie:1\n")
-        with self.assertRaisesRegex(StageError, "not in .*source-review"):
-            self.refreshed(approved_source_keys=approved)
 
 
 class Stage(unittest.TestCase):

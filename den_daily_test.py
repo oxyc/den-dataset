@@ -8,8 +8,8 @@ it as the job does, on two days:
   * **day one** — `den run` into an empty out-dir, then `den stage publish --plan`: every gate the publisher
     runs, nothing signed or uploaded. The manifest it leaves is "published": copied to `published/`, where
     the next day's change set and gates read the live dataset from.
-  * **day two** — one film's plot is rewritten upstream. The bounded weekly review observes it but keeps
-    the old plot, judgements and vector coherent; no inference or embedding worklist names it.
+  * **day two** — one film's Wikipedia plot is rewritten upstream. Daily and weekly runs deliberately do
+    not survey existing prose, so the old coherent plot, judgements and vector remain untouched.
   * **day two, from the release** — the same day again, in an out-dir that holds only the bundle day one's
     publish put beside the dataset (`pipeline/published.py`): no plots, no shards, no answers. It has to
     build the same corpus and the same store, since that is how the job runs — it keeps nothing between runs.
@@ -169,14 +169,11 @@ class DenDaily(fixture.DenRun):
         report = self.report()
         self.assertEqual(report["baseline"]["datasetVersion"], self.day_one["version"])
         self.assertEqual((report["added"], report["changed"]), ([], {}))
-        self.assertEqual(report["sourceReview"]["count"], 1)
-        self.assertEqual((report["refresh"]["reviewQueued"], report["refresh"]["approved"]), (1, 0))
         self.assertEqual(report["datasetVersion"], self.day_two["version"])
         self.assertEqual([s["stage"] for s in report["skipped"]], ["classify", "critique", "genres_moods (ask)"])
         self.assertEqual(report["spend"], {"inputTokens": 0, "usd": 0.0})
         with open(os.path.join(self.out, "daily-report.md"), encoding="utf-8") as fh:
             summary = fh.read()
-        self.assertIn("source candidates awaiting explicit review: 1", summary)
         self.assertIn("Not ready", summary)
 
     def test_the_delta_ids_are_written_by_the_documented_rule(self):
@@ -186,15 +183,13 @@ class DenDaily(fixture.DenRun):
         self.assertFalse(ids & self.labels())
         self.assertIn("tv:900006", ids, "the premise-only title with no plot vector")
 
-    def test_the_source_edit_is_review_only_and_absent_from_every_inference_worklist(self):
+    def test_the_unsurveyed_source_edit_is_absent_from_every_inference_worklist(self):
         plan = self.plan()
         self.assertEqual(plan["baseline"]["datasetVersion"], self.day_one["version"])
         self.assertEqual((plan["added"], plan["changed"], plan["withdrawn"]), ([], {}, {}))
         for name in ("keys.txt", "new.txt"):
             with open(os.path.join(self.out, "changes", name), encoding="utf-8") as fh:
                 self.assertNotIn(EDITED, fh.read().split())
-        with open(os.path.join(self.out, "changes", "review.txt"), encoding="utf-8") as fh:
-            self.assertEqual(fh.read().split(), [EDITED])
 
     def test_the_reviewed_title_is_not_embedded_again(self):
         again = self.day_two["embedded"][len(self.day_one["embedded"]):]
@@ -216,7 +211,7 @@ class DenDaily(fixture.DenRun):
         self.assertEqual((meta["datasetVersion"], meta.get("storeSha256")),
                          (self.day_two["version"], self.day_two["storeSha256"]))
         self.assertEqual(self.seeded_code, self.day_two_code)
-        for artifact in (artifacts.FRANCHISE_DECISIONS, artifacts.FRANCHISES, artifacts.SOURCE_REVIEW):
+        for artifact in (artifacts.FRANCHISE_DECISIONS, artifacts.FRANCHISES):
             with open(os.path.join(self.seeded, artifact.filename), encoding="utf-8") as fh:
                 seeded = json.load(fh)
             with open(os.path.join(self.out, artifact.filename), encoding="utf-8") as fh:
@@ -225,7 +220,7 @@ class DenDaily(fixture.DenRun):
 
     def test_the_seed_carries_no_plot(self):
         """The bundle is published beside the dataset, so what it lays out holds a plot's digest, never its
-        text: day two may fetch an edited candidate for review, but never makes it canonical."""
+        text: day two does not fetch the existing title's edit at all."""
         with open(enrich_batch(self.seeded, self.day_one_batch()), encoding="utf-8") as fh:
             seeded = json.load(fh)
         self.assertTrue(seeded)

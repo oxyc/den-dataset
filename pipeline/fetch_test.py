@@ -79,8 +79,7 @@ class Declaration(unittest.TestCase):
     def test_it_declares_the_batches_and_the_checkpoint_that_resumes_them(self):
         """An absent checkpoint is not an empty one: it made a delta restart the numbering at 1 and
         overwrite two batches."""
-        self.assertEqual([bind(e).name for e in fetch.OUTPUTS],
-                         ["enriched", "enrich_checkpoint", "refresh", "source_review"])
+        self.assertEqual([bind(e).name for e in fetch.OUTPUTS], ["enriched", "enrich_checkpoint", "refresh"])
 
     def test_both_worklists_are_declared(self):
         self.assertEqual(sorted(bind(e).name for e in fetch.INPUTS), ["universe_movie", "universe_tv"])

@@ -196,13 +196,6 @@ class Context:
     #: revisions, reports the counts, and fetches and writes nothing — the drain included. See
     #: `pipeline/refresh.py`.
     refresh: bool = False
-    #: Bound how many stale grounded titles one refresh re-fetches. None means every stale title. The daily
-    #: job's weekly review uses a bound so a one-time revision backfill can publish progress instead of
-    #: exceeding its runner deadline and starting from the same live bundle again.
-    refresh_limit: int | None = None
-    #: Explicit operator approval to replace these reviewed Wikipedia candidates and rerun their
-    #: model/vector artifacts. Source revision drift never populates this file automatically.
-    approved_source_keys: str = ""
     #: The change set adds this week's slice of a cycle this many weeks long (`pipeline/changes.py`), so a
     #: weekly run revisits the whole corpus once per cycle. None adds no slice.
     revisit_weeks: int | None = None
