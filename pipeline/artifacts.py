@@ -500,6 +500,17 @@ JEV_MORE_LIKE = Artifact(
     required=False,
 )
 
+#: Each asked title's fan picks for You Might Also Like (oxyc/den-atlas#121): the titles a model named that a
+#: fan would also love, matched to corpus keys. Bought by an operator run, never by a stage, so a store stage
+#: with no copy in the out-dir and no override writes no fan_picks sections.
+FAN_PICKS = Artifact(
+    name="fan_picks",
+    filename="fan-picks.json",
+    producer="tools/fan_picks.py",
+    how="tools/fan_picks.py prepare/run/collect/match, then export (oxyc/den-atlas#121)",
+    required=False,
+)
+
 #: The only artifact a release carries (oxyc/den#113). Everything above is an input to it.
 STORE = Artifact(
     name="store",
@@ -534,4 +545,4 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              EMBEDDER, EMBEDDING_SPACE, PLOT_LENGTH_TRANSFORM, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
              FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISE_DECISIONS, FRANCHISES,
              VECTORS, RAW_VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, PREMISE_TAGS,
-             JEV_MORE_LIKE, STORE, MANIFEST, RELEASE)
+             JEV_MORE_LIKE, FAN_PICKS, STORE, MANIFEST, RELEASE)

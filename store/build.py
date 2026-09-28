@@ -17,8 +17,8 @@ import json
 import os
 import sys
 
-from . import (aliases, awards, cards, entities, facets, facts, format, franchises, identity, labels, makers,
-               jev_more_like, premise_tags, scores, studios, vectors, versions)
+from . import (aliases, awards, cards, entities, facets, facts, fan_picks, format, franchises, identity, labels,
+               makers, jev_more_like, premise_tags, scores, studios, vectors, versions)
 from .inputs import corpus_rows, labels_by_key, read_json
 
 
@@ -125,6 +125,10 @@ def run(args, inputs, prose_check, provenance_check):
     if jev_columns.present:
         print(f"  Jev More Like This scores: {jev_columns.anchors} titles", file=sys.stderr)
 
+    fan_columns = fan_picks.FanPicks(args.fan_picks, keys)
+    if fan_columns.present:
+        print(f"  fan picks: {fan_columns.anchors} titles asked", file=sys.stderr)
+
     ordered_strings = strings.freeze()
     prose_complaint = prose_check(ordered_strings)
     if prose_complaint:
@@ -163,6 +167,7 @@ def run(args, inputs, prose_check, provenance_check):
     tag_columns.put(sec, strings)
     version_columns.put(sec)
     jev_columns.put(sec)
+    fan_columns.put(sec)
 
     plot_hits, plot_rows, premise_hits, premise_rows = vectors.put(
         sec, keys, args, labels_source, premise_labels_source)
@@ -186,6 +191,8 @@ def run(args, inputs, prose_check, provenance_check):
         ("premise-tagged titles", tag_columns.tagged, tag_columns.source_count, args.premise_tags),
         # Every scored anchor in the file landed on a row of the store. Zero against zero without it.
         ("Jev-scored titles", jev_columns.anchors, jev_columns.source_count, args.jev_more_like),
+        # Every asked title in the file landed on a row of the store. Zero against zero without it.
+        ("titles asked for fan picks", fan_columns.anchors, fan_columns.source_count, args.fan_picks),
     ):
         if got != want:
             sys.exit(f"{what}: {got} in the store, {want} in {source} — they must agree exactly")
@@ -205,7 +212,7 @@ def run(args, inputs, prose_check, provenance_check):
                       "withNames": card_columns.named, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
                       "premiseTagged": tag_columns.tagged, "otherVersions": version_columns.titles,
-                      "jevMoreLike": jev_columns.anchors,
+                      "jevMoreLike": jev_columns.anchors, "fanPicksAsked": fan_columns.anchors,
                       "entities": len(entity_index.qids), "iconicStudios": len(studio_list.kept),
                       "awardTitles": award_columns.titles, "ceremonies": len(award_columns.ceremonies),
                       "personTraits": entity_index.trait_counts(),

@@ -8,6 +8,7 @@
       --premise-vectors out-repass/vectors-premise.bin --premise-labels out-repass/labels-premise.json \
       --premise-tags data/premise-tags-v2.json \
       [--jev-more-like out-issue132/full/jev-more-like.json] \
+      [--fan-picks out-issue121/fan-picks.json] \
       --dataset-version <ver> --out out-repass/den-<ver>.store
 
 The layout is den-spec `wire/store-v3.md`. That document is the contract; this is one of its two
@@ -183,6 +184,9 @@ PROVENANCE = {
     # Jev's overall More Like This Noul per weighed candidate (#132), over Wikipedia leads and plot sections.
     # The candidate rows are the model's selection as much as atlas's, so the whole group is the model's.
     "jev_like_v": "llm", "jev_like_o": "llm", "jev_like_p": "llm",
+    # The titles a model named that a fan of each title would also love (oxyc/den-atlas#121), matched to rows by
+    # the store's own Wikidata names, and which titles were asked.
+    "fan_picks_v": "llm", "fan_picks_o": "llm", "fan_picks_a": "ours",
     # Embeddings of the article's plot text, and of the premise tags a model wrote from it.
     "vec_plot": "wikipedia",
     "vec_premise": "llm",
@@ -196,7 +200,9 @@ CURATED_FRANCHISE_SECTIONS = frozenset({
 })
 PREMISE_TAG_SECTIONS = frozenset({"premise_tag_v", "premise_tag_o"})
 JEV_MORE_LIKE_SECTIONS = frozenset({"jev_like_v", "jev_like_o", "jev_like_p"})
-OPTIONAL_PROVENANCE_GROUPS = (CURATED_FRANCHISE_SECTIONS, PREMISE_TAG_SECTIONS, JEV_MORE_LIKE_SECTIONS)
+FAN_PICK_SECTIONS = frozenset({"fan_picks_v", "fan_picks_o", "fan_picks_a"})
+OPTIONAL_PROVENANCE_GROUPS = (CURATED_FRANCHISE_SECTIONS, PREMISE_TAG_SECTIONS, JEV_MORE_LIKE_SECTIONS,
+                              FAN_PICK_SECTIONS)
 
 #: The sources that are a vendor's CONTENT. `identifier` is deliberately not one: an id is a join key,
 #: which is the one thing both catalogue licences leave us.
@@ -313,6 +319,9 @@ def build_parser():
     ap.add_argument("--jev-more-like",
                     help="jev-more-like.json from tools/rulers/more_like_cascade_full.py export — Jev's "
                          "More Like This scores (#132); absent writes no jev_like sections.")
+    ap.add_argument("--fan-picks",
+                    help="fan-picks.json from tools/fan_picks.py export — each asked title's fan picks "
+                         "(oxyc/den-atlas#121); absent writes no fan_picks sections.")
     ap.add_argument("--dataset-version", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--stamp-meta",

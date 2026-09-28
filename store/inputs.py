@@ -18,7 +18,7 @@ import sys
 #: the year and the poster path, and the store now takes the first two from Wikidata and publishes no
 #: third. The writer reads no TMDB artifact at all.
 INPUT_ARGS = ("corpus", "entities", "facts", "vectors", "vector_labels",
-              "premise_vectors", "premise_labels", "franchises", "premise_tags", "jev_more_like")
+              "premise_vectors", "premise_labels", "franchises", "premise_tags", "jev_more_like", "fan_picks")
 
 
 def file_sha256(path):

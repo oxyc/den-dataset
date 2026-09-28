@@ -33,6 +33,8 @@ DIMS = 1024
 PREMISE_TAGS = {"movie:1": ["one-last-job", "heist-gone-wrong"]}
 #: `StoreFixture`'s default Jev More Like This scores: movie:2 weighed for movie:1, nothing for movie:2.
 JEV_MORE_LIKE = {"movie:1": [["movie:2", 0.57]]}
+#: `StoreFixture`'s default fan picks: movie:1 asked with movie:2 picked; movie:2 never asked.
+FAN_PICKS = {"movie:1": ["movie:2"]}
 
 
 def spec_dir():
@@ -217,7 +219,7 @@ class StoreFixture:
     def build(self, out_dir, titles=None, plot_keys=("movie:1",), premise_keys=("movie:2",),
               plot_labels=None, premise_labels=None, write_plot_vectors=None, stamp=None,
               build_store=BUILD_STORE, entities=None, franchises=True, premise_tags=PREMISE_TAGS,
-              facts_keys=None, jev_more_like=JEV_MORE_LIKE):
+              facts_keys=None, jev_more_like=JEV_MORE_LIKE, fan_picks=FAN_PICKS):
         """`*_keys` are the blob's OWN key column; `*_labels` the labels artifact's records, which
         default to the same thing. Passing them apart is how the key-set assert is exercised;
         `write_plot_vectors` swaps in a writer of another format. `stamp` asks the writer to record
@@ -226,7 +228,7 @@ class StoreFixture:
         `entities` replaces or adds entity-table entries. `premise_tags` is the tags file's `tags`
         object, or None to leave `--premise-tags` off. `facts_keys` are the facts file's records, which
         default to the corpus titles'. `jev_more_like` is the Jev export's `anchors`, or None to leave
-        `--jev-more-like` off."""
+        `--jev-more-like` off; `fan_picks` likewise for `--fan-picks`."""
         titles = self.TITLES if titles is None else titles
         plot_keys, premise_keys = list(plot_keys), list(premise_keys)
         plot_labels = plot_keys if plot_labels is None else list(plot_labels)
@@ -292,6 +294,8 @@ class StoreFixture:
                if premise_tags is not None else []),
              *(["--jev-more-like", dump("jev-more-like.json", {"anchors": jev_more_like})]
                if jev_more_like is not None else []),
+             *(["--fan-picks", dump("fan-picks.json", {"anchors": fan_picks})]
+               if fan_picks is not None else []),
              "--dataset-version", "test", "--out", store,
              *(["--stamp-meta", stamp] if stamp else [])],
             capture_output=True, text=True)
@@ -944,6 +948,9 @@ class EverySectionDeclaresWhereItsBytesCameFrom(StoreFixture, unittest.TestCase)
         mod.check_provenance(set(mod.PROVENANCE) - mod.JEV_MORE_LIKE_SECTIONS)
         with self.assertRaisesRegex(SystemExit, "jev_like_p"):
             mod.check_provenance(set(mod.PROVENANCE) - {"jev_like_p"})
+        mod.check_provenance(set(mod.PROVENANCE) - mod.FAN_PICK_SECTIONS)
+        with self.assertRaisesRegex(SystemExit, "fan_picks_a"):
+            mod.check_provenance(set(mod.PROVENANCE) - {"fan_picks_a"})
 
     def test_a_section_with_no_declared_source_stops_the_build(self):
         """The case this exists for, end to end: the writer emits a section the table does not know
@@ -1471,6 +1478,47 @@ class JevMoreLikeShips(StoreFixture, unittest.TestCase):
             with self.subTest(anchors=anchors), tempfile.TemporaryDirectory() as out, \
                     self.assertRaises(AssertionError) as caught:
                 self.build(out, jev_more_like=anchors)
+            self.assertIn(complaint, str(caught.exception))
+
+
+class FanPicksShip(StoreFixture, unittest.TestCase):
+    """Each asked title's picks as rows in the file's order, and which titles were asked."""
+
+    def picks(self, store, row):
+        offsets, rows, keys = store.ints("fan_picks_o"), store.ints("fan_picks_v"), store.keys()
+        return [keys[rows[i]] for i in range(offsets[row], offsets[row + 1])]
+
+    def test_an_asked_title_keeps_its_picks_and_an_unasked_one_reads_as_not_asked(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, stderr = self.build(out)
+        keys, asked = store.keys(), store.ints("fan_picks_a", "B", 1)
+        self.assertEqual(self.picks(store, keys.index("movie:1")), ["movie:2"])
+        self.assertEqual((asked[keys.index("movie:1")], asked[keys.index("movie:2")]), (1, 0))
+        self.assertEqual(self.picks(store, keys.index("movie:2")), [])
+        self.assertIn('"fanPicksAsked": 1', stderr)
+
+    def test_a_title_asked_with_no_picks_is_asked(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, fan_picks={"movie:1": [], "movie:2": []})
+        self.assertEqual(store.ints("fan_picks_a", "B", 1), [1, 1])
+        self.assertEqual(store.ints("fan_picks_v"), [])
+
+    def test_without_the_input_the_sections_are_absent(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, fan_picks=None)
+        for name in ("fan_picks_v", "fan_picks_o", "fan_picks_a"):
+            self.assertNotIn(name, store.table)
+
+    def test_a_row_that_joins_nothing_or_a_malformed_pick_is_fatal(self):
+        for anchors, complaint in (
+                ({"tv:1": ["movie:2"]}, "tv:1 has fan picks and is not a corpus title"),
+                ({"movie:1": ["tv:1"]}, "movie:1 has a malformed pick"),
+                ({"movie:1": ["movie:1"]}, "movie:1 has a malformed pick"),
+                ({"movie:1": ["movie:2", "movie:2"]}, "movie:1 has a malformed pick"),
+                ({"movie:1": "movie:2"}, "movie:1's fan picks are not a list")):
+            with self.subTest(anchors=anchors), tempfile.TemporaryDirectory() as out, \
+                    self.assertRaises(AssertionError) as caught:
+                self.build(out, fan_picks=anchors)
             self.assertIn(complaint, str(caught.exception))
 
 
