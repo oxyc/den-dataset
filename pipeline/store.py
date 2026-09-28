@@ -46,6 +46,7 @@ INPUTS = (
     artifacts.FRANCHISES,
     artifacts.PREMISE_TAGS,
     artifacts.JEV_MORE_LIKE,
+    artifacts.FAN_PICKS,
 )
 
 OUTPUTS = (artifacts.STORE,)
