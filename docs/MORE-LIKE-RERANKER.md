@@ -105,3 +105,28 @@ python3 tools/rulers/more_like_card.py compare --card-work /private/path/more-li
   --card-answers /private/path/card-answers.jsonl --story-work /private/path/more-like-gate \
   --story-answers /private/path/more-like-gate/answers.jsonl
 ```
+
+## Cascade pilot
+
+`tools/rulers/more_like_cascade.py` runs the whole reranker on atlas's live rows before a corpus run is
+bought: a title/year screen over each anchor's first 100, then one lead + story call over the finalists. Its
+module docstring states the rule; the preregistration it writes states the slices, metrics and pass
+criterion. The anchors are atlas's judged seeds and the gate's 512 ruler anchors.
+
+```sh
+python3 tools/rulers/more_like_cascade.py fetch --atlas <atlas base URL> --expect-version <dataset> \
+  --ruler /private/ruler.json --judged <den-atlas>/judged/rail.json --out /private/pilot/pool.json
+python3 tools/rulers/more_like_cascade.py prepare --pool /private/pilot/pool.json --ruler /private/ruler.json \
+  --judged <den-atlas>/judged/rail.json --judged-cross <den-atlas>/judged/rail-cross.json \
+  --franchises <out-dir>/franchises.json --articles <out-dir>/articles.jsonl --enriched-dir <out-dir>/enriched \
+  --work /private/pilot/run --max-spend-usd 3
+python3 tools/rulers/more_like_cascade.py screen --work /private/pilot/run      # dry; add --spend
+python3 tools/rulers/more_like_cascade.py finalize --work /private/pilot/run
+python3 tools/rulers/more_like_cascade.py evidence --work /private/pilot/run    # dry; add --spend
+python3 tools/rulers/more_like_cascade.py score --work /private/pilot/run --pool … --ruler … --judged … \
+  --judged-cross … --franchises …
+```
+
+The spend cap covers both paid steps: each refuses to start unless everything already spent plus its own
+remaining byte-level ceiling fits. A failed call is logged to `<phase>-errors.jsonl` and that anchor keeps
+atlas's row.
