@@ -17,6 +17,7 @@ with no error anywhere. Measured: that silently cost Inception, The Dark Knight 
 The query TEXT is part of the cache key, so it is reproduced byte for byte from the pass that scraped the
 shipped corpus. Reformatting it is a re-scrape of ~770 requests.
 """
+import concurrent.futures
 import json
 import math
 import os
@@ -28,6 +29,21 @@ from . import http
 
 HOST = "query.wikidata.org"
 PATH = "/sparql"
+
+#: Batches of one lookup in flight at once. WDQS allows five concurrent queries per client and answers 429
+#: beyond that; three is the doc-facts scrape's figure (`pipeline/docfacts.py`), kept well under the limit.
+#: A daily run spent over three minutes asking these lookups one batch at a time.
+LOOKUP_CONCURRENCY = 3
+
+
+def in_parallel(ask, batches):
+    """`[ask(batch) for batch in batches]`, `LOOKUP_CONCURRENCY` at a time. The answers come back in batch
+    order, so a caller merging them in that order builds what the one-at-a-time loop built; the first
+    failure is raised as the loop would have raised it."""
+    if len(batches) <= 1:
+        return [ask(batch) for batch in batches]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=LOOKUP_CONCURRENCY) as pool:
+        return list(pool.map(ask, batches))
 
 #: The TMDB-id property per media. A film and a series are different statements, and asking the wrong one
 #: returns nothing rather than erroring.
@@ -852,9 +868,10 @@ def claimants(ids, media, cache=None):
     """`tmdbId -> [Q-id]` for every id at least one item states, from disk where a batch was asked before."""
     ordered = sorted(set(int(i) for i in ids))
     out = {}
-    for start in range(0, len(ordered), CLAIM_BATCH):
-        out.update(_asked(claimant_query(ordered[start:start + CLAIM_BATCH], media), "sparql-claimant",
-                          parse_claimants, cache))
+    for answer in in_parallel(
+            lambda batch: _asked(claimant_query(batch, media), "sparql-claimant", parse_claimants, cache),
+            [ordered[start:start + CLAIM_BATCH] for start in range(0, len(ordered), CLAIM_BATCH)]):
+        out.update(answer)
     return out
 
 
@@ -862,9 +879,10 @@ def item_evidence(qids, media, cache=None):
     """`Q-id -> evidence` (`parse_evidence`) for the claimants of a contested id."""
     ordered = sorted(set(qids))
     out = {}
-    for start in range(0, len(ordered), EVIDENCE_BATCH):
-        out.update(_asked(evidence_query(ordered[start:start + EVIDENCE_BATCH], media), "sparql-evidence",
-                          parse_evidence, cache))
+    for answer in in_parallel(
+            lambda batch: _asked(evidence_query(batch, media), "sparql-evidence", parse_evidence, cache),
+            [ordered[start:start + EVIDENCE_BATCH] for start in range(0, len(ordered), EVIDENCE_BATCH)]):
+        out.update(answer)
     return out
 
 

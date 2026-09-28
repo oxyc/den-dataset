@@ -15,7 +15,10 @@ The query TEXT is pinned because it is hashed into the cache key: reformatting i
 """
 import hashlib
 import json
+import re
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -697,6 +700,42 @@ class OneItemPerTitle(unittest.TestCase):
                       lambda e: wikidata.language_query([3], "tv", e), lambda e: wikidata.source_query([3], "tv", e),
                       lambda e: wikidata.target_query([3], "tv", e)):
             self.assertEqual(build({2559: [BONN]}), build(None))
+
+
+class BatchesInParallel(unittest.TestCase):
+    """A lookup's batches are asked a few at a time and merged as the one-at-a-time loop merged them."""
+
+    def test_answers_come_back_in_batch_order_whatever_order_they_finish_in(self):
+        def ask(batch):
+            time.sleep(0.02 * (5 - batch[0]))  # the first batch finishes last
+            return {batch[0]: "x"}
+        answers = wikidata.in_parallel(ask, [[i] for i in range(5)])
+        self.assertEqual(answers, [{i: "x"} for i in range(5)])
+
+    def test_no_more_than_the_limit_are_in_flight(self):
+        lock, state = threading.Lock(), {"now": 0, "most": 0}
+
+        def ask(batch):
+            with lock:
+                state["now"] += 1
+                state["most"] = max(state["most"], state["now"])
+            time.sleep(0.02)
+            with lock:
+                state["now"] -= 1
+            return batch
+        wikidata.in_parallel(ask, [[i] for i in range(12)])
+        self.assertEqual(state["most"], wikidata.LOOKUP_CONCURRENCY)
+
+    def test_claimants_merge_to_what_the_serial_loop_built(self):
+        """Six claimant batches, each answering for its own ids: the merged map equals asking each in turn."""
+        def asked(query, namespace, parse, cache):
+            ids = [int(i) for i in re.findall(r'"(\d+)"', query)]
+            return {i: [f"Q{i}"] for i in ids}
+        ids = list(range(1, wikidata.CLAIM_BATCH * 6))
+        with mock.patch.object(wikidata, "_asked", side_effect=asked):
+            merged = wikidata.claimants(ids, "movie")
+        self.assertEqual(list(merged), ids)
+        self.assertEqual(merged, {i: [f"Q{i}"] for i in ids})
 
 
 if __name__ == "__main__":

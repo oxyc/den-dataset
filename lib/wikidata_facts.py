@@ -26,7 +26,7 @@ import unicodedata
 import urllib.parse
 
 from . import http
-from .wikidata import HOST, ID_PROPERTY, PATH, WikidataError, exclusion
+from .wikidata import HOST, ID_PROPERTY, PATH, WikidataError, exclusion, in_parallel
 
 #: The per-property requests, keyed on their text like the doc-facts ones — a different namespace path, so
 #: the two scrapes' entries cannot collide.
@@ -423,23 +423,27 @@ def _pairs(payload, left, right):
 
 
 def _franchise_lookup(qids, query_for, parse, cache, batch):
-    """`parse` over every batch of `qids`, each answer cached under its query text like `series`."""
-    out = {}
-    ordered = sorted(set(qids))
-    for start in range(0, len(ordered), batch):
-        query = query_for(ordered[start:start + batch])
+    """`parse` over every batch of `qids`, each answer cached under its query text like `series`. The
+    batches are asked `in_parallel` and merged in batch order."""
+    def ask(ids):
+        query = query_for(ids)
         key = cache.key(FRANCHISE_CACHE_PATH, {"q": query}) if cache is not None else None
         hit = cache.read(key) if key is not None else None
         if hit is not None:
             try:
-                out.update(parse(hit))
-                continue
+                return parse(hit)
             except WikidataError:
                 pass
         payload = _sparql(query, fallback=True)
-        out.update(parse(payload))
+        parsed = parse(payload)
         if key is not None:
             cache.write(key, payload)
+        return parsed
+
+    out = {}
+    ordered = sorted(set(qids))
+    for answer in in_parallel(ask, [ordered[start:start + batch] for start in range(0, len(ordered), batch)]):
+        out.update(answer)
     return out
 
 
