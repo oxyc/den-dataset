@@ -179,6 +179,32 @@ class Stage(unittest.TestCase):
         self.run_stage(spend=True)
         self.assertEqual(len(Jev.sent), 7, "a title answered in any shard is never asked again")
 
+    def test_a_separate_adaptation_is_asked_the_line_question_in_the_same_run_and_stays(self):
+        class RoseannaApart(Jev):
+            """Calls Roseanna a separate adaptation, then says it continues the line."""
+
+            def ask_with_metadata(self, state, questions):
+                if "fr__continues_line" in questions:
+                    type(self).sent.append(state)
+                    return ({"fr__continues_line": {"type": "noul", "noul": 0.9}},
+                            {"model": self.model, "usage": {"input_tokens": 900, "output_tokens": 10}})
+                answers, meta = super().ask_with_metadata(state, questions)
+                if state["requestedTarget"]["title"] == "Roseanna":
+                    answers["fr__separate_adaptation"]["noul"] = 0.9
+                return answers, meta
+
+        RoseannaApart.sent = []
+        with mock.patch.object(franchises.rc, "TypeSafe", RoseannaApart):
+            franchises.run(Context(out_dir=self.out, spend=True), cache=object())
+        self.assertEqual(len(RoseannaApart.sent), 8, "seven titles, then the one separate adaptation")
+        self.assertEqual(RoseannaApart.sent[-1]["requestedTarget"]["title"], "Roseanna")
+        self.assertIn("movie:3", self.derived()["titles"], "the line pass kept Roseanna in Beck")
+        with open(os.path.join(self.out, "franchise-line-decisions-v1.json"), encoding="utf-8") as fh:
+            self.assertEqual(list(json.load(fh)["decisions"]), ["movie:3"])
+        with mock.patch.object(franchises.rc, "TypeSafe", RoseannaApart):
+            franchises.run(Context(out_dir=self.out, spend=True), cache=object())
+        self.assertEqual(len(RoseannaApart.sent), 8, "neither pass asks a title twice")
+
     def test_compact_decisions_rebuild_without_private_states_or_raw_answers(self):
         self.run_stage(spend=True)
         expected = self.derived()
@@ -305,6 +331,43 @@ class Stage(unittest.TestCase):
         self.assertEqual(got["Qbond"]["members"], {"movie:1": "Qeon", "movie:2": "Qeon",
                                                    "movie:4": "adaptation:movie:4", "movie:5": "adaptation:movie:4"})
         self.assertEqual(counts["separate production"], 1, "the 1967 Casino Royale is outside the Eon series")
+
+    def hannibal(self):
+        """A book series and a Wikidata series holding the same films, as Hannibal Lecter's do; Red Dragon is a
+        second adaptation of Manhunter's novel, and the Hopkins films' prequel."""
+        titles = {"movie:1": franchises.fg.Title("movie:1", "Manhunter", 1986),
+                  "movie:2": franchises.fg.Title("movie:2", "The Silence of the Lambs", 1991),
+                  "movie:3": franchises.fg.Title("movie:3", "Hannibal", 2001),
+                  "movie:4": franchises.fg.Title("movie:4", "Red Dragon", 2002)}
+        groups = {"Qbooks": franchises.fg.Group("Qbooks", "book-series", "Hannibal Lecter", titles),
+                  "Qseries": franchises.fg.Group("Qseries", "series", "Hannibal Lecter", titles)}
+        asked = {key: ["Qbooks", "Qseries"] for key in titles}
+        answers = {key: (decision(choice="B", separate=0.76 if key == "movie:4" else 0.1), asked[key])
+                   for key in titles}
+        return titles, groups, asked, answers
+
+    def test_a_separate_adaptation_the_line_pass_says_continues_the_line_stays_in_it(self):
+        titles, groups, asked, answers = self.hannibal()
+        line = {"movie:4": ({"fr__continues_line": {"type": "noul", "noul": 0.9}}, asked["movie:4"])}
+        got, counts = franchises.resolve(titles, groups, {}, {}, asked, answers, {}, line)
+        self.assertIn("movie:4", got["Qseries"]["members"])
+        self.assertFalse(str(got["Qseries"]["members"]["movie:4"]).startswith("adaptation:"),
+                         "a continuation is one more title of the line, not a reboot starting an era")
+        self.assertEqual(counts["separate production"], 0)
+
+    def test_without_a_clear_yes_from_the_line_pass_a_separate_adaptation_leaves(self):
+        titles, groups, asked, answers = self.hannibal()
+        for line in ({}, {"movie:4": ({"fr__continues_line": {"type": "noul", "noul": 0.6}}, asked["movie:4"])},
+                     {"movie:4": ({"fr__continues_line": {"type": "noul", "noul": 0.9}}, ["Qseries"])}):
+            got, counts = franchises.resolve(titles, groups, {}, {}, asked, answers, {}, line)
+            self.assertNotIn("movie:4", got["Qseries"]["members"], line)
+            self.assertEqual(counts["separate production"], 1)
+
+    def test_the_line_pass_asks_only_separate_adaptations_answered_under_their_candidates(self):
+        titles, groups, asked, answers = self.hannibal()
+        self.assertEqual(franchises.line_targets(asked, answers), {"movie:4": ["Qbooks", "Qseries"]})
+        stale = {**asked, "movie:4": ["Qseries"]}
+        self.assertEqual(franchises.line_targets(stale, answers), {})
 
     def test_a_group_listed_by_a_shared_name_word_is_not_merged_on_one_sides_word(self):
         titles = {"movie:1": franchises.fg.Title("movie:1", "Into the Spider-Verse", 2018),

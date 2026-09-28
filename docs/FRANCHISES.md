@@ -19,6 +19,11 @@ The top-level `usage` totals the rows and records exact spend at the pinned Jev 
 raw answer is audited in full before it can enter this file. On later days its candidates must still equal
 the current candidates or the decision is set aside.
 
+`franchise-line-decisions-v1.json` is the same for the line pass, in the same shape with its one Noul
+answer, `fr__continues_line`. Its private states and answers are `franchise-line-states*.jsonl` and
+`franchise-line-answers-v1*.jsonl`. The line pass asks only the titles the franchise pass calls a
+separate adaptation (`0.75`), in the same `--spend` run, and the daily job buys both asks when it can buy.
+
 ## Derivation thresholds
 
 The typed answers are evidence, not an instruction to merge every borderline candidate:
@@ -38,7 +43,9 @@ The typed answers are evidence, not an instruction to merge every borderline can
   the vote: a Wikidata series or media franchise holding titles of both, three or more actors credited in
   both (the 1993 Martin Beck films and the 1997– Beck films), or a title of one whose answer chose the
   other (the Norwegian *Olsenbanden* choosing the Danish Olsen Gang);
-- a franchise is one continuity or rights line (the owner's rule, oxyc/den-atlas#92). A `separate
+- a franchise is one continuity or rights line (the owner's rule, oxyc/den-atlas#92). A separate adaptation
+  the line pass says continues the line at `0.75` is one more title of it and starts no era: *Red Dragon*
+  (2002) adapts the novel *Manhunter* did, and is the Hopkins films' prequel. Otherwise a `separate
   adaptation` answer at `0.75` is another production and joins no franchise, unless Wikidata keeps it in
   the line: in a series narrower than the franchise with other titles (Eon's 2006 *Casino Royale*), or,
   when the franchise has no such series, named by the franchise's own series item or heading its sequel

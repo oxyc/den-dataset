@@ -18,6 +18,11 @@ pass reads is written here (`FRANCHISE_STATES`, one shard per content digest), s
 validation, resume, lock and manifest are used unchanged, as `run_delta.py` and `genres_moods` use them.
 Answers go to the shard of the same digest, and a title answered in any shard is never asked again.
 
+**Line pass** (paid, same run). A title that pass calls a separate adaptation is then asked one more
+question (`line_questions`): whether it continues its group's line all the same, as Red Dragon (2002), a
+second adaptation of Manhunter's novel, continues the Hopkins films. Its states, answers and decisions are
+files of their own (`LINE`), so adding it left every answer the first pass bought valid.
+
 **Derive** (free, every run). `franchises.json`: every franchise, its members in release order with their
 era, and each title's franchise. An asked title joins the group it chose; where the groups a franchise's
 titles chose are said to be one franchise, they are merged, each an era. The result must clear the golden
@@ -58,7 +63,8 @@ FREE_WITHOUT_SPEND = True
 
 INPUTS = (artifacts.FACTS, artifacts.ARTICLES, artifacts.MANIFEST)
 OUTPUTS = (artifacts.FRANCHISE_STATES, artifacts.FRANCHISE_ANSWERS, artifacts.FRANCHISE_ANSWERS_MANIFEST,
-           artifacts.FRANCHISE_DECISIONS, artifacts.FRANCHISES)
+           artifacts.FRANCHISE_DECISIONS, artifacts.FRANCHISE_LINE_STATES, artifacts.FRANCHISE_LINE_ANSWERS,
+           artifacts.FRANCHISE_LINE_ANSWERS_MANIFEST, artifacts.FRANCHISE_LINE_DECISIONS, artifacts.FRANCHISES)
 
 GOLDEN = os.path.join(REPO, "data", "franchise-golden.json")
 HEADING = "Franchise candidates (from Wikidata)"
@@ -119,6 +125,40 @@ def questions():
         },
     }
     return qs, {}
+
+
+def line_questions():
+    """(questions, label mapping) of the line pass. `fr__separate_adaptation` cannot tell a second adaptation
+    of a book made as part of the line from another production of it: Red Dragon (2002) adapts the novel
+    Manhunter did, and is also the Hopkins films' prequel. This asks the part the derive needs."""
+    qs = {
+        "fr__continues_line": {
+            "type": "noul",
+            "instructions": EVIDENCE + "Was this work made as a continuation of the other titles in its group: "
+                            "the same actors in its recurring roles, or made and presented as a prequel or "
+                            "sequel of them? Answer no for an independent production of the same source, and "
+                            "for a reboot or a remake that recasts the roles and starts again.",
+        },
+    }
+    return qs, {}
+
+
+@dataclasses.dataclass(frozen=True)
+class Pass:
+    """One paid question set and where its states, answers and resume decisions live."""
+    questions: object
+    states: object
+    answers: object
+    decisions: object
+
+
+#: What every asked title is sent.
+FIRST = Pass(questions, artifacts.FRANCHISE_STATES, artifacts.FRANCHISE_ANSWERS, artifacts.FRANCHISE_DECISIONS)
+#: What a title FIRST calls a separate adaptation is then sent (`line_targets`), in the same run.
+LINE = Pass(line_questions, artifacts.FRANCHISE_LINE_STATES, artifacts.FRANCHISE_LINE_ANSWERS,
+            artifacts.FRANCHISE_LINE_DECISIONS)
+#: A clear yes keeps a separate adaptation in its group's line, as one more title of it rather than a reboot.
+LINE_TAKE = 0.75
 
 
 # ---------------------------------------------------------------------------------------------- groups
@@ -231,8 +271,8 @@ def _candidate_ids(stored):
     return [(c[0], tuple(c[1])) if isinstance(c, list) else c for c in stored]
 
 
-def write_states(ctx, asked, groups, titles, answered):
-    """Write the states shard for the titles to ask, named by its digest. Returns (path, records, state ids,
+def write_states(ctx, asked, groups, titles, answered, p=FIRST):
+    """Write `p`'s states shard for the titles to ask, named by its digest. Returns (path, records, state ids,
     how many were skipped for want of an article). A title already answered in any shard is not written."""
     articles = _article_records(ctx)
     rows, states, skipped = [], {}, 0
@@ -252,28 +292,28 @@ def write_states(ctx, asked, groups, titles, answered):
         return None, [], {}, skipped
     body = "".join(json.dumps(r, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n" for r in rows)
     digest = hashlib.sha256(body.encode()).hexdigest()[:12]
-    path = ctx.shard(artifacts.FRANCHISE_STATES)[:-len(".jsonl")] + f"-{digest}.jsonl"
+    path = ctx.shard(p.states)[:-len(".jsonl")] + f"-{digest}.jsonl"
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(body)
     return path, rows, states, skipped
 
 
-def answers_path(ctx, states_path):
+def answers_path(ctx, states_path, p=FIRST):
     digest = os.path.basename(states_path)[:-len(".jsonl")].rpartition("-")[2]
-    return ctx.shard(artifacts.FRANCHISE_ANSWERS)[:-len(".jsonl")] + f"-{digest}.jsonl"
+    return ctx.shard(p.answers)[:-len(".jsonl")] + f"-{digest}.jsonl"
 
 
-def ask(ctx, asked, groups, titles):
-    """Buy the answers for every asked title not yet answered. Returns how many were asked."""
-    answered = set(read_answers(ctx))
-    states_path, rows, states, skipped = write_states(ctx, asked, groups, titles, answered)
+def ask(ctx, asked, groups, titles, p=FIRST):
+    """Buy `p`'s answers for every asked title not yet answered. Returns how many were asked."""
+    answered = set(read_answers(ctx, p=p))
+    states_path, rows, states, skipped = write_states(ctx, asked, groups, titles, answered, p)
     if skipped:
         print(f"franchises: not asking {skipped}: no article", file=sys.stderr)
     if not rows:
         return 0
-    qs, mapping = questions()
-    out = answers_path(ctx, states_path)
+    qs, mapping = p.questions()
+    out = answers_path(ctx, states_path, p)
     args = argparse.Namespace(articles=states_path, enriched_dir=None, out=out, manifest=None, prompt=rc.PROMPT,
                               taxonomy=rc.TAXONOMY, model=PINNED_MODEL, max_state_chars=rc.DEFAULT_MAX_STATE_CHARS,
                               workers=8, limit=ctx.limit)
@@ -320,9 +360,13 @@ def plan_report(ctx, asked, automatic):
     articles = _article_records(ctx)
     answered, durable = load_answers(ctx, persist=False)
     todo = [k for k in asked if k not in answered and k in articles]
+    line_answered = load_answers(ctx, persist=False, p=LINE)[0]
+    # Only titles already answered can be counted: the rest reach the line pass once the first answers them.
+    line_todo = [k for k in line_targets(asked, answered) if k not in line_answered and k in articles]
     report = {"automatic": len(automatic), "asked": len(asked),
               "alreadyAnswered": len(set(asked) & set(answered)),
               "noArticle": sum(1 for k in asked if k not in articles), "ask": len(todo),
+              "lineAsk": len(line_todo),
               **decisions.projection(durable, len(todo))}
     print(json.dumps(report, indent=2))
     return report
@@ -331,21 +375,21 @@ def plan_report(ctx, asked, automatic):
 # --------------------------------------------------------------------------------------------- derive
 
 
-def load_answers(ctx, persist=True):
-    """`key -> (answers, candidate ids)` over every answer shard, each read beside the states shard of the
-    same digest and its manifest. Every paid row is audited against that frozen state and today's exact
-    franchise questions. A title answered twice is refused."""
-    qs, _ = questions()
-    compact_path = ctx.path(artifacts.FRANCHISE_DECISIONS)
+def load_answers(ctx, persist=True, p=FIRST):
+    """`key -> (answers, candidate ids)` over every answer shard of `p`, each read beside the states shard of
+    the same digest and its manifest. Every paid row is audited against that frozen state and today's exact
+    questions of `p`. A title answered twice is refused."""
+    qs, _ = p.questions()
+    compact_path = ctx.path(p.decisions)
     durable, _ = decisions.read(compact_path, qs, PINNED_MODEL)
     out = {key: decisions.validate_decision(key, decision, qs, PINNED_MODEL,
                                             os.path.basename(compact_path))
            for key, decision in durable.items()}
     durable = dict(durable)
     raw_seen = set()
-    states_by_digest = {os.path.basename(p)[:-len(".jsonl")].rpartition("-")[2]: p
-                        for p in ctx.paths(artifacts.FRANCHISE_STATES)}
-    for path in ctx.paths(artifacts.FRANCHISE_ANSWERS):
+    states_by_digest = {os.path.basename(s)[:-len(".jsonl")].rpartition("-")[2]: s
+                        for s in ctx.paths(p.states)}
+    for path in ctx.paths(p.answers):
         manifest_path = path + ".manifest.json"
         if not os.path.exists(manifest_path):
             raise StageError(f"{path} has no manifest at {manifest_path}, so nothing says what bought it")
@@ -361,7 +405,7 @@ def load_answers(ctx, persist=True):
             audit_combined.validate_manifest(manifest, states, evidence_sha)
         except (ValueError, SystemExit) as refusal:
             raise StageError(f"franchises: {refusal}") from None
-        qs, mapping = questions()
+        qs, mapping = p.questions()
         config = manifest["config"]
         if config.get("globalQuestions") != qs or config.get("labelQuestionMapping") != mapping:
             raise StageError(f"franchises: {manifest_path} does not record today's franchise questions")
@@ -399,13 +443,29 @@ def load_answers(ctx, persist=True):
     return out, durable
 
 
-def read_answers(ctx, persist=True):
-    return load_answers(ctx, persist)[0]
+def read_answers(ctx, persist=True, p=FIRST):
+    return load_answers(ctx, persist, p)[0]
 
 
-def resolve(titles, groups, flagged, automatic, asked, answers, names):
+def line_targets(asked, answers):
+    """The titles the line pass asks: those answered under their current candidates that the franchise pass
+    calls a separate adaptation, with those candidates."""
+    return {key: listed for key, listed in asked.items()
+            if key in answers and answers[key][1] == listed
+            and answers[key][0]["fr__separate_adaptation"]["noul"] >= SEPARATE_TAKE}
+
+
+def continues_line(key, listed, line):
+    """Whether the line pass says a title continues its group's line, asked under the same candidates."""
+    got = line.get(key)
+    return got is not None and got[1] == listed and got[0]["fr__continues_line"]["noul"] >= LINE_TAKE
+
+
+def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None):
     """`({franchise id: {name, source, members: {key: era}}}, counts)`: the automatic franchises, then each
-    answered title's choice, then the groups its titles say are one franchise merged."""
+    answered title's choice, then the groups its titles say are one franchise merged. `line` holds the line
+    pass's answers: a separate adaptation it says continues the line is taken as one more title of it."""
+    line = line or {}
     franchise_of, era_of, source, confidence, umbrella_of = {}, {}, {}, {}, {}
     for key, (root, era) in automatic.items():
         franchise_of[key] = root
@@ -448,12 +508,14 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
         if held < TAKE:
             counts["no franchise"] += 1
             continue
-        separate_vote = got["fr__separate_adaptation"]["noul"]
+        # A separate adaptation the line pass says continues the line is one more title of it (Red Dragon),
+        # neither another production nor a reboot starting an era.
+        apart = got["fr__separate_adaptation"]["noul"] >= SEPARATE_TAKE and not continues_line(key, listed, line)
         if isinstance(chosen, str) and flagged.get(gid) == "catalogue" \
                 and catalogue_support.get(gid, 0.0) < CATALOGUE_TAKE:
             counts["no franchise"] += 1
             continue
-        if separate_vote >= SEPARATE_TAKE and not in_line(key, gid, titles, groups):
+        if apart and not in_line(key, gid, titles, groups):
             counts["separate production"] += 1
             continue
         if isinstance(chosen, tuple) and gid not in groups:
@@ -475,10 +537,10 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
             # A group inside the franchise is one of its eras already, not a second franchise to merge; and a
             # title that is a separate adaptation says it is not one franchise with the others.
             if isinstance(other, tuple) or other in (chosen, gid) or groups[other].members < groups[gid].members \
-                    or separate_vote >= SEPARATE_TAKE:
+                    or apart:
                 continue
             one[frozenset((gid, other))].append((key, got["fr__one_franchise"]["noul"]))
-        if separate_vote >= SEPARATE_TAKE:
+        if apart:
             separate.add(key)
     # Groups the titles listing both say are one franchise are merged, the bigger one absorbing the other.
     merged, merge_confidence = {}, {}
@@ -662,7 +724,8 @@ def document(franchises, groups, titles, names):
 
 def derive(ctx, titles, groups, automatic, asked, names, flagged):
     answers = read_answers(ctx)
-    franchises, counts = resolve(titles, groups, flagged, automatic, asked, answers, names)
+    line = read_answers(ctx, p=LINE)
+    franchises, counts = resolve(titles, groups, flagged, automatic, asked, answers, names, line)
     doc, of = document(franchises, groups, titles, names)
     with open(GOLDEN, encoding="utf-8") as fh:
         golden = json.load(fh)
@@ -698,14 +761,24 @@ def run(ctx, cache=None):
     pilot = selected(ctx, asked)
     if ctx.plan:
         report = plan_report(ctx, pilot, automatic)
-        return f"planned only — {report['ask']:,} titles to ask; nothing written"
-    bought = ask(ctx, pilot, groups, titles) if ctx.spend else 0
+        return (f"planned only — {report['ask']:,} titles to ask, {report['lineAsk']:,} for the line pass; "
+                "nothing written")
+    bought = line_bought = 0
+    if ctx.spend:
+        bought = ask(ctx, pilot, groups, titles)
+        # In the same run, so a title the franchise pass calls a separate adaptation is never derived
+        # without the line pass's answer once it can be bought.
+        line_bought = ask(ctx, line_targets(pilot, read_answers(ctx)), groups, titles, LINE)
     if ctx.spend and ctx.keys:
         _answers, durable = load_answers(ctx)
-        usage = decisions.totals(durable)
-        return (f"targeted pilot — asked {bought:,}; {usage['calls']:,} durable decisions, "
+        _line, line_durable = load_answers(ctx, p=LINE)
+        usage = decisions.totals({**{f"first:{k}": v for k, v in durable.items()},
+                                  **{f"line:{k}": v for k, v in line_durable.items()}})
+        return (f"targeted pilot — asked {bought:,}, line pass {line_bought:,}; "
+                f"{usage['calls']:,} durable decisions, "
                 f"{usage['inputTokens']:,} exact input tokens, ${usage['costUSD']:.8f}; "
                 "franchises.json not rebuilt from a partial pilot")
     counts, written = derive(ctx, titles, groups, automatic, asked, names, flagged)
-    return (f"{ctx.path(artifacts.FRANCHISES)} — {written:,} franchises; asked {bought:,}; " +
+    return (f"{ctx.path(artifacts.FRANCHISES)} — {written:,} franchises; asked {bought:,}, "
+            f"line pass {line_bought:,}; " +
             ", ".join(f"{name} {n:,}" for name, n in sorted(counts.items()) if n))

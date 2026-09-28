@@ -431,6 +431,16 @@
      "movie:24667"
     ]
    ]
+  },
+  {
+   "name": "Hannibal Lecter",
+   "together": [
+    "movie:11454",
+    "movie:274",
+    "movie:9740",
+    "movie:9533",
+    "movie:1248"
+   ]
   }
  ],
  "apart": [

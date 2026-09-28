@@ -75,7 +75,8 @@ class Skips(Recorded):
         self.assertEqual(self.ran(), ["changes", "articles", "genres_moods", "docfacts", "plot_length", "finalize",
                                       "facts", "franchises", "corpus", "store", "publish"])
         self.assertEqual([s["stage"] for s in report["skipped"]],
-                         ["worklist", "fetch", "classify", "critique", "genres_moods (ask)", "embed"])
+                         ["worklist", "fetch", "classify", "critique", "genres_moods (ask)", "embed",
+                          "franchises (ask)"])
         self.assertTrue(report["ready"])
 
     def test_with_every_credential_and_spend_every_stage_runs_and_the_paid_ones_buy(self):
@@ -84,7 +85,7 @@ class Skips(Recorded):
         # No universe was written by the recorded worklist, so the fetch is its refresh alone.
         self.assertEqual(self.ran(), ["worklist", *STAGES[STAGES.index("changes"):]])
         spent = {name for name, spend, _plan in (c for c in self.calls if len(c) == 3) if spend}
-        self.assertEqual(spent, {"classify", "critique", "genres_moods"})
+        self.assertEqual(spent, {"classify", "critique", "genres_moods", "franchises"})
         self.assertEqual([c for c in self.calls if c[0] == "publish"], [("publish", False, True)],
                          "the publish stage only checks")
 

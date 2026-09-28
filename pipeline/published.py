@@ -78,6 +78,7 @@ BUNDLE = (
     # Optional for the last pre-franchise-resume generation. Prose-free: the private article states and raw
     # provider rows are deliberately not in this bundle.
     ("franchise-decisions-v1.json", "franchise-decisions-v1.json", False),
+    ("franchise-line-decisions-v1.json", "franchise-line-decisions-v1.json", False),
     ("franchises.json", "franchises.json", False),
 )
 
