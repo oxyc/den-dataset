@@ -263,16 +263,68 @@ class Stage(unittest.TestCase):
         self.assertEqual(got["Qstory"]["members"], {"movie:2": None})
         self.assertEqual(got["Qstory"]["umbrellaOf"], {"movie:2": "Quniverse"})
 
-    def test_an_uncertain_source_only_separate_adaptation_is_left_out(self):
+    def test_a_separate_adaptation_of_a_book_series_joins_no_franchise(self):
         titles = {"movie:1": franchises.fg.Title("movie:1", "Loose relocation", 1973),
-                  "movie:2": franchises.fg.Title("movie:2", "Recognised reboot", 2011)}
+                  "movie:2": franchises.fg.Title("movie:2", "Another production", 2011)}
         groups = {"Qbooks": franchises.fg.Group("Qbooks", "book-series", "The books", titles)}
         asked = {key: ["Qbooks"] for key in titles}
         answers = {"movie:1": (decision(confidence=0.8, separate=0.9), ["Qbooks"]),
-                   "movie:2": (decision(confidence=0.9, separate=0.9), ["Qbooks"])}
+                   "movie:2": (decision(confidence=0.95, separate=0.9), ["Qbooks"])}
         got, counts = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
-        self.assertEqual(got["Qbooks"]["members"], {"movie:2": "adaptation:movie:2"})
-        self.assertEqual(counts["no franchise"], 1)
+        self.assertEqual(got, {})
+        self.assertEqual(counts["separate production"], 2)
+
+    def bond(self):
+        """Eon's films nest in the James Bond series, which also names the 1967 Casino Royale."""
+        titles = {"movie:1": franchises.fg.Title("movie:1", "Dr. No", 1962, series=["Qbond", "Qeon"]),
+                  "movie:2": franchises.fg.Title("movie:2", "GoldenEye", 1995, series=["Qbond", "Qeon"]),
+                  "movie:3": franchises.fg.Title("movie:3", "Casino Royale", 1967, series=["Qbond"]),
+                  "movie:4": franchises.fg.Title("movie:4", "Casino Royale", 2006, series=["Qbond", "Qeon"]),
+                  "movie:5": franchises.fg.Title("movie:5", "Skyfall", 2012, series=["Qbond", "Qeon"])}
+        groups = {"Qbond": franchises.fg.Group("Qbond", "series", "James Bond", titles),
+                  "Qeon": franchises.fg.Group("Qeon", "series", "Eon", ["movie:1", "movie:2", "movie:4", "movie:5"])}
+        asked = {key: ["Qbond", "Qeon"] for key in titles}
+        return titles, groups, asked
+
+    def test_an_answer_split_between_a_franchise_and_its_era_joins_the_franchise_in_that_era(self):
+        titles, groups, asked = self.bond()
+        split = decision(choice="B", confidence=0.48, probability=0.56)
+        split["fr__group"]["probabilities"]["A"] = 0.43
+        answers = {"movie:1": (decision(), asked["movie:1"]), "movie:2": (split, asked["movie:2"])}
+        got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
+        self.assertEqual(got["Qbond"]["members"], {"movie:1": "Qeon", "movie:2": "Qeon"})
+        self.assertEqual(got["Qbond"]["confidence"], 0.9)
+
+    def test_another_production_leaves_and_a_reboot_in_the_line_starts_an_era(self):
+        titles, groups, asked = self.bond()
+        answers = {key: (decision(separate=0.9 if key in ("movie:3", "movie:4") else 0.1), asked[key])
+                   for key in titles}
+        got, counts = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
+        self.assertEqual(got["Qbond"]["members"], {"movie:1": "Qeon", "movie:2": "Qeon",
+                                                   "movie:4": "adaptation:movie:4", "movie:5": "adaptation:movie:4"})
+        self.assertEqual(counts["separate production"], 1, "the 1967 Casino Royale is outside the Eon series")
+
+    def test_a_group_listed_by_a_shared_name_word_is_not_merged_on_one_sides_word(self):
+        titles = {"movie:1": franchises.fg.Title("movie:1", "Into the Spider-Verse", 2018),
+                  "movie:2": franchises.fg.Title("movie:2", "Across the Spider-Verse", 2023),
+                  "tv:3": franchises.fg.Title("tv:3", "Hawaii Five-O", 1968),
+                  "tv:4": franchises.fg.Title("tv:4", "Hawaii Five-0", 2010)}
+        groups = {"Qverse": franchises.fg.Group("Qverse", "series", "Spider-Verse", ["movie:1", "movie:2"]),
+                  "Qhawaii": franchises.fg.Group("Qhawaii", "series", "Lenkov-verse", ["tv:3", "tv:4"])}
+        asked = {"tv:3": ["Qhawaii", "Qverse"], "tv:4": ["Qhawaii", "Qverse"]}
+        answers = {key: (decision(one=0.9), asked[key]) for key in asked}
+        automatic = {"movie:1": ("Qverse", None), "movie:2": ("Qverse", None)}
+        got, _ = franchises.resolve(titles, groups, {}, automatic, asked, answers, {})
+        self.assertEqual(set(got), {"Qverse", "Qhawaii"})
+
+    def test_titles_of_one_year_are_in_release_order_where_wikidata_dates_them(self):
+        titles = {"movie:1": franchises.fg.Title("movie:1", "October", 1997, date="1997-10-31"),
+                  "movie:2": franchises.fg.Title("movie:2", "June", 1997, date="1997-06-27")}
+        groups = {"Qs": franchises.fg.Group("Qs", "series", "Series", titles)}
+        grouped = {"Qs": {"name": "Series", "source": franchises.WIKIDATA, "confidence": 1.0, "umbrellaOf": {},
+                          "members": {"movie:1": None, "movie:2": None}}}
+        doc, _ = franchises.document(grouped, groups, titles, {})
+        self.assertEqual([m["key"] for m in doc["Qs"]["members"]], ["movie:2", "movie:1"])
 
     def test_a_tv_title_in_a_mixed_group_gets_its_own_era(self):
         titles = {"movie:1": franchises.fg.Title("movie:1", "The film", 2000),

@@ -24,18 +24,29 @@ the current candidates or the decision is set aside.
 The typed answers are evidence, not an instruction to merge every borderline candidate:
 
 - an ordinary group choice is accepted at `0.5`;
+- choosing a group Wikidata nests inside another listed group (the Eon series inside James Bond, the MCU
+  Spider-Man films inside Spider-Man in film) is choosing the bigger group's franchise, in the chosen
+  group's era; the answer's weight on the franchise and every listed group inside it counts together;
 - a possible catalogue needs average support of `0.8` across its own answered members, preventing a few
   borderline title-level choices from turning a thematic companion set into a franchise;
 - a possible shared universe is never merged into a primary franchise (it can be the title's optional
   umbrella instead);
-- `separate adaptation` makes an era only at `0.75`; when the selected group is a book series, a
-  separate adaptation also needs a `0.85` group choice to join at all;
+- two groups merge only when titles of both say they are one franchise; a title that is a separate
+  adaptation casts no merge vote;
+- a franchise is one continuity or rights line (the owner's rule, oxyc/den-atlas#92). A `separate
+  adaptation` answer at `0.75` is another production and joins no franchise, unless Wikidata keeps it in
+  the line: in a series narrower than the franchise with other titles (Eon's 2006 *Casino Royale*), or,
+  when the franchise has no such series, named by the franchise's own series item or heading its sequel
+  chain. A book series' adaptations or a character link are never a line. A title that stays starts an
+  era, with every later title of the era it was in;
 - a TV title in a mixed film/TV franchise gets a distinct era when Wikidata supplies no narrower child
   group.
 
+Members and eras are in release order: the year, then Wikidata's finer date within it where it gives one.
+
 These thresholds are pinned by the golden controls, including the full corpus-visible Beck group, the
-relocated 1973 *The Laughing Policeman*, the Three Flavours Cornetto trilogy, and MCU primary-versus-
-umbrella titles.
+relocated 1973 *The Laughing Policeman*, the Three Flavours Cornetto trilogy, MCU primary-versus-umbrella
+titles, and the separate productions kept apart (the British *Wallander*, the non-Eon Bond films).
 
 ## Derived franchises schema 2
 
@@ -68,6 +79,7 @@ Its stable serving contract is:
 
 `titles[key].umbrella` is omitted when none is known. It is informational and is never used for More Like This
 exclusion. `titles[key].primary` is the exclusion group. Era ids come from the underlying Wikidata group;
-the unsplit main era uses `<franchise id>:era:main`, and a separately judged adaptation uses its corpus key.
+the unsplit main era uses `<franchise id>:era:main`, and a reboot's era (or a TV title's own era) uses
+`adaptation:<corpus key>` of the title that starts it.
 Both `eras` and `members` are release ordered, with zero-based `order` made explicit. A franchise's
 confidence is the lowest accepted member/merge confidence; an all-Wikidata franchise is `1.0`.

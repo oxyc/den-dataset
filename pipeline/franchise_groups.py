@@ -55,12 +55,12 @@ class Title:
     """One title as grouping reads it. `series`, `franchises` and `sources` are Q-ids of groups it is in;
     `follows` the corpus keys it follows or is followed by; `characters` its fictional characters."""
 
-    __slots__ = ("key", "name", "year", "media", "series", "franchises", "sources", "follows", "characters",
-                 "people")
+    __slots__ = ("key", "name", "year", "date", "media", "series", "franchises", "sources", "follows",
+                 "characters", "people")
 
     def __init__(self, key, name="", year=None, series=(), franchises=(), sources=(), follows=(),
-                 characters=(), people=()):
-        self.key, self.name, self.year = key, name or "", year
+                 characters=(), people=(), date=None):
+        self.key, self.name, self.year, self.date = key, name or "", year, date or ""
         self.media = key.partition(":")[0]
         self.series, self.franchises, self.sources = tuple(series), tuple(franchises), tuple(sources)
         self.follows, self.characters, self.people = tuple(follows), tuple(characters), frozenset(people)
@@ -77,7 +77,14 @@ class Group:
 
 
 def order_key(title):
+    """By year. It names chains and character groups, so it must not move when a date is refined."""
     return (title.year if title.year is not None else 9999, title.key)
+
+
+def release_key(title):
+    """Release order in a franchise row: the year, then Wikidata's date within it where it states a finer
+    one ("1997" sorts before "1997-06-27", which sorts before "1997-10-31"), then the key."""
+    return (title.year if title.year is not None else 9999, title.date, title.key)
 
 
 def build(titles, names, parents=None):
