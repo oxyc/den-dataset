@@ -1,6 +1,8 @@
 # Weekly dependency PRs, grouped so a refresh is one reviewable PR rather than several.
 #
-# There is no `pip` entry because the Python is stdlib-only: there is no requirements file to read.
+# There is no `pip` entry because the pipeline is stdlib-only. The two requirements files under tools/ are
+# deliberately not tracked: tools/translate pins exactly the environment the full translation run used, so a
+# bump would break the reproduction it exists for, and tools/rulers pins nothing to bump.
 #
 # The artifacts this repo consumes and produces are pinned by other means and dependabot has no
 # ecosystem for them: the corpus is embedded through den-embed (whose ONNX Runtime version changes
