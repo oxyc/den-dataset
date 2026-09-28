@@ -18,7 +18,7 @@ import os
 import sys
 
 from . import (aliases, awards, cards, entities, facets, facts, format, franchises, identity, labels, makers,
-               scores, studios, vectors)
+               premise_tags, scores, studios, vectors)
 from .inputs import corpus_rows, labels_by_key, read_json
 
 
@@ -113,6 +113,11 @@ def run(args, inputs, prose_check, provenance_check):
     franchise_columns = franchises.Franchises(args.franchises, keys, args.dataset_version)
     franchise_columns.intern(strings)
 
+    tag_columns = premise_tags.PremiseTags(args.premise_tags, keys)
+    tag_columns.intern(strings)
+    if tag_columns.present:
+        print(f"  premise tags: {tag_columns.tagged} titles", file=sys.stderr)
+
     ordered_strings = strings.freeze()
     prose_complaint = prose_check(ordered_strings)
     if prose_complaint:
@@ -148,6 +153,7 @@ def run(args, inputs, prose_check, provenance_check):
     studio_list.put(sec, strings)
     award_columns.put(sec, strings)
     franchise_columns.put(sec, strings)
+    tag_columns.put(sec, strings)
 
     plot_hits, plot_rows, premise_hits, premise_rows = vectors.put(
         sec, keys, args, labels_source, premise_labels_source)
@@ -167,6 +173,8 @@ def run(args, inputs, prose_check, provenance_check):
         # carries must have landed on a row of the store.
         ("plot vectors", plot_hits, plot_rows, args.vectors),
         ("premise vectors", premise_hits, premise_rows, args.premise_vectors or args.premise_labels),
+        # Every tag set in the file landed on a row of the store. Zero against zero without the input.
+        ("premise-tagged titles", tag_columns.tagged, tag_columns.source_count, args.premise_tags),
     ):
         if got != want:
             sys.exit(f"{what}: {got} in the store, {want} in {source} — they must agree exactly")
@@ -185,6 +193,7 @@ def run(args, inputs, prose_check, provenance_check):
     print(json.dumps({"titles": n, "withLabels": label_columns.with_labels,
                       "withNames": card_columns.named, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
+                      "premiseTagged": tag_columns.tagged,
                       "entities": len(entity_index.qids), "iconicStudios": len(studio_list.kept),
                       "awardTitles": award_columns.titles, "ceremonies": len(award_columns.ceremonies),
                       "personTraits": entity_index.trait_counts(),

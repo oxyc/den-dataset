@@ -6,6 +6,7 @@
       --facets out-repass/facets.bin \
       --vectors out-repass/vectors-bge-m3.bin --vector-labels out-repass/labels-t02.json \
       --premise-vectors out-repass/vectors-premise.bin --premise-labels out-repass/labels-premise.json \
+      --premise-tags data/premise-tags-v2.json \
       --dataset-version <ver> --out out-repass/den-<ver>.store
 
 The layout is den-spec `wire/store-v3.md`. That document is the contract; this is one of its two
@@ -174,6 +175,8 @@ PROVENANCE = {
     "fr_source": "ours", "fr_umb_id": "ours", "fr_umb_name": "ours",
     "fr_era_id": "ours", "fr_era_name": "ours", "fr_era_order": "ours", "fr_era_o": "ours",
     "fr_mem_row": "ours", "fr_mem_era": "ours", "fr_mem_order": "ours", "fr_mem_o": "ours",
+    # The premise tags a model wrote from the article's plot (`data/premise-tags-v2.json`), and their spans.
+    "premise_tag_v": "llm", "premise_tag_o": "ours",
     # Embeddings of the article's plot text, and of the premise tags a model wrote from it.
     "vec_plot": "wikipedia",
     "vec_premise": "llm",
@@ -185,7 +188,8 @@ CURATED_FRANCHISE_SECTIONS = frozenset({
     "fr_era_id", "fr_era_name", "fr_era_order", "fr_era_o", "fr_mem_row", "fr_mem_era",
     "fr_mem_order", "fr_mem_o",
 })
-OPTIONAL_PROVENANCE_GROUPS = (CURATED_FRANCHISE_SECTIONS,)
+PREMISE_TAG_SECTIONS = frozenset({"premise_tag_v", "premise_tag_o"})
+OPTIONAL_PROVENANCE_GROUPS = (CURATED_FRANCHISE_SECTIONS, PREMISE_TAG_SECTIONS)
 
 #: The sources that are a vendor's CONTENT. `identifier` is deliberately not one: an id is a join key,
 #: which is the one thing both catalogue licences leave us.
@@ -296,6 +300,9 @@ def build_parser():
                     help="labels-premise.json — the PREMISE vectors' key set, checked the same way. Its "
                          "genres & moods are a copy of the plot labels and are not read.")
     ap.add_argument("--franchises", help="franchises.json schema 2; absent writes no curated sections")
+    ap.add_argument("--premise-tags",
+                    help="data/premise-tags-v2.json — each title's premise tags; absent writes no "
+                         "premise_tag sections. Every key must be a corpus title.")
     ap.add_argument("--dataset-version", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--stamp-meta",

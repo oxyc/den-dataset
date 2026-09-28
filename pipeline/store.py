@@ -44,11 +44,16 @@ INPUTS = (
     artifacts.PREMISE_VECTORS,
     artifacts.PREMISE_LABELS,
     artifacts.FRANCHISES,
+    artifacts.PREMISE_TAGS,
 )
 
 OUTPUTS = (artifacts.STORE,)
 
 WRITER = os.path.join(REPO, PRODUCER)
+
+#: Inputs that are committed files rather than out-dir artifacts: the path read when the out-dir holds no
+#: copy and no override names one.
+COMMITTED = {artifacts.PREMISE_TAGS.name: os.path.join(REPO, "data", artifacts.PREMISE_TAGS.filename)}
 
 
 def argv(ctx):
@@ -60,6 +65,8 @@ def argv(ctx):
     command = [sys.executable, WRITER]
     for entry in (bind(e) for e in INPUTS):
         path = ctx.require(entry.artifact)
+        if path is None and entry.name in COMMITTED and entry.name not in ctx.overrides:
+            path = COMMITTED[entry.name]
         if path is not None:
             command += [entry.flag(), path]
     # `--out` rather than `--store`: the writer names its output by role, not by artifact.

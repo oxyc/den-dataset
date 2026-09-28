@@ -32,7 +32,9 @@ out-dir starts empty of every other artifact. The genres & moods stage reads two
 an out-dir, and the test stands in for both, as it does for den-embed: `fixture-corpus/genres-moods-curated.json`
 for `data/genres-moods-curated.json`, whose 47,539 real titles no fixture upstream could answer for, and a
 passing quality gate, which needs ten golden titles per label to score anything and has its own suite
-(`pipeline/genres_moods_test.py`).
+(`pipeline/genres_moods_test.py`). The store stage reads `data/premise-tags-v2.json`, and
+`fixture-corpus/premise-tags-v2.json` stands in for it the same way: the store refuses a tag set for a title
+it does not hold, and none of the real file's titles are the fixture's.
 
 **What `den run` does.** Every stage but the two that buy or publish, unattended, in one command: the
 fetch drain over a universe holding a title below every floor, and the stages from `facts` on under the
@@ -67,7 +69,7 @@ sys.path.insert(0, HERE)
 
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
-from pipeline import artifacts, audit_combined, enrich, genres_moods  # noqa: E402
+from pipeline import artifacts, audit_combined, enrich, genres_moods, store  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 from store import vector_blob  # noqa: E402
 
@@ -91,6 +93,7 @@ GIVEN_VERSION = "fixture"
 DIMS = 1024
 BELOW_FLOOR = "movie:900004"
 CURATED = os.path.join(FIXTURE, "genres-moods-curated.json")
+PREMISE_TAGS = os.path.join(FIXTURE, "premise-tags-v2.json")
 #: The title whose genres & moods come from a Jev answer rather than the curated file, and that answer's
 #: strong labels: everything else it is asked is answered 0.05, under every threshold in the rule.
 DERIVED = "tv:900005"
@@ -547,6 +550,7 @@ class DenRun(unittest.TestCase):
                 mock.patch.object(http, "request", cls.upstreams.request), \
                 mock.patch.object(socket.socket, "connect", offline_connect(socket.socket.connect)), \
                 mock.patch.object(genres_moods, "CURATED", CURATED), \
+                mock.patch.dict(store.COMMITTED, {artifacts.PREMISE_TAGS.name: PREMISE_TAGS}), \
                 mock.patch.object(genres_moods.gmm, "run_eval", gate_passes):
             cls.drive(den)
 
@@ -782,6 +786,13 @@ class DenRun(unittest.TestCase):
         qids = store.column("ent_qid", "I", 4)
         row = store.keys().index("movie:900001")
         self.assertEqual([qids[e] for e in store.span("src_authors", row)], [91000002, 91000017])
+
+    def test_the_premise_tags_reach_the_store(self):
+        """The seeded tag sets land on their titles in the file's order; every other title owns none."""
+        store = Store(self.path(artifacts.STORE))
+        tags = read_json(PREMISE_TAGS)["tags"]
+        for row, key in enumerate(store.keys()):
+            self.assertEqual([store.text(i) for i in store.span("premise_tag", row)], tags.get(key, []), key)
 
     def test_every_shipped_title_has_a_vector_and_says_which(self):
         store = Store(self.path(artifacts.STORE))

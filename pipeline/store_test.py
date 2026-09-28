@@ -47,6 +47,7 @@ FIXTURE_FILES = {
     "premise_vectors": "premise.bin",
     "premise_labels": "premise-labels.json",
     "franchises": "franchises.json",
+    "premise_tags": "premise-tags.json",
 }
 
 
@@ -96,6 +97,16 @@ class CommandLine(unittest.TestCase):
             command = store.argv(self.paths(out, skip=("premise_vectors",)))
             self.assertNotIn("--premise-vectors", command)
             self.assertIsNone(writer.build_parser().parse_args(command[2:]).premise_vectors)
+
+    def test_the_premise_tags_default_to_the_committed_file(self):
+        """They live in `data/`, not in an out-dir, so a run that names no copy reads the repo's."""
+        with tempfile.TemporaryDirectory() as out:
+            ctx = self.paths(out)
+            bare = Context(out_dir=out, dataset_version="test",
+                           overrides={n: p for n, p in ctx.overrides.items() if n != "premise_tags"})
+            parsed = writer.build_parser().parse_args(store.argv(bare)[2:])
+            self.assertEqual(parsed.premise_tags, store.COMMITTED["premise_tags"])
+            self.assertTrue(os.path.isfile(parsed.premise_tags))
 
     def test_an_absent_required_input_stops_the_stage(self):
         with tempfile.TemporaryDirectory() as out:

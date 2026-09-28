@@ -40,6 +40,8 @@ statistic.
 We take the first view. It is stated here as a position rather than a fact so that anyone relying on it
 can weigh it, and so that the CC BY-SA text itself — which is unambiguous — is not confused with it.
 `vectors-premise.bin`, being embeddings of those tags, follows the same reasoning at one further remove.
+The store carries the v2 tags themselves too (`premise_tag_v`/`_o`), under the same position: they are the
+committed file's strings, already published in this repository.
 
 ## TMDB
 
