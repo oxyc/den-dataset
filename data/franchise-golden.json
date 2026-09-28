@@ -1,5 +1,5 @@
 {
- "about": "The hand-checked franchises of oxyc/den-atlas#92 as corpus keys, for pipeline/eval_franchises.py. `together` is one franchise, `eras` its eras where the case says; `apart` must never share a franchise (separate adaptations of Sherlock Holmes and Dracula, a studio's films, a shared universe's separate stories); `none` is no franchise (a studio's films, a thematic trilogy). The owner's decisions it encodes: one franchise with eras, a TV series joins its films, a shared universe is not the franchise.",
+ "about": "The hand-checked franchises of oxyc/den-atlas#92 as corpus keys, for pipeline/eval_franchises.py. `together` is one franchise, `eras` its eras where the case says; `apart` must never share a franchise (separate adaptations of Sherlock Holmes and Dracula, a studio's films, a shared universe's separate stories); `none` is no franchise (a studio's films, a thematic trilogy). The owner's decisions it encodes: one franchise with eras, a TV series joins its films, a shared universe is not the franchise, and a franchise is one continuity or rights line, so a separate production of the same source is apart from it (the British Wallander, the 1967 Casino Royale and Never Say Never Again).",
  "cases": [
   {
    "name": "Beck",
@@ -108,7 +108,7 @@
     "movie:221868",
     "movie:227246",
     "movie:218939",
-    "tv:7263"
+    "tv:31766"
    ],
    "eras": [
     [
@@ -117,7 +117,7 @@
      "movie:218939"
     ],
     [
-     "tv:7263"
+     "tv:31766"
     ]
    ]
   },
@@ -477,6 +477,18 @@
   [
    "movie:1726",
    "movie:10195"
+  ],
+  [
+   "movie:221868",
+   "tv:7263"
+  ],
+  [
+   "movie:646",
+   "movie:12208"
+  ],
+  [
+   "movie:646",
+   "movie:36670"
   ]
  ],
  "none": [
@@ -489,8 +501,8 @@
   "movie:107985"
  ],
  "floors": {
-  "togetherRecall": 0.9726,
-  "eraAgreement": 0.982,
+  "togetherRecall": 0.9897,
+  "eraAgreement": 0.9863,
   "apartViolations": 0,
   "noneViolations": 0
  }

@@ -70,14 +70,13 @@ TAKE = 0.5
 #: borderline choices otherwise turn exactly the thematic companion sets this flag exists for into a
 #: franchise (the completed corpus pass exposed the Three Flavours Cornetto trilogy at 0.51--0.77).
 CATALOGUE_TAKE = 0.8
-#: ``separate adaptation`` is an era boundary, not a membership vote. Jev tends to call every film based
-#: on a different novel a separate adaptation at about 0.5, splitting a continuing film series title by
-#: title. Reserve that boundary for a clear answer.
+#: A clear ``separate adaptation`` answer. Jev tends to call every film based on a different novel a
+#: separate adaptation at about 0.5, so only a clear answer counts. The owner's rule (oxyc/den-atlas#92,
+#: 2026-09-28): a franchise is one continuity or rights line, so a separate production of the same source
+#: (the British Wallander, the non-Eon Bond films, a Sherlock Holmes adaptation) is not an era of it and
+#: leaves it; it is found through the title's "Other versions" row instead (oxyc/den-atlas#112). A reboot
+#: inside the line (Eon's 2006 Casino Royale) stays and starts an era; see `reboots`.
 SEPARATE_TAKE = 0.75
-#: A source-only candidate plus a clear separate-adaptation answer is weak franchise evidence. Require a
-#: correspondingly clear group choice; this leaves a loose relocation such as The Laughing Policeman out,
-#: while a confidently recognised reboot remains a separate era.
-SEPARATE_SOURCE_TAKE = 0.85
 
 SECTION = f"the `{HEADING}` section"
 EVIDENCE = ("Judge the requested work (film or series) from the supplied article lead and what is widely known "
@@ -130,13 +129,19 @@ def read_facts(path):
     return records, blob.get("entities") or {}
 
 
-def _year(record):
+def _date(record):
+    """Wikidata's release (or first-aired) date at the precision it states: "1997", "1997-06", "1997-06-27"."""
     for field in ("released", "started"):
         value = record.get(field)
         date = value.get("date") if isinstance(value, dict) else value
         if isinstance(date, str) and date[:4].isdigit():
-            return int(date[:4])
+            return date
     return None
+
+
+def _year(record):
+    date = _date(record)
+    return int(date[:4]) if date else None
 
 
 def titles_from(records, source_series, tmdb_keys):
@@ -152,7 +157,7 @@ def titles_from(records, source_series, tmdb_keys):
         out[key] = fg.Title(key, names.get("en") or names.get("orig") or key, _year(r),
                             series=r.get("franchise") or [], franchises=r.get("mediaFranchise") or [],
                             sources=sources, follows=follows, characters=r.get("characters") or [],
-                            people=(r.get("cast") or []) + (r.get("directors") or []))
+                            people=(r.get("cast") or []) + (r.get("directors") or []), date=_date(r))
     return out
 
 
@@ -428,34 +433,44 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
             continue
         choice = got["fr__group"]
         letter = choice["choice"]
-        if letter not in fg.LETTERS or fg.LETTERS.index(letter) >= len(listed) or choice["confidence"] < TAKE:
+        if letter not in fg.LETTERS or fg.LETTERS.index(letter) >= len(listed):
             counts["no franchise"] += 1
             continue
         chosen = listed[fg.LETTERS.index(letter)]
-        gid = f"characters:{min(chosen[1])}" if isinstance(chosen, tuple) else chosen
+        gid = f"characters:{min(chosen[1])}" if isinstance(chosen, tuple) else \
+            container(chosen, listed, groups, flagged, choice.get("probabilities") or {})
+        held = support(choice, listed, gid, groups, flagged)
+        if held < TAKE:
+            counts["no franchise"] += 1
+            continue
         separate_vote = got["fr__separate_adaptation"]["noul"]
         if isinstance(chosen, str) and flagged.get(gid) == "catalogue" \
                 and catalogue_support.get(gid, 0.0) < CATALOGUE_TAKE:
             counts["no franchise"] += 1
             continue
-        if isinstance(chosen, str) and groups[gid].kind == "book-series" \
-                and separate_vote >= SEPARATE_TAKE and choice["confidence"] < SEPARATE_SOURCE_TAKE:
-            counts["no franchise"] += 1
+        if separate_vote >= SEPARATE_TAKE and not in_line(key, gid, titles, groups):
+            counts["separate production"] += 1
             continue
         if isinstance(chosen, tuple) and gid not in groups:
             groups[gid] = fg.Group(gid, "characters", titles[min(chosen[1], key=lambda k: fg.order_key(titles[k]))].name,
                                    chosen[1])
         franchise_of[key] = gid
+        if gid != chosen and isinstance(chosen, str):
+            era_of[key] = chosen
         source[gid] = JEV
-        confidence[key] = choice["confidence"]
+        confidence[key] = held
         umbrellas = [other for other in listed if isinstance(other, str) and other != gid
                      and flagged.get(other) == "universe" and key in groups[other].members]
         if umbrellas:
             umbrella_of[key] = min(umbrellas, key=lambda group: (len(groups[group].members), group))
         counts["answered"] += 1
         for other in listed:
-            if not isinstance(other, tuple) and other != chosen:
-                one[frozenset((gid, other))].append(got["fr__one_franchise"]["noul"])
+            # A group inside the franchise is one of its eras already, not a second franchise to merge; and a
+            # title that is a separate adaptation says it is not one franchise with the others.
+            if isinstance(other, tuple) or other in (chosen, gid) or groups[other].members < groups[gid].members \
+                    or separate_vote >= SEPARATE_TAKE:
+                continue
+            one[frozenset((gid, other))].append((key, got["fr__one_franchise"]["noul"]))
         if separate_vote >= SEPARATE_TAKE:
             separate.add(key)
     # Groups the titles listing both say are one franchise are merged, the bigger one absorbing the other.
@@ -467,12 +482,17 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
         return g
 
     for pair, votes in sorted(one.items(), key=lambda kv: sorted(kv[0])):
-        agreement = sum(votes) / len(votes)
+        agreement = sum(vote for _, vote in votes) / len(votes)
         if agreement < TAKE:
             continue
         # A shared universe is useful title metadata, never a primary-franchise merge. Otherwise a 0.5-ish
         # answer from a crossover collapses Thor, Iron Man and every other MCU story into one row.
         if any(flagged.get(gid) == "universe" for gid in pair):
+            continue
+        # Each side's own titles must be among those saying so. One yes/no covers every listed group, so a
+        # title listed a group only by a shared name word ("Spider-Verse" beside the "Lenkov-verse" of
+        # Hawaii Five-0) would otherwise merge two franchises neither of whose titles was asked about both.
+        if not all(any(voter in groups[gid].members for voter, _ in votes) for gid in pair):
             continue
         a, b = sorted((top(g) for g in pair), key=lambda g: (-len(groups[g].members), g))
         if a != b:
@@ -489,9 +509,7 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
     out = {}
     for key, gid in franchise_of.items():
         root, merge_conf = root_and_confidence(gid)
-        if key in separate:
-            era = f"adaptation:{key}"
-        elif gid != root:
+        if gid != root:
             era = gid
         else:
             era = era_of.get(key) or fg.era(key, groups[root], groups)
@@ -506,7 +524,69 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
         if key in umbrella_of and umbrella_of[key] != root:
             entry["umbrellaOf"][key] = umbrella_of[key]
         entry["members"][key] = era
+    reboots(out, separate, titles)
     return out, counts
+
+
+def container(chosen, listed, groups, flagged, probabilities):
+    """The largest listed group Wikidata places the chosen group inside, else the chosen group itself.
+    Choosing the Eon series or the MCU Spider-Man films is choosing their franchise, as `fg.plan` decides
+    for a title nobody asks about. A flagged universe or catalogue never contains, and neither does a book
+    series: its adaptations are separate productions, not one line. Of two containers holding the same
+    titles, the one the answer leaned to wins."""
+    inside = [(len(groups[g].members), probabilities.get(letter, 0.0), g) for letter, g in zip(fg.LETTERS, listed)
+              if isinstance(g, str) and g not in flagged and groups[g].kind != "book-series"
+              and groups[chosen].members < groups[g].members]
+    return max(inside)[2] if inside else chosen
+
+
+def support(choice, listed, gid, groups, flagged):
+    """How sure the answer is that the title is in `gid`: the chosen letter's confidence, or what it put on
+    the franchise and every listed group inside it together, when that is more. Jev splits an answer
+    between a franchise and its own era (GoldenEye: 0.43 the James Bond films, 0.56 the Eon series), and
+    neither half alone clears `TAKE`."""
+    if gid not in groups or gid in flagged:
+        return choice["confidence"]
+    probabilities = choice.get("probabilities") or {}
+    inside = [probabilities.get(letter, 0.0) for letter, g in zip(fg.LETTERS, listed)
+              if isinstance(g, str) and groups[g].members <= groups[gid].members]
+    return max(choice["confidence"], sum(inside)) if len(inside) > 1 else choice["confidence"]
+
+
+def in_line(key, gid, titles, groups):
+    """Whether a title Jev calls a separate adaptation is still in the franchise's line (a reboot, a remake
+    by the same line, the head of a remake's own sequels) rather than another production of the source.
+
+    A book series' adaptations or a character link are no line. Wikidata decides the rest: the title is in
+    a series narrower than the franchise that holds other titles too (Eon's 2006 Casino Royale), or the
+    franchise has such a series without it (the 1967 Casino Royale, outside the Eon series, is out). Failing
+    both, it is in the line if Wikidata's own series item names it (Sherlock in "Sherlock"), or a sequel
+    chain starts with it (the 1991 Father of the Bride and its Part II)."""
+    root = groups.get(gid)
+    if root is None or root.kind in ("book-series", "characters"):
+        return False
+    title = titles[key]
+    narrower = [g for g in groups.values() if g.kind == "series" and g.members < root.members]
+    if any(title.key in g.members for g in narrower if g.id in title.series):
+        return True
+    if any(title.key not in g.members for g in narrower):
+        return False
+    if gid in title.series:
+        return True
+    return root.kind == "chain" and min(root.members, key=lambda k: fg.release_key(titles[k])) == key
+
+
+def reboots(franchises, rebooted, titles):
+    """A reboot starts an era: it and every later title of the era it was in move to an era of its own
+    (Casino Royale 2006 and the Craig films after it, out of the Eon series)."""
+    for entry in franchises.values():
+        members = entry["members"]
+        starts = sorted((k for k in members if k in rebooted), key=lambda k: fg.release_key(titles[k]))
+        base = dict(members)
+        for key in members:
+            for start in starts:
+                if base[start] == base[key] and fg.release_key(titles[start]) <= fg.release_key(titles[key]):
+                    members[key] = f"adaptation:{start}"
 
 
 def era_name(era, groups, titles, names):
@@ -523,7 +603,7 @@ def document(franchises, groups, titles, names):
     out, of = {}, {}
     for fid in sorted(franchises):
         entry = franchises[fid]
-        members = sorted(entry["members"], key=lambda k: fg.order_key(titles[k]))
+        members = sorted(entry["members"], key=lambda k: fg.release_key(titles[k]))
         if len(members) < 2:
             continue
         positions = {key: order for order, key in enumerate(members)}
