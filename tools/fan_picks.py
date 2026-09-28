@@ -431,8 +431,12 @@ def submit(w, items, label, reserve):
             fh.write(json.dumps({"key": f"{key}#{ask}", "request": request_body(w.titles[key])},
                                 ensure_ascii=False) + "\n")
     file_name = upload(source, f"fan-picks-{label}")
-    _, job = http("POST", f"{API}/v1beta/models/{MODEL}:batchGenerateContent",
-                  {"batch": {"displayName": f"fan-picks-{label}", "inputConfig": {"fileName": file_name}}})
+    try:
+        _, job = http("POST", f"{API}/v1beta/models/{MODEL}:batchGenerateContent",
+                      {"batch": {"displayName": f"fan-picks-{label}", "inputConfig": {"fileName": file_name}}})
+    except urllib.error.HTTPError as exc:
+        # The API says why (an enqueued-token limit, a bad file); nothing is recorded, so a rerun resubmits.
+        raise SystemExit(f"batch {label} refused: HTTP {exc.code} {exc.read()[:500].decode(errors='replace')}")
     entry = {"name": job["name"], "label": label, "file": file_name, "items": [list(i) for i in items],
              "state": "submitted", "reservedUSD": reserve,
              "submittedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
