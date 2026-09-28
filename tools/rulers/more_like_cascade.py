@@ -98,11 +98,8 @@ def ruler_cases(ruler_path):
 
 # --- fetch ---------------------------------------------------------------------------------------------
 
-def fetch(atlas, expect_version, ruler_path, judged_path, out, workers=8):
-    """Atlas's live rows (first 200) for every pilot anchor, and each type's popularity order."""
-    meta = _get(atlas, "/dataset.json")
-    if meta.get("datasetVersion") != expect_version:
-        raise SystemExit(f"atlas serves {meta.get('datasetVersion')}, not {expect_version}")
+def popularity_order(atlas):
+    """Each browsable title's rank in its type's popularity order, with that type's size, title and year."""
     popularity = {}
     for kind in ("movie", "series"):
         rows, skip, order = [], 0, None
@@ -119,6 +116,15 @@ def fetch(atlas, expect_version, ruler_path, judged_path, out, workers=8):
         for rank, title in enumerate(rows, 1):
             popularity[dataset_key(title["type"], title["id"])] = {
                 "rank": rank, "typeSize": len(rows), "title": title["title"], "year": title.get("year")}
+    return popularity
+
+
+def fetch(atlas, expect_version, ruler_path, judged_path, out, workers=8):
+    """Atlas's live rows (first 200) for every pilot anchor, and each type's popularity order."""
+    meta = _get(atlas, "/dataset.json")
+    if meta.get("datasetVersion") != expect_version:
+        raise SystemExit(f"atlas serves {meta.get('datasetVersion')}, not {expect_version}")
+    popularity = popularity_order(atlas)
     anchors = sorted(set(judged_anchors(judged_path)) | {case["anchor"]["key"] for case in ruler_cases(ruler_path)})
 
     def row(key):

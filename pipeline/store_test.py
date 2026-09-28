@@ -48,6 +48,7 @@ FIXTURE_FILES = {
     "premise_labels": "premise-labels.json",
     "franchises": "franchises.json",
     "premise_tags": "premise-tags.json",
+    "jev_more_like": "jev-more-like.json",
 }
 
 

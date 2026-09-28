@@ -45,6 +45,7 @@ INPUTS = (
     artifacts.PREMISE_LABELS,
     artifacts.FRANCHISES,
     artifacts.PREMISE_TAGS,
+    artifacts.JEV_MORE_LIKE,
 )
 
 OUTPUTS = (artifacts.STORE,)

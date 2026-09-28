@@ -7,6 +7,7 @@
       --vectors out-repass/vectors-bge-m3.bin --vector-labels out-repass/labels-t02.json \
       --premise-vectors out-repass/vectors-premise.bin --premise-labels out-repass/labels-premise.json \
       --premise-tags data/premise-tags-v2.json \
+      [--jev-more-like out-issue132/full/jev-more-like.json] \
       --dataset-version <ver> --out out-repass/den-<ver>.store
 
 The layout is den-spec `wire/store-v3.md`. That document is the contract; this is one of its two
@@ -179,6 +180,9 @@ PROVENANCE = {
     "premise_tag_v": "llm", "premise_tag_o": "ours",
     # Other versions of a title's story, grouped by the P144/P4969 source work (oxyc/den-atlas#112).
     "versions_v": "wikidata", "versions_o": "wikidata", "versions_k": "wikidata",
+    # Jev's overall More Like This Noul per weighed candidate (#132), over Wikipedia leads and plot sections.
+    # The candidate rows are the model's selection as much as atlas's, so the whole group is the model's.
+    "jev_like_v": "llm", "jev_like_o": "llm", "jev_like_p": "llm",
     # Embeddings of the article's plot text, and of the premise tags a model wrote from it.
     "vec_plot": "wikipedia",
     "vec_premise": "llm",
@@ -191,7 +195,8 @@ CURATED_FRANCHISE_SECTIONS = frozenset({
     "fr_mem_order", "fr_mem_o",
 })
 PREMISE_TAG_SECTIONS = frozenset({"premise_tag_v", "premise_tag_o"})
-OPTIONAL_PROVENANCE_GROUPS = (CURATED_FRANCHISE_SECTIONS, PREMISE_TAG_SECTIONS)
+JEV_MORE_LIKE_SECTIONS = frozenset({"jev_like_v", "jev_like_o", "jev_like_p"})
+OPTIONAL_PROVENANCE_GROUPS = (CURATED_FRANCHISE_SECTIONS, PREMISE_TAG_SECTIONS, JEV_MORE_LIKE_SECTIONS)
 
 #: The sources that are a vendor's CONTENT. `identifier` is deliberately not one: an id is a join key,
 #: which is the one thing both catalogue licences leave us.
@@ -305,6 +310,9 @@ def build_parser():
     ap.add_argument("--premise-tags",
                     help="data/premise-tags-v2.json — each title's premise tags; absent writes no "
                          "premise_tag sections. Every key must be a corpus title.")
+    ap.add_argument("--jev-more-like",
+                    help="jev-more-like.json from tools/rulers/more_like_cascade_full.py export — Jev's "
+                         "More Like This scores (#132); absent writes no jev_like sections.")
     ap.add_argument("--dataset-version", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--stamp-meta",

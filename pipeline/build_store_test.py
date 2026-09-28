@@ -31,6 +31,8 @@ MIGRATE = os.path.join(HERE, "migrate_vector_blob.py")
 DIMS = 1024
 #: `StoreFixture`'s default premise tags: movie:1 has two, movie:2 none.
 PREMISE_TAGS = {"movie:1": ["one-last-job", "heist-gone-wrong"]}
+#: `StoreFixture`'s default Jev More Like This scores: movie:2 weighed for movie:1, nothing for movie:2.
+JEV_MORE_LIKE = {"movie:1": [["movie:2", 0.57]]}
 
 
 def spec_dir():
@@ -215,7 +217,7 @@ class StoreFixture:
     def build(self, out_dir, titles=None, plot_keys=("movie:1",), premise_keys=("movie:2",),
               plot_labels=None, premise_labels=None, write_plot_vectors=None, stamp=None,
               build_store=BUILD_STORE, entities=None, franchises=True, premise_tags=PREMISE_TAGS,
-              facts_keys=None):
+              facts_keys=None, jev_more_like=JEV_MORE_LIKE):
         """`*_keys` are the blob's OWN key column; `*_labels` the labels artifact's records, which
         default to the same thing. Passing them apart is how the key-set assert is exercised;
         `write_plot_vectors` swaps in a writer of another format. `stamp` asks the writer to record
@@ -223,7 +225,8 @@ class StoreFixture:
         the writer itself — the only way to reach a guard that fires on the writer's own constants.
         `entities` replaces or adds entity-table entries. `premise_tags` is the tags file's `tags`
         object, or None to leave `--premise-tags` off. `facts_keys` are the facts file's records, which
-        default to the corpus titles'."""
+        default to the corpus titles'. `jev_more_like` is the Jev export's `anchors`, or None to leave
+        `--jev-more-like` off."""
         titles = self.TITLES if titles is None else titles
         plot_keys, premise_keys = list(plot_keys), list(premise_keys)
         plot_labels = plot_keys if plot_labels is None else list(plot_labels)
@@ -287,6 +290,8 @@ class StoreFixture:
              *(["--franchises", dump("franchises.json", franchise_doc)] if franchise_doc else []),
              *(["--premise-tags", dump("premise-tags.json", {"tags": premise_tags})]
                if premise_tags is not None else []),
+             *(["--jev-more-like", dump("jev-more-like.json", {"anchors": jev_more_like})]
+               if jev_more_like is not None else []),
              "--dataset-version", "test", "--out", store,
              *(["--stamp-meta", stamp] if stamp else [])],
             capture_output=True, text=True)
@@ -936,6 +941,9 @@ class EverySectionDeclaresWhereItsBytesCameFrom(StoreFixture, unittest.TestCase)
         mod.check_provenance(set(mod.PROVENANCE) - mod.PREMISE_TAG_SECTIONS)
         with self.assertRaisesRegex(SystemExit, "premise_tag_o"):
             mod.check_provenance(set(mod.PROVENANCE) - {"premise_tag_o"})
+        mod.check_provenance(set(mod.PROVENANCE) - mod.JEV_MORE_LIKE_SECTIONS)
+        with self.assertRaisesRegex(SystemExit, "jev_like_p"):
+            mod.check_provenance(set(mod.PROVENANCE) - {"jev_like_p"})
 
     def test_a_section_with_no_declared_source_stops_the_build(self):
         """The case this exists for, end to end: the writer emits a section the table does not know
@@ -1426,6 +1434,44 @@ class PremiseTagsShip(StoreFixture, unittest.TestCase):
                     self.assertRaises(AssertionError) as caught:
                 self.build(out, premise_tags={"movie:1": tags})
             self.assertIn("movie:1 has malformed premise tags", str(caught.exception))
+
+
+class JevMoreLikeShips(StoreFixture, unittest.TestCase):
+    """Each anchor's Jev-weighed candidates as rows, with the overall Noul in hundredths beside each."""
+
+    def span(self, store, row):
+        offsets = store.ints("jev_like_o")
+        rows, scores = store.ints("jev_like_v"), store.ints("jev_like_p", "B", 1)
+        keys = store.keys()
+        return [(keys[rows[i]], scores[i]) for i in range(offsets[row], offsets[row + 1])]
+
+    def test_an_anchors_candidates_keep_their_order_and_an_unscored_title_owns_an_empty_span(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, stderr = self.build(out)
+        self.assertEqual(self.span(store, store.keys().index("movie:1")), [("movie:2", 57)])
+        self.assertEqual(self.span(store, store.keys().index("movie:2")), [])
+        self.assertIn('"jevMoreLike": 1', stderr)
+
+    def test_without_the_input_the_sections_are_absent(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, jev_more_like=None)
+        for name in ("jev_like_v", "jev_like_o", "jev_like_p"):
+            self.assertNotIn(name, store.table)
+
+    def test_a_row_that_joins_nothing_or_a_malformed_candidate_is_fatal(self):
+        for anchors, complaint in (
+                ({"tv:1": [["movie:2", 0.5]]}, "tv:1 has Jev scores and is not a corpus title"),
+                ({"movie:1": [["tv:1", 0.5]]}, "movie:1 has a malformed candidate"),
+                ({"movie:1": [["movie:1", 0.5]]}, "movie:1 has a malformed candidate"),
+                ({"movie:1": [["movie:2", 0.5], ["movie:2", 0.6]]}, "movie:1 has a malformed candidate"),
+                ({"movie:1": [["movie:2", 0.575]]}, "movie:1 has a malformed candidate"),
+                ({"movie:1": [["movie:2", 1.5]]}, "movie:1 has a malformed candidate"),
+                ({"movie:1": [["movie:2", True]]}, "movie:1 has a malformed candidate"),
+                ({"movie:1": []}, "movie:1 has a malformed candidate")):
+            with self.subTest(anchors=anchors), tempfile.TemporaryDirectory() as out, \
+                    self.assertRaises(AssertionError) as caught:
+                self.build(out, jev_more_like=anchors)
+            self.assertIn(complaint, str(caught.exception))
 
 
 class OnlyATitleIdReachesTheImdbColumn(unittest.TestCase):
