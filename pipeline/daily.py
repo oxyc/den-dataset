@@ -34,10 +34,10 @@ the out-dir first (`pipeline/published.py`).
   * an out-dir that holds enriched batches and no live manifest. The change set would call every title new,
     and the stages would redo the whole corpus;
   * `--spend` with a plan that has no live baseline. A first generation is ~$20 of classification, and it is
-    bought by hand (`docs/OPERATE.md`, 3a), never by a timer.
+    bought by hand (`docs/OPERATE.md`, "A first generation"), never by a timer.
 
-**The facts stage's delta ids** (`facts-delta-ids.txt`) are written here, by `docs/OPERATE.md` step 6a's
-rule: the titles the live facts file carries, and the ids the list already names, less the titles the new
+**The facts stage's delta ids** (`facts-delta-ids.txt`) are written here, by the rule in `docs/OPERATE.md`,
+"Wikidata": the titles the live facts file carries, and the ids the list already names, less the titles the new
 labels carry. An id added to the list by hand stays until it has a vector.
 """
 import dataclasses
@@ -73,7 +73,7 @@ def keys_of(path):
 
 
 def write_delta_ids(ctx, live_version):
-    """`facts-delta-ids.txt` by step 6a's rule. Returns how many ids it lists."""
+    """`facts-delta-ids.txt` by the delta-pass rule. Returns how many ids it lists."""
     labels = keys_of(ctx.path(artifacts.VECTOR_LABELS))
     listed = set()
     path = ctx.path(artifacts.DELTA_IDS)
@@ -191,7 +191,8 @@ def run_day(day):
             day.stage(name)
             if day.args.spend and changes.planned(ctx) is None:
                 raise StageError("daily: --spend with no live baseline would buy a first generation, the whole "
-                                 "corpus; that is bought by hand (docs/OPERATE.md, 3a), not by the daily job.")
+                                 "corpus; that is bought by hand (docs/OPERATE.md, \"A first generation\"), not by "
+                                 "the daily job.")
         elif name in PAID:
             if not day.can_buy:
                 day.skip(name, "not given --spend with a TYPESAFE_API_KEY, so nothing was bought: a changed "
@@ -210,7 +211,7 @@ def run_day(day):
             day.stage(name)
         elif name == "facts":
             count = write_delta_ids(finalize_ctx(ctx), live_version(ctx))
-            print(f"==> facts: {count} delta id(s) by docs/OPERATE.md 6a's rule", file=sys.stderr)
+            print(f"==> facts: {count} delta id(s) by the delta-pass rule (docs/OPERATE.md, Wikidata)", file=sys.stderr)
             day.stage(name)
         elif name == "publish":
             try:

@@ -395,7 +395,7 @@ CORPUS_FACTS = Artifact(
 
 #: The ids the delta pass scrapes: titles /recommend needs facts for that have no vector — which is not the
 #: same as new: a title the classify pass drops from the labels loses its vector and lands here. No stage
-#: derives the list; docs/OPERATE.md step 6a gives the rule (the last published facts file's titles minus
+#: derives the list; `./den daily` writes it, and docs/OPERATE.md "Wikidata" gives the rule (the last published facts file's titles minus
 #: the new labels', plus what atlas is missing), `movie:1` / `tv:2`, one per line or comma-separated. An old
 #: list is not reusable: the 8,949 ids the last rebuild scraped as vectorless all have vectors now.
 DELTA_IDS = Artifact(
@@ -403,7 +403,7 @@ DELTA_IDS = Artifact(
     filename="facts-delta-ids.txt",
     producer="docs/OPERATE.md",
     how="list the ids to scrape without a vector (movie:1, tv:2 …) into facts-delta-ids.txt — "
-        "docs/OPERATE.md step 6a",
+        "docs/OPERATE.md, \"Wikidata\"",
 )
 
 #: The delta pass: the ids above, scraped WITHOUT `hasVector`.

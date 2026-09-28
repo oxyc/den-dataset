@@ -165,7 +165,7 @@ class Refusals(Recorded):
 
 
 class DeltaIds(unittest.TestCase):
-    """docs/OPERATE.md step 6a: the live facts' titles and the ids listed, less the new labels'."""
+    """The delta-pass rule (docs/OPERATE.md, "Wikidata"): the live facts' titles and the ids listed, less the new labels'."""
 
     def write(self, out, name, keys):
         with open(os.path.join(out, name), "w", encoding="utf-8") as fh:

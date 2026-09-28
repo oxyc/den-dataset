@@ -169,7 +169,7 @@ class Invocation(unittest.TestCase):
     """
 
     def documented(self, script, publish_dir):
-        """`pipeline/publish-dataset.sh <dir>`, run from the repo root, as `docs/OPERATE.md` step 8 says.
+        """`pipeline/publish-dataset.sh <dir>`, run from the repo root, as `docs/OPERATE.md` ("Publishing a daily run") says.
 
         The publisher itself is swapped for the recorder: running the real one would clobber a public
         release, which is the one thing no test in this repo may do.

@@ -67,7 +67,7 @@ jobs:
           python-version: "3.12"
       # The live manifest, and the bundle its publish put on `corpus-<version>`. Public, read with the job's
       # own token. Without either there is nothing to start from, and a day never starts from nothing: that
-      # is a whole generation, bought at once (docs/OPERATE.md, "Where a day starts").
+      # is a whole generation, bought at once (docs/OPERATE.md, "When a run is not ready").
       - name: The live dataset
         env:
           GH_TOKEN: ${{ github.token }}
