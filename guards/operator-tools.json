@@ -20,6 +20,7 @@
   "tools/rulers/more_like_gate.py": "preregisters and runs the bounded Jev More Like This reranker gate (oxyc/den-dataset#132)",
   "tools/rulers/more_like_prior.py": "preregisters the fresh title-and-year control arm for the More Like This gate (oxyc/den-dataset#132)",
   "tools/rulers/more_like_card.py": "preregisters the compact-card evidence arm of the More Like This gate and pairs it with the story arm (oxyc/den-dataset#132)",
+  "tools/rulers/more_like_cascade.py": "preregisters and runs the bounded pilot of the More Like This screen-then-evidence cascade (oxyc/den-dataset#132)",
   "tools/rulers/premise_mine_candidates.py": "premise ruler: candidate pools for triplet generation (oxyc/den-dataset#18 step 12)",
   "tools/rulers/build_judge_batches.py": "premise ruler: the blind judging passes; pass 3 is unrun (oxyc/den-dataset#18 step 12)",
   "tools/rulers/consolidate_triplets.py": "premise ruler: un-blinds the judging passes into the confirmed triplet set (oxyc/den-dataset#18 step 12)",
