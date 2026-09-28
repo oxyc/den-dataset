@@ -33,6 +33,11 @@ The typed answers are evidence, not an instruction to merge every borderline can
   umbrella instead);
 - two groups merge only when titles of both say they are one franchise; a title that is a separate
   adaptation casts no merge vote;
+- two groups with no title in common were listed together only because their names share a word, and
+  most such pairs are unrelated (Die Hard and *A Hard Day's Night*). They merge only on evidence beside
+  the vote: a Wikidata series or media franchise holding titles of both, three or more actors credited in
+  both (the 1993 Martin Beck films and the 1997– Beck films), or a title of one whose answer chose the
+  other (the Norwegian *Olsenbanden* choosing the Danish Olsen Gang);
 - a franchise is one continuity or rights line (the owner's rule, oxyc/den-atlas#92). A `separate
   adaptation` answer at `0.75` is another production and joins no franchise, unless Wikidata keeps it in
   the line: in a series narrower than the franchise with other titles (Eon's 2006 *Casino Royale*), or,
