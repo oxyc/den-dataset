@@ -68,10 +68,13 @@ BUNDLE = (
     # pre-#121 publish; once present it must travel with the other facts checkpoints or a stateless daily
     # run asks Wikidata for every adapted work's authors again.
     ("facts-source-authors.json", "facts-source-authors.json", False),
+    # Added by oxyc/den-atlas#112, optional on the same terms: the TMDB keys of every adapted work.
+    ("facts-source-titles.json", "facts-source-titles.json", False),
     ("facts-delta/facts-fields.json", "facts-delta.facts-fields.json", False),
     ("facts-delta/facts-entities.json", "facts-delta.facts-entities.json", False),
     ("facts-delta/facts-source-types.json", "facts-delta.facts-source-types.json", False),
     ("facts-delta/facts-source-authors.json", "facts-delta.facts-source-authors.json", False),
+    ("facts-delta/facts-source-titles.json", "facts-delta.facts-source-titles.json", False),
     # Optional for the last pre-franchise-resume generation. Prose-free: the private article states and raw
     # provider rows are deliberately not in this bundle.
     ("franchise-decisions-v1.json", "franchise-decisions-v1.json", False),

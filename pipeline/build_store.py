@@ -177,6 +177,8 @@ PROVENANCE = {
     "fr_mem_row": "ours", "fr_mem_era": "ours", "fr_mem_order": "ours", "fr_mem_o": "ours",
     # The premise tags a model wrote from the article's plot (`data/premise-tags-v2.json`), and their spans.
     "premise_tag_v": "llm", "premise_tag_o": "ours",
+    # Other versions of a title's story, grouped by the P144/P4969 source work (oxyc/den-atlas#112).
+    "versions_v": "wikidata", "versions_o": "wikidata", "versions_k": "wikidata",
     # Embeddings of the article's plot text, and of the premise tags a model wrote from it.
     "vec_plot": "wikipedia",
     "vec_premise": "llm",

@@ -32,13 +32,14 @@ from .wikidata import HOST, ID_PROPERTY, PATH, WikidataError, exclusion
 #: the two scrapes' entries cannot collide.
 CACHE_PATH = "sparql-facts"
 
-Spec = collections.namedtuple("Spec", "key prop kind iso_via tv_only single numeric where")
+Spec = collections.namedtuple("Spec", "key prop kind iso_via tv_only single numeric where inverse")
 
 
-def spec(key, prop, kind, iso_via=None, tv_only=False, single=False, numeric=False, where=""):
+def spec(key, prop, kind, iso_via=None, tv_only=False, single=False, numeric=False, where="", inverse=False):
     """`where` is a SPARQL pattern on `?v` that a value must also match, asked with the property so it is
-    cached with it — part of the query text, so changing it re-asks the property."""
-    return Spec(key, prop, kind, iso_via, tv_only, single, numeric, where)
+    cached with it — part of the query text, so changing it re-asks the property. `inverse` asks for the
+    items that state the property ON the title (`?v wdt:P ?film`) rather than the title's own values."""
+    return Spec(key, prop, kind, iso_via, tv_only, single, numeric, where, inverse)
 
 
 #: `entity` is a Q-id with a name in `entities`; `iso` resolves the value to a code through a second
@@ -67,6 +68,9 @@ SPECS = (
     spec("franchise", "P179", "entity"),                     # sparse (41% top films, 5% tail); see SERIES_CLASSES
     spec("mainSubjects", "P921", "entity"),                  # 29%
     spec("basedOn", "P144", "entity"),                       # 18% — links adaptations of one source
+    # The same link stated on the source: a work whose P4969 (derivative work) names this title. It adds
+    # 46 titles to the 9,722 P144 links into another version (oxyc/den-atlas#112).
+    spec("derivedFrom", "P4969", "entity", inverse=True),
     # Franchise evidence (oxyc/den-atlas#92), measured on the 2,000 most-voted titles: each links titles
     # the P179 `franchise` does not. Evidence for grouping, never a plot source (`lib/wikidata.py`: a
     # franchise sibling is not the same story).
@@ -144,6 +148,8 @@ def facts_query(ids, media, item, excluded=None):
         select = "?tmdb ?v ?prec"
         body = (f"?film p:{item.prop} ?st . ?st psv:{item.prop} ?node . "
                 f"?node wikibase:timeValue ?v ; wikibase:timePrecision ?prec .")
+    elif item.inverse:
+        select, body = "?tmdb ?v", f"?v wdt:{item.prop} ?film ."
     else:
         select, body = "?tmdb ?v", f"?film wdt:{item.prop} ?v .{' ' + item.where if item.where else ''}"
     return (f"SELECT {select} WHERE {{\n"

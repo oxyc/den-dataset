@@ -286,6 +286,10 @@ class Wikidata:
         if head == "SELECT ?tmdb ?v ?prec":
             return [{"v": stated["time"], "prec": str(stated["precision"])}
                     for stated in self.claims(qid, prop(r"p:(P\d+) \?st"))]
+        if head == "SELECT ?tmdb ?v" and re.search(r"\?v wdt:P\d+ \?film \.", query):
+            # An inverse property (`derivedFrom`): the items stating it that name this title.
+            through = prop(r"\?v wdt:(P\d+) \?film \.")
+            return [{"v": ENTITY + other} for other in sorted(self.items) if qid in self.claims(other, through)]
         if head == "SELECT ?tmdb ?v":
             return [{"v": self.value(v)} for v in self.claims(qid, prop(r"\?film wdt:(P\d+) \?v \."))]
         if "?orig" in head:

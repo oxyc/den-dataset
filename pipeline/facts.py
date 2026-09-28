@@ -89,11 +89,14 @@ CHECKPOINTS = {True: "", False: "facts-delta"}
 AWARDS = ("awardsWon", "awardsNominated")
 #: What groups titles into a franchise beyond P179 (`wd.SPECS`, oxyc/den-atlas#92).
 FRANCHISE_EVIDENCE = ("mediaFranchise", "follows", "followedBy", "characters")
-BACKFILLED = AWARDS + FRANCHISE_EVIDENCE
+#: What links a title to the other versions of its story beyond `basedOn` (oxyc/den-atlas#112).
+VERSION_EVIDENCE = ("derivedFrom",)
+BACKFILLED = AWARDS + FRANCHISE_EVIDENCE + VERSION_EVIDENCE
 #: Record fields whose Q-ids are not named. An award ships by its ceremony; a sequel is a title with its own
 #: record; a character is evidence for grouping, and naming every one would add tens of thousands of
-#: entities. A media franchise IS named: a franchise row shows it.
-UNNAMED = AWARDS + ("follows", "followedBy", "characters")
+#: entities. A media franchise IS named: a franchise row shows it. A `derivedFrom` work groups versions and
+#: is never displayed.
+UNNAMED = AWARDS + ("follows", "followedBy", "characters") + VERSION_EVIDENCE
 #: Ids per backfill request. Far more than `BATCH`: the backfill asks one property of every checkpointed
 #: row, and a WDQS request's cost is the request, not its size — measured on the corpus while WDQS was
 #: throttling this client, 25 ids took 22 s and 500 took 5.4 s. At 25 the 47,618-title corpus was ~15 s a
@@ -503,12 +506,15 @@ def resolve_source_authors(fields, path, cache):
 
 def resolve_sources(fields, path):
     """What each adapted title is adapted FROM — a book, a manga, a game — which the bare `basedOn` Q-id
-    cannot say. A work Wikidata states no type for is remembered as `[]` so it is not asked again."""
+    cannot say. A work Wikidata states no type for is remembered as `[]` so it is not asked again. The
+    `derivedFrom` works are typed too, for the other versions (`version_sources`); `basedOnKind` is still
+    `basedOn`'s alone. Returns the checkpoint: work Q-id -> its type labels."""
     kinds = checkpoint(path)
     targets = set()
     for row in fields.values():
-        if isinstance(row.get("basedOn"), list):
-            targets.update(row["basedOn"])
+        for name in ("basedOn",) + VERSION_EVIDENCE:
+            if isinstance(row.get(name), list):
+                targets.update(row[name])
     unresolved = sorted(targets - set(kinds))
     say(f"source kinds: {len(kinds)} cached, {len(unresolved)} to resolve")
     if unresolved:
@@ -527,6 +533,36 @@ def resolve_sources(fields, path):
             for kind in found:
                 counts[kind] = counts.get(kind, 0) + 1
     say("basedOnKind: " + " ".join(f"{k}={n}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1])))
+    return kinds
+
+
+def version_sources(fields, kinds, path, cache):
+    """`work Q-id -> {"kind": ..., "titles": [...]}` for every work a title is based on or derived from: its
+    strongest kind (`wd.strongest_kind`), left out when Wikidata states no type, and the TMDB keys the work
+    has itself — a film or series, so a title based on it is a remake. The keys are checkpointed like the
+    source authors, `[]` for asked-and-none, so a work is asked once. What `pipeline/versions.py` groups
+    the other versions by, once the merge has both passes."""
+    found = checkpoint(path)
+    works = set()
+    for row in fields.values():
+        for name in ("basedOn",) + VERSION_EVIDENCE:
+            works.update(q for q in row.get(name) or [] if isinstance(q, str) and q.startswith("Q"))
+    unresolved = sorted(works - set(found))
+    say(f"version sources: {len(found)} works cached, {len(unresolved)} to resolve")
+    if unresolved:
+        answered = wd.tmdb_keys(unresolved, cache)
+        for qid in unresolved:
+            found[qid] = answered.get(qid, [])
+        save(path, found)
+    out = {}
+    for qid in sorted(works):
+        entry = {"titles": found.get(qid) or []}
+        kind = wd.strongest_kind(kinds.get(qid) or [])
+        if kind:
+            entry["kind"] = kind
+        out[qid] = entry
+    say(f"version sources: {sum(1 for e in out.values() if e['titles'])} of {len(out)} works are screen works")
+    return out
 
 
 def shipped_entities(names, fields):
@@ -621,7 +657,8 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, again=fr
     # Before the entities are named, so the authors are named with them.
     resolve_source_authors(fields, os.path.join(directory, "facts-source-authors.json"), cache)
     names = resolve_entities(fields, os.path.join(directory, "facts-entities.json"), cache)
-    resolve_sources(fields, os.path.join(directory, "facts-source-types.json"))
+    kinds = resolve_sources(fields, os.path.join(directory, "facts-source-types.json"))
+    sources = version_sources(fields, kinds, os.path.join(directory, "facts-source-titles.json"), cache)
     entities = shipped_entities(names, fields)
     # Built over EVERY entity, not only the Q-ids some record names as a genre — the Swift's rule, kept. So
     # a type, a subject or a studio whose name matches passes as a genre: 14 of the shipped 82 entries are
@@ -639,8 +676,14 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, again=fr
         media, tmdb_id = key.split(":")
         row = {name: value for name, value in fields[key].items() if not (name in BACKFILLED and not value)}
         records.append({**row, "mediaType": media, "tmdbId": int(tmdb_id), "hasVector": has_vector})
-    save(out, {"schema": 1, "datasetVersion": version, "genreMap": genre_map,
-               "entities": {qid: entity_out(entry) for qid, entry in entities.items()}, "records": records})
+    # The works the written records name, for the merge to group other versions by: a version can sit in
+    # the other pass, so they are grouped only once both are merged (`pipeline/merge_facts.py`).
+    named = {q for record in records for name in ("basedOn",) + VERSION_EVIDENCE for q in record.get(name) or []}
+    document = {"schema": 1, "datasetVersion": version, "genreMap": genre_map,
+                "entities": {qid: entity_out(entry) for qid, entry in entities.items()}, "records": records}
+    if named:
+        document["sources"] = {qid: sources[qid] for qid in sorted(named) if qid in sources}
+    save(out, document)
     ambiguous = ambiguous_keys(records)
     if ambiguous:
         say(f"WARNING: {len(ambiguous)} titles ship with NO Wikidata fields: several items claim each one's TMDB "
