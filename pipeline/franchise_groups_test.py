@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Franchise groups from Wikidata alone, on titles shaped like the cases oxyc/den-atlas#92 measured."""
+import os
+import subprocess
+import sys
 import unittest
 
 from . import franchise_groups as fg
@@ -31,6 +34,20 @@ class Groups(unittest.TestCase):
         self.assertEqual(fg.chain_name(["Carry On Sergeant", "Carry On Nurse", "Carry On Cleo"]), "Carry On")
         self.assertEqual(fg.chain_name(["Pitch Black", "The Chronicles of Riddick"]), "")
         self.assertFalse(any(g.startswith("chain:movie:3") for g in groups))
+
+    def test_a_chain_is_named_in_the_first_titles_spelling_whatever_the_hash_seed(self):
+        """Two titles spelling the shared words differently: the name must not depend on a set's order,
+        which moves with PYTHONHASHSEED — one corpus built two stores under one datasetVersion that way."""
+        code = ("from pipeline import franchise_groups as fg\n"
+                "t = {k: fg.Title(k, n, y, follows=f) for k, n, y, f in [\n"
+                "    ('movie:73636', 'Plaga Zombie', 1997, ['movie:40151']),\n"
+                "    ('movie:40151', 'Plaga zombie: zona mutante', 2001, ['movie:73636'])]}\n"
+                "print(fg.build(t, {})['chain:movie:73636'].name)")
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        names = {subprocess.run([sys.executable, "-c", code], cwd=repo, check=True, capture_output=True, text=True,
+                                env=dict(os.environ, PYTHONHASHSEED=str(seed))).stdout.strip()
+                 for seed in range(8)}
+        self.assertEqual(names, {"Plaga Zombie"})
 
 
 class Plan(unittest.TestCase):
