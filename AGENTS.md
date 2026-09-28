@@ -14,7 +14,7 @@ prose somewhere that can go stale without anything failing.
 | What does a daily run redo? | `pipeline/changes.py` — the change set since the live dataset, which the stages after it read. |
 | Which titles are one franchise, and why? | `pipeline/franchises.py` (the stage), `pipeline/franchise_groups.py` (what Wikidata decides alone), `data/franchise-golden.json` (the gate). |
 | Where does a daily run start, with nothing kept? | `pipeline/published.py` — the bundle a publish puts on `corpus-<ver>`, and the out-dir seeded from it. |
-| How do I run it? | `docs/OPERATE.md`. `./den run` runs every stage; it skips the paid classify and critique passes without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. `./den daily` is the scheduled job (`pipeline/daily.py`). |
+| How do I run it? | `./den daily` is the scheduled job (`pipeline/daily.py`). `./den run` runs every stage; it skips the paid classify and critique passes without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. `docs/OPERATE.md` is publishing a ready run and recovering one that is not. |
 
 ## The part that is still being rebuilt
 

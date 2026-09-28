@@ -9,7 +9,7 @@ collapsed into one.
 Note `hasVector` is a PASS-level stamp, not a fact looked up per title. And the delta set is not only "new
 arrivals the >=50-vote worklist cannot reach yet": it is every title /recommend needs that has no vector,
 which has held series with thousands of votes and no plot, and titles the classify pass dropped from the
-labels (docs/OPERATE.md step 6a says how the list is derived).
+labels (docs/OPERATE.md, "Wikidata", says how the list is derived).
 
 The facts stage (`pipeline/facts.py`) runs this merge after both passes. Before that nothing in this repo
 performed it: the published `facts-<version>.json` was assembled by hand, which is how a rebuild once

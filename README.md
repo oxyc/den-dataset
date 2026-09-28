@@ -8,7 +8,7 @@ service (bge-m3, 1024-dim int8).
 
 | Read | For |
 |---|---|
-| [`docs/OPERATE.md`](docs/OPERATE.md) | building and publishing a generation, the embedder rule, current state |
+| [`docs/OPERATE.md`](docs/OPERATE.md) | publishing a daily run, recovering one that is not ready, the embedder rule |
 | [`AGENTS.md`](AGENTS.md) | where each question about the code is answered; the hand enrichment of genres & moods |
 | [`docs/LESSONS.md`](docs/LESSONS.md) | why the pipeline is shaped the way it is |
 | [`docs/FACETS-V2.md`](docs/FACETS-V2.md) | the classify pass: what it asks, how it is run and audited, what may be published |

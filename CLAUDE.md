@@ -29,12 +29,14 @@ built beside it, never to a tags file.
 Corpus vectors and live query vectors must be in the same **space**, and the known-answer canary
 (`data/embed-canary.json`) is what says they are — not a version string, and not a host. The same image at
 `MAX_TOKENS=1024` gives byte-identical vectors on the box and on a GitHub-hosted runner (#27), so the corpus
-can be embedded in either. `docs/OPERATE.md` "The alignment rule" is the procedure and the current state.
+can be embedded in either. `docs/OPERATE.md` "The alignment rule" is the procedure; the live manifest's `embeddingSpace` is the current
+state.
 
 ## Docs
 
 - `README.md` — what the dataset is and what is published.
-- `docs/OPERATE.md` — how to run it, and current state. No history, no changelog.
+- `docs/OPERATE.md` — what a person does by hand: publish a ready run, recover one that is not. No history,
+  no changelog.
 - `docs/LESSONS.md` — why the procedure has its shape.
 - `AGENTS.md` — where in the code each question is answered.
 

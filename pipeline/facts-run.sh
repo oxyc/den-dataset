@@ -8,7 +8,7 @@
 #
 #   pipeline/facts-run.sh <out-dir> [max-attempts]
 #
-# The out-dir must hold labels-t02.json, dataset.meta.json and facts-delta-ids.txt (docs/OPERATE.md step 6a);
+# The out-dir must hold labels-t02.json, dataset.meta.json and facts-delta-ids.txt (docs/OPERATE.md, "Wikidata");
 # set LABELS to point at labels elsewhere. The dataset version is the manifest's — the stage reads it there.
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
