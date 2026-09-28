@@ -1,0 +1,9 @@
+{
+  "count": 2,
+  "index": "premise-v2",
+  "schema": 1,
+  "tags": {
+    "movie:900001": ["storm-bound-island", "keeper-guards-a-secret", "stranger-arrives-by-sea"],
+    "tv:900006": ["family-saga", "estranged-siblings-reunite"]
+  }
+}

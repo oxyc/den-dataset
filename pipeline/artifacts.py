@@ -476,6 +476,18 @@ PREMISE_LABELS = Artifact(
     manifest_key="premiseLabelsFile",
 )
 
+#: Each title's premise tags, the strings the premise vectors were embedded from. Committed rather than
+#: built into an out-dir: the store stage reads `data/premise-tags-v2.json` unless the out-dir holds a
+#: copy or an override names one. Optional to the writer: without it the store has no tag sections.
+PREMISE_TAGS = Artifact(
+    name="premise_tags",
+    filename="premise-tags-v2.json",
+    producer="pipeline/merge_premise_tags.py",
+    how="pipeline/merge_premise_tags.py --into data/premise-tags-v2.json --phase <run>/gen "
+        "(docs/OPERATE.md)",
+    required=False,
+)
+
 #: The only artifact a release carries (oxyc/den#113). Everything above is an input to it.
 STORE = Artifact(
     name="store",
@@ -509,5 +521,5 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              PUBLISHED_GENRES_MOODS, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
              EMBEDDER, EMBEDDING_SPACE, PLOT_LENGTH_TRANSFORM, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
              FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISE_DECISIONS, FRANCHISES,
-             VECTORS, RAW_VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, STORE, MANIFEST,
-             RELEASE)
+             VECTORS, RAW_VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, PREMISE_TAGS,
+             STORE, MANIFEST, RELEASE)

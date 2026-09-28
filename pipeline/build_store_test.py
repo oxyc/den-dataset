@@ -29,6 +29,8 @@ from store import vector_blob  # noqa: E402
 BUILD_STORE = os.path.join(HERE, "build_store.py")
 MIGRATE = os.path.join(HERE, "migrate_vector_blob.py")
 DIMS = 1024
+#: `StoreFixture`'s default premise tags: movie:1 has two, movie:2 none.
+PREMISE_TAGS = {"movie:1": ["one-last-job", "heist-gone-wrong"]}
 
 
 def spec_dir():
@@ -212,13 +214,14 @@ class StoreFixture:
 
     def build(self, out_dir, titles=None, plot_keys=("movie:1",), premise_keys=("movie:2",),
               plot_labels=None, premise_labels=None, write_plot_vectors=None, stamp=None,
-              build_store=BUILD_STORE, entities=None, franchises=True):
+              build_store=BUILD_STORE, entities=None, franchises=True, premise_tags=PREMISE_TAGS):
         """`*_keys` are the blob's OWN key column; `*_labels` the labels artifact's records, which
         default to the same thing. Passing them apart is how the key-set assert is exercised;
         `write_plot_vectors` swaps in a writer of another format. `stamp` asks the writer to record
         what it read into that manifest. `build_store` runs a wrapper around the real writer instead of
         the writer itself — the only way to reach a guard that fires on the writer's own constants.
-        `entities` replaces or adds entity-table entries."""
+        `entities` replaces or adds entity-table entries. `premise_tags` is the tags file's `tags`
+        object, or None to leave `--premise-tags` off."""
         titles = self.TITLES if titles is None else titles
         plot_keys, premise_keys = list(plot_keys), list(premise_keys)
         plot_labels = plot_keys if plot_labels is None else list(plot_labels)
@@ -280,6 +283,8 @@ class StoreFixture:
              "--premise-vectors", vectors(os.path.join(out_dir, "premise.bin"), premise_keys, 200),
              "--premise-labels", dump("premise-labels.json", rows_file(premise_labels)),
              *(["--franchises", dump("franchises.json", franchise_doc)] if franchise_doc else []),
+             *(["--premise-tags", dump("premise-tags.json", {"tags": premise_tags})]
+               if premise_tags is not None else []),
              "--dataset-version", "test", "--out", store,
              *(["--stamp-meta", stamp] if stamp else [])],
             capture_output=True, text=True)
@@ -893,6 +898,9 @@ class EverySectionDeclaresWhereItsBytesCameFrom(StoreFixture, unittest.TestCase)
         mod.check_provenance(without_franchises)
         with self.assertRaisesRegex(SystemExit, "fr_name"):
             mod.check_provenance(set(mod.PROVENANCE) - {"fr_name"})
+        mod.check_provenance(set(mod.PROVENANCE) - mod.PREMISE_TAG_SECTIONS)
+        with self.assertRaisesRegex(SystemExit, "premise_tag_o"):
+            mod.check_provenance(set(mod.PROVENANCE) - {"premise_tag_o"})
 
     def test_a_section_with_no_declared_source_stops_the_build(self):
         """The case this exists for, end to end: the writer emits a section the table does not know
@@ -1347,6 +1355,42 @@ class BirthplacesAndSourceAuthorsShip(StoreFixture, unittest.TestCase):
                     self.assertRaises(AssertionError) as caught:
                 self.build(out, entities={"Q100": {"en": "Name 100", "aliases": ["Nom 100"], **entry}})
             self.assertIn(complaint, str(caught.exception))
+
+
+class PremiseTagsShip(StoreFixture, unittest.TestCase):
+    """Each title's premise tags from `data/premise-tags-v2.json`, as string ids in the file's order."""
+
+    def span(self, store, row):
+        offsets = store.ints("premise_tag_o")
+        return [store.text(i) for i in store.ints("premise_tag_v")[offsets[row]:offsets[row + 1]]]
+
+    def test_a_titles_tags_keep_their_order_and_an_untagged_title_owns_an_empty_span(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, stderr = self.build(out)
+        self.assertEqual(self.span(store, store.keys().index("movie:1")), ["one-last-job", "heist-gone-wrong"])
+        self.assertEqual(self.span(store, store.keys().index("movie:2")), [])
+        self.assertIn('"premiseTagged": 1', stderr)
+
+    def test_without_the_input_the_sections_are_absent(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, premise_tags=None)
+        self.assertNotIn("premise_tag_v", store.table)
+        self.assertNotIn("premise_tag_o", store.table)
+
+    def test_a_tag_set_for_a_title_the_corpus_does_not_hold_is_fatal(self):
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, premise_tags={**PREMISE_TAGS, "tv:1": ["found-family"]})
+            self.assertFalse(os.path.exists(os.path.join(out, "test.store")))
+        self.assertIn("tv:1 has premise tags and is not a corpus title", str(caught.exception))
+
+    def test_a_malformed_tag_set_is_fatal(self):
+        for tags in ([], "one-last-job", ["one-last-job", ""], ["one-last-job", 3],
+                     ["one-last-job", "one-last-job"], [" one-last-job"]):
+            with self.subTest(tags=tags), tempfile.TemporaryDirectory() as out, \
+                    self.assertRaises(AssertionError) as caught:
+                self.build(out, premise_tags={"movie:1": tags})
+            self.assertIn("movie:1 has malformed premise tags", str(caught.exception))
 
 
 class OnlyATitleIdReachesTheImdbColumn(unittest.TestCase):
