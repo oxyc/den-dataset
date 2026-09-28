@@ -214,14 +214,16 @@ class StoreFixture:
 
     def build(self, out_dir, titles=None, plot_keys=("movie:1",), premise_keys=("movie:2",),
               plot_labels=None, premise_labels=None, write_plot_vectors=None, stamp=None,
-              build_store=BUILD_STORE, entities=None, franchises=True, premise_tags=PREMISE_TAGS):
+              build_store=BUILD_STORE, entities=None, franchises=True, premise_tags=PREMISE_TAGS,
+              facts_keys=None):
         """`*_keys` are the blob's OWN key column; `*_labels` the labels artifact's records, which
         default to the same thing. Passing them apart is how the key-set assert is exercised;
         `write_plot_vectors` swaps in a writer of another format. `stamp` asks the writer to record
         what it read into that manifest. `build_store` runs a wrapper around the real writer instead of
         the writer itself — the only way to reach a guard that fires on the writer's own constants.
         `entities` replaces or adds entity-table entries. `premise_tags` is the tags file's `tags`
-        object, or None to leave `--premise-tags` off."""
+        object, or None to leave `--premise-tags` off. `facts_keys` are the facts file's records, which
+        default to the corpus titles'."""
         titles = self.TITLES if titles is None else titles
         plot_keys, premise_keys = list(plot_keys), list(premise_keys)
         plot_labels = plot_keys if plot_labels is None else list(plot_labels)
@@ -273,8 +275,8 @@ class StoreFixture:
                  **{f"Q{q}": {"en": f"Name {q}"} for q in range(100, 111)},
                  "Q100": {"en": "Name 100", "aliases": ["Nom 100"]}, **(entities or {})}),
              "--facts", dump("facts.json", {"genreMap": {"Q1": {"movie": 18}},
-                                            "records": [{"mediaType": t["mediaType"], "tmdbId": t["tmdbId"]}
-                                                        for t in titles]}),
+                                            "records": rows_file(facts_keys or [t["key"] for t in titles])
+                                            ["records"]}),
              # No `--metadata`: the TMDB sidecar supplied the title, the year and the poster path, and the
              # writer now takes the first two from the corpus's own `facts` and publishes no third.
              # The plot pass labelled movie:1 only; the premise pass labelled movie:2 only.
@@ -332,6 +334,39 @@ class GenresAndMoodsHaveOneSource(StoreFixture, unittest.TestCase):
             with self.assertRaises(AssertionError) as caught:
                 self.build(out, titles, plot_keys=("movie:1", "movie:3"))
         self.assertIn("labelled titles: 1 in the store, 2 in", str(caught.exception))
+
+
+class EveryCountIsHeldToItsArtifact(StoreFixture, unittest.TestCase):
+    """The count asserts at the end of `store/build.py`, one input each that only that assert can see.
+
+    Each case keeps every OTHER count in agreement, so the refusal it asserts is the one under test and not
+    a neighbour firing first. Without these, deleting any one of the asserts left every test passing.
+    """
+
+    GAMMA = {"key": "movie:3", "mediaType": "movie", "tmdbId": 3, "facts": {"titles": {"en": "Gamma"}},
+             "labels": {"primaryGenre": "Comedy", "animated": False, "subgenres": [], "moods": []}}
+
+    def refused(self, needle, **build):
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaises(AssertionError) as caught:
+                self.build(out, **build)
+        self.assertIn(needle, str(caught.exception))
+
+    def test_a_corpus_row_the_facts_file_does_not_hold_is_fatal(self):
+        self.refused("rows: 2 in the store, 1 in", facts_keys=["movie:1"])
+
+    def test_a_title_whose_names_are_all_blank_is_fatal(self):
+        blank = {"key": "movie:3", "mediaType": "movie", "tmdbId": 3, "facts": {"titles": {"en": ""}}}
+        self.refused("named titles: 2 in the store, 3 in", titles=self.TITLES + [blank])
+
+    def test_a_plot_vector_for_a_title_the_corpus_does_not_hold_is_fatal(self):
+        # movie:9 has a vector and a labels record and no corpus row; movie:3 is labelled in the corpus
+        # and not in the labels file, so the labelled-titles count still agrees at 2.
+        self.refused("plot vectors: 1 in the store, 2 in",
+                     titles=self.TITLES + [self.GAMMA], plot_keys=("movie:1", "movie:9"))
+
+    def test_a_premise_vector_for_a_title_the_corpus_does_not_hold_is_fatal(self):
+        self.refused("premise vectors: 1 in the store, 2 in", premise_keys=("movie:2", "movie:9"))
 
 
 class TheBlobNamesItsOwnRows(StoreFixture, unittest.TestCase):
