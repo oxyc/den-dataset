@@ -10,8 +10,10 @@ It had no test of its own, which is the same shape of problem one level up.
 import importlib.util
 import json
 import os
+import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -172,6 +174,49 @@ class Corpus(unittest.TestCase):
                 os.chdir(cwd)
             self.assertEqual(code, 1)
             self.assertIn("consolidate_corpus.py", err)
+            # Named for what is wrong: without the existence check the untracked-file check answers
+            # instead, for the same path, and a count of 1 alone could not tell the two apart.
+            self.assertIn("does not exist", err)
+
+
+class ProducerOnDisk(unittest.TestCase):
+    """Each place a producer is looked up refuses one that does not exist, and one git does not track —
+    asked of a registry pointed at a path that is missing, and at a real file outside the repo."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.untracked = touch(self.dir, "producer.py", "")
+        self.missing = os.path.join(self.dir, "gone.py")
+
+    def check(self, meta):
+        cwd = os.getcwd()
+        os.chdir(REPO)
+        try:
+            return run(meta, self.dir)
+        finally:
+            os.chdir(cwd)
+
+    def refused(self, patch, meta, needle):
+        with mock.patch.dict(*patch):
+            code, err = self.check(meta)
+        self.assertEqual(code, 1, err)
+        self.assertIn(needle, err)
+
+    def test_a_published_artifacts_producer_must_exist_and_be_tracked(self):
+        touch(self.dir, "mystery.json")
+        meta = {"mysteryFile": "mystery.json"}
+        self.refused((cp.PRODUCERS, {"mysteryFile": (self.missing, "run it", True)}), meta, "does not exist")
+        self.refused((cp.PRODUCERS, {"mysteryFile": (self.untracked, "run it", True)}), meta,
+                     "is not tracked by git")
+
+    def test_a_store_inputs_producer_must_exist_and_be_tracked(self):
+        meta = {"storeFile": "den-aaaaaaaaaaaa.store",
+                "storeInputs": [{"arg": "premise_labels", "path": "", "sha256": "", "bytes": 0, "mtime": 0}]}
+        self.refused((cp.STORE_INPUTS, {"premise_labels": (self.missing, "run it", True)}), meta,
+                     "does not exist")
+        self.refused((cp.STORE_INPUTS, {"premise_labels": (self.untracked, "run it", True)}), meta,
+                     "is not tracked by git")
 
 
 class StoreInputs(unittest.TestCase):
