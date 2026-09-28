@@ -160,6 +160,29 @@ FRANCHISE_DECISIONS = Artifact(
     filename="franchise-decisions-v1.json",
 )
 
+#: The line pass (`pipeline/franchises.py`, `LINE`): the titles the franchise pass calls a separate adaptation,
+#: asked whether they continue their group's line all the same. The same four kinds of file as the franchise
+#: pass, under their own names, so the answers that pass bought stay valid under its own questions.
+FRANCHISE_LINE_STATES = Artifact(
+    name="franchise_line_states",
+    filename="franchise-line-states*.jsonl",
+    shards=True,
+)
+FRANCHISE_LINE_ANSWERS = Artifact(
+    name="franchise_line_answers",
+    filename="franchise-line-answers-v1*.jsonl",
+    shards=True,
+)
+FRANCHISE_LINE_ANSWERS_MANIFEST = Artifact(
+    name="franchise_line_answers_manifest",
+    filename="franchise-line-answers-v1*.jsonl.manifest.json",
+    shards=True,
+)
+FRANCHISE_LINE_DECISIONS = Artifact(
+    name="franchise_line_decisions",
+    filename="franchise-line-decisions-v1.json",
+)
+
 #: Every franchise, its members in release order with their era, and each title's franchise
 #: (oxyc/den-atlas#92). Rebuilt on every run from the facts and the answers, behind the golden set.
 FRANCHISES = Artifact(
@@ -543,6 +566,8 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              PUBLISHED_META, PUBLISHED_CORPUS,
              PUBLISHED_GENRES_MOODS, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
              EMBEDDER, EMBEDDING_SPACE, PLOT_LENGTH_TRANSFORM, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
-             FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISE_DECISIONS, FRANCHISES,
+             FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISE_DECISIONS,
+             FRANCHISE_LINE_STATES, FRANCHISE_LINE_ANSWERS, FRANCHISE_LINE_ANSWERS_MANIFEST,
+             FRANCHISE_LINE_DECISIONS, FRANCHISES,
              VECTORS, RAW_VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, PREMISE_TAGS,
              JEV_MORE_LIKE, FAN_PICKS, STORE, MANIFEST, RELEASE)

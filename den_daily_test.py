@@ -170,7 +170,8 @@ class DenDaily(fixture.DenRun):
         self.assertEqual(report["baseline"]["datasetVersion"], self.day_one["version"])
         self.assertEqual((report["added"], report["changed"]), ([], {}))
         self.assertEqual(report["datasetVersion"], self.day_two["version"])
-        self.assertEqual([s["stage"] for s in report["skipped"]], ["classify", "critique", "genres_moods (ask)"])
+        self.assertEqual([s["stage"] for s in report["skipped"]], ["classify", "critique", "genres_moods (ask)",
+                                                                   "franchises (ask)"])
         self.assertEqual(report["spend"], {"inputTokens": 0, "usd": 0.0})
         with open(os.path.join(self.out, "daily-report.md"), encoding="utf-8") as fh:
             summary = fh.read()

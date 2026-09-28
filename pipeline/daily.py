@@ -23,7 +23,8 @@ the out-dir first (`pipeline/published.py`).
 **What a missing credential skips**, each named in the report so a skipped stage is never a quiet one:
 
   * no `TMDB_API_KEY` — no delta worklist: no new titles are discovered;
-  * no `--spend` or no `TYPESAFE_API_KEY` — the classify and critique passes, and the genres & moods ask.
+  * no `--spend` or no `TYPESAFE_API_KEY` — the classify and critique passes, and the genres & moods and
+    franchise asks.
     A changed title then keeps its old rows, and a new one has none; the report says which;
   * no `DEN_EMBED_URL` — the embed pass. Any den-embed will do whose canary answers match
     (`docs/OPERATE.md`, "The alignment rule"); the scheduled job runs its own. A new title with a plot then
@@ -60,6 +61,11 @@ SUMMARY = "daily-report.md"
 #: labels, so looking back further than a day costs little and a day the job did not run is not lost.
 DAYS_BACK = 7
 PAID = ("classify", "critique")
+#: The stages whose ask is one step of several: they run every day, and buy only when the day can. What a day
+#: that cannot buy leaves undone.
+ASKS = {"genres_moods": "nothing bought; genres & moods derived from what is answered",
+        "franchises": "nothing bought; franchises derived from what is answered, and a new title that needs "
+                      "judgment has no franchise yet"}
 
 
 def when(now=None):
@@ -199,9 +205,9 @@ def run_day(day):
                                "title keeps its old rows and a new one has none")
                 continue
             day.stage(name, spend=True)
-        elif name == "genres_moods":
+        elif name in ASKS:
             if not day.can_buy:
-                day.skip("genres_moods (ask)", "nothing bought; genres & moods derived from what is answered")
+                day.skip(f"{name} (ask)", ASKS[name])
             day.stage(name, spend=day.can_buy)
         elif name == "embed":
             if not env.get("DEN_EMBED_URL"):
