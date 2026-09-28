@@ -4,8 +4,8 @@
 No network. What is tested is what the stage decides from Wikidata alone, what a title is sent, that a
 second run buys nothing, what the answers derive, and that the golden set decides whether anything is
 written. The facts are shaped like the cases oxyc/den-atlas#92 measured: Spider-Man's films nest in one
-series (automatic, with eras), Beck's 1997– films and its 1993 films are two groups nothing on Wikidata
-links (asked), and Studio Ghibli is a studio's films typed a film series (asked).
+series (automatic, with eras), Beck's 1997– films and its 1993 films are two groups no Wikidata series
+links (asked; a continuing cast lets them merge), and Studio Ghibli is a studio's films typed a film series (asked).
 """
 import json
 import os
@@ -19,10 +19,12 @@ from . import run_combined as rc
 from .contract import Context, StageError
 
 VERSION = "testver"
+#: Actors of both Beck groups: the continuing cast that lets the two merge (oxyc/den-dataset#158).
+BECK_CAST = ["Qpersbrandt", "Qhirdwall", "Qcarlsson"]
 RECORDS = [
-    (1, "Beck – Mannen med ikonerna", 1997, {"franchise": ["Qbeck"]}),
+    (1, "Beck – Mannen med ikonerna", 1997, {"franchise": ["Qbeck"], "cast": BECK_CAST}),
     (2, "Beck – Vita nätter", 1998, {"franchise": ["Qbeck"]}),
-    (3, "Roseanna", 1993, {"basedOn": ["Qn1"]}),
+    (3, "Roseanna", 1993, {"basedOn": ["Qn1"], "cast": BECK_CAST}),
     (4, "The Man on the Balcony", 1993, {"basedOn": ["Qn2"]}),
     (5, "Spider-Man", 2002, {"franchise": ["Qraimi"]}),
     (6, "Spider-Man 2", 2004, {"franchise": ["Qraimi"]}),
@@ -316,6 +318,54 @@ class Stage(unittest.TestCase):
         automatic = {"movie:1": ("Qverse", None), "movie:2": ("Qverse", None)}
         got, _ = franchises.resolve(titles, groups, {}, automatic, asked, answers, {})
         self.assertEqual(set(got), {"Qverse", "Qhawaii"})
+
+    def name_word_pair(self, **extra):
+        """Die Hard and A Hard Day's Night: two groups with no title in common, each title listing both
+        and saying they are one franchise."""
+        titles = {"movie:1": franchises.fg.Title("movie:1", "Die Hard", 1988, **extra.get("movie:1", {})),
+                  "movie:2": franchises.fg.Title("movie:2", "Die Hard 2", 1990),
+                  "movie:3": franchises.fg.Title("movie:3", "A Hard Day's Night", 1964,
+                                                 **extra.get("movie:3", {})),
+                  "movie:4": franchises.fg.Title("movie:4", "Help!", 1965)}
+        groups = {"Qdie": franchises.fg.Group("Qdie", "series", "Die Hard", ["movie:1", "movie:2"]),
+                  "Qday": franchises.fg.Group("Qday", "series", "A Hard Day's Night", ["movie:3", "movie:4"])}
+        asked = {"movie:1": ["Qdie", "Qday"], "movie:2": ["Qdie", "Qday"],
+                 "movie:3": ["Qday", "Qdie"], "movie:4": ["Qday", "Qdie"]}
+        answers = {key: (decision(one=0.9), asked[key]) for key in asked}
+        return titles, groups, asked, answers
+
+    def test_groups_sharing_only_a_name_word_are_not_merged_on_the_vote_alone(self):
+        titles, groups, asked, answers = self.name_word_pair()
+        got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
+        self.assertEqual(set(got), {"Qdie", "Qday"})
+
+    def test_a_continuing_cast_merges_two_groups_sharing_only_a_name_word(self):
+        cast = {"cast": ["Qa", "Qb", "Qc"]}
+        titles, groups, asked, answers = self.name_word_pair(**{"movie:1": cast, "movie:3": cast})
+        got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
+        self.assertEqual(set(got), {"Qday"})
+
+        two = {"cast": ["Qa", "Qb"]}
+        titles, groups, asked, answers = self.name_word_pair(**{"movie:1": two, "movie:3": two})
+        got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
+        self.assertEqual(set(got), {"Qdie", "Qday"}, "two shared actors are not a continuing cast")
+
+    def test_a_wikidata_series_holding_titles_of_both_merges_them(self):
+        titles, groups, asked, answers = self.name_word_pair()
+        groups["Qline"] = franchises.fg.Group("Qline", "franchise", "The line", ["movie:1", "movie:3"])
+        got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
+        self.assertEqual(set(got), {"Qday"})
+
+        groups["Qline"] = franchises.fg.Group("Qline", "book-series", "The books", ["movie:1", "movie:3"])
+        got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
+        self.assertEqual(set(got), {"Qdie", "Qday"}, "a book series' adaptations are no line")
+
+    def test_a_title_choosing_the_other_group_merges_them(self):
+        titles, groups, asked, answers = self.name_word_pair()
+        answers["movie:4"] = (decision(choice="B", one=0.9), asked["movie:4"])
+        got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
+        self.assertEqual(set(got), {"Qday"})
+        self.assertEqual(set(got["Qday"]["members"]), {"movie:1", "movie:2", "movie:3", "movie:4"})
 
     def test_titles_of_one_year_are_in_release_order_where_wikidata_dates_them(self):
         titles = {"movie:1": franchises.fg.Title("movie:1", "October", 1997, date="1997-10-31"),

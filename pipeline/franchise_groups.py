@@ -53,17 +53,18 @@ def words(text):
 
 class Title:
     """One title as grouping reads it. `series`, `franchises` and `sources` are Q-ids of groups it is in;
-    `follows` the corpus keys it follows or is followed by; `characters` its fictional characters."""
+    `follows` the corpus keys it follows or is followed by; `characters` its fictional characters; `cast`
+    its actors."""
 
     __slots__ = ("key", "name", "year", "date", "media", "series", "franchises", "sources", "follows",
-                 "characters", "people")
+                 "characters", "cast")
 
     def __init__(self, key, name="", year=None, series=(), franchises=(), sources=(), follows=(),
-                 characters=(), people=(), date=None):
+                 characters=(), cast=(), date=None):
         self.key, self.name, self.year, self.date = key, name or "", year, date or ""
         self.media = key.partition(":")[0]
         self.series, self.franchises, self.sources = tuple(series), tuple(franchises), tuple(sources)
-        self.follows, self.characters, self.people = tuple(follows), tuple(characters), frozenset(people)
+        self.follows, self.characters, self.cast = tuple(follows), tuple(characters), frozenset(cast)
 
 
 class Group:

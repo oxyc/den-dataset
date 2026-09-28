@@ -77,6 +77,10 @@ CATALOGUE_TAKE = 0.8
 #: leaves it; it is found through the title's "Other versions" row instead (oxyc/den-atlas#112). A reboot
 #: inside the line (Eon's 2006 Casino Royale) stays and starts an era; see `reboots`.
 SEPARATE_TAKE = 0.75
+#: Actors credited in both of two groups with no title in common that make them one line. Measured on the
+#: 181 such merges of the 791b40086762 corpus (oxyc/den-dataset#158): the right ones share 4 to 9, the
+#: unrelated ones at most 2.
+SHARED_CAST = 3
 
 SECTION = f"the `{HEADING}` section"
 EVIDENCE = ("Judge the requested work (film or series) from the supplied article lead and what is widely known "
@@ -157,7 +161,7 @@ def titles_from(records, source_series, tmdb_keys):
         out[key] = fg.Title(key, names.get("en") or names.get("orig") or key, _year(r),
                             series=r.get("franchise") or [], franchises=r.get("mediaFranchise") or [],
                             sources=sources, follows=follows, characters=r.get("characters") or [],
-                            people=(r.get("cast") or []) + (r.get("directors") or []), date=_date(r))
+                            cast=r.get("cast") or [], date=_date(r))
     return out
 
 
@@ -410,6 +414,7 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
         confidence[key] = 1.0
     counts = collections.Counter(automatic=len(automatic))
     one = collections.defaultdict(list)
+    named = {}
     separate = set()
     catalogue_votes = collections.defaultdict(list)
     for key, listed in asked.items():
@@ -455,6 +460,8 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
             groups[gid] = fg.Group(gid, "characters", titles[min(chosen[1], key=lambda k: fg.order_key(titles[k]))].name,
                                    chosen[1])
         franchise_of[key] = gid
+        if isinstance(chosen, str):
+            named[key] = chosen
         if gid != chosen and isinstance(chosen, str):
             era_of[key] = chosen
         source[gid] = JEV
@@ -494,6 +501,12 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
         # Hawaii Five-0) would otherwise merge two franchises neither of whose titles was asked about both.
         if not all(any(voter in groups[gid].members for voter, _ in votes) for gid in pair):
             continue
+        # Groups that share no title were listed together only because their names share a word, and most
+        # such pairs are unrelated (Die Hard and A Hard Day's Night) with votes no threshold separates from
+        # the right ones (Beck and Martin Beck). They merge only on evidence beside the vote.
+        g1, g2 = sorted(pair)
+        if not (groups[g1].members & groups[g2].members) and not linked(g1, g2, groups, titles, flagged, named):
+            continue
         a, b = sorted((top(g) for g in pair), key=lambda g: (-len(groups[g].members), g))
         if a != b:
             merged[b] = a
@@ -526,6 +539,22 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names):
         entry["members"][key] = era
     reboots(out, separate, titles)
     return out, counts
+
+
+def linked(a, b, groups, titles, flagged, named):
+    """Whether something other than a shared name word says two groups with no title in common are one
+    franchise (oxyc/den-dataset#158): a Wikidata series or media franchise holding titles of both (Naruto's
+    films and the series); a continuing cast, `SHARED_CAST` actors credited in both (the 1993 Martin Beck
+    films and the 1997– Beck films; Wikidata rarely states the characters they play); or a title of one
+    whose answer chose the other (the Norwegian Olsenbanden choosing the Danish Olsen Gang)."""
+    mine, theirs = groups[a].members, groups[b].members
+    if any(g.id not in (a, b) and g.id not in flagged and g.kind in ("series", "franchise")
+           and g.members & mine and g.members & theirs for g in groups.values()):
+        return True
+    if len({p for k in mine for p in titles[k].cast} & {p for k in theirs for p in titles[k].cast}) >= SHARED_CAST:
+        return True
+    return any(key in side and groups[chosen].members <= other
+               for key, chosen in named.items() for side, other in ((mine, theirs), (theirs, mine)))
 
 
 def container(chosen, listed, groups, flagged, probabilities):
