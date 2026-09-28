@@ -106,9 +106,13 @@ def build(titles, names, parents=None):
     groups = {q: Group(q, kinds[q], names.get(q) or q, keys) for q, keys in members.items() if len(keys) >= 2}
     for chain in _chains(titles):
         if not any(chain <= g.members for g in groups.values()):
-            first = min((titles[k] for k in chain), key=order_key)
+            # Release order, not the set's: `chain_name` keeps the first title's spelling of the shared words,
+            # and a set of strings iterates in a hash order that changes per process — "Plaga Zombie" in one
+            # run, "Plaga zombie" in the next, and the same corpus built two different stores.
+            ordered = sorted((titles[k] for k in chain), key=order_key)
+            first = ordered[0]
             gid = f"chain:{first.key}"
-            groups[gid] = Group(gid, "chain", chain_name([titles[k].name for k in chain]) or first.name, chain)
+            groups[gid] = Group(gid, "chain", chain_name([t.name for t in ordered]) or first.name, chain)
     return groups
 
 
