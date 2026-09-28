@@ -17020,7 +17020,6 @@
    "business-deal-backdrop"
   ],
   "movie:10698": [
-   "divided-city-cold-war",
    "west-meets-east-romance",
    "punk-subculture-rebellion",
    "contraband-video-smuggling",
@@ -31853,10 +31852,10 @@
    "underground-poetry-publication",
    "west-escape-attempt",
    "lover-forced-apart",
-   "cold-war-divided-city",
-   "secret-police-coerced-informant",
-   "border-closure-family-separation",
-   "wartime-literary-publication"
+   "coerced-secret-informant",
+   "authoritarian-censorship-crackdown",
+   "divided-city-border-closure",
+   "youth-cultural-resistance"
   ],
   "movie:114051": [
    "teen-gang-in-slums",
@@ -222955,7 +222954,9 @@
    "wartime-military-conspiracy",
    "stolen-weapons-transaction",
    "underground-network-coordination",
-   "soldier-soldier-loyalty"
+   "soldier-soldier-loyalty",
+   "occupied-territory-resistance-collaboration",
+   "military-defector-arms-deal"
   ],
   "movie:364136": [
    "end-of-life-choice",
@@ -260090,7 +260091,6 @@
   "movie:423189": [
    "nightclub-final-evening",
    "demolition-closure-party",
-   "new-year-eve-nostalgia",
    "old-friends-last-night",
    "working-class-bar-ending",
    "political-official-present",
@@ -267946,7 +267946,12 @@
   "movie:433082": [
    "child-survival-mission",
    "family-trust-betrayal",
-   "historical-persecution-flight"
+   "historical-persecution-flight",
+   "occupation-roundup-deportation",
+   "escape-route-underground-network",
+   "collaborator-betrayal-threat",
+   "wartime-persecution-flight",
+   "musician-identity-concealment"
   ],
   "movie:433084": [
    "youth-led-protest-movement",
@@ -311630,7 +311635,8 @@
    "coaching-dishonesty",
    "ability-misrepresentation",
    "competitive-trickery",
-   "inclusive-sports-scandal"
+   "inclusive-sports-scandal",
+   "coaching-team-eligibility-fraud"
   ],
   "movie:51046": [
    "solo-ocean-voyage",
@@ -402943,7 +402949,9 @@
    "pilgrim-mistaken-for-inquisitor",
    "misidentification-causes-chaos",
    "religious-authority-threatened",
-   "confusion-and-equivocations-ensue"
+   "confusion-and-equivocations-ensue",
+   "religious-authority-fear-control",
+   "sexual-scandal-moral-panic"
   ],
   "movie:77330": [
    "jealous-husband-confronts-seducer",
@@ -404949,7 +404957,10 @@
    "parental-punishment-reconciliation",
    "wealth-redistribution-goodwill",
    "holiday-moral-lesson",
-   "youthful-idealism-justified"
+   "youthful-idealism-justified",
+   "gift-redistribution-social-justice",
+   "youth-idealism-adult-criticism",
+   "punishment-forced-moral-labor"
   ],
   "movie:779782": [
    "magic-school-good-vs-evil",
@@ -405378,7 +405389,8 @@
    "hidden-secrets-colleagues",
    "past-relationship-complication",
    "war-crimes-tribunal",
-   "mounting-group-tension"
+   "mounting-group-tension",
+   "detective-past-romance-complication"
   ],
   "movie:78179": [
    "juvenile-court-judge",
@@ -405439,7 +405451,8 @@
    "body-recycling-machine",
    "crime-transformation",
    "criminal-underworld",
-   "unlikely-romance"
+   "unlikely-romance",
+   "relics-fraud-religious-scam"
   ],
   "movie:78197": [
    "suicide-bombing-aftermath",
@@ -424843,7 +424856,8 @@
    "widowhood-transformation",
    "age-defying-vitality",
    "family-disapproval",
-   "late-life-liberation"
+   "late-life-liberation",
+   "atrocity-survivor-friendship-catalyst"
   ],
   "movie:846867": [
    "assassin-descends-into-hell",
@@ -428447,7 +428461,8 @@
    "personal-support-relationship",
    "sporting-comeback-attempt",
    "equipment-sabotage-risk",
-   "psychological-endurance-test"
+   "psychological-endurance-test",
+   "championship-competition-sponsor-pressure"
   ],
   "movie:860720": [
    "frame-story-grandfather-tale",
@@ -443705,7 +443720,8 @@
    "friends-rescue-mission",
    "gang-violence-hostage-taking",
    "false-corpse-discovery",
-   "mistaken-identity-adventure"
+   "mistaken-identity-adventure",
+   "body-identification-fraud"
   ],
   "movie:932339": [
    "hired-seducer",
@@ -444256,7 +444272,10 @@
    "post-colonial-allegiance-dilemma",
    "wartime-loyalty-struggle",
    "indigenous-troops-service",
-   "historical-military-drama"
+   "historical-military-drama",
+   "native-troops-colonial-conflict",
+   "loyalist-soldier-repatriation-struggle",
+   "post-conflict-veteran-displacement"
   ],
   "movie:934756": [
    "forced-to-share-vacation-rental",
@@ -444568,7 +444587,8 @@
    "teacher-student-musical-education",
    "working-class-talent-awakening",
    "lyric-opera-introduction",
-   "artistic-potential-recognition"
+   "artistic-potential-recognition",
+   "working-class-classical-music-opportunity"
   ],
   "movie:936075": [
    "rise-to-superstardom",
@@ -444607,7 +444627,9 @@
    "cross-species-companionship",
    "military-desertion-charge",
    "father-reconciliation-letter",
-   "war-love-and-animal-companionship"
+   "war-love-and-animal-companionship",
+   "occupied-territory-wartime-romance",
+   "soldier-military-discipline-desertion-charge"
   ],
   "movie:9362": [
    "giant-subterranean-monsters",
@@ -444687,7 +444709,10 @@
    "gang-turf-war-escalation",
    "youth-street-culture",
    "fascist-extremist-clash",
-   "suburban-gang-rivalry"
+   "suburban-gang-rivalry",
+   "violent-street-clashes",
+   "youth-subcultural-conflict",
+   "political-extremist-violence"
   ],
   "movie:936378": [
    "posing-as-buyer-to-steal",
@@ -445371,7 +445396,8 @@
    "psychological-split-identity",
    "investigation-of-strange-occurrences",
    "moral-corruption-release",
-   "supernatural-horror-premise"
+   "supernatural-horror-premise",
+   "mad-scientist-transformation-violence"
   ],
   "movie:9387": [
    "orphaned-slave-turned-warrior",
@@ -445968,7 +445994,9 @@
    "military-dictatorship-exile-impact",
    "bandmate-political-persecution",
    "singer-overcomes-shyness-depression",
-   "post-exile-career-ascent"
+   "post-exile-career-ascent",
+   "artist-friend-political-exile-impact",
+   "musician-depression-recovery-career"
   ],
   "movie:9413": [
    "fake-engagement",
@@ -446073,7 +446101,8 @@
    "police-corruption-obstacles",
    "dangerous-case-endangerment",
    "authoritarian-state-crime",
-   "legal-system-corruption-exposure"
+   "legal-system-corruption-exposure",
+   "enforced-disappearance-judicial-investigation"
   ],
   "movie:94196": [
    "escaped-child-slave",
@@ -446295,7 +446324,9 @@
    "captured-foreigner-ranch",
    "romantic-pursuit-cowgirls",
    "communication-failure-humor",
-   "hearing-impaired-confusion"
+   "hearing-impaired-confusion",
+   "language-barrier-comedy",
+   "stranger-arrival-chaos"
   ],
   "movie:943": [
    "cop-partnership-final-case",
@@ -446327,7 +446358,9 @@
    "discovered-intimate-letter-deception",
    "marriage-trust-destroyed",
    "regime-spycraft-corruption",
-   "betrayal-through-surveillance-state"
+   "betrayal-through-surveillance-state",
+   "state-surveillance-betrayal",
+   "artist-spy-recruitment"
   ],
   "movie:9431": [
    "vampire-brothel",
@@ -446625,7 +446658,8 @@
    "community-antagonism",
    "marital-strain-from-setting",
    "outsiders-unwelcome",
-   "conflict-with-locals"
+   "conflict-with-locals",
+   "violent-village-threat-escalates"
   ],
   "movie:944194": [
    "elderly-veteran-escapes-care-home",
@@ -447702,7 +447736,8 @@
    "educational-voyage-chaos",
    "former-police-antagonist",
    "maritime-adventure-conflict",
-   "youth-program-complications"
+   "youth-program-complications",
+   "voyage-descends-into-chaos"
   ],
   "movie:948": [
    "masked-killer-stalks-babysitter",
@@ -447752,7 +447787,8 @@
    "solo-investigation-journey",
    "confronting-personal-past",
    "search-for-truth-elderly-woman",
-   "disability-not-deterring-pursuit"
+   "disability-not-deterring-pursuit",
+   "unofficial-investigation-despite-illness"
   ],
   "movie:948050": [
    "half-brothers-conflict-violent",
@@ -448244,7 +448280,8 @@
    "secret-organization-pursuit",
    "artist-partner-investigation",
    "theatrical-crime-scene",
-   "dark-organization-conspiracy"
+   "dark-organization-conspiracy",
+   "cross-continent-fugitive-flight"
   ],
   "movie:95006": [
    "true-crime-documentary",
@@ -448419,7 +448456,8 @@
    "ancestral-secret-technique",
    "family-legacy-deaths",
    "brothers-survival-dependent",
-   "mystical-curse-premise"
+   "mystical-curse-premise",
+   "martial-master-teaches-survival-art"
   ],
   "movie:9506": [
    "unorthodox-therapist-moves-in",
@@ -448449,7 +448487,8 @@
    "urban-survival-sex-trade",
    "refugee-from-profession",
    "escape-to-domestic-life",
-   "clean-break-transformation"
+   "clean-break-transformation",
+   "final-escape-from-exploitation"
   ],
   "movie:950792": [
    "peasant-uprising",
@@ -448510,7 +448549,8 @@
    "grassroots-reproductive-rights",
    "friend-death-motivates-commitment",
    "medical-procedure-assistance-illegal",
-   "women-empowerment-through-solidarity"
+   "women-empowerment-through-solidarity",
+   "clandestine-abortion-network-expands"
   ],
   "movie:9509": [
    "burned-out-bodyguard-redemption",
@@ -448655,7 +448695,9 @@
    "childless-parents-temporary-care",
    "escape-route-operation",
    "hidden-child-reunion-awaited",
-   "humanitarian-resistance-action"
+   "humanitarian-resistance-action",
+   "child-separation-wartime-trauma",
+   "underground-river-crossing-escape"
   ],
   "movie:9517": [
    "teen-friend-group-murder-plot",
@@ -448798,7 +448840,8 @@
    "robbery-cover-operation",
    "murder-contract-mishap",
    "crime-gone-wrong-comedy",
-   "chaotic-criminal-enterprise"
+   "chaotic-criminal-enterprise",
+   "mistaken-identity-mayhem"
   ],
   "movie:9524": [
    "rise-of-a-performing-group",
@@ -449739,7 +449782,8 @@
    "nation-isolation-atlantis-reversal",
    "families-adapting-new-reality",
    "daily-life-disrupted-disaster",
-   "border-region-transformation"
+   "border-region-transformation",
+   "geological-disaster-territorial-isolation"
   ],
   "movie:9565": [
    "high-school-friendship-group",
@@ -449846,7 +449890,8 @@
    "romantic-relationship-boundary-test",
    "identity-formation-decision",
    "tradition-modernity-reconciliation",
-   "separation-from-community-temporary"
+   "separation-from-community-temporary",
+   "cultural-departure-rite-decision"
   ],
   "movie:956877": [
    "woman-amnesia-identity-unknown",
@@ -449855,7 +449900,8 @@
    "psychological-mystery-personal",
    "search-for-lost-self",
    "amnesia-reveals-truth",
-   "identity-reconstruction-quest"
+   "identity-reconstruction-quest",
+   "repressed-trauma-causes-amnesia"
   ],
   "movie:9569": [
    "cop-left-for-dead-in-coma",
@@ -450170,7 +450216,8 @@
    "false-identification-possibility",
    "newspaper-revelation-catalyst",
    "memory-loss-assumption-questioned",
-   "competing-claimants-mystery"
+   "competing-claimants-mystery",
+   "wartime-disappearance-ambiguous-return"
   ],
   "movie:957608": [
    "childhood-friends-drift-apart",
@@ -450283,7 +450330,8 @@
    "shared-musical-dreams",
    "orchestral-conducting-competition",
    "mentor-master-musician",
-   "siblings-support-through-exclusion"
+   "siblings-support-through-exclusion",
+   "gender-discrimination-orchestral-conducting"
   ],
   "movie:958182": [
    "military-academy-abuse",
@@ -450312,7 +450360,8 @@
    "sisterhood-rediscovery-travel",
    "child-accompanies-escape",
    "marital-death-catalyst",
-   "family-reconciliation-during-transit"
+   "family-reconciliation-during-transit",
+   "grief-denial-triggers-escape"
   ],
   "movie:958192": [
    "grandmother-death-summer-vacation",
@@ -453947,7 +453996,8 @@
    "body-disposal-cover-up",
    "conservative-party-corruption",
    "pre-election-chaos-chaos",
-   "political-ambition-destroyed-scandal"
+   "political-ambition-destroyed-scandal",
+   "accidental-death-election-jeopardy"
   ],
   "movie:97051": [
    "deadly-game-for-money",
@@ -456719,7 +456769,9 @@
    "brutal-infantry-warfare",
    "historical-war-drama",
    "young-soldier-experience",
-   "international-conflict-participation"
+   "international-conflict-participation",
+   "colonial-soldier-deployed-distant-war",
+   "trench-warfare-devastation-firsthand"
   ],
   "movie:9812": [
    "drug-dealer-seeks-refuge-with-reformed-friend",
@@ -461560,7 +461612,8 @@
    "love-transcends-war",
    "reunion-years-later-changed",
    "wartime-moral-compromise",
-   "east-west-escape-separation"
+   "east-west-escape-separation",
+   "enemy-soldier-aids-resistance-fighter"
   ],
   "tv:101352": [
    "fish-out-of-water-rural-posting",
@@ -461983,7 +462036,8 @@
    "criminal-case-opportunist",
    "financial-desperation-drives-plot",
    "detective-work-amateur",
-   "high-stakes-financial-motivation"
+   "high-stakes-financial-motivation",
+   "unsolved-murder-bounty-investigation"
   ],
   "tv:1029": [
    "superhero-action",
@@ -464987,7 +465041,8 @@
    "sexual-liberation",
    "business-innovation-early",
    "adult-industry-launch",
-   "technology-and-sexuality"
+   "technology-and-sexuality",
+   "telephone-hotline-sex-service"
   ],
   "tv:113828": [
    "cold-war-espionage",
@@ -466419,7 +466474,8 @@
    "upper-class-society",
    "cousin-relationship",
    "comedy-with-tragedy",
-   "love-and-marriage"
+   "love-and-marriage",
+   "inter-generational-romance-tension"
   ],
   "tv:118956": [
    "dragon-hunter-protagonist",
@@ -466979,7 +467035,8 @@
    "romantic-entanglements",
    "recovery-and-resilience",
    "generational-drama",
-   "life-interrupted"
+   "life-interrupted",
+   "accident-recovery-entanglement"
   ],
   "tv:121459": [
    "inherited-apartment",
@@ -467006,7 +467063,10 @@
    "international-spy-game",
    "dual-loyalty-conflict",
    "intelligence-agencies-opposed",
-   "love-amid-suspicion"
+   "love-amid-suspicion",
+   "geopolitical-espionage-tension",
+   "pianist-forced-surveillance",
+   "romance-spy-deception"
   ],
   "tv:1215": [
    "struggling-writer",
@@ -467349,7 +467409,8 @@
    "multimedia-franchise",
    "pop-culture-phenomenon",
    "serialized-storytelling",
-   "expanding-universe"
+   "expanding-universe",
+   "cosplay-costume-romance"
   ],
   "tv:123348": [
    "juvenile-offenders-outdoor-program",
@@ -467377,7 +467438,9 @@
    "organized-crime-empire",
    "police-pursuit",
    "violent-underworld",
-   "wanted-fugitive"
+   "wanted-fugitive",
+   "favela-hide-evasion",
+   "estranged-father-reconciliation"
   ],
   "tv:123378": [
    "criminal-defense-attorney",
@@ -468093,7 +468156,8 @@
    "evil-vampire-threat",
    "vampire-society-politics",
    "young-adult-paranormal",
-   "protective-best-friend"
+   "protective-best-friend",
+   "moroi-vampire-hierarchy"
   ],
   "tv:125949": [
    "corrupt-police-unit",
@@ -468940,7 +469004,8 @@
    "splinter-religious-group",
    "ideology-examination",
    "crime-theology-overlap",
-   "family-tragedy-faith"
+   "family-tragedy-faith",
+   "detective-criminal-investigation"
   ],
   "tv:128098": [
    "vampire-immortal-chronicle",
@@ -469140,7 +469205,8 @@
    "half-submerged-vessel",
    "dangerous-ocean-voyage",
    "survival-against-odds",
-   "police-arrest-ending"
+   "police-arrest-ending",
+   "desperate-livelihood-smuggling"
   ],
   "tv:128794": [
    "revenge-quest",
@@ -469601,7 +469667,8 @@
    "election-attack-planned",
    "police-discover-operation",
    "international-espionage",
-   "terror-attack-prevented"
+   "terror-attack-prevented",
+   "extremist-cell-infiltration"
   ],
   "tv:13027": [
    "wealthy-woman-forced-marriage",
@@ -472069,7 +472136,8 @@
    "border-crossing-mission",
    "stakeout-shootout-violence",
    "trainee-field-operation",
-   "criminal-network-disruption"
+   "criminal-network-disruption",
+   "drone-smuggling-operation"
   ],
   "tv:13894": [
    "female-impersonator-lover-pursuit",
@@ -473755,7 +473823,8 @@
    "childhood-love-passion",
    "imperial-confinement-struggle",
    "family-tragedy-loss",
-   "historical-modernized-narrative"
+   "historical-modernized-narrative",
+   "arranged-marriage-constraint"
   ],
   "tv:1533": [
    "workplace-ensemble-comedy",
@@ -473808,7 +473877,8 @@
    "faith-tested-extreme",
    "small-village-darkness",
    "religious-skepticism-challenged",
-   "hidden-miracle-deception"
+   "hidden-miracle-deception",
+   "false-miracle-exposure"
   ],
   "tv:153425": [
    "prison-officer-drama",
@@ -474304,7 +474374,8 @@
    "troubled-past-investigator",
    "psychological-cat-and-mouse",
    "crime-narrative-obsession",
-   "killer-correspondence-mystery"
+   "killer-correspondence-mystery",
+   "winter-urban-murder-spree"
   ],
   "tv:155545": [
    "teens-saving-a-landmark",
@@ -475006,7 +475077,8 @@
    "identity-mystery-solving",
    "cliff-body-discovery",
    "cryptic-clue-investigation",
-   "two-amateur-sleuth-romance"
+   "two-amateur-sleuth-romance",
+   "unexplained-death-investigation"
   ],
   "tv:157395": [
    "mismatched-investigative-duo",
@@ -478046,7 +478118,8 @@
    "chaos-prophecy-avoidance",
    "supernatural-adolescent-comedy",
    "destiny-defiance-plot",
-   "musical-theater-passion-conflict"
+   "musical-theater-passion-conflict",
+   "prophesied-destiny-rejection"
   ],
   "tv:195241": [
    "parent-child-reconciliation",
@@ -478427,7 +478500,8 @@
    "financial-desperation-crime",
    "undercover-infiltration-plan",
    "suburban-drug-empire",
-   "illegal-narcotics-distribution"
+   "illegal-narcotics-distribution",
+   "supply-gap-opportunity"
   ],
   "tv:196890": [
    "warring-kingdoms-unification",
@@ -478572,7 +478646,9 @@
    "female-protagonist-recurring-death",
    "sexual-assault-avoidance",
    "alternate-life-exploration",
-   "deja-vu-awakening-purpose"
+   "deja-vu-awakening-purpose",
+   "death-and-rebirth-cycle",
+   "self-aware-time-loop-protagonist"
   ],
   "tv:197428": [
    "fugitive-friends",
@@ -479037,7 +479113,8 @@
    "independent-filmmaker-breakthrough",
    "film-financing-challenge-overcome",
    "theatrical-release-expansion",
-   "production-budget-versus-artistic-vision"
+   "production-budget-versus-artistic-vision",
+   "convenience-store-workplace-comedy"
   ],
   "tv:2000": [
    "mismatched-duo-aboard-a-ship",
@@ -479248,7 +479325,8 @@
    "duffel-bag-secret-wealth",
    "family-secret-exposure",
    "daughter-protecting-parent",
-   "truth-hidden-past-emerging"
+   "truth-hidden-past-emerging",
+   "stepmother-stepdaughter-bond"
   ],
   "tv:201304": [
    "fugitive-manhunt",
@@ -483864,7 +483942,8 @@
    "organized-crime-collapse",
    "prostitution-cartel-war",
    "criminal-violence-escalation",
-   "true-crime-inspiration"
+   "true-crime-inspiration",
+   "red-light-district-underworld"
   ],
   "tv:221486": [
    "bookmaker-protagonist",
@@ -490729,7 +490808,8 @@
    "dance-of-joy-celebration",
    "fish-out-of-water-sitcom",
    "newspaper-workplace-arc",
-   "buddy-sitcom-format"
+   "buddy-sitcom-format",
+   "family-sitcom-ensemble"
   ],
   "tv:2686": [
    "platonic-roommates-cover-story",
@@ -497740,7 +497820,8 @@
    "technology-and-superpowers",
    "action-fantasy-adaptation",
    "hero-team-ensemble-cast",
-   "superhero-origin-story-adaptation"
+   "superhero-origin-story-adaptation",
+   "mutant-warrior-saga"
   ],
   "tv:3828": [
    "single-precinct-ensemble",
@@ -515076,7 +515157,8 @@
    "liberation-freedom-victory",
    "love-triangle-emotional-conflict",
    "historical-drama-epic",
-   "wartime-survival-courage"
+   "wartime-survival-courage",
+   "occupied-estate-collaboration"
   ],
   "tv:66980": [
    "undercover-police-investigation",
@@ -516784,7 +516866,8 @@
    "hidden-grandfather-family-connection",
    "children-adventure-fantasy",
    "interdimensional-travel-gateway",
-   "holiday-magical-realism"
+   "holiday-magical-realism",
+   "magical-wish-fulfillment-redemption"
   ],
   "tv:68947": [
    "corporate-fraud-exposure",
@@ -520428,7 +520511,8 @@
    "children-book-adaptation",
    "beloved-character-franchise",
    "heartwarming-adventure-tales",
-   "cross-generational-appeal"
+   "cross-generational-appeal",
+   "anthropomorphic-animal-protagonist"
   ],
   "tv:7448": [
    "childhood-friends-turned-rivals",
@@ -520858,7 +520942,8 @@
    "jinn-and-magical-beings",
    "love-and-adventure-tales",
    "historical-narrative-collection",
-   "eastern-literary-classic"
+   "eastern-literary-classic",
+   "magical-wish-fulfillment"
   ],
   "tv:75592": [
    "missing-spouse-investigation",
@@ -523197,7 +523282,9 @@
    "buddy-cop-dynamic",
    "workplace-partnership",
    "slice-of-life",
-   "domestic-tension"
+   "domestic-tension",
+   "retired-father-son-bonding",
+   "crime-investigation-comedy"
   ],
   "tv:80335": [
    "memory-loss-mystery",
@@ -523298,7 +523385,8 @@
    "character-focused-documentary",
    "real-world-drama",
    "cinematic-documentary",
-   "ensemble-portrait"
+   "ensemble-portrait",
+   "paranormal-investigation-mockumentary"
   ],
   "tv:80483": [
    "city-divided-by-class",
@@ -525459,7 +525547,8 @@
    "advanced-animation-style",
    "military-sci-fi",
    "giant-robot-battles",
-   "dystopian-future-setting"
+   "dystopian-future-setting",
+   "bounty-hunter-space-odyssey"
   ],
   "tv:84503": [
    "shared-duplex-living",
@@ -525928,7 +526017,8 @@
    "winter-supernatural-horror",
    "absurd-detective-protagonist",
    "outsider-team-quirky",
-   "magical-realism-detective"
+   "magical-realism-detective",
+   "ancient-mythology-modern-crime"
   ],
   "tv:85699": [
    "struggling-cleaner-protagonist",
@@ -526444,7 +526534,8 @@
    "kidnapping-mystery",
    "family-devastation-resolution",
    "emotional-crime-investigation",
-   "trans-national-pursuit"
+   "trans-national-pursuit",
+   "missing-child-investigation"
   ],
   "tv:86752": [
    "chosen-one-warrior",
@@ -529015,7 +529106,9 @@
    "manufacturing-job-loss-decline",
    "social-commentary-economic-devastation",
    "economic-hardship-narrative",
-   "societal-disintegration-story"
+   "societal-disintegration-story",
+   "industrial-town-decay",
+   "police-chief-moral-conflict"
   ],
   "tv:918": [
    "field-hospital-in-wartime",
@@ -529076,7 +529169,8 @@
    "human-robotics-scientists-murdered",
    "first-robot-human-killer-8-years",
    "artificial-intelligence-threat",
-   "android-crime-thriller"
+   "android-crime-thriller",
+   "serial-killer-investigation-android"
   ],
   "tv:9203": [
    "chain-reaction-natural-disasters",
@@ -530183,7 +530277,11 @@
    "secret-agents-defend-national-interests",
    "childhood-memories-mysterious-past",
    "woman-seeks-personal-truth",
-   "superpower-espionage-games"
+   "superpower-espionage-games",
+   "neutral-nation-espionage-battleground",
+   "occupying-military-presence-tension",
+   "intelligence-agency-power-struggle",
+   "childhood-secret-political-conspiracy"
   ],
   "tv:93895": [
    "dinosaur-theme-park",
@@ -530367,7 +530465,8 @@
    "coming-of-age-ensemble",
    "peer-group-dynamics",
    "physical-development-focus",
-   "comedic-awkwardness"
+   "comedic-awkwardness",
+   "school-health-class-instruction"
   ],
   "tv:94280": [
    "post-war-aftermath-fallout",
