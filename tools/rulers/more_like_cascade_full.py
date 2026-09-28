@@ -168,6 +168,10 @@ class Frozen:
             return None
         row = self.pool["rows"][anchor]
         screened = [k for k in row if k in self.identity and (self.identity[k]["year"] or 0) < CUTOFF_YEAR]
+        if not screened:
+            # Nothing to ask about (an empty row, or every candidate too new): the API refuses a call with no
+            # questions, and without screen scores the finalists are atlas's top ten, as for a new anchor.
+            return None
         labels = blinded(anchor, screened, 3)
         state = {"anchor": self.identity[anchor],
                  "candidates": {label: self.identity[key] for label, key in labels.items()}}

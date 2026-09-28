@@ -92,6 +92,20 @@ class FullRunTest(unittest.TestCase):
         self.assertEqual(fake.calls, 5)
         self.assertEqual(summary["newInputTokens"], 50)
 
+    def test_an_anchor_with_nothing_to_screen_skips_the_screen_and_weighs_atlas_top_ten(self):
+        with gzip.open(self.pool, "rt") as fh:
+            pool = json.load(fh)
+        for key in TITLES:
+            if key != "movie:1":
+                pool["popularity"][key]["year"] = 2025
+        with gzip.open(self.pool, "wt") as fh:
+            json.dump(pool, fh)
+        self.prepare()
+        fake = Fake()
+        summary = self.run_(fake)
+        self.assertEqual((summary["weighed"], summary["screened"]), (3, 0))
+        self.assertEqual(fake.calls, 3)
+
     def test_the_cap_stops_between_anchors_and_never_leaves_a_screen_without_its_evidence(self):
         self.prepare(cap=0.0)
         fake = Fake()
