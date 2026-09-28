@@ -36,6 +36,12 @@ class Query(unittest.TestCase):
                          'SELECT ?tmdb ?v WHERE {\n  VALUES ?tmdb { "5" }\n  ?film wdt:P4947 ?tmdb .\n'
                          '  ?film wdt:P674 ?v . FILTER NOT EXISTS { ?v wdt:P31 wd:Q5 . }\n}')
 
+    def test_an_inverse_query_asks_for_the_items_stating_it_on_the_title(self):
+        # `derivedFrom`: a work whose P4969 (derivative work) names the title.
+        self.assertEqual(wd.facts_query([5], "movie", SPEC["derivedFrom"]),
+                         'SELECT ?tmdb ?v WHERE {\n  VALUES ?tmdb { "5" }\n  ?film wdt:P4947 ?tmdb .\n'
+                         '  ?v wdt:P4969 ?film .\n}')
+
     def test_an_iso_query_reads_the_code_off_the_value(self):
         self.assertEqual(wd.facts_query([5], "tv", SPEC["languages"]),
                          'SELECT ?tmdb ?code WHERE {\n  VALUES ?tmdb { "5" }\n  ?film wdt:P4983 ?tmdb .\n'

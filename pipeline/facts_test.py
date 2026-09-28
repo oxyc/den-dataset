@@ -45,8 +45,9 @@ class Wikidata:
         self.births = {}        # person qid -> birthplace row, as `wd.birthplaces` answers
         self.codes = {}         # country qid -> ISO code
         self.authors = {}       # work qid -> [author qid]
+        self.screens = {}       # work qid -> the TMDB keys it has itself, as `wd.tmdb_keys` answers
         self.asked = {"facts": [], "titles": [], "names": [], "types": [], "series": [], "imdb": [],
-                      "awards": [], "people": [], "births": [], "codes": [], "authors": []}
+                      "awards": [], "people": [], "births": [], "codes": [], "authors": [], "screens": []}
         self.failing = set()    # (media, tmdbId) whose batch raises
         self.languages = []     # (media, the languages the titles hop was told) per call
         self.live = False       # answered from the cache, so nothing is paced
@@ -139,6 +140,10 @@ class Wikidata:
         self.asked["authors"].append(tuple(qids))
         return {q: self.authors[q] for q in qids if q in self.authors}
 
+    def tmdb_keys(self, qids, cache=None):
+        self.asked["screens"].append(tuple(qids))
+        return {q: self.screens[q] for q in qids if q in self.screens}
+
 
 class Staged(unittest.TestCase):
     def setUp(self):
@@ -151,7 +156,7 @@ class Staged(unittest.TestCase):
                            ("series", self.wd.series), ("imdb_ids", self.wd.imdb_ids),
                            ("award_links", self.wd.award_links), ("people", self.wd.people),
                            ("birthplaces", self.wd.birthplaces), ("country_codes", self.wd.country_codes),
-                           ("authors", self.wd.authors_of)):
+                           ("authors", self.wd.authors_of), ("tmdb_keys", self.wd.tmdb_keys)):
             original = getattr(facts.wd, name)
             setattr(facts.wd, name, stub)
             self.addCleanup(setattr, facts.wd, name, original)
@@ -609,6 +614,33 @@ class SourceAuthors(Staged):
         record = next(r for r in self.read(f"facts-{VERSION}.pre-merge.json")["records"]
                       if r["mediaType"] == "movie")
         self.assertNotIn("sourceAuthors", record)
+
+
+class OtherVersions(Staged):
+    """Each title's other versions (oxyc/den-atlas#112), grouped once both passes are merged."""
+
+    def test_versions_are_grouped_across_the_passes_and_each_work_is_asked_once(self):
+        """movie:1 (corpus pass) adapts the novel Q30; movie:7 (delta pass only) is named by Q30's P4969.
+        tv:1 is based on Q61, which is movie:1 itself, in another country: a remake."""
+        self.wd.facts[("movie", 1)]["countries"] = ["US"]
+        self.wd.facts[("movie", 7)]["derivedFrom"] = ["Q30"]
+        self.wd.facts[("tv", 1)].update(basedOn=["Q61"], countries=["SE"])
+        self.wd.screens = {"Q61": ["movie:1"]}
+        merged = self.read(os.path.basename(self.run_stage()))
+        found = {f"{r['mediaType']}:{r['tmdbId']}": r.get("otherVersions") for r in merged["records"]}
+        self.assertEqual(found, {
+            "movie:1": [{"key": "movie:7", "kind": "source"}, {"key": "tv:1", "kind": "remake"}],
+            "movie:7": [{"key": "movie:1", "kind": "source"}],
+            "tv:1": [{"key": "movie:1", "kind": "remake"}],
+        })
+        self.assertNotIn("sources", merged, "the works are used by the merge, not shipped")
+        corpus = self.read(f"facts-{VERSION}.pre-merge.json")
+        self.assertEqual(corpus["sources"], {"Q30": {"kind": "book", "titles": []},
+                                             "Q61": {"titles": ["movie:1"]}})
+        self.assertEqual(self.read("facts-source-titles.json"), {"Q30": [], "Q61": ["movie:1"]})
+        asked = len(self.wd.asked["screens"])
+        self.run_stage()
+        self.assertEqual(self.wd.asked["screens"][asked:], [], "a work that was asked is not asked again")
 
 
 class Resume(Staged):

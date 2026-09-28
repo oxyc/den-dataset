@@ -18,7 +18,7 @@ import os
 import sys
 
 from . import (aliases, awards, cards, entities, facets, facts, format, franchises, identity, labels, makers,
-               premise_tags, scores, studios, vectors)
+               premise_tags, scores, studios, vectors, versions)
 from .inputs import corpus_rows, labels_by_key, read_json
 
 
@@ -118,6 +118,9 @@ def run(args, inputs, prose_check, provenance_check):
     if tag_columns.present:
         print(f"  premise tags: {tag_columns.tagged} titles", file=sys.stderr)
 
+    version_columns = versions.Versions(rows, keys)
+    print(f"  other versions: {version_columns.titles} titles", file=sys.stderr)
+
     ordered_strings = strings.freeze()
     prose_complaint = prose_check(ordered_strings)
     if prose_complaint:
@@ -154,6 +157,7 @@ def run(args, inputs, prose_check, provenance_check):
     award_columns.put(sec, strings)
     franchise_columns.put(sec, strings)
     tag_columns.put(sec, strings)
+    version_columns.put(sec)
 
     plot_hits, plot_rows, premise_hits, premise_rows = vectors.put(
         sec, keys, args, labels_source, premise_labels_source)
@@ -193,7 +197,7 @@ def run(args, inputs, prose_check, provenance_check):
     print(json.dumps({"titles": n, "withLabels": label_columns.with_labels,
                       "withNames": card_columns.named, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
-                      "premiseTagged": tag_columns.tagged,
+                      "premiseTagged": tag_columns.tagged, "otherVersions": version_columns.titles,
                       "entities": len(entity_index.qids), "iconicStudios": len(studio_list.kept),
                       "awardTitles": award_columns.titles, "ceremonies": len(award_columns.ceremonies),
                       "personTraits": entity_index.trait_counts(),

@@ -19,10 +19,18 @@ every other artifact and showed up only as /recommend quietly losing library tit
 Delta records LOSE to corpus records on a collision: the corpus pass has a vector and the fuller scrape, and
 a title that has since been embedded should be read as embedded.
 
+Each title's other versions (`otherVersions`, `pipeline/versions.py`) are grouped here rather than in either
+pass: a version can sit in the other pass. Each pass carries the works its records name as `sources`; they
+are folded like the entities, used, and not shipped.
+
     pipeline/merge_facts.py <corpus-facts.json> <delta-facts.json> <out.json> [--version <datasetVersion>]
 """
 import json
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pipeline import versions  # noqa: E402
 
 
 def load(path):
@@ -48,6 +56,8 @@ def main():
     # are folded with the corpus winning ties, same rule as the records.
     entities = {**delta.get("entities", {}), **corpus.get("entities", {})}
     genre_map = {**delta.get("genreMap", {}), **corpus.get("genreMap", {})}
+    sources = {**delta.get("sources", {}), **corpus.get("sources", {})}
+    with_versions = versions.derive(merged, sources)
 
     # Every input record must appear in the output. The whole reason this script exists is a merge that
     # silently lost 137 of them.
@@ -74,6 +84,7 @@ def main():
         "hasVector": with_vector,
         "vectorless": len(merged) - with_vector,
         "basedOnKind": sum(1 for r in merged if r.get("basedOnKind")),
+        "otherVersions": with_versions,
         "entities": len(entities),
         "path": dest,
     }))
