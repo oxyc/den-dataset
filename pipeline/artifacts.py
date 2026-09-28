@@ -488,6 +488,18 @@ PREMISE_TAGS = Artifact(
     required=False,
 )
 
+#: Jev's overall More Like This Noul for each anchor's weighed candidates (#132): the cascade's finalists
+#: over atlas's live row, exported from its append-only answers. Bought by an operator run, never by a
+#: stage, so a store stage with no copy in the out-dir and no override writes no Jev sections.
+JEV_MORE_LIKE = Artifact(
+    name="jev_more_like",
+    filename="jev-more-like.json",
+    producer="tools/rulers/more_like_cascade_full.py",
+    how="tools/rulers/more_like_cascade_full.py fetch/prepare/run --spend, then export "
+        "(oxyc/den-dataset#132)",
+    required=False,
+)
+
 #: The only artifact a release carries (oxyc/den#113). Everything above is an input to it.
 STORE = Artifact(
     name="store",
@@ -522,4 +534,4 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              EMBEDDER, EMBEDDING_SPACE, PLOT_LENGTH_TRANSFORM, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
              FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISE_DECISIONS, FRANCHISES,
              VECTORS, RAW_VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, PREMISE_TAGS,
-             STORE, MANIFEST, RELEASE)
+             JEV_MORE_LIKE, STORE, MANIFEST, RELEASE)

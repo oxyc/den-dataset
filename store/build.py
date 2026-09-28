@@ -18,7 +18,7 @@ import os
 import sys
 
 from . import (aliases, awards, cards, entities, facets, facts, format, franchises, identity, labels, makers,
-               premise_tags, scores, studios, vectors, versions)
+               jev_more_like, premise_tags, scores, studios, vectors, versions)
 from .inputs import corpus_rows, labels_by_key, read_json
 
 
@@ -121,6 +121,10 @@ def run(args, inputs, prose_check, provenance_check):
     version_columns = versions.Versions(rows, keys)
     print(f"  other versions: {version_columns.titles} titles", file=sys.stderr)
 
+    jev_columns = jev_more_like.JevMoreLike(args.jev_more_like, keys)
+    if jev_columns.present:
+        print(f"  Jev More Like This scores: {jev_columns.anchors} titles", file=sys.stderr)
+
     ordered_strings = strings.freeze()
     prose_complaint = prose_check(ordered_strings)
     if prose_complaint:
@@ -158,6 +162,7 @@ def run(args, inputs, prose_check, provenance_check):
     franchise_columns.put(sec, strings)
     tag_columns.put(sec, strings)
     version_columns.put(sec)
+    jev_columns.put(sec)
 
     plot_hits, plot_rows, premise_hits, premise_rows = vectors.put(
         sec, keys, args, labels_source, premise_labels_source)
@@ -179,6 +184,8 @@ def run(args, inputs, prose_check, provenance_check):
         ("premise vectors", premise_hits, premise_rows, args.premise_vectors or args.premise_labels),
         # Every tag set in the file landed on a row of the store. Zero against zero without the input.
         ("premise-tagged titles", tag_columns.tagged, tag_columns.source_count, args.premise_tags),
+        # Every scored anchor in the file landed on a row of the store. Zero against zero without it.
+        ("Jev-scored titles", jev_columns.anchors, jev_columns.source_count, args.jev_more_like),
     ):
         if got != want:
             sys.exit(f"{what}: {got} in the store, {want} in {source} — they must agree exactly")
@@ -198,6 +205,7 @@ def run(args, inputs, prose_check, provenance_check):
                       "withNames": card_columns.named, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
                       "premiseTagged": tag_columns.tagged, "otherVersions": version_columns.titles,
+                      "jevMoreLike": jev_columns.anchors,
                       "entities": len(entity_index.qids), "iconicStudios": len(studio_list.kept),
                       "awardTitles": award_columns.titles, "ceremonies": len(award_columns.ceremonies),
                       "personTraits": entity_index.trait_counts(),
