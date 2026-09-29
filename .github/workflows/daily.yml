@@ -14,6 +14,7 @@ name: daily
 #
 #   secrets  TMDB_API_KEY                       the delta worklist; without it no new titles are discovered
 #            TYPESAFE_API_KEY                   the classify, critique and genres & moods answers (with spend)
+#            GEMINI_API_KEY                     new titles' fan picks (with spend)
 #            WIKIMEDIA_ENTERPRISE_USERNAME/_PASSWORD   optional plot source
 #            DEN_EMBED_URL                      a den-embed to embed against instead of the job's own
 #   vars     DEN_DAILY_ENABLED                  `true` to run on the schedule
@@ -96,6 +97,7 @@ jobs:
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WIKIMEDIA_ENTERPRISE_USERNAME: ${{ secrets.WIKIMEDIA_ENTERPRISE_USERNAME }}
           WIKIMEDIA_ENTERPRISE_PASSWORD: ${{ secrets.WIKIMEDIA_ENTERPRISE_PASSWORD }}
           DEN_EMBED_URL: ${{ secrets.DEN_EMBED_URL || (vars.DEN_EMBED_IMAGE != '' && 'http://127.0.0.1:8080' || '') }}

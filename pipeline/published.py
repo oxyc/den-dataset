@@ -80,6 +80,10 @@ BUNDLE = (
     ("franchise-decisions-v1.json", "franchise-decisions-v1.json", False),
     ("franchise-line-decisions-v1.json", "franchise-line-decisions-v1.json", False),
     ("franchises.json", "franchises.json", False),
+    # The next stateless day merges its new titles into the full fan-picks input. Optional only for the
+    # transition from the first fan-picks generation; a spending daily run refuses rather than replacing a
+    # missing 52k-title base with that day's handful.
+    ("fan-picks.json", "fan-picks.json", False),
 )
 
 #: The bundle's own record: the generation and each file's digest.

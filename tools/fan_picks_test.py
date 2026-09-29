@@ -201,5 +201,66 @@ class Spend(unittest.TestCase):
             self.assertEqual(fp.admit(w, items, "batch")[0], [])
 
 
+class Daily(unittest.TestCase):
+    def fixture(self, directory, anchors=None):
+        corpus = os.path.join(directory, "corpus.jsonl.gz")
+        with gzip.open(corpus, "wt", encoding="utf-8") as fh:
+            for key in ("movie:1", "movie:2", "movie:8", "movie:9"):
+                fh.write(json.dumps(ROWS[key]) + "\n")
+        articles = os.path.join(directory, "articles.jsonl")
+        with open(articles, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"mediaType": "movie", "tmdbId": 1,
+                                 "text": "A whimsical romantic comedy.\n\n== Plot ==\nNo."}) + "\n")
+        franchises = os.path.join(directory, "franchises.json")
+        with open(franchises, "w", encoding="utf-8") as fh:
+            json.dump({"franchises": {}, "titles": {}}, fh)
+        existing = os.path.join(directory, "fan-picks.json")
+        with open(existing, "w", encoding="utf-8") as fh:
+            json.dump({"anchors": anchors or {"movie:2": ["movie:8"], "movie:99": ["movie:2"]}}, fh)
+        return corpus, articles, franchises, existing
+
+    def test_new_titles_use_the_full_prompt_match_and_merge_into_the_existing_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, articles, franchises, existing = self.fixture(directory)
+            seen = []
+
+            def generate(title, key, ask):
+                seen.append((title, key, ask))
+                return ({"picks": [{"title": "Seven Samurai", "year": 1954, "type": "film"}],
+                         "costUSD": 0.003}, None, True)
+
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1"],
+                                     workers=1, generate=generate, follows={})
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertEqual(out["anchors"], {"movie:1": ["movie:2"], "movie:2": ["movie:8"]})
+        self.assertEqual((result["asked"], result["answered"], result["costUSD"]), (1, 1, 0.003))
+        self.assertEqual(seen[0][0]["lead"], "A whimsical romantic comedy.")
+        self.assertEqual(fp.request_body(seen[0][0])["generationConfig"]["thinkingConfig"],
+                         {"thinkingLevel": "low"})
+
+    def test_a_provider_accepted_empty_answer_marks_the_title_asked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
+            error = {"costUSD": 0.001, "error": "no picks list", "usage": {}}
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1"],
+                                     workers=1, generate=lambda *_: (None, error, True), follows={})
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertEqual(out["anchors"]["movie:1"], [])
+        self.assertEqual((result["asked"], result["emptyAnswers"]), (1, 1))
+
+    def test_an_unreachable_provider_refuses_without_replacing_the_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, articles, franchises, existing = self.fixture(directory)
+            with open(existing, encoding="utf-8") as fh:
+                before = fh.read()
+            with self.assertRaisesRegex(RuntimeError, "Gemini unreachable"):
+                fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1"], workers=1,
+                                generate=lambda *_: (None, {"error": "HTTP 503"}, False), follows={})
+            with open(existing, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), before)
+
+
 if __name__ == "__main__":
     unittest.main()
