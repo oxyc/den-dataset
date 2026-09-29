@@ -261,6 +261,16 @@ class Daily(unittest.TestCase):
             with open(existing, encoding="utf-8") as fh:
                 self.assertEqual(fh.read(), before)
 
+    def test_withdrawn_anchors_and_picks_are_removed_before_the_store_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, articles, franchises, existing = self.fixture(
+                directory, {"movie:2": ["movie:8", "movie:99"], "movie:99": ["movie:2"]})
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, [], follows={})
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertEqual(out["anchors"], {"movie:2": ["movie:8"]})
+        self.assertEqual((result["asked"], result["anchors"], result["picks"]), (0, 1, 1))
+
 
 if __name__ == "__main__":
     unittest.main()
