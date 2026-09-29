@@ -99,10 +99,21 @@ class Matching(unittest.TestCase):
         self.assertEqual(self.resolve("7 Samurai", 1954), ("matched", "movie:2"))
         self.assertEqual(self.resolve("Ocean's 11", 2001), ("matched", "movie:3"))
 
-    def test_the_year_tells_a_remake_apart_within_one(self):
+    def test_the_year_tells_a_remake_apart_within_two(self):
         self.assertEqual(self.resolve("Ocean's Eleven", 1960), ("matched", "movie:4"))
-        self.assertEqual(self.resolve("Ocean's Eleven", 2002), ("matched", "movie:3"))
+        self.assertEqual(self.resolve("Ocean's Eleven", 2003), ("matched", "movie:3"))
         self.assertEqual(self.resolve("Ocean's Eleven", 1980), ("unmatched", None))
+
+    def test_the_nearer_year_wins_over_a_remake_two_years_off(self):
+        names = fp.Names({r["key"]: r for r in (row("movie:1", "Twin", 2000), row("movie:2", "Twin", 2002))})
+        self.assertEqual(names.resolve({"title": "Twin", "year": 2000, "type": "film"}), ("matched", "movie:1"))
+        self.assertEqual(names.resolve({"title": "Twin", "year": 2001, "type": "film"}), ("ambiguous", None))
+
+    def test_a_title_the_store_has_no_year_for_matches_whatever_the_picks_year(self):
+        names = fp.Names({r["key"]: r for r in (row("tv:9", "Camping", None), row("movie:9", "Solo", 1990))})
+        self.assertEqual(names.resolve({"title": "Camping", "year": 2016, "type": "series"}), ("matched", "tv:9"))
+        # The only dated "Solo" is another work 20 years off: not taken.
+        self.assertEqual(names.resolve({"title": "Solo", "year": 2010, "type": "film"}), ("unmatched", None))
 
     def test_a_possessive_is_tried_only_after_the_name_as_written(self):
         self.assertEqual(self.resolve("Kurosawa's Dreams", 1990), ("matched", "movie:5"))

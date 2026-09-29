@@ -548,6 +548,8 @@ NUMBERS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight
            "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"]
 WORD_TO_DIGIT = {w: str(i) for i, w in enumerate(NUMBERS)}
 DIGIT_TO_WORD = {str(i): w for i, w in enumerate(NUMBERS)}
+#: How far a pick's year may be from the store's and still name that title.
+YEAR_SLACK = 2
 _PAREN = re.compile(r"^(.*?)\s*\(([^()]*)\)\s*$")
 _POSSESSIVE = re.compile(r"^(?:[\w.\-]+\s){0,2}[\w.\-]+['’]s\s+(.+)$")
 
@@ -591,16 +593,33 @@ class Names:
                 self.by_name[(folded, media_kind(key))].append((key, year))
 
     def resolve(self, pick):
-        """`("matched", key)`, `("ambiguous", None)` or `("unmatched", None)`."""
+        """`("matched", key)`, `("ambiguous", None)` or `("unmatched", None)`.
+
+        Within a name tier, the titles of the type within one year of the pick's, then within `YEAR_SLACK`,
+        then — only when every title carrying the name has no year in the store — those. The first of
+        those with any title decides: one is the match, more is ambiguous and dropped. The tighter window
+        comes first so a remake two years off never makes the original ambiguous. A pick with no year
+        takes the name's titles whatever their years.
+
+        A dated title further off is not taken even when it is the only one: measured on 41,583 answers,
+        such joins were mostly another work of the same name that the store does not hold (the 1947 *The
+        Fugitive* for the 1993 one, the 2001 *Metropolis* for the 1927 one)."""
         kind = pick.get("type") or "film"
         year = pick.get("year")
         for tier in name_tiers(pick["title"]):
-            found = {key for name in tier for key, y in self.by_name.get((name, kind), ())
-                     if year is None or (y is not None and abs(y - year) <= 1)}
-            if len(found) == 1:
-                return "matched", found.pop()
-            if found:
-                return "ambiguous", None
+            found = {key: y for name in tier for key, y in self.by_name.get((name, kind), ())}
+            if year is None:
+                windows = (list(found),)
+            else:
+                def within(slack):
+                    return [key for key, y in found.items() if y is not None and abs(y - year) <= slack]
+                undated = list(found) if all(y is None for y in found.values()) else []
+                windows = (within(1), within(YEAR_SLACK), undated)
+            for candidates in windows:
+                if len(candidates) == 1:
+                    return "matched", candidates[0]
+                if candidates:
+                    return "ambiguous", None
         return "unmatched", None
 
 
