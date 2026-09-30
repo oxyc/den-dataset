@@ -1,4 +1,6 @@
 {
- "_": "Native Wikidata labels for own production-series items whose English label collapses two distinct lines. The final franchise gate still rejects every unresolved duplicate display name.",
+ "_": "Stable display names for production groups whose source label collapses distinct lines or whose multinational credits cannot identify the line's viewer-facing country. The final franchise gate still rejects every unresolved duplicate display name.",
+ "chain:movie:15472": "Millennium (Swedish films)",
+ "chain:movie:65754": "Millennium (American films)",
  "Q3905033": "Olsenbanden"
 }

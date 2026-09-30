@@ -237,14 +237,26 @@ def grouped(ctx, cache=None):
     groups = fg.build(titles, names, parents)
     with open(DISPLAY_NAMES, encoding="utf-8") as handle:
         display_names = json.load(handle)
-    prefer_distinct_wikidata_names(groups, names, display_names)
-    flagged = fg.flags(groups, titles)
-    automatic, asked = fg.plan(titles, groups, flagged)
+    flagged, automatic, asked = plan_before_display_names(titles, groups, names, display_names)
     return titles, groups, flagged, automatic, asked, names
 
 
+def plan_before_display_names(titles, groups, names, display_names):
+    """Plan against source labels, then apply viewer-facing names without invalidating paid decisions.
+
+    Candidate lists are part of each durable paid answer. The two Olsen production-series items both had
+    Wikidata's English label ``Olsen Gang`` when those answers were bought, so changing the Norwegian
+    display name before planning silently made all fourteen Danish answers stale. The native name is only
+    presentation: keep the evidence/candidate plan stable and apply it after the plan has been recorded.
+    """
+    flagged = fg.flags(groups, titles)
+    automatic, asked = fg.plan(titles, groups, flagged)
+    prefer_distinct_wikidata_names(groups, names, display_names)
+    return flagged, automatic, asked
+
+
 def prefer_distinct_wikidata_names(groups, names, preferred):
-    """Use recorded native Wikidata labels for own series items whose English labels collapse together."""
+    """Use recorded stable labels where source labels or multinational credits collapse distinct lines."""
     changed = {}
     for qid, label in preferred.items():
         if qid == "_" or qid not in groups:
