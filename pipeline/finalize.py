@@ -6,7 +6,11 @@
 after `embed` because those stores are its input, and before `facts` because the corpus facts pass scrapes
 the ids in the `labels-t02.json` this writes.
 
-**The stores decide which titles; `genres-moods.json` decides their genres & moods.** A label line in the
+**The stores decide which titles have vectors; the change snapshot decides which titles the corpus has.**
+`datasetVersion` covers both. A newly admitted title without an article has no vector yet but still changes
+the searchable corpus and its store; the absolute `changes/plan.json` snapshot digest makes that a new
+generation without chaining the preceding live version into its identity. `genres-moods.json` decides the
+vector titles' genres & moods. A label line in the
 stores is what its vector was composed from, which can be older than this run's genres & moods: a title
 whose genres & moods changed keeps its vector until `embed --reembed-changed` re-embeds it. What ships is
 this run's, so `labels-t02.json` carries each vector title's genres & moods from `genres-moods.json`, and
@@ -75,7 +79,8 @@ QUANTIZATION = "int8-symmetric-x127"
 #: The enrichment's checkpoint is read for three counters in `report.json` and nothing else. The Swift
 #: also read `classify-checkpoint.json` for a fourth, `noPrimary`; the only thing that wrote that file was
 #: the vote-pass `assemble`, deleted in #48, so it is not read here and the counter is gone with it.
-INPUTS = (artifacts.EMBED_LABELS, artifacts.EMBED_VECTORS, artifacts.GENRES_MOODS, artifacts.EMBEDDER,
+INPUTS = (artifacts.EMBED_LABELS, artifacts.EMBED_VECTORS, artifacts.GENRES_MOODS, artifacts.CHANGES,
+          artifacts.EMBEDDER,
           artifacts.EMBEDDING_SPACE, artifacts.COMPOSITION, artifacts.PLOT_LENGTH_TRANSFORM,
           artifacts.ENRICH_CHECKPOINT)
 OUTPUTS = (artifacts.VECTOR_LABELS, artifacts.RAW_VECTORS, artifacts.VECTORS, artifacts.MANIFEST,
@@ -95,7 +100,23 @@ OWNED = frozenset((
     "datasetVersion", "taxonomyVersion", "embeddingModel", "dims", "count", "quantization", "labelsFile",
     "vectorsFile", "labelsGzFile", "labelsSha256", "labelsBytes", "vectorsSha256", "vectorsBytes",
     "builtAt", "lastModifiedHttp", "metadataFile", "metadataSha256", "metadataBytes", "embedderRuntime",
-    "embedderMaxTokens", "embeddingSpace", "plotVectorTransform", "plotVectorTransformSha256"))
+    "embedderMaxTokens", "embeddingSpace", "plotVectorTransform", "plotVectorTransformSha256",
+    "corpusSnapshotSha256"))
+
+
+def corpus_snapshot_sha256(ctx):
+    """The absolute change-stage snapshot digest, absent for legacy/manual out-dirs."""
+    path = os.path.join(ctx.path(artifacts.CHANGES), "plan.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            digest = json.load(handle).get("snapshotSha256")
+    except (OSError, ValueError) as error:
+        raise StageError(f"finalize: {path} is not a readable change plan ({error})") from None
+    if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise StageError(f"finalize: {path} has no valid snapshotSha256")
+    return digest
 
 #: Field names that carry expressive prose. A published artifact holds labels, ids and numbers — TMDB's
 #: terms bar shipping their text, and a CC0 plot belongs in the corpus and the embedding, not in an
@@ -364,7 +385,9 @@ def run(ctx, now=None):
 
     labels_sha = hashlib.sha256(labels_blob).hexdigest()
     vectors_sha = hashlib.sha256(vectors_blob).hexdigest()
-    version = hashlib.sha256(f"{labels_sha}:{vectors_sha}".encode()).hexdigest()[:12]
+    snapshot_sha = corpus_snapshot_sha256(ctx)
+    identity = f"{labels_sha}:{vectors_sha}" + (f":{snapshot_sha}" if snapshot_sha else "")
+    version = hashlib.sha256(identity.encode()).hexdigest()[:12]
     stamp = int(time.time() if now is None else now)
     meta = {"datasetVersion": version, "taxonomyVersion": TAXONOMY, "embeddingModel": EMBEDDING_MODEL,
             "dims": dim, "count": len(records), "quantization": QUANTIZATION,
@@ -377,6 +400,8 @@ def run(ctx, now=None):
         meta["embedderMaxTokens"] = embedder["maxTokens"]
     if space:
         meta["embeddingSpace"] = space["spaceId"]
+    if snapshot_sha:
+        meta["corpusSnapshotSha256"] = snapshot_sha
     public_transform = plot_length.public_record(transform, transform_artifact_sha)
     meta["plotVectorTransform"] = public_transform
     meta["plotVectorTransformSha256"] = hashlib.sha256(plot_length.canonical(public_transform)).hexdigest()

@@ -252,6 +252,12 @@ def write_list(path, keys):
     caching.write_atomically(path, "".join(f"{key}\n" for key in keys).encode("utf-8"))
 
 
+def snapshot_sha256(snapshot):
+    """Stable identity of the absolute enriched corpus, independent of which live version it followed."""
+    payload = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def run(ctx, now=None):
     """Plan, and write the plan. Returns its directory."""
     enriched = ctx.require(artifacts.ENRICHED)
@@ -295,6 +301,10 @@ def run(ctx, now=None):
     plan = {
         "baseline": {"datasetVersion": live[0], "maxBatchId": live[1]} if live else None,
         "throughBatch": numbers[-1],
+        # `datasetVersion` used to cover only titles with vectors. A newly admitted title without an article
+        # still changes the corpus/store, so the publisher correctly refused the different store under the
+        # old version. This absolute digest is stable after publication and moves for every corpus-row change.
+        "snapshotSha256": snapshot_sha256(current),
         "counts": {"titles": len(current), "added": len(added), "changed": len(changed),
                    "withdrawn": len(withdrawn), "tombstoned": len(tombstoned), "withdrawnBefore": len(again),
                    "revised": revised, "unchanged": unchanged,
