@@ -11,6 +11,7 @@ service (bge-m3, 1024-dim int8).
 | [`docs/OPERATE.md`](docs/OPERATE.md) | publishing a daily run, recovering one that is not ready, the embedder rule |
 | [`AGENTS.md`](AGENTS.md) | where each question about the code is answered; the hand enrichment of genres & moods |
 | [`docs/LESSONS.md`](docs/LESSONS.md) | why the pipeline is shaped the way it is |
+| [`docs/MODEL-COSTS.md`](docs/MODEL-COSTS.md) | what each paid model step costs, measured runs, and why each model was chosen |
 | [`docs/FACETS-V2.md`](docs/FACETS-V2.md) | the classify pass: what it asks, how it is run and audited, what may be published |
 | [`data/README.md`](data/README.md) | the committed inputs: tags, vocabularies, evaluation rulers |
 | [`LICENSES.md`](LICENSES.md) | licences per asset — the code is MIT, the source text is not |
