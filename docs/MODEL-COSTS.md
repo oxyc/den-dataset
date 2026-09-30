@@ -83,6 +83,16 @@ All four know the whole catalogue, deep tail included. A split by popularity is 
 - 99.2% of titles keep ≥10 picks.
 - The model said it didn't know 0.4% of titles.
 
+## Genre & mood labels
+
+A primary genre, up to three subgenres and up to three moods per title, stored in `data/genres-moods-curated.json`.
+- **Existing titles:** labelled in July 2026 by Claude Code subagents on the owner's plan, so no API spend. No code in the repo regenerates them.
+- **New titles:** labelled automatically by the daily job's TypeSafe (Jev) genres & moods call, ~$0.0003 a title (daily run 2026-09-30).
+- **Hand enrichment** (`./den genres-moods prepare | merge`, `pipeline/genres_moods_enrich.py`): an optional tool that overrides the automatic labels with agent-written ones for chosen titles.
+  - Agents run on the monthly plans at no API cost, optionally with web search (`--web`).
+  - Last used for the 2,285-title batch in #56.
+  - Not planned for the foreseeable future: the automatic labels cover new titles.
+
 ## Premise tags: bake-off (#182, 2026-09-30)
 
 Setup:
