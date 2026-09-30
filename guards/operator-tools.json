@@ -11,7 +11,6 @@
   "pipeline/seed_genres_moods_curated.py": "seeded data/genres-moods-curated.json, and re-derives the subgenres and moods of listed September titles (--keys)",
   "pipeline/resume_combined_excluding.py": "resumes a paid combined run with capacity exceptions quarantined to their own shard, which audit_combined_bundle.py then verifies",
   "pipeline/assert_compliance.py": "after any subagent LLM phase: proves from the batch files on disk that no TMDB prose reached a model (TMDb 1.C)",
-  "pipeline/build_premise_worklist.py": "premise-tag generation (oxyc/den-dataset#18 step 13): which titles are sent, and the evidence they are shown",
   "pipeline/build_premise_backfill.py": "premise-tag generation: re-batches the titles a pass dropped",
   "pipeline/canonicalize_premise_tags.py": "canonicalises premise surface forms with local embeddings and bounded Jev Choices (oxyc/den-dataset#15)",
   "pipeline/llm_phase.py": "resume and coverage for any subagent LLM phase (--list-missing, --verify)",

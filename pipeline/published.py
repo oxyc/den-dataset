@@ -56,6 +56,9 @@ BUNDLE = (
     ("index/plot-length-transform-v1.json", "index.plot-length-transform-v1.json", False),
     ("labels-premise.json", "labels-premise.json", True),
     ("vectors-premise.bin", "vectors-premise.bin", False),
+    # Daily premise generation appends new-title strings and vectors together. The strings are a store
+    # input and the next stateless run's coverage record, so they must travel with the blob they describe.
+    ("premise-tags-v2.json", "premise-tags-v2.json", False),
     ("genres-moods.json", "genres-moods.json", True),
     ("doc-facts.json", "doc-facts.json", True),
     ("index/composition.json", "index.composition.json", True),
@@ -119,6 +122,7 @@ def bundle(out_dir, dest):
             # Optional permits a pre-feature generation. Once the store says it used fan picks, omitting the
             # durable input would make a stateless daily rebuild silently delete all three sections.
             durable_arg = {"vectors-premise.bin": "premise_vectors", "labels-premise.json": "premise_labels",
+                           "premise-tags-v2.json": "premise_tags",
                            "franchises.json": "franchises", "jev-more-like.json": "jev_more_like",
                            "fan-picks.json": "fan_picks"}.get(asset)
             if required or (durable_arg and durable_arg in used_store_inputs):

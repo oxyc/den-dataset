@@ -101,7 +101,7 @@ def keys_of(doc):
     return {f"{r['mediaType']}:{r['tmdbId']}" for r in doc}
 
 
-def load_have(root):
+def load_have(root, extra_tags=()):
     """Every title that already has premise tags.
 
     Both COMMITTED tag files, plus `out-premise-999/tags.json` when it happens to be there.
@@ -117,6 +117,11 @@ def load_have(root):
         path = os.path.join(root, name)
         if not os.path.exists(path):
             sys.exit(f"{name} is missing — it is committed, so this is a broken checkout, not a stale one")
+        with open(path, encoding="utf-8") as fh:
+            have |= keys_of(json.load(fh))
+    for path in extra_tags:
+        if not os.path.exists(path):
+            sys.exit(f"{path} is missing — an explicitly named premise-tags input cannot be skipped")
         with open(path, encoding="utf-8") as fh:
             have |= keys_of(json.load(fh))
     extra_path = os.path.join(root, "out-premise-999/tags.json")
@@ -138,6 +143,8 @@ ap.add_argument("--out-dir", required=True)
 ap.add_argument("--changes", help="changes/plan.json; restrict generation to added and regained titles")
 ap.add_argument("--token-ceiling", type=int,
                 help="with --changes, explicit maximum estimated input + output tokens for this worklist")
+ap.add_argument("--existing-tags", action="append", default=[],
+                help="an additional durable premise-tags file, such as the live bundle's copy")
 args = ap.parse_args()
 
 if bool(args.changes) != bool(args.token_ceiling):
@@ -146,7 +153,7 @@ if args.token_ceiling is not None and args.token_ceiling < 1:
     sys.exit("--token-ceiling must be positive")
 
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-have = load_have(root)
+have = load_have(root, args.existing_tags)
 eligible = incremental_keys(args.changes) if args.changes else None
 os.makedirs(args.out_dir, exist_ok=True)
 

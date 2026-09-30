@@ -1,0 +1,312 @@
+"""Paid, resumable Haiku premise tags for a daily run's newly admitted titles."""
+import datetime
+import hashlib
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+from . import artifacts, embed_canary
+from .contract import REPO, StageError
+from . import validate_premise_batch as validate
+from store import vector_blob
+
+MODEL = "claude-haiku-4-5-20251001"
+API = "https://api.anthropic.com/v1/messages"
+PRICE_IN = 1.0e-6
+PRICE_OUT = 5.0e-6
+MARGIN = 1.35
+MAX_RETRIES = 4
+
+
+class GenerationError(RuntimeError):
+    def __init__(self, message, usage):
+        super().__init__(message)
+        self.usage = dict(usage)
+        self.cost_usd = round(cost(self.usage), 6)
+
+
+def _json(path):
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _write(path, value):
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(value, handle, ensure_ascii=False, indent=1, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def _extract(text):
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I | re.S)
+    value = json.loads(text)
+    if isinstance(value, dict) and isinstance(value.get("rows"), list):
+        value = value["rows"]
+    if not isinstance(value, list):
+        raise ValueError("response is not a JSON array")
+    return value
+
+
+def _request(api_key, system, rows, max_tokens, opener=urllib.request.urlopen):
+    body = {"model": MODEL, "max_tokens": max_tokens, "temperature": 0,
+            "system": system,
+            "messages": [{"role": "user", "content":
+                          "Return only the JSON answer array for these rows:\n" +
+                          json.dumps(rows, ensure_ascii=False, separators=(",", ":"))}]}
+    request = urllib.request.Request(API, data=json.dumps(body).encode(), method="POST",
+                                     headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
+                                              "content-type": "application/json"})
+    for attempt in range(MAX_RETRIES):
+        try:
+            with opener(request, timeout=300) as response:
+                payload = json.load(response)
+            text = "".join(block.get("text", "") for block in payload.get("content") or []
+                           if block.get("type") == "text")
+            usage = payload.get("usage") or {}
+            return _extract(text), {"inputTokens": usage.get("input_tokens") or 0,
+                                    "outputTokens": usage.get("output_tokens") or 0}
+        except urllib.error.HTTPError as error:
+            if error.code not in (408, 409, 429) and error.code < 500:
+                raise RuntimeError(f"Anthropic request refused with HTTP {error.code}") from None
+            if attempt == MAX_RETRIES - 1:
+                raise RuntimeError(f"Anthropic request failed after {MAX_RETRIES} attempts: HTTP {error.code}") \
+                    from None
+            delay = error.headers.get("retry-after") if error.headers else None
+            time.sleep(float(delay) if delay and delay.isdigit() else 2 ** attempt)
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            if attempt == MAX_RETRIES - 1:
+                raise RuntimeError(f"Anthropic request failed after {MAX_RETRIES} attempts: "
+                                   f"{type(error).__name__}") from None
+            time.sleep(2 ** attempt)
+
+
+def cost(usage):
+    return usage["inputTokens"] * PRICE_IN + usage["outputTokens"] * PRICE_OUT
+
+
+def projected(manifest):
+    return round((manifest.get("estimatedInputTokens", 0) * PRICE_IN +
+                  manifest.get("estimatedOutputTokens", 0) * PRICE_OUT) * MARGIN, 6)
+
+
+def call_ceiling(system, rows, max_tokens):
+    """Conservative dollar bound checked before a request; output cannot exceed ``max_tokens``."""
+    chars = len(system) + len(json.dumps(rows, ensure_ascii=False)) + 300
+    return math.ceil(chars / 3) * PRICE_IN + max_tokens * PRICE_OUT
+
+
+def _clean(row, source):
+    kept = []
+    for tag in row.get("tags") or []:
+        fixed = validate.normalise(tag) if isinstance(tag, str) else ""
+        if not fixed or not validate.TAG.match(fixed) or validate.has_non_ascii(fixed):
+            continue
+        if validate.genre_words(fixed) or fixed in validate.VAGUE_TAGS \
+                or validate.proper_nouns(fixed, source):
+            continue
+        if fixed not in kept:
+            kept.append(fixed)
+    return {"key": row.get("key"), "tags": kept[:validate.MAX_TAGS]}
+
+
+def _checked(batch_in, batch_out):
+    fatal, _notes = validate.check(batch_in, batch_out, strict_language=True)
+    if fatal:
+        raise RuntimeError("; ".join(fatal[:4]))
+    sources = {row["key"]: row.get("plot", "") for row in batch_in}
+    return [_clean(row, sources[row["key"]]) for row in batch_out]
+
+
+def generate(phase, api_key, cap, opener=urllib.request.urlopen):
+    """Fill missing batch outputs, validating exact keys and repairing only short cleaned rows."""
+    manifest = _json(os.path.join(phase, "manifest.json"))
+    estimate = projected(manifest)
+    if not math.isfinite(cap) or cap <= 0 or estimate > cap:
+        raise RuntimeError(f"premise tags project ${estimate:.4f}, crossing the ${cap:.2f} daily cap")
+    with open(os.path.join(REPO, "data", "premise-tags-v1.SPEC.md"), encoding="utf-8") as handle:
+        spec = handle.read()
+    out_dir = os.path.join(phase, "out")
+    os.makedirs(out_dir, exist_ok=True)
+    totals = {"inputTokens": 0, "outputTokens": 0}
+    generated = repaired = resumed = 0
+    for index in range(manifest["batches"]):
+        name = f"batch-{index:04d}.json"
+        batch_in = _json(os.path.join(phase, "in", name))
+        path = os.path.join(out_dir, name)
+        if os.path.exists(path):
+            try:
+                cleaned = _checked(batch_in, _json(path))
+                if all(len(row["tags"]) >= validate.MIN_TAGS for row in cleaned):
+                    resumed += len(cleaned)
+                    continue
+            except (OSError, ValueError, RuntimeError):
+                pass
+        max_tokens = min(8192, max(1024, len(batch_in) * 500))
+        ceiling = call_ceiling(spec, batch_in, max_tokens)
+        if cost(totals) + ceiling > cap:
+            raise GenerationError(f"batch {index} can cost up to ${ceiling:.4f}; ${cost(totals):.4f} is already "
+                                  f"spent, crossing the ${cap:.2f} daily cap before the call", totals)
+        answer, usage = _request(api_key, spec, batch_in, max_tokens, opener)
+        for key in totals:
+            totals[key] += usage[key]
+        try:
+            cleaned = _checked(batch_in, answer)
+        except RuntimeError as error:
+            raise GenerationError(str(error), totals) from error
+        by_key = {row["key"]: row for row in batch_in}
+        for pos, row in enumerate(cleaned):
+            if len(row["tags"]) >= validate.MIN_TAGS:
+                continue
+            source = by_key[row["key"]]
+            repair_system = (spec + "\nThis is a repair of one row whose invalid tags were removed. "
+                             "Return one JSON array row with the same key and 8-12 distinct valid tags.")
+            ceiling = call_ceiling(repair_system, [source], 1024)
+            if cost(totals) + ceiling > cap:
+                raise GenerationError(f"{row['key']}: repair can cost up to ${ceiling:.4f}; the ${cap:.2f} "
+                                      "daily cap leaves too little room before the call", totals)
+            fixed, repair_usage = _request(api_key, repair_system, [source], 1024, opener)
+            for key in totals:
+                totals[key] += repair_usage[key]
+            try:
+                checked = _checked([source], fixed)
+            except RuntimeError as error:
+                raise GenerationError(str(error), totals) from error
+            if len(checked) != 1 or len(checked[0]["tags"]) < validate.MIN_TAGS:
+                raise GenerationError(f"{row['key']}: repair still has fewer than {validate.MIN_TAGS} usable tags",
+                                      totals)
+            cleaned[pos] = checked[0]
+            repaired += 1
+        _write(path, cleaned)
+        generated += len(cleaned)
+        if cost(totals) > cap:
+            raise GenerationError(f"premise tags reached ${cost(totals):.4f}, over the ${cap:.2f} daily cap",
+                                  totals)
+    return {"model": MODEL, "titles": manifest["titles"], "generated": generated, "resumed": resumed,
+            "repairedRows": repaired, "inputTokens": totals["inputTokens"],
+            "outputTokens": totals["outputTokens"], "costUSD": round(cost(totals), 6),
+            "projectedSpendUSD": estimate, "spendCapUSD": cap}
+
+
+def prepare(ctx, tags_path, token_ceiling):
+    work = os.path.join(ctx.out_dir, "premise-increment")
+    command = [sys.executable, os.path.join(REPO, "pipeline", "build_premise_worklist.py")]
+    for path in ctx.paths(artifacts.COMBINED):
+        command += ["--combined", path]
+    command += ["--articles", ctx.path(artifacts.ARTICLES), "--changes",
+                os.path.join(ctx.path(artifacts.CHANGES), "plan.json"), "--token-ceiling", str(token_ceiling),
+                "--existing-tags", tags_path, "--out-dir", work]
+    result = subprocess.run(command)
+    if result.returncode:
+        raise StageError(f"premise tags: worklist exited {result.returncode}")
+    return work, _json(os.path.join(work, "gen", "manifest.json"))
+
+
+def ensure_tags(ctx):
+    target = ctx.path(artifacts.PREMISE_TAGS)
+    if not os.path.exists(target):
+        source = os.path.join(REPO, "data", artifacts.PREMISE_TAGS.filename)
+        with open(source, "rb") as src:
+            payload = src.read()
+        os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
+        with open(target, "wb") as dst:
+            dst.write(payload)
+    return target
+
+
+def merge(ctx, phase, result, now):
+    tags_path = ensure_tags(ctx)
+    command = [sys.executable, os.path.join(REPO, "pipeline", "merge_premise_tags.py"),
+               "--into", tags_path, "--phase", phase, "--note",
+               f"daily new-title generation {now.date().isoformat()} with {MODEL}"]
+    completed = subprocess.run(command)
+    if completed.returncode:
+        raise StageError(f"premise tags: merge exited {completed.returncode}")
+    value = _json(tags_path)
+    increments = list(value.get("dailyIncrements") or [])
+    increments.append({"date": now.date().isoformat(), "model": MODEL, "titles": result["titles"],
+                       "inputTokens": result["inputTokens"], "outputTokens": result["outputTokens"],
+                       "costUSD": result["costUSD"]})
+    value["dailyIncrements"] = increments
+    _write(tags_path, value)
+    return tags_path
+
+
+def _embed(url, texts):
+    endpoint = url.rstrip("/") + "/embed/batch"
+    request = urllib.request.Request(endpoint, data=json.dumps({"texts": texts}).encode(),
+                                     headers={"content-type": "application/json"})
+    for attempt in range(MAX_RETRIES):
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                return json.load(response)["vectors"]
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError) as error:
+            if attempt == MAX_RETRIES - 1:
+                raise StageError(f"premise tags: embed request failed after {MAX_RETRIES} attempts "
+                                 f"({type(error).__name__})") from None
+            time.sleep(2 ** attempt)
+
+
+def extend_vectors(ctx, url):
+    tags = _json(ctx.path(artifacts.PREMISE_TAGS))["tags"]
+    path = ctx.path(artifacts.PREMISE_VECTORS)
+    try:
+        count, dims, keys, blob, base = vector_blob.read(path, allow_legacy=False)
+    except SystemExit as error:
+        raise StageError(f"premise tags: {error}") from error
+    if keys is None:
+        raise StageError("premise tags: the live premise blob does not name its rows")
+    missing = sorted(set(tags) - set(keys))
+    if not missing:
+        return {"before": count, "embedded": 0, "after": count}
+    unknown = sorted(set(keys) - set(tags))
+    if unknown:
+        raise StageError(f"premise tags: {len(unknown)} vector rows have no tag strings")
+    embed_canary.gate(url)
+    rows = bytearray(blob[base:])
+    for start in range(0, len(missing), 48):
+        block = missing[start:start + 48]
+        vectors = _embed(url, [" ".join(tags[key]) for key in block])
+        valid = (isinstance(vectors, list) and len(vectors) == len(block)
+                 and all(isinstance(row, list) and len(row) == dims
+                         and all(isinstance(value, int) and not isinstance(value, bool)
+                                 and -128 <= value <= 127 for value in row)
+                         for row in vectors))
+        if not valid:
+            raise StageError("premise tags: embedder returned the wrong premise-vector shape")
+        for row in vectors:
+            rows.extend(bytes((value + 256) % 256 for value in row))
+    all_keys = list(keys) + missing
+    try:
+        vector_blob.write(path, all_keys, bytes(rows), dims)
+    except SystemExit as error:
+        raise StageError(f"premise tags: {error}") from error
+    ids = os.path.join(ctx.out_dir, "premise-increment", "premise-ids.json")
+    _write(ids, all_keys)
+    command = [sys.executable, os.path.join(REPO, "pipeline", "build_premise_labels.py"),
+               "--ids", ids, "--labels", ctx.path(artifacts.VECTOR_LABELS), "--blob", path,
+               "--out", ctx.path(artifacts.PREMISE_LABELS)]
+    if subprocess.run(command).returncode:
+        raise StageError("premise tags: premise-label rebuild failed")
+    return {"before": count, "embedded": len(missing), "after": len(all_keys)}
+
+
+def stamp_metadata(ctx, result):
+    if not result:
+        return
+    path = ctx.stamp_meta
+    value = _json(path)
+    tags = _json(ctx.path(artifacts.PREMISE_TAGS))
+    value["premiseTags"] = {"coverage": tags.get("count", len(tags.get("tags") or {})),
+                            "model": result["model"], "selection": "added-or-regained-only",
+                            "generatedThisRun": result["titles"],
+                            "source": "Jev-classified story-premise/theme-subject sections"}
+    _write(path, value)

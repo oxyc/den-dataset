@@ -43,6 +43,7 @@ the out-dir first (`pipeline/published.py`).
 "Wikidata": the titles the live facts file carries, and the ids the list already names, less the titles the new
 labels carry. An id added to the list by hand stays until it has a vector.
 """
+import argparse
 import dataclasses
 import datetime
 import json
@@ -51,7 +52,7 @@ import sys
 
 from lib import cache as caching
 
-from . import artifacts, changes, finalize, load, plot_length, published
+from . import artifacts, changes, finalize, load, plot_length, premise_daily, published, spend
 from .contract import Context, StageError
 from . import STAGES
 from tools import fan_picks
@@ -64,6 +65,7 @@ SUMMARY = "daily-report.md"
 #: labels, so looking back further than a day costs little and a day the job did not run is not lost.
 DAYS_BACK = 7
 PAID = ("classify", "critique")
+TYPESAFE_PROJECTED_PER_TITLE = 0.0004
 #: The stages whose ask is one step of several: they run every day, and buy only when the day can. What a day
 #: that cannot buy leaves undone.
 ASKS = {"genres_moods": "nothing bought; genres & moods derived from what is answered",
@@ -135,9 +137,17 @@ class Day:
                            mode=mode, since=since if mode == "delta" else "", refresh=False,
                            revisit_weeks=args.revisit_weeks, spend=False)
         self.skipped, self.ran = [], []
-        self.can_buy = bool(args.spend and environ.get("TYPESAFE_API_KEY"))
-        self.can_buy_fan_picks = bool(args.spend and environ.get("GEMINI_API_KEY"))
+        enabled = lambda setting: bool(args.spend and setting is not False)
+        self.can_buy = bool(enabled(getattr(args, "spend_typesafe", None)) and environ.get("TYPESAFE_API_KEY"))
+        self.can_buy_fan_picks = bool(enabled(getattr(args, "spend_fan_picks", None)) and
+                                      environ.get("GEMINI_API_KEY"))
+        self.can_buy_premise = bool(enabled(getattr(args, "spend_premise", False)) and
+                                    environ.get("ANTHROPIC_API_KEY") and environ.get("DEN_EMBED_URL"))
         self.fan_picks = None
+        self.premise = None
+        prior = spend.month_to_date(getattr(args, "published_reports_dir", None), now.date())
+        self.ledger = spend.Ledger(prior, getattr(args, "max_spend_usd_month", 10.0))
+        self.typesafe_before = None
 
     def skip(self, stage, why):
         self.skipped.append({"stage": stage, "why": why})
@@ -221,6 +231,62 @@ def update_fan_picks(day):
     return result
 
 
+def planned_title_count(plan):
+    keys = set(plan.get("added") or []) | set((plan.get("changed") or {}).keys())
+    revisit = plan.get("revisit") or []
+    if isinstance(revisit, dict):
+        keys |= set(revisit)
+    elif isinstance(revisit, list):
+        keys |= set(revisit)
+    return len(keys)
+
+
+def reserve_known_spend(day):
+    """Reserve every step whose request count is known at the change-plan boundary."""
+    plan = changes.planned(day.ctx) or {}
+    if day.can_buy:
+        day.ledger.reserve("typesafe", planned_title_count(plan) * TYPESAFE_PROJECTED_PER_TITLE,
+                           getattr(day.args, "typesafe_max_spend_usd", 1.0))
+        day.typesafe_before = paid_tokens(day.ctx)
+    if day.can_buy_fan_picks:
+        projected = len(plan.get("added") or []) * fan_picks.PILOT_COST * fan_picks.MARGIN
+        day.ledger.reserve("fanPicks", projected, day.args.fan_picks_max_spend_usd)
+
+
+def update_premise(day):
+    """Build the exact new/regained worklist, reserve it, generate it, and merge its strings."""
+    if not day.can_buy_premise:
+        why = ("not given --spend with the premise switch, ANTHROPIC_API_KEY and DEN_EMBED_URL; "
+               "new titles keep no premise tags until a spending run")
+        day.skip("premise_tags", why)
+        return None
+    tags_path = premise_daily.ensure_tags(day.ctx)
+    premise_cap = getattr(day.args, "premise_max_spend_usd", 1.0)
+    ceiling = max(1, int(premise_cap / premise_daily.PRICE_OUT))
+    work, manifest = premise_daily.prepare(day.ctx, tags_path, ceiling)
+    projected = premise_daily.projected(manifest)
+    day.ledger.reserve("premiseTags", projected, premise_cap)
+    if not manifest["titles"]:
+        result = {"model": premise_daily.MODEL, "titles": 0, "generated": 0, "resumed": 0,
+                  "repairedRows": 0, "inputTokens": 0, "outputTokens": 0, "costUSD": 0.0,
+                  "projectedSpendUSD": 0.0, "spendCapUSD": premise_cap}
+    else:
+        try:
+            result = premise_daily.generate(os.path.join(work, "gen"), day.environ["ANTHROPIC_API_KEY"],
+                                            premise_cap)
+            premise_daily.merge(day.ctx, os.path.join(work, "gen"), result, day.now)
+        except premise_daily.GenerationError as error:
+            day.ledger.actual("premiseTags", error.cost_usd)
+            raise StageError(f"premise_tags: {error}") from error
+        except (OSError, ValueError, RuntimeError) as error:
+            raise StageError(f"premise_tags: {error}") from error
+    day.ledger.actual("premiseTags", result["costUSD"])
+    day.premise = result
+    day.ran.append("premise_tags")
+    print(f"==> premise_tags: {json.dumps(result, sort_keys=True)}", file=sys.stderr)
+    return result
+
+
 def run_day(day):
     """Every stage of the day, in `STAGES` order. Returns the check's verdict: `(ready, why)`."""
     ctx, env = day.ctx, day.environ
@@ -244,6 +310,7 @@ def run_day(day):
                 raise StageError("daily: --spend with no live baseline would buy a first generation, the whole "
                                  "corpus; that is bought by hand (docs/OPERATE.md, \"A first generation\"), not by "
                                  "the daily job.")
+            reserve_known_spend(day)
         elif name in PAID:
             if not day.can_buy:
                 day.skip(name, "not given --spend with a TYPESAFE_API_KEY, so nothing was bought: a changed "
@@ -254,6 +321,12 @@ def run_day(day):
             if not day.can_buy:
                 day.skip(f"{name} (ask)", ASKS[name])
             day.stage(name, spend=day.can_buy)
+            if name == "genres_moods":
+                update_premise(day)
+            if name == "franchises":
+                if day.can_buy and day.typesafe_before is not None:
+                    used = paid_tokens(day.ctx) - day.typesafe_before
+                    day.ledger.actual("typesafe", used * (0.042 / 1_000_000))
         elif name == "embed":
             if not env.get("DEN_EMBED_URL"):
                 day.skip(name, "no DEN_EMBED_URL, so nothing was embedded: a new title with a plot has no "
@@ -264,9 +337,16 @@ def run_day(day):
             count = write_delta_ids(finalize_ctx(ctx), live_version(ctx))
             print(f"==> facts: {count} delta id(s) by the delta-pass rule (docs/OPERATE.md, Wikidata)", file=sys.stderr)
             day.stage(name)
+        elif name == "finalize":
+            day.stage(name)
+            if day.premise and day.premise["titles"]:
+                day.premise["vectors"] = premise_daily.extend_vectors(day.ctx, env["DEN_EMBED_URL"])
         elif name == "store":
             day.fan_picks = update_fan_picks(day)
+            if day.fan_picks:
+                day.ledger.actual("fanPicks", day.fan_picks.get("costUSD", 0.0))
             day.stage(name)
+            premise_daily.stamp_metadata(day.ctx, day.premise)
         elif name == "publish":
             try:
                 day.stage(name, plan=True)
@@ -296,6 +376,20 @@ def report(day, ready, why, tokens):
         with open(ctx.stamp_meta, encoding="utf-8") as handle:
             meta = json.load(handle)
     rate = 0.042 / 1_000_000  # lib/typesafe_client.TypeSafe.RATE_PER_INPUT_TOKEN, not imported: it is a client
+    if "typesafe" in day.ledger.steps:
+        day.ledger.actual("typesafe", tokens * rate)
+    fan_step = day.ledger.steps.get("fanPicks")
+    if fan_step and fan_step.get("actualUSD") is None:
+        checkpoint = fan_picks.daily_checkpoint_path(finalize_ctx(ctx).path(artifacts.FAN_PICKS))
+        amount = 0.0
+        if os.path.exists(checkpoint):
+            try:
+                responses = fan_picks.load_daily_checkpoint(checkpoint)["responses"].values()
+                amount = sum((row.get("answer") or row.get("error") or {}).get("costUSD", 0.0)
+                             for row in responses if isinstance(row, dict))
+            except (OSError, ValueError, RuntimeError):
+                pass
+        day.ledger.actual("fanPicks", amount)
     boundary = None
     if plot_length.PRE_TRANSFORM_BOUNDARY in why:
         baseline = plan.get("baseline") or {}
@@ -315,8 +409,9 @@ def report(day, ready, why, tokens):
         "withdrawn": plan.get("withdrawn", {}), "revisit": plan.get("revisit"),
         "seeded": getattr(day, "seeded", None), "ran": day.ran, "skipped": day.skipped,
         "migrationBoundary": boundary,
-        "fanPicks": day.fan_picks,
-        "spend": {"inputTokens": tokens, "usd": round(tokens * rate, 4)},
+        "fanPicks": day.fan_picks, "premiseTags": day.premise,
+        "spend": {**day.ledger.report(), "typesafeInputTokens": tokens,
+                  "typesafeUSD": round(tokens * rate, 6)},
     }
     caching.write_atomically(os.path.join(ctx.out_dir, REPORT),
                              (json.dumps(out, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
@@ -324,13 +419,18 @@ def report(day, ready, why, tokens):
              f"**{'Ready to publish' if ready else 'Not ready'}** — {why.splitlines()[0] if why else ''}", "",
              f"- live dataset: {(out['baseline'] or {}).get('datasetVersion') or 'none (a first generation)'}",
              f"- built: {out['datasetVersion']} ({out['store'].get('storeRecords')} rows)",
-             f"- spend: ${out['spend']['usd']:.2f} ({tokens:,} input tokens)", ""]
+             f"- spend today: ${out['spend']['totalUSD']:.4f}; month to date: "
+             f"${out['spend']['monthToDateUSD']:.4f} / ${out['spend']['monthlyCapUSD']:.2f}", ""]
     if out["fanPicks"]:
         lines += [f"- fan picks: {out['fanPicks']['asked']} asked, {out['fanPicks']['answered']} answered, "
                   f"{out['fanPicks']['emptyAnswers']} empty, "
                   f"{out['fanPicks'].get('parseErrors', 0)} malformed, "
                   f"{len(out['fanPicks'].get('notInCorpus') or [])} plan-only/not in corpus; "
                   f"${out['fanPicks']['costUSD']:.4f}", ""]
+    if out["premiseTags"]:
+        lines += [f"- premise tags: {out['premiseTags']['titles']} title(s), "
+                  f"{out['premiseTags']['repairedRows']} repaired; "
+                  f"${out['premiseTags']['costUSD']:.4f}", ""]
     counts = out["counts"] or {}
     lines += [f"| added | changed | withdrawn | revised | revisited |", "|---|---|---|---|---|",
               f"| {counts.get('added', 0)} | {counts.get('changed', 0)} | {counts.get('withdrawn', 0)} | "
@@ -378,7 +478,15 @@ def register(commands):
     sub.add_argument("--spend", action="store_true",
                      help="buy the classify, critique, genres & moods, and new-title fan-picks answers "
                           "(needs the corresponding provider keys and a live baseline)")
+    sub.add_argument("--spend-typesafe", action=argparse.BooleanOptionalAction, default=None)
+    sub.add_argument("--spend-fan-picks", action=argparse.BooleanOptionalAction, default=None)
+    sub.add_argument("--spend-premise", action=argparse.BooleanOptionalAction, default=False)
+    sub.add_argument("--typesafe-max-spend-usd", type=float, default=1.0, metavar="USD")
     sub.add_argument("--fan-picks-max-spend-usd", type=float, default=fan_picks.DAILY_SPEND_CAP, metavar="USD",
                      help=f"projected per-run cap for new-title Gemini calls (default: "
                           f"${fan_picks.DAILY_SPEND_CAP:.2f}); the whole set must fit before any call")
+    sub.add_argument("--premise-max-spend-usd", type=float, default=1.0, metavar="USD")
+    sub.add_argument("--max-spend-usd-month", type=float, default=10.0, metavar="USD")
+    sub.add_argument("--published-reports-dir",
+                     help="downloaded public daily-report JSON assets used for the monthly spend total")
     return sub

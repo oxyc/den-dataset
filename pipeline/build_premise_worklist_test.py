@@ -53,11 +53,12 @@ class IncrementalPremiseWorklistTest(unittest.TestCase):
                 },
             }, handle)
 
-    def run_script(self, ceiling="10000", out="out"):
+    def run_script(self, ceiling="10000", out="out", extra=()):
         return subprocess.run([
             sys.executable, SCRIPT, "--combined", self.combined, "--articles", self.articles,
             "--changes", self.plan, "--token-ceiling", ceiling,
             "--out-dir", os.path.join(self.directory, out),
+            *extra,
         ], cwd=ROOT, text=True, capture_output=True)
 
     def test_only_added_and_regained_are_batched_with_audited_evidence(self):
@@ -92,6 +93,17 @@ class IncrementalPremiseWorklistTest(unittest.TestCase):
         result = self.run_script(ceiling="1", out="too-large")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("exceeds --token-ceiling 1", result.stderr)
+
+    def test_the_live_bundles_tag_copy_prevents_a_second_purchase(self):
+        tags = os.path.join(self.directory, "premise-tags-v2.json")
+        with open(tags, "w", encoding="utf-8") as handle:
+            json.dump({"tags": {"movie:990000001": ["already-tagged"]}}, handle)
+        result = self.run_script(out="with-live-tags", extra=("--existing-tags", tags))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(os.path.join(self.directory, "with-live-tags", "gen", "manifest.json"),
+                  encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        self.assertEqual(manifest["ids"], ["movie:990000002", "tv:990000004"])
 
 
 if __name__ == "__main__":
