@@ -83,7 +83,6 @@ class Parse(unittest.TestCase):
         _, error = fp.record({"candidates": [{"content": {"parts": [{"text": "{not json"}]},
                                               "finishReason": "MAX_TOKENS"}]}, "movie:1", 0, "online")
         self.assertIn("MAX_TOKENS", error["error"])
-        self.assertIs(error["accepted"], True)
 
 
 class Matching(unittest.TestCase):
@@ -164,13 +163,31 @@ class Export(unittest.TestCase):
                        "movie:2": {"known": False, "asks": [[{"status": "unmatched", "title": "Z"}]]}}
             fp.write_json(w.path("matched.json.gz"), matched, gz=True)
             with open(w.path("answers.jsonl"), "w") as fh:
-                fh.write("{}\n")
+                pass
             out = os.path.join(work, "fan-picks.json")
             result = fp.export(work, out)
             with open(out) as fh:
                 exported = json.load(fh)
         self.assertEqual(exported["anchors"], {"movie:1": ["movie:2"], "movie:2": []})
         self.assertEqual((result["anchors"], result["withPicks"]), (2, 1))
+
+    def test_provider_accepted_empty_is_asked_but_malformed_and_transport_errors_are_not(self):
+        with tempfile.TemporaryDirectory() as work:
+            w = self.prepared(work)
+            fp.write_json(w.path("matched.json.gz"), {}, gz=True)
+            open(w.path("answers.jsonl"), "w").close()
+            with open(w.path("errors.jsonl"), "w") as fh:
+                for error in ({"key": "movie:1", "usage": {}, "text": ""},
+                              {"key": "movie:2", "usage": {}, "text": "not json"},
+                              {"key": "movie:3", "error": "HTTP 503"}):
+                    fh.write(json.dumps(error) + "\n")
+            out = os.path.join(work, "fan-picks.json")
+            fp.export(work, out)
+            with open(out) as fh:
+                exported = json.load(fh)
+            errors_sha = fp.file_digest(w.path("errors.jsonl"))
+        self.assertEqual(exported["anchors"], {"movie:1": []})
+        self.assertEqual(exported["errorsSha256"], errors_sha)
 
     @staticmethod
     def prepared(work):
@@ -240,10 +257,10 @@ class Daily(unittest.TestCase):
         self.assertEqual(fp.request_body(seen[0][0])["generationConfig"]["thinkingConfig"],
                          {"thinkingLevel": "low"})
 
-    def test_a_provider_refusal_marks_the_title_asked_with_no_picks(self):
+    def test_a_provider_refusal_is_asked_empty_like_the_full_run(self):
         with tempfile.TemporaryDirectory() as directory:
             corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
-            error = {"costUSD": 0.001, "error": "no picks list", "usage": {}}
+            error = {"costUSD": 0.001, "error": "no picks list", "usage": {}, "text": ""}
             result = fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1"],
                                      workers=1, generate=lambda *_: (None, error, True), follows={})
             with open(existing, encoding="utf-8") as fh:
@@ -251,21 +268,16 @@ class Daily(unittest.TestCase):
         self.assertEqual(out["anchors"]["movie:1"], [])
         self.assertEqual((result["asked"], result["emptyAnswers"]), (1, 1))
 
-    def test_export_marks_only_accepted_errors_asked(self):
+    def test_malformed_nonempty_provider_output_stays_unasked(self):
         with tempfile.TemporaryDirectory() as directory:
-            work = Export.prepared(directory).dir
-            w = fp.Work(work)
-            fp.write_json(w.path("matched.json.gz"), {}, gz=True)
-            with open(w.path("answers.jsonl"), "w", encoding="utf-8"):
-                pass
-            with open(w.path("errors.jsonl"), "w", encoding="utf-8") as handle:
-                handle.write(json.dumps({"key": "movie:1", "accepted": True, "error": "safety"}) + "\n")
-                handle.write(json.dumps({"key": "movie:2", "error": "transport"}) + "\n")
-            out = os.path.join(directory, "fan-picks.json")
-            fp.export(work, out)
-            with open(out, encoding="utf-8") as handle:
-                exported = json.load(handle)
-        self.assertEqual(exported["anchors"], {"movie:1": []})
+            corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
+            error = {"costUSD": 0.001, "error": "bad json", "usage": {}, "text": "{"}
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1"],
+                                     workers=1, generate=lambda *_: (None, error, True), follows={})
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertNotIn("movie:1", out["anchors"])
+        self.assertEqual((result["emptyAnswers"], result["parseErrors"]), (0, 1))
 
     def test_a_valid_empty_answer_is_asked_like_the_full_run(self):
         with tempfile.TemporaryDirectory() as directory:

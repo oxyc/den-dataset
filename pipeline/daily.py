@@ -328,6 +328,7 @@ def report(day, ready, why, tokens):
     if out["fanPicks"]:
         lines += [f"- fan picks: {out['fanPicks']['asked']} asked, {out['fanPicks']['answered']} answered, "
                   f"{out['fanPicks']['emptyAnswers']} empty, "
+                  f"{out['fanPicks'].get('parseErrors', 0)} malformed, "
                   f"{len(out['fanPicks'].get('notInCorpus') or [])} plan-only/not in corpus; "
                   f"${out['fanPicks']['costUSD']:.4f}", ""]
     counts = out["counts"] or {}
