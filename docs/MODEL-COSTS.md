@@ -93,7 +93,7 @@ Setup:
 | Model | Triplet accuracy | vs Haiku | $/title (5/call) | Problems |
 |---|---:|---|---:|---|
 | Claude Haiku 4.5 | 0.786 (154) | – | $0.0017 | none; tagged every title |
-| gpt-5.6-luna (Codex) | 0.800 (40) | 4/5, p=1.0 | ~$0.0003 | a tag with a space; needs an OpenAI API key |
+| gpt-5.6-luna (Codex, 10/call) | 0.838 (154) | 10/18, p=0.18 | $0.0003 ($0.00015 Batch) | 10 of 46 calls had one tag with a space; needs an OpenAI API key |
 | Gemini 3.5 Flash-Lite | 0.813 (150) | 14/19, p=0.49 | $0.0005 | malformed JSON without a schema; rows under 8 tags; tags with spaces |
 | Gemini 3.1 Flash-Lite | 0.800 (150) | 13/16, p=0.71 | $0.0008 | ~379 thinking tokens a title |
 | Gemini 3.7 Flash | 0.800 (150) | 18/21, p=0.75 | $0.0010 (2027: $0.0020) | ~1 in 4 five-title calls malformed without a schema |
@@ -103,7 +103,8 @@ Setup:
 
 - **Quality:** no cheaper model differs significantly from Haiku. At 150 triplets the 95% interval is about ±6.5 points.
 - **Refusals:** every Gemini model refuses ~0.9% of titles (sexual-violence plots), and one refusal sinks a multi-title call. Haiku tagged them all.
-- **Style:** Haiku writes longer, event-level tags (3.7 words a tag), luna 3.3, Flash-Lite 2.5. Mixing styles in one index is untested (#182).
+- **Style:** Haiku writes longer, event-level tags (3.7 words a tag), luna 3.3, Flash-Lite 2.5.
+- **Mixing is safe.** Replacing 10% or 30% of shipped tags with luna's, Flash-Lite's or fresh Haiku's doesn't lower accuracy, including on triplets that mix sources (#182). So new titles can switch model without re-tagging the rest.
 
 **Re-tagging all 50,503 titles** at 40 a call. Each range spans a plot extract of 1,509 to 2,356 characters. The cost fit predicts #146 at $0.00113 a title against $0.0012 measured.
 
@@ -119,8 +120,9 @@ Untested: 40 titles a call on Gemini or luna. Test it with a response schema bef
 
 ## Notes
 
-- **Output dominates price.** Asking for 15 picks instead of 20 cuts fan-pick cost by about a quarter.
+- **Output dominates price.** Fan picks stay at 20; compact the answer format instead (the answers were pretty-printed JSON, and whitespace bills as output) (#187).
 - **Thinking is the hidden cost.** Default thinking on Gemini Flash was 2.5× the price of low with no clear gain; on Pro it roughly tripled the price.
 - **Monthly plans.** Claude and ChatGPT plans run models through their CLIs at no extra $, limited by plan caps. They suit local backfills and bake-offs, never the daily job.
-- **Refusals** must not sink a batch: retry one title per call, then record the title as refused (#170).
+- **Refusals** must not sink a batch: retry one title per call, then ask the step's fallback model (#183).
+- **New releases.** A model can't know fans of titles released after its training data. In the fan-picks run, Gemini didn't know 5.9% of 2025 titles and 35.2% of 2026 titles, and guessed picks from the plot for them. Re-ask those later (#187).
 - **Price changes.** Update this file when a price changes or a run is measured, and cite the issue.
