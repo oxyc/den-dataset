@@ -83,6 +83,7 @@ class Parse(unittest.TestCase):
         _, error = fp.record({"candidates": [{"content": {"parts": [{"text": "{not json"}]},
                                               "finishReason": "MAX_TOKENS"}]}, "movie:1", 0, "online")
         self.assertIn("MAX_TOKENS", error["error"])
+        self.assertIs(error["accepted"], True)
 
 
 class Matching(unittest.TestCase):
@@ -239,7 +240,7 @@ class Daily(unittest.TestCase):
         self.assertEqual(fp.request_body(seen[0][0])["generationConfig"]["thinkingConfig"],
                          {"thinkingLevel": "low"})
 
-    def test_a_provider_refusal_stays_unasked_like_the_full_run(self):
+    def test_a_provider_refusal_marks_the_title_asked_with_no_picks(self):
         with tempfile.TemporaryDirectory() as directory:
             corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
             error = {"costUSD": 0.001, "error": "no picks list", "usage": {}}
@@ -247,8 +248,24 @@ class Daily(unittest.TestCase):
                                      workers=1, generate=lambda *_: (None, error, True), follows={})
             with open(existing, encoding="utf-8") as fh:
                 out = json.load(fh)
-        self.assertNotIn("movie:1", out["anchors"])
+        self.assertEqual(out["anchors"]["movie:1"], [])
         self.assertEqual((result["asked"], result["emptyAnswers"]), (1, 1))
+
+    def test_export_marks_only_accepted_errors_asked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Export.prepared(directory).dir
+            w = fp.Work(work)
+            fp.write_json(w.path("matched.json.gz"), {}, gz=True)
+            with open(w.path("answers.jsonl"), "w", encoding="utf-8"):
+                pass
+            with open(w.path("errors.jsonl"), "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"key": "movie:1", "accepted": True, "error": "safety"}) + "\n")
+                handle.write(json.dumps({"key": "movie:2", "error": "transport"}) + "\n")
+            out = os.path.join(directory, "fan-picks.json")
+            fp.export(work, out)
+            with open(out, encoding="utf-8") as handle:
+                exported = json.load(handle)
+        self.assertEqual(exported["anchors"], {"movie:1": []})
 
     def test_a_valid_empty_answer_is_asked_like_the_full_run(self):
         with tempfile.TemporaryDirectory() as directory:

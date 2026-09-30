@@ -325,6 +325,10 @@ def record(response, key, ask, mode, batch=None):
         return row, None
     except (ValueError, json.JSONDecodeError) as exc:
         finish = ((response.get("candidates") or [{}])[0]).get("finishReason")
+        # The provider returned a response for this title even though its safety filter (or an unusable
+        # response) left no picks. Keep that distinct from transport and batch-delivery errors: export marks
+        # an accepted title asked with no picks, while a request that never got a response remains unasked.
+        row["accepted"] = True
         row["error"] = f"{type(exc).__name__}: {exc}; finishReason={finish}"[:300]
         row["text"] = text[:2000]
         return None, row
@@ -693,9 +697,9 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     """Ask Gemini online for new daily titles, match with the full run's rule, and merge the durable input.
 
     Existing anchors and picks that no longer join the current corpus are removed before the store sees
-    them. A provider refusal or malformed answer remains unasked, matching the full run; a transport failure
-    refuses the update so an outage can never become `fan_picks_a`. The whole request set must fit the
-    invocation's projected spend cap before any request is made.
+    them. A provider-accepted refusal or malformed answer is an asked title with no picks, matching the full
+    export; a transport failure refuses the update so an outage can never become `fan_picks_a`. The whole
+    request set must fit the invocation's projected spend cap before any request is made.
     """
     rows = corpus_rows(corpus_path)
     if not os.path.exists(existing_path):
@@ -769,10 +773,11 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
             franchises = json.load(fh)
         names = Names(rows)
         owned = related(rows, franchises, sequel_keys(rows, titles) if follows is None else follows)
-        for key, answer in answered.items():
-            # Only a parseable answer marks the title asked. This is the full run's rule: safety refusals and
-            # malformed responses are absent from the section and retain atlas's structural-affinity fallback.
-            matched = match_answer(answer, key, names, owned.get(key, set()))
+        for key in titles:
+            # Receiving a response is the ask boundary. A refusal has no own picks, but atlas may still build
+            # its taste row from titles whose picks name it; it must never fall back to structural affinity.
+            answer = answered.get(key)
+            matched = match_answer(answer, key, names, owned.get(key, set())) if answer else []
             anchors[key] = merged([matched])
 
     costs = [row.get("costUSD", 0.0) for row in [*answered.values(), *parse_errors.values()]]
@@ -884,6 +889,8 @@ def export(work, out):
     w = Work(work)
     matched = read_gz_json(w.path("matched.json.gz"))
     anchors = {k: merged(v["asks"]) for k, v in sorted(matched.items())}
+    accepted_empty = {e["key"] for e in read_jsonl(w.path("errors.jsonl")) if e.get("accepted") is True}
+    anchors.update({key: [] for key in sorted(accepted_empty - set(anchors))})
     value = {"schema": EXPORT_SCHEMA, "issue": "oxyc/den-atlas#121", "model": MODEL,
              "manifestSha256": file_digest(w.path("manifest.json")),
              "answersSha256": file_digest(w.path("answers.jsonl")),
