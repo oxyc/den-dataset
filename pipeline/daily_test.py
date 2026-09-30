@@ -39,6 +39,9 @@ class Recorded(unittest.TestCase):
         patch = mock.patch.object(daily, "load", self.stage)
         patch.start()
         self.addCleanup(patch.stop)
+        changed = mock.patch.object(daily.classify, "changed_articles", return_value=("articles", "digest"))
+        changed.start()
+        self.addCleanup(changed.stop)
         fan = mock.patch.object(daily, "update_fan_picks", lambda day: {
             "asked": 0, "answered": 0, "emptyAnswers": 0, "anchors": 1, "picks": 1, "costUSD": 0.0})
         fan.start()
@@ -97,6 +100,19 @@ class Skips(Recorded):
         self.day({"DEN_EMBED_URL": "http://embed.invalid"}, spend=True)
         self.assertNotIn("classify", self.ran())
         self.assertEqual([c[1] for c in self.calls if c[0] == "genres_moods"], [False])
+
+    def test_a_new_title_without_an_article_skips_every_paid_ask_and_still_derives(self):
+        env = {"TYPESAFE_API_KEY": "j", "ANTHROPIC_API_KEY": "a", "DEN_EMBED_URL": "http://embed.invalid"}
+        with mock.patch.object(daily.classify, "changed_articles", return_value=None):
+            code, report = self.day(env, spend=True)
+        self.assertEqual(code, 0)
+        self.assertNotIn("classify", self.ran())
+        self.assertNotIn("critique", self.ran())
+        self.assertEqual([c[1] for c in self.calls if c[0] in ("genres_moods", "franchises")], [False, False])
+        self.assertEqual(
+            [entry["stage"] for entry in report["skipped"]],
+            ["fetch", "classify", "critique", "genres_moods (ask)", "premise_tags", "franchises (ask)"],
+        )
 
     def test_each_step_switch_can_disable_its_provider_under_the_master(self):
         day = daily.Day(args(self.out, spend=True, spend_typesafe=False, spend_fan_picks=False,
