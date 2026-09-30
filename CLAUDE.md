@@ -38,6 +38,8 @@ state.
 - `docs/OPERATE.md` — what a person does by hand: publish a ready run, recover one that is not. No history,
   no changelog.
 - `docs/LESSONS.md` — why the procedure has its shape.
+- `docs/MODEL-COSTS.md` — what each paid model step costs and why its model was chosen. Update it when a
+  price changes or a run is measured.
 - `AGENTS.md` — where in the code each question is answered.
 
 A fact belongs in exactly one document, and what the code states, a document should not restate.
