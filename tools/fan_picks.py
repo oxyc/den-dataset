@@ -325,10 +325,6 @@ def record(response, key, ask, mode, batch=None):
         return row, None
     except (ValueError, json.JSONDecodeError) as exc:
         finish = ((response.get("candidates") or [{}])[0]).get("finishReason")
-        # The provider returned a response for this title even though its safety filter (or an unusable
-        # response) left no picks. Keep that distinct from transport and batch-delivery errors: export marks
-        # an accepted title asked with no picks, while a request that never got a response remains unasked.
-        row["accepted"] = True
         row["error"] = f"{type(exc).__name__}: {exc}; finishReason={finish}"[:300]
         row["text"] = text[:2000]
         return None, row
@@ -375,8 +371,8 @@ def generate_online(title, key, ask=0):
     """One retried generateContent ask: `(answer, error, accepted)`.
 
     `accepted` separates an HTTP/transport failure from a response received from the provider. A safety
-    refusal or malformed response is still an error, and the daily job leaves that title unasked so it has
-    the full run's structural-affinity fallback.
+    refusal or malformed response is still an error. A provider-accepted empty response is a durable
+    asked-empty anchor; malformed non-empty output remains unasked.
     """
     url = f"{API}/v1beta/models/{MODEL}:generateContent"
     for attempt in range(6):
@@ -692,14 +688,20 @@ def match_answer(answer, seed, names, owned):
     return out
 
 
+def accepted_empty(error):
+    """A billed provider response with no candidate text, not a transport or parsing failure."""
+    return isinstance(error, dict) and isinstance(error.get("usage"), dict) \
+        and isinstance(error.get("text"), str) and not error["text"].strip()
+
+
 def daily_update(corpus_path, articles_path, franchises_path, existing_path, out, keys, workers=8,
                  generate=generate_online, follows=None, max_spend=DAILY_SPEND_CAP):
     """Ask Gemini online for new daily titles, match with the full run's rule, and merge the durable input.
 
     Existing anchors and picks that no longer join the current corpus are removed before the store sees
-    them. A provider-accepted refusal or malformed answer is an asked title with no picks, matching the full
-    export; a transport failure refuses the update so an outage can never become `fan_picks_a`. The whole
-    request set must fit the invocation's projected spend cap before any request is made.
+    them. A provider-accepted empty answer is asked-empty, while malformed non-empty output remains unasked;
+    a transport failure refuses the update so an outage can never become `fan_picks_a`. The whole request
+    set must fit the invocation's projected spend cap before any request is made.
     """
     rows = corpus_rows(corpus_path)
     if not os.path.exists(existing_path):
@@ -751,7 +753,7 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
         raise RuntimeError(f"daily fan picks: refusing {len(titles)} requests: their ${projected:.4f} "
                            f"projected spend crosses the ${max_spend:.2f} per-run cap")
 
-    answered, parse_errors, unavailable = {}, {}, {}
+    answered, empty_answers, parse_errors, unavailable = {}, {}, {}, {}
     def one(item):
         key, title = item
         return key, generate(title, key, 0)
@@ -761,6 +763,8 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
                 unavailable[key] = error
             elif answer is not None:
                 answered[key] = answer
+            elif accepted_empty(error):
+                empty_answers[key] = error
             else:
                 parse_errors[key] = error
     if unavailable:
@@ -773,18 +777,19 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
             franchises = json.load(fh)
         names = Names(rows)
         owned = related(rows, franchises, sequel_keys(rows, titles) if follows is None else follows)
-        for key in titles:
-            # Receiving a response is the ask boundary. A refusal has no own picks, but atlas may still build
-            # its taste row from titles whose picks name it; it must never fall back to structural affinity.
-            answer = answered.get(key)
-            matched = match_answer(answer, key, names, owned.get(key, set())) if answer else []
+        for key, answer in answered.items():
+            matched = match_answer(answer, key, names, owned.get(key, set()))
             anchors[key] = merged([matched])
+        for key in empty_answers:
+            anchors[key] = []
 
-    costs = [row.get("costUSD", 0.0) for row in [*answered.values(), *parse_errors.values()]]
+    costs = [row.get("costUSD", 0.0)
+             for row in [*answered.values(), *empty_answers.values(), *parse_errors.values()]]
     value = {"schema": EXPORT_SCHEMA, "issue": "oxyc/den-atlas#121", "model": MODEL,
              "count": len(anchors), "anchors": dict(sorted(anchors.items()))}
     write_json(out, value)
-    return {"asked": len(titles), "answered": len(answered), "emptyAnswers": len(parse_errors),
+    return {"asked": len(titles), "answered": len(answered), "emptyAnswers": len(empty_answers),
+            "parseErrors": len(parse_errors),
             "notInCorpus": not_in_corpus,
             "anchors": len(anchors), "picks": sum(len(v) for v in anchors.values()),
             "costUSD": round(sum(costs), 6), "projectedSpendUSD": round(projected, 6),
@@ -888,12 +893,17 @@ def export(work, out):
     list, which the store records as asked."""
     w = Work(work)
     matched = read_gz_json(w.path("matched.json.gz"))
-    anchors = {k: merged(v["asks"]) for k, v in sorted(matched.items())}
-    accepted_empty = {e["key"] for e in read_jsonl(w.path("errors.jsonl")) if e.get("accepted") is True}
-    anchors.update({key: [] for key in sorted(accepted_empty - set(anchors))})
+    answered = {key for key, _ in w.answers()}
+    errors_path = w.path("errors.jsonl")
+    refused = {error["key"] for error in read_jsonl(errors_path)
+               if accepted_empty(error)} - answered
+    anchors = {key: [] for key in refused}
+    anchors.update({k: merged(v["asks"]) for k, v in sorted(matched.items())})
+    anchors = dict(sorted(anchors.items()))
     value = {"schema": EXPORT_SCHEMA, "issue": "oxyc/den-atlas#121", "model": MODEL,
              "manifestSha256": file_digest(w.path("manifest.json")),
              "answersSha256": file_digest(w.path("answers.jsonl")),
+             "errorsSha256": file_digest(errors_path) if os.path.exists(errors_path) else hashlib.sha256(b"").hexdigest(),
              "count": len(anchors), "anchors": anchors}
     with open(out + ".tmp", "w", encoding="utf-8") as fh:
         json.dump(value, fh, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
