@@ -28,6 +28,7 @@ import datetime
 import gzip
 import hashlib
 import json
+import math
 import os
 import random
 import re
@@ -58,6 +59,9 @@ BATCH_FACTOR = 0.5
 PILOT_COST = 351 * PRICE_IN + 665 * PRICE_OUT
 #: A chunk is reserved at the observed cost per title times this.
 MARGIN = 1.3
+#: A scheduled day is small, but a broken change plan must not turn an unattended run into a catalogue
+#: purchase. The CLI may lower or deliberately raise this; the whole set must fit before the first call.
+DAILY_SPEND_CAP = 1.0
 #: Popularity bands the sample is stratified over and a report is broken down by: positions in the order.
 BANDS = ((0, 1000), (1000, 3000), (3000, 6000), (6000, 10000), (10000, 20000), (20000, None))
 
@@ -366,9 +370,9 @@ def run_online(w, items, workers=8, log=sys.stderr):
 def generate_online(title, key, ask=0):
     """One retried generateContent ask: `(answer, error, accepted)`.
 
-    `accepted` separates an HTTP/transport failure from a 200 response the safety filter or parser left
-    empty. The daily job records the latter as an asked title with no picks (`fan_picks_a = 1`), but refuses
-    the former rather than publishing an outage as an answer.
+    `accepted` separates an HTTP/transport failure from a response received from the provider. A safety
+    refusal or malformed response is still an error, and the daily job leaves that title unasked so it has
+    the full run's structural-affinity fallback.
     """
     url = f"{API}/v1beta/models/{MODEL}:generateContent"
     for attempt in range(6):
@@ -685,12 +689,13 @@ def match_answer(answer, seed, names, owned):
 
 
 def daily_update(corpus_path, articles_path, franchises_path, existing_path, out, keys, workers=8,
-                 generate=generate_online, follows=None):
+                 generate=generate_online, follows=None, max_spend=DAILY_SPEND_CAP):
     """Ask Gemini online for new daily titles, match with the full run's rule, and merge the durable input.
 
     Existing anchors and picks that no longer join the current corpus are removed before the store sees
-    them. A provider-accepted but filtered/malformed answer is an empty asked anchor; a transport failure
-    refuses the update so an outage can never become `fan_picks_a`.
+    them. A provider refusal or malformed answer remains unasked, matching the full run; a transport failure
+    refuses the update so an outage can never become `fan_picks_a`. The whole request set must fit the
+    invocation's projected spend cap before any request is made.
     """
     rows = corpus_rows(corpus_path)
     if not os.path.exists(existing_path):
@@ -731,6 +736,13 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
             raise RuntimeError(f"daily fan picks: {key} has no store title to ask Gemini about")
         titles[key] = {"key": key, "title": title, "year": card_year(facts), "lead": leads.get(key, "")}
 
+    if not math.isfinite(max_spend) or max_spend <= 0:
+        raise ValueError("daily fan picks: max spend must be a positive finite dollar amount")
+    projected = len(titles) * PILOT_COST * MARGIN
+    if projected > max_spend:
+        raise RuntimeError(f"daily fan picks: refusing {len(titles)} requests: their ${projected:.4f} "
+                           f"projected spend crosses the ${max_spend:.2f} per-run cap")
+
     answered, parse_errors, unavailable = {}, {}, {}
     def one(item):
         key, title = item
@@ -753,10 +765,10 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
             franchises = json.load(fh)
         names = Names(rows)
         owned = related(rows, franchises, sequel_keys(rows, titles) if follows is None else follows)
-        for key in titles:
-            # A 200 response with no parseable picks includes Gemini's safety-filter refusals. It was asked, so
-            # the empty anchor is deliberate and suppresses atlas's old structural-affinity fallback.
-            matched = match_answer(answered.get(key, {"picks": []}), key, names, owned.get(key, set()))
+        for key, answer in answered.items():
+            # Only a parseable answer marks the title asked. This is the full run's rule: safety refusals and
+            # malformed responses are absent from the section and retain atlas's structural-affinity fallback.
+            matched = match_answer(answer, key, names, owned.get(key, set()))
             anchors[key] = merged([matched])
 
     costs = [row.get("costUSD", 0.0) for row in [*answered.values(), *parse_errors.values()]]
@@ -765,7 +777,8 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     write_json(out, value)
     return {"asked": len(titles), "answered": len(answered), "emptyAnswers": len(parse_errors),
             "anchors": len(anchors), "picks": sum(len(v) for v in anchors.values()),
-            "costUSD": round(sum(costs), 6)}
+            "costUSD": round(sum(costs), 6), "projectedSpendUSD": round(projected, 6),
+            "spendCapUSD": max_spend}
 
 
 def match(work, corpus_path, franchises_path, follows_path=None):

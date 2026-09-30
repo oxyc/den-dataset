@@ -21,7 +21,7 @@ NOW = datetime.datetime(2026, 9, 24, 3, 23, tzinfo=datetime.timezone.utc)
 
 def args(out, **kwargs):
     return argparse.Namespace(**dict({"out_dir": out, "mode": "export", "since": None, "revisit_weeks": None,
-                                      "spend": False}, **kwargs))
+                                      "spend": False, "fan_picks_max_spend_usd": 1.0}, **kwargs))
 
 
 class Recorded(unittest.TestCase):
@@ -186,6 +186,7 @@ class FanPicks(unittest.TestCase):
              mock.patch.object(daily.fan_picks, "daily_update", return_value=result) as update:
             self.assertEqual(daily.update_fan_picks(day), result)
         self.assertEqual(update.call_args.kwargs["keys"], ["movie:7", "tv:8"])
+        self.assertEqual(update.call_args.kwargs["max_spend"], 1.0)
         self.assertEqual(day.ran, ["fan_picks"])
 
     def test_no_key_carries_the_input_without_asking(self):
@@ -215,6 +216,18 @@ class FanPicks(unittest.TestCase):
             self.assertIsNone(daily.update_fan_picks(day))
         update.assert_not_called()
         self.assertEqual(day.skipped[0]["stage"], "fan_picks")
+
+    def test_a_live_store_with_fan_picks_refuses_a_bundle_that_lost_the_input(self):
+        day = self.day(key="")
+        ctx = types.SimpleNamespace(path=lambda artifact: os.path.join(day.ctx.out_dir,
+                                                                      artifact.filename.replace("{version}", "v")))
+        os.makedirs(os.path.dirname(day.ctx.path(artifacts.PUBLISHED_META)), exist_ok=True)
+        with open(day.ctx.path(artifacts.PUBLISHED_META), "w", encoding="utf-8") as handle:
+            json.dump({"storeInputs": [{"arg": "fan_picks"}]}, handle)
+        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+             mock.patch.object(daily.changes, "planned", return_value={"added": []}):
+            with self.assertRaisesRegex(StageError, "refusing to build a store that drops"):
+                daily.update_fan_picks(day)
 
 
 class DeltaIds(unittest.TestCase):

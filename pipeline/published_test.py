@@ -108,6 +108,13 @@ class Published(unittest.TestCase):
         with open(os.path.join(self.fresh, artifacts.FAN_PICKS.filename), encoding="utf-8") as fh:
             self.assertEqual(json.load(fh)["anchors"], {"movie:1": ["tv:2"]})
 
+    def test_a_generation_whose_store_used_fan_picks_must_bundle_the_input(self):
+        os.unlink(os.path.join(self.out, artifacts.FAN_PICKS.filename))
+        write(os.path.join(self.out, artifacts.MANIFEST.filename),
+              json.dumps({**self.meta, "storeInputs": [{"arg": "fan_picks"}]}))
+        with self.assertRaisesRegex(StageError, "fan-picks.json"):
+            published.bundle(self.out, os.path.join(self.tmp, "missing-fan-picks"))
+
     def test_the_seeded_batch_is_each_title_with_a_source_and_no_plot(self):
         published.seed(self.fresh)
         batch = json.loads(self.read(enrich.batch_path("", 4)))

@@ -13,6 +13,7 @@ third drifted from the first twice in one day. Now the argument list is BUILT fr
 declaration that disagrees with the writer fails at its argument parser rather than in a registry nobody
 runs, and `check_producers.py` reads the same tuple instead of keeping a copy.
 """
+import json
 import os
 import subprocess
 import sys
@@ -65,12 +66,29 @@ def argv(ctx):
     one that is absent stops here, naming its producer — see `Context.require`.
     """
     command = [sys.executable, WRITER]
+    supplied = set()
     for entry in (bind(e) for e in INPUTS):
         path = ctx.require(entry.artifact)
         if path is None and entry.name in COMMITTED and entry.name not in ctx.overrides:
             path = COMMITTED[entry.name]
         if path is not None:
             command += [entry.flag(), path]
+            supplied.add(entry.arg)
+    live = ctx.path(artifacts.PUBLISHED_META)
+    if os.path.exists(live):
+        try:
+            with open(live, encoding="utf-8") as handle:
+                record = json.load(handle).get("storeInputs") or []
+        except (OSError, ValueError) as error:
+            raise StageError(f"store: could not read the live manifest: {error}") from error
+        if not isinstance(record, list):
+            raise StageError("store: the live manifest's storeInputs is not a list")
+        optional = {bind(entry).arg for entry in INPUTS if not bind(entry).artifact.required}
+        live_optional = {entry.get("arg") for entry in record if isinstance(entry, dict)} & optional
+        missing = sorted(live_optional - supplied)
+        if missing:
+            raise StageError(f"store: refusing to drop optional input(s) the live store used: "
+                             f"{', '.join(missing)}. Restore them from the live generation's corpus bundle")
     # `--out` rather than `--store`: the writer names its output by role, not by artifact.
     command += ["--dataset-version", ctx.dataset_version, "--out", ctx.path(artifacts.STORE)]
     # Without this the store is written and no manifest names it, so `publish-dataset.sh` refuses it as

@@ -192,6 +192,19 @@ def update_fan_picks(day):
                "the existing fan-picks input is still carried forward")
         day.skip("fan_picks", why)
     existing = ctx.path(artifacts.FAN_PICKS)
+    live = day.ctx.path(artifacts.PUBLISHED_META)
+    if not os.path.exists(existing) and os.path.exists(live):
+        try:
+            with open(live, encoding="utf-8") as handle:
+                store_inputs = json.load(handle).get("storeInputs") or []
+        except (OSError, ValueError) as error:
+            raise StageError(f"fan_picks: could not read the live manifest: {error}") from error
+        if not isinstance(store_inputs, list):
+            raise StageError("fan_picks: the live manifest's storeInputs is not a list")
+        if any(entry.get("arg") == "fan_picks" for entry in store_inputs if isinstance(entry, dict)):
+            raise StageError(f"fan_picks: the live store was built with fan picks but {existing} is missing; "
+                             "refusing to build a store that drops its fan_picks sections. Republish the live "
+                             "generation's corpus bundle with fan-picks.json before enabling the daily job")
     if not asked and not os.path.exists(existing):
         if not added:
             day.skip("fan_picks", "no titles were added and there is no existing fan-picks input to carry")
@@ -200,7 +213,7 @@ def update_fan_picks(day):
         result = fan_picks.daily_update(
             corpus_path=ctx.path(artifacts.CORPUS), articles_path=ctx.path(artifacts.ARTICLES),
             franchises_path=ctx.path(artifacts.FRANCHISES), existing_path=existing,
-            out=existing, keys=asked)
+            out=existing, keys=asked, max_spend=day.args.fan_picks_max_spend_usd)
     except (OSError, ValueError, RuntimeError) as error:
         raise StageError(f"fan_picks: {error}") from error
     day.ran.append("fan_picks")
@@ -362,4 +375,7 @@ def register(commands):
     sub.add_argument("--spend", action="store_true",
                      help="buy the classify, critique, genres & moods, and new-title fan-picks answers "
                           "(needs the corresponding provider keys and a live baseline)")
+    sub.add_argument("--fan-picks-max-spend-usd", type=float, default=fan_picks.DAILY_SPEND_CAP, metavar="USD",
+                     help=f"projected per-run cap for new-title Gemini calls (default: "
+                          f"${fan_picks.DAILY_SPEND_CAP:.2f}); the whole set must fit before any call")
     return sub
