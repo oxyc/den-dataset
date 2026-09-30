@@ -14,7 +14,7 @@ name: daily
 #            GEMINI_API_KEY                     new titles' fan picks (with spend)
 #            ANTHROPIC_API_KEY                  new titles' premise tags (with spend)
 #            WIKIMEDIA_ENTERPRISE_USERNAME/_PASSWORD   optional plot source
-#            DEN_EMBED_URL                      a den-embed to embed against instead of the job's own
+#            DEN_EMBED_URL                      fallback den-embed when DEN_EMBED_IMAGE is not configured
 #   vars     DEN_DAILY_ENABLED                  `true` to run on the schedule
 #            DEN_DAILY_SPEND                    `true` to let the scheduled run buy the day's answers
 #            DEN_DAILY_SPEND_TYPESAFE           `false` disables TypeSafe while master spend is on
@@ -119,7 +119,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WIKIMEDIA_ENTERPRISE_USERNAME: ${{ secrets.WIKIMEDIA_ENTERPRISE_USERNAME }}
           WIKIMEDIA_ENTERPRISE_PASSWORD: ${{ secrets.WIKIMEDIA_ENTERPRISE_PASSWORD }}
-          DEN_EMBED_URL: ${{ secrets.DEN_EMBED_URL || (vars.DEN_EMBED_IMAGE != '' && 'http://127.0.0.1:8080' || '') }}
+          # When the workflow started its pinned image, use that exact service. Preferring the fallback secret
+          # here left the local canary-proved image idle and could send writes to a different CPU/runtime build.
+          DEN_EMBED_URL: ${{ (vars.DEN_EMBED_IMAGE != '' && 'http://127.0.0.1:8080') || secrets.DEN_EMBED_URL || '' }}
           WEEKS: ${{ github.event_name == 'workflow_dispatch' && inputs.revisit_weeks || (github.event.schedule == '47 4 * * 1' && (vars.DEN_REVISIT_WEEKS || '8') || '') }}
           # format() so a dispatch's `false` is a non-empty string and is not replaced by the schedule's variable.
           SPEND: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.spend) || format('{0}', vars.DEN_DAILY_SPEND == 'true') }}
