@@ -238,6 +238,10 @@ def run(args, inputs, prose_check, provenance_check):
         meta["storeFile"] = os.path.basename(args.out)
         meta["storeSha256"] = hashlib.sha256(blob).hexdigest()
         meta["storeBytes"] = len(blob)
+        # The publisher compares this with the live store and refuses a disappearing section. Readers
+        # intentionally tolerate optional sections for old stores; a new publish silently losing one is a
+        # different event, and the manifest is the cheap comparison after the transition publish.
+        meta["storeSections"] = list(sec.order)
         # WHAT IT WAS BUILT FROM, in the manifest rather than in the store or a sidecar.
         #
         # In the store would change den-spec `wire/store-v1.md`, the committed fixture and both readers —

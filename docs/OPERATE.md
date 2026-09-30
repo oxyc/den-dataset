@@ -70,6 +70,7 @@ Each gate is in `pipeline/publish-dataset.sh` with the incident that put it ther
 |---|---|
 | record count / coverage | A blob would lose records or fall behind the corpus. Find the stage that lost them; `DEN_ALLOW_DROPPING_BLOBS=1` only for a deliberate shrink — it also switches off the "could not read the published manifest" guard. |
 | `datasetVersion … is already published with a DIFFERENT store` | The corpus is unchanged and the store is not. If the writer changed deliberately: `DEN_STORE_REBUILD='what changed'`, recorded in the manifest as `storeRebuild`. If the corpus changed, it wants a new `datasetVersion`. |
+| `store would lose sections` | Restore the missing store input. For a deliberate format retirement only, set `DEN_ALLOW_DROPPING_STORE_SECTIONS='why these sections are retired'`; the reason is printed and recorded as `droppedStoreSections`. |
 | ownership (no producer, or a changed store input) | An artifact nothing committed here builds, or a store built from an input that has since moved. Rebuild; `DEN_ALLOW_UNOWNED_ARTIFACTS=1` / `DEN_ALLOW_STALE_STORE_INPUTS=1` when deliberate. |
 | dead generation | A declared file carries another generation's version in its name. Rebuild it or drop the key. |
 | manifest contradicts its files | A count or byte size in the manifest disagrees with the file. Re-stamp from the files. |

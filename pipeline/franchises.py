@@ -474,7 +474,6 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None
         confidence[key] = 1.0
     counts = collections.Counter(automatic=len(automatic))
     one = collections.defaultdict(list)
-    named = {}
     separate = set()
     catalogue_votes = collections.defaultdict(list)
     for key, listed in asked.items():
@@ -502,16 +501,27 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None
             counts["no franchise"] += 1
             continue
         chosen = listed[fg.LETTERS.index(letter)]
+        rerouted = False
+        # A related group's name is enough to show it to Jev, not enough to move a title out of the group
+        # Wikidata says contains it. Accept a cross-group choice only when the two groups have structural
+        # continuity. This keeps national remake series separate (the Norwegian and Danish Olsen lines)
+        # while still allowing cases such as Beck, whose productions share a continuing cast.
+        if isinstance(chosen, str) and key not in groups[chosen].members:
+            home = sorted((g for g in listed if isinstance(g, str) and key in groups[g].members),
+                          key=lambda g: (len(groups[g].members), g))
+            if home and not any(linked(chosen, own, groups, titles, flagged) for own in home):
+                chosen = home[0]
+                rerouted = True
         gid = f"characters:{min(chosen[1])}" if isinstance(chosen, tuple) else \
             container(chosen, listed, groups, flagged, choice.get("probabilities") or {})
-        held = support(choice, listed, gid, groups, flagged)
+        held = 1.0 if rerouted else support(choice, listed, gid, groups, flagged)
         if held < TAKE:
             counts["no franchise"] += 1
             continue
         # A separate adaptation the line pass says continues the line is one more title of it (Red Dragon),
         # neither another production nor a reboot starting an era.
         apart = got["fr__separate_adaptation"]["noul"] >= SEPARATE_TAKE and not continues_line(key, listed, line)
-        if isinstance(chosen, str) and flagged.get(gid) == "catalogue" \
+        if not rerouted and isinstance(chosen, str) and flagged.get(gid) == "catalogue" \
                 and catalogue_support.get(gid, 0.0) < CATALOGUE_TAKE:
             counts["no franchise"] += 1
             continue
@@ -522,11 +532,9 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None
             groups[gid] = fg.Group(gid, "characters", titles[min(chosen[1], key=lambda k: fg.order_key(titles[k]))].name,
                                    chosen[1])
         franchise_of[key] = gid
-        if isinstance(chosen, str):
-            named[key] = chosen
         if gid != chosen and isinstance(chosen, str):
             era_of[key] = chosen
-        source[gid] = JEV
+        source[gid] = WIKIDATA if rerouted else JEV
         confidence[key] = held
         umbrellas = [other for other in listed if isinstance(other, str) and other != gid
                      and flagged.get(other) == "universe" and key in groups[other].members]
@@ -567,7 +575,7 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None
         # such pairs are unrelated (Die Hard and A Hard Day's Night) with votes no threshold separates from
         # the right ones (Beck and Martin Beck). They merge only on evidence beside the vote.
         g1, g2 = sorted(pair)
-        if not (groups[g1].members & groups[g2].members) and not linked(g1, g2, groups, titles, flagged, named):
+        if not (groups[g1].members & groups[g2].members) and not linked(g1, g2, groups, titles, flagged):
             continue
         a, b = sorted((top(g) for g in pair), key=lambda g: (-len(groups[g].members), g))
         if a != b:
@@ -603,20 +611,21 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None
     return out, counts
 
 
-def linked(a, b, groups, titles, flagged, named):
+def linked(a, b, groups, titles, flagged):
     """Whether something other than a shared name word says two groups with no title in common are one
     franchise (oxyc/den-dataset#158): a Wikidata series or media franchise holding titles of both (Naruto's
-    films and the series); a continuing cast, `SHARED_CAST` actors credited in both (the 1993 Martin Beck
-    films and the 1997– Beck films; Wikidata rarely states the characters they play); or a title of one
-    whose answer chose the other (the Norwegian Olsenbanden choosing the Danish Olsen Gang)."""
+    films and the series); or a continuing cast, `SHARED_CAST` actors credited in both (the 1993 Martin
+    Beck films and the 1997– Beck films; Wikidata rarely states the characters they play)."""
     mine, theirs = groups[a].members, groups[b].members
     if any(g.id not in (a, b) and g.id not in flagged and g.kind in ("series", "franchise")
            and g.members & mine and g.members & theirs for g in groups.values()):
         return True
-    if len({p for k in mine for p in titles[k].cast} & {p for k in theirs for p in titles[k].cast}) >= SHARED_CAST:
-        return True
-    return any(key in side and groups[chosen].members <= other
-               for key, chosen in named.items() for side, other in ((mine, theirs), (theirs, mine)))
+    shared_cast = ({p for k in mine for p in titles[k].cast} &
+                   {p for k in theirs for p in titles[k].cast})
+    # Cast continuity can bridge an adaptation/source group to its screen series (Beck). It must not join
+    # two explicit production series: remakes often retain or cameo several actors, as the Norwegian
+    # Olsenbanden films do with the Danish Olsen Gang, without continuing that production line.
+    return "book-series" in (groups[a].kind, groups[b].kind) and len(shared_cast) >= SHARED_CAST
 
 
 def container(chosen, listed, groups, flagged, probabilities):

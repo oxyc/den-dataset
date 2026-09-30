@@ -49,6 +49,23 @@ class Groups(unittest.TestCase):
                  for seed in range(8)}
         self.assertEqual(names, {"Plaga Zombie"})
 
+    def test_separate_screen_chains_inside_one_book_series_are_kept(self):
+        titles = {
+            "movie:1": fg.Title("movie:1", "Swedish One", 2009, sources=["Qbooks"], follows=["movie:2"]),
+            "movie:2": fg.Title("movie:2", "Swedish Two", 2009, sources=["Qbooks"], follows=["movie:1"]),
+            "movie:3": fg.Title("movie:3", "American One", 2011, sources=["Qbooks"], follows=["movie:4"]),
+            "movie:4": fg.Title("movie:4", "American Two", 2018, sources=["Qbooks"], follows=["movie:3"]),
+        }
+        groups = fg.build(titles, {"Qbooks": "The novels"})
+        self.assertEqual(groups["Qbooks"].members, set(titles))
+        self.assertEqual(groups["chain:movie:1"].members, {"movie:1", "movie:2"})
+        self.assertEqual(groups["chain:movie:3"].members, {"movie:3", "movie:4"})
+
+        automatic, asked = fg.plan(titles, groups)
+        self.assertEqual(automatic["movie:1"], ("chain:movie:1", None))
+        self.assertEqual(automatic["movie:4"], ("chain:movie:3", None))
+        self.assertEqual(asked, {})
+
 
 class Plan(unittest.TestCase):
     def test_one_root_is_automatic_with_its_child_as_the_era(self):
