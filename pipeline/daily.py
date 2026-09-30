@@ -52,7 +52,7 @@ import sys
 
 from lib import cache as caching
 
-from . import artifacts, changes, finalize, load, plot_length, premise_daily, published, spend
+from . import artifacts, changes, classify, finalize, load, plot_length, premise_daily, published, spend
 from .contract import Context, StageError
 from . import STAGES
 from tools import fan_picks
@@ -145,6 +145,7 @@ class Day:
                                     environ.get("ANTHROPIC_API_KEY") and environ.get("DEN_EMBED_URL"))
         self.fan_picks = None
         self.premise = None
+        self.classifiable_changes = None
         prior = spend.month_to_date(getattr(args, "published_reports_dir", None), now.date())
         self.ledger = spend.Ledger(prior, getattr(args, "max_spend_usd_month", 10.0))
         self.typesafe_before = None
@@ -260,6 +261,9 @@ def update_premise(day):
                "new titles keep no premise tags until a spending run")
         day.skip("premise_tags", why)
         return None
+    if day.classifiable_changes is False:
+        day.skip("premise_tags", "no newly admitted or regained title has an article to classify")
+        return None
     tags_path = premise_daily.ensure_tags(day.ctx)
     premise_cap = getattr(day.args, "premise_max_spend_usd", 1.0)
     ceiling = max(1, int(premise_cap / premise_daily.PRICE_OUT))
@@ -316,11 +320,18 @@ def run_day(day):
                 day.skip(name, "not given --spend with a TYPESAFE_API_KEY, so nothing was bought: a changed "
                                "title keeps its old rows and a new one has none")
                 continue
+            if name == "classify":
+                day.classifiable_changes = classify.changed_articles(ctx) is not None
+            if day.classifiable_changes is False:
+                day.skip(name, "no newly admitted or regained title has an article to classify")
+                continue
             day.stage(name, spend=True)
         elif name in ASKS:
             if not day.can_buy:
                 day.skip(f"{name} (ask)", ASKS[name])
-            day.stage(name, spend=day.can_buy)
+            elif day.classifiable_changes is False:
+                day.skip(f"{name} (ask)", "no newly admitted or regained title has a classified article")
+            day.stage(name, spend=day.can_buy and day.classifiable_changes is not False)
             if name == "genres_moods":
                 update_premise(day)
             if name == "franchises":
