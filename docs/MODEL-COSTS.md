@@ -93,7 +93,7 @@ Setup:
 | Model | Triplet accuracy | vs Haiku | $/title (5/call) | Problems |
 |---|---:|---|---:|---|
 | Claude Haiku 4.5 | 0.786 (154) | – | $0.0017 | none; tagged every title |
-| gpt-5.6-luna (Codex, 10/call) | 0.838 (154) | 10/18, p=0.18 | $0.0003 ($0.00015 Batch) | 10 of 46 calls had one tag with a space; needs an OpenAI API key |
+| gpt-5.6-luna (Codex, 10/call) | 0.838 (154) | 10/18, p=0.18 | $0.0003 ($0.00015 Batch) | 10 of 46 calls had one tag with a space |
 | Gemini 3.5 Flash-Lite | 0.813 (150) | 14/19, p=0.49 | $0.0005 | malformed JSON without a schema; rows under 8 tags; tags with spaces |
 | Gemini 3.1 Flash-Lite | 0.800 (150) | 13/16, p=0.71 | $0.0008 | ~379 thinking tokens a title |
 | Gemini 3.7 Flash | 0.800 (150) | 18/21, p=0.75 | $0.0010 (2027: $0.0020) | ~1 in 4 five-title calls malformed without a schema |
