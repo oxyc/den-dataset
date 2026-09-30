@@ -67,6 +67,7 @@ OUTPUTS = (artifacts.FRANCHISE_STATES, artifacts.FRANCHISE_ANSWERS, artifacts.FR
            artifacts.FRANCHISE_LINE_ANSWERS_MANIFEST, artifacts.FRANCHISE_LINE_DECISIONS, artifacts.FRANCHISES)
 
 GOLDEN = os.path.join(REPO, "data", "franchise-golden.json")
+DISPLAY_NAMES = os.path.join(REPO, "data", "franchise-display-names.json")
 HEADING = "Franchise candidates (from Wikidata)"
 #: The `source` of a franchise: decided from Wikidata alone, or with Jev's answers.
 WIKIDATA, JEV = "wikidata", "jev-franchise-v1"
@@ -201,7 +202,7 @@ def titles_from(records, source_series, tmdb_keys):
         out[key] = fg.Title(key, names.get("en") or names.get("orig") or key, _year(r),
                             series=r.get("franchise") or [], franchises=r.get("mediaFranchise") or [],
                             sources=sources, follows=follows, characters=r.get("characters") or [],
-                            cast=r.get("cast") or [], date=_date(r))
+                            cast=r.get("cast") or [], date=_date(r), countries=r.get("countries") or [])
     return out
 
 
@@ -229,13 +230,31 @@ def grouped(ctx, cache=None):
     names = {q: e.get("en") for q, e in entities.items() if isinstance(e, dict) and e.get("en")}
     unnamed = sorted(({s for found in source_series.values() for s in found} |
                       {p for ps in parents.values() for p in ps}) - set(names))
-    if unnamed:
-        names.update({q: d["name"] for q, d in wd.entity_details(unnamed).items() if d.get("name")})
+    details = wd.entity_details(unnamed) if unnamed else {}
+    if details:
+        names.update({q: d["name"] for q, d in details.items() if d.get("name")})
     titles = titles_from(records, source_series, tmdb_keys)
     groups = fg.build(titles, names, parents)
+    with open(DISPLAY_NAMES, encoding="utf-8") as handle:
+        display_names = json.load(handle)
+    prefer_distinct_wikidata_names(groups, names, display_names)
     flagged = fg.flags(groups, titles)
     automatic, asked = fg.plan(titles, groups, flagged)
     return titles, groups, flagged, automatic, asked, names
+
+
+def prefer_distinct_wikidata_names(groups, names, preferred):
+    """Use recorded native Wikidata labels for own series items whose English labels collapse together."""
+    changed = {}
+    for qid, label in preferred.items():
+        if qid == "_" or qid not in groups:
+            continue
+        if not isinstance(label, str) or not label.strip():
+            raise StageError(f"franchises: {DISPLAY_NAMES} has an invalid label for {qid}")
+        groups[qid].name = label.strip()
+        names[qid] = label.strip()
+        changed[qid] = label.strip()
+    return changed
 
 
 # ------------------------------------------------------------------------------------------------ ask
@@ -731,11 +750,50 @@ def document(franchises, groups, titles, names):
     return out, of
 
 
+def check_unique_names(franchises):
+    """Refuse display names shared by two final franchise rows, listing every collision."""
+    by_name = collections.defaultdict(list)
+    spelling = {}
+    for fid, entry in franchises.items():
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            raise StageError(f"franchises: {fid} has no display name")
+        token = " ".join(name.split()).casefold()
+        by_name[token].append(fid)
+        spelling.setdefault(token, name)
+    duplicates = [(spelling[token], sorted(ids)) for token, ids in by_name.items() if len(ids) > 1]
+    if duplicates:
+        lines = [f"{name!r}: {', '.join(ids)}" for name, ids in sorted(duplicates)]
+        raise StageError("franchises: duplicate display names; every group must be distinct:\n  " +
+                         "\n  ".join(lines))
+
+
+def disambiguate_duplicate_names(franchises):
+    """Add first-release-year and medium only to names that otherwise collide."""
+    by_name = collections.defaultdict(list)
+    for fid, entry in franchises.items():
+        by_name[" ".join(entry["name"].split()).casefold()].append((fid, entry))
+    changed = {}
+    for colliding in by_name.values():
+        if len(colliding) < 2:
+            continue
+        for fid, entry in colliding:
+            first = entry.get("members", [{}])[0]
+            year, key = first.get("year"), first.get("key", "")
+            medium = "films" if key.startswith("movie:") else "series"
+            qualifier = f"{year} {medium}" if isinstance(year, int) else medium
+            entry["name"] = f"{entry['name']} ({qualifier})"
+            changed[fid] = entry["name"]
+    return changed
+
+
 def derive(ctx, titles, groups, automatic, asked, names, flagged):
     answers = read_answers(ctx)
     line = read_answers(ctx, p=LINE)
     franchises, counts = resolve(titles, groups, flagged, automatic, asked, answers, names, line)
     doc, of = document(franchises, groups, titles, names)
+    disambiguated = disambiguate_duplicate_names(doc)
+    check_unique_names(doc)
     with open(GOLDEN, encoding="utf-8") as fh:
         golden = json.load(fh)
     result = eval_franchises.evaluate({"franchises": doc, "titles": of}, golden, set(titles))
@@ -747,6 +805,7 @@ def derive(ctx, titles, groups, automatic, asked, names, flagged):
         golden_sha = hashlib.sha256(fh.read()).hexdigest()
     blob = {"schema": 2, "datasetVersion": ctx.dataset_version, "franchises": doc, "titles": of,
             "derivation": {"golden": os.path.relpath(GOLDEN, REPO), "goldenSha256": golden_sha,
+                           "nameDisambiguations": disambiguated,
                            "eval": result, "counts": dict(counts), "model": PINNED_MODEL}}
     path = ctx.path(artifacts.FRANCHISES)
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
