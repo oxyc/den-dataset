@@ -524,13 +524,13 @@ JEV_MORE_LIKE = Artifact(
 )
 
 #: Each asked title's fan picks for You Might Also Like (oxyc/den-atlas#121): the titles a model named that a
-#: fan would also love, matched to corpus keys. Bought by an operator run, never by a stage, so a store stage
-#: with no copy in the out-dir and no override writes no fan_picks sections.
+#: fan would also love, matched to corpus keys. The full input comes from an operator run; the daily job merges
+#: picks for newly added titles before the store stage. With no input the store writes no fan_picks sections.
 FAN_PICKS = Artifact(
     name="fan_picks",
     filename="fan-picks.json",
     producer="tools/fan_picks.py",
-    how="tools/fan_picks.py prepare/run/collect/match, then export (oxyc/den-atlas#121)",
+    how="tools/fan_picks.py prepare/run/collect/match, then export; daily merges new titles (oxyc/den-atlas#121)",
     required=False,
 )
 

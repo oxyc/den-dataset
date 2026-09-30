@@ -26,6 +26,8 @@ the out-dir first (`pipeline/published.py`).
   * no `--spend` or no `TYPESAFE_API_KEY` — the classify and critique passes, and the genres & moods and
     franchise asks.
     A changed title then keeps its old rows, and a new one has none; the report says which;
+  * no `--spend` or no `GEMINI_API_KEY` — no fan picks are bought for added titles; the durable existing
+    fan-picks input is still sanitized and carried into the next store;
   * no `DEN_EMBED_URL` — the embed pass. Any den-embed will do whose canary answers match
     (`docs/OPERATE.md`, "The alignment rule"); the scheduled job runs its own. A new title with a plot then
     has no vector and the plot-vector gate refuses.
@@ -52,6 +54,7 @@ from lib import cache as caching
 from . import artifacts, changes, finalize, load, plot_length, published
 from .contract import Context, StageError
 from . import STAGES
+from tools import fan_picks
 
 #: The report the job leaves beside the store, for the workflow to upload and a person to read.
 REPORT = "daily-report.json"
@@ -133,6 +136,8 @@ class Day:
                            revisit_weeks=args.revisit_weeks, spend=False)
         self.skipped, self.ran = [], []
         self.can_buy = bool(args.spend and environ.get("TYPESAFE_API_KEY"))
+        self.can_buy_fan_picks = bool(args.spend and environ.get("GEMINI_API_KEY"))
+        self.fan_picks = None
 
     def skip(self, stage, why):
         self.skipped.append({"stage": stage, "why": why})
@@ -174,6 +179,46 @@ def seed_if_empty(ctx):
     seeded = published.seed(ctx.out_dir)
     print(f"==> seeded from the live dataset: {json.dumps(seeded, sort_keys=True)}", file=sys.stderr)
     return seeded
+
+
+def update_fan_picks(day):
+    """Merge fan picks for the plan's added titles before the store reads its input."""
+    ctx = finalize_ctx(day.ctx)
+    plan = changes.planned(day.ctx) or {}
+    added = plan.get("added") or []
+    asked = added if day.can_buy_fan_picks else []
+    if added and not day.can_buy_fan_picks:
+        why = ("not given --spend with GEMINI_API_KEY, so no new-title fan picks were bought; "
+               "the existing fan-picks input is still carried forward")
+        day.skip("fan_picks", why)
+    existing = ctx.path(artifacts.FAN_PICKS)
+    live = day.ctx.path(artifacts.PUBLISHED_META)
+    if not os.path.exists(existing) and os.path.exists(live):
+        try:
+            with open(live, encoding="utf-8") as handle:
+                store_inputs = json.load(handle).get("storeInputs") or []
+        except (OSError, ValueError) as error:
+            raise StageError(f"fan_picks: could not read the live manifest: {error}") from error
+        if not isinstance(store_inputs, list):
+            raise StageError("fan_picks: the live manifest's storeInputs is not a list")
+        if any(entry.get("arg") == "fan_picks" for entry in store_inputs if isinstance(entry, dict)):
+            raise StageError(f"fan_picks: the live store was built with fan picks but {existing} is missing; "
+                             "refusing to build a store that drops its fan_picks sections. Republish the live "
+                             "generation's corpus bundle with fan-picks.json before enabling the daily job")
+    if not asked and not os.path.exists(existing):
+        if not added:
+            day.skip("fan_picks", "no titles were added and there is no existing fan-picks input to carry")
+        return None
+    try:
+        result = fan_picks.daily_update(
+            corpus_path=ctx.path(artifacts.CORPUS), articles_path=ctx.path(artifacts.ARTICLES),
+            franchises_path=ctx.path(artifacts.FRANCHISES), existing_path=existing,
+            out=existing, keys=asked, max_spend=day.args.fan_picks_max_spend_usd)
+    except (OSError, ValueError, RuntimeError) as error:
+        raise StageError(f"fan_picks: {error}") from error
+    day.ran.append("fan_picks")
+    print(f"==> fan_picks: {json.dumps(result, sort_keys=True)}", file=sys.stderr)
+    return result
 
 
 def run_day(day):
@@ -218,6 +263,9 @@ def run_day(day):
         elif name == "facts":
             count = write_delta_ids(finalize_ctx(ctx), live_version(ctx))
             print(f"==> facts: {count} delta id(s) by the delta-pass rule (docs/OPERATE.md, Wikidata)", file=sys.stderr)
+            day.stage(name)
+        elif name == "store":
+            day.fan_picks = update_fan_picks(day)
             day.stage(name)
         elif name == "publish":
             try:
@@ -267,6 +315,7 @@ def report(day, ready, why, tokens):
         "withdrawn": plan.get("withdrawn", {}), "revisit": plan.get("revisit"),
         "seeded": getattr(day, "seeded", None), "ran": day.ran, "skipped": day.skipped,
         "migrationBoundary": boundary,
+        "fanPicks": day.fan_picks,
         "spend": {"inputTokens": tokens, "usd": round(tokens * rate, 4)},
     }
     caching.write_atomically(os.path.join(ctx.out_dir, REPORT),
@@ -276,6 +325,9 @@ def report(day, ready, why, tokens):
              f"- live dataset: {(out['baseline'] or {}).get('datasetVersion') or 'none (a first generation)'}",
              f"- built: {out['datasetVersion']} ({out['store'].get('storeRecords')} rows)",
              f"- spend: ${out['spend']['usd']:.2f} ({tokens:,} input tokens)", ""]
+    if out["fanPicks"]:
+        lines += [f"- fan picks: {out['fanPicks']['asked']} asked, {out['fanPicks']['answered']} answered, "
+                  f"{out['fanPicks']['emptyAnswers']} empty; ${out['fanPicks']['costUSD']:.4f}", ""]
     counts = out["counts"] or {}
     lines += [f"| added | changed | withdrawn | revised | revisited |", "|---|---|---|---|---|",
               f"| {counts.get('added', 0)} | {counts.get('changed', 0)} | {counts.get('withdrawn', 0)} | "
@@ -321,6 +373,9 @@ def register(commands):
     sub.add_argument("--revisit-weeks", type=int, metavar="N",
                      help="also revisit this week's slice of an N-week cycle (the weekly run)")
     sub.add_argument("--spend", action="store_true",
-                     help="buy the classify, critique and genres & moods answers for what moved "
-                          "(needs TYPESAFE_API_KEY and a live baseline)")
+                     help="buy the classify, critique, genres & moods, and new-title fan-picks answers "
+                          "(needs the corresponding provider keys and a live baseline)")
+    sub.add_argument("--fan-picks-max-spend-usd", type=float, default=fan_picks.DAILY_SPEND_CAP, metavar="USD",
+                     help=f"projected per-run cap for new-title Gemini calls (default: "
+                          f"${fan_picks.DAILY_SPEND_CAP:.2f}); the whole set must fit before any call")
     return sub

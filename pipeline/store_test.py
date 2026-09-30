@@ -16,6 +16,7 @@ fixture beside it would be a second definition of what a valid corpus is.
 """
 import hashlib
 import importlib.util
+import json
 import os
 import tempfile
 import unittest
@@ -123,6 +124,16 @@ class CommandLine(unittest.TestCase):
             stamped = Context(out_dir=ctx.out_dir, dataset_version=ctx.dataset_version,
                               overrides=ctx.overrides, stamp_meta=os.path.join(out, "meta.json"))
             self.assertIn("--stamp-meta", store.argv(stamped))
+
+    def test_a_live_optional_store_input_cannot_disappear(self):
+        with tempfile.TemporaryDirectory() as out:
+            ctx = self.paths(out, skip=("fan_picks",))
+            live = ctx.path(artifacts.PUBLISHED_META)
+            os.makedirs(os.path.dirname(live), exist_ok=True)
+            with open(live, "w", encoding="utf-8") as handle:
+                json.dump({"storeInputs": [{"arg": "fan_picks"}]}, handle)
+            with self.assertRaisesRegex(StageError, "refusing to drop.*fan_picks"):
+                store.argv(ctx)
 
 
 class Equivalence(fixture.StoreFixture, unittest.TestCase):

@@ -48,6 +48,8 @@ def generation(out):
           '{"schema":1,"decisions":{"movie:1":{"candidates":["Q1"]}}}')
     write(os.path.join(out, artifacts.FRANCHISES.filename),
           '{"schema":2,"titles":{"movie:1":{"primary":"Q1"}}}')
+    write(os.path.join(out, artifacts.FAN_PICKS.filename),
+          '{"schema":"fan-picks-v1","anchors":{"movie:1":["tv:2"]}}')
     write(os.path.join(out, artifacts.VECTOR_LABELS.filename),
           json.dumps({"records": [{"tmdbId": 1, "mediaType": "movie", "genres": ["drama"]}]}))
     vector_blob.write(os.path.join(out, artifacts.VECTORS.filename), ["movie:1"], bytes([1, 255, 128]), 3)
@@ -100,6 +102,18 @@ class Published(unittest.TestCase):
         self.assertEqual(json.loads(self.read(artifacts.FRANCHISES.filename))["schema"], 2)
         self.assertNotIn("franchise-states", self.record["files"])
         self.assertFalse(any(name.startswith("franchise-answers") for name in self.record["files"]))
+
+    def test_fan_picks_survive_for_the_next_stateless_daily_merge(self):
+        published.seed(self.fresh)
+        with open(os.path.join(self.fresh, artifacts.FAN_PICKS.filename), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["anchors"], {"movie:1": ["tv:2"]})
+
+    def test_a_generation_whose_store_used_fan_picks_must_bundle_the_input(self):
+        os.unlink(os.path.join(self.out, artifacts.FAN_PICKS.filename))
+        write(os.path.join(self.out, artifacts.MANIFEST.filename),
+              json.dumps({**self.meta, "storeInputs": [{"arg": "fan_picks"}]}))
+        with self.assertRaisesRegex(StageError, "fan-picks.json"):
+            published.bundle(self.out, os.path.join(self.tmp, "missing-fan-picks"))
 
     def test_the_seeded_batch_is_each_title_with_a_source_and_no_plot(self):
         published.seed(self.fresh)

@@ -21,7 +21,7 @@ NOW = datetime.datetime(2026, 9, 24, 3, 23, tzinfo=datetime.timezone.utc)
 
 def args(out, **kwargs):
     return argparse.Namespace(**dict({"out_dir": out, "mode": "export", "since": None, "revisit_weeks": None,
-                                      "spend": False}, **kwargs))
+                                      "spend": False, "fan_picks_max_spend_usd": 1.0}, **kwargs))
 
 
 class Recorded(unittest.TestCase):
@@ -39,6 +39,10 @@ class Recorded(unittest.TestCase):
         patch = mock.patch.object(daily, "load", self.stage)
         patch.start()
         self.addCleanup(patch.stop)
+        fan = mock.patch.object(daily, "update_fan_picks", lambda day: {
+            "asked": 0, "answered": 0, "emptyAnswers": 0, "anchors": 1, "picks": 1, "costUSD": 0.0})
+        fan.start()
+        self.addCleanup(fan.stop)
         for name in ("write_delta_ids", "finalize_ctx"):
             stub = mock.patch.object(daily, name, (lambda *a: 0) if name == "write_delta_ids" else (lambda c: c))
             stub.start()
@@ -163,6 +167,67 @@ class Refusals(Recorded):
         })
         with open(os.path.join(self.out, daily.SUMMARY), encoding="utf-8") as handle:
             self.assertIn("**Migration boundary**", handle.read())
+
+
+class FanPicks(unittest.TestCase):
+    def day(self, spend=True, key="g"):
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        environ = {"GEMINI_API_KEY": key} if key else {}
+        return daily.Day(args(directory, spend=spend), environ, NOW)
+
+    def test_added_titles_are_the_only_online_fan_pick_asks(self):
+        day = self.day()
+        ctx = types.SimpleNamespace(path=lambda artifact: os.path.join(day.ctx.out_dir,
+                                                                      artifact.filename.replace("{version}", "v")))
+        result = {"asked": 2, "answered": 2, "emptyAnswers": 0,
+                  "anchors": 10, "picks": 40, "costUSD": 0.01}
+        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+             mock.patch.object(daily.changes, "planned", return_value={"added": ["movie:7", "tv:8"]}), \
+             mock.patch.object(daily.fan_picks, "daily_update", return_value=result) as update:
+            self.assertEqual(daily.update_fan_picks(day), result)
+        self.assertEqual(update.call_args.kwargs["keys"], ["movie:7", "tv:8"])
+        self.assertEqual(update.call_args.kwargs["max_spend"], 1.0)
+        self.assertEqual(day.ran, ["fan_picks"])
+
+    def test_no_key_carries_the_input_without_asking(self):
+        day = self.day(key="")
+        ctx = types.SimpleNamespace(path=lambda artifact: os.path.join(day.ctx.out_dir,
+                                                                      artifact.filename.replace("{version}", "v")))
+        with open(ctx.path(artifacts.FAN_PICKS), "w", encoding="utf-8") as handle:
+            handle.write('{"anchors":{"movie:1":[]}}')
+        result = {"asked": 0, "answered": 0, "emptyAnswers": 0,
+                  "anchors": 8, "picks": 30, "costUSD": 0.0}
+        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+             mock.patch.object(daily.changes, "planned", return_value={"added": ["movie:7"]}), \
+             mock.patch.object(daily.fan_picks, "daily_update", return_value=result) as update, \
+             contextlib.redirect_stderr(io.StringIO()):
+            daily.update_fan_picks(day)
+        self.assertEqual(update.call_args.kwargs["keys"], [])
+        self.assertEqual(day.skipped[0]["stage"], "fan_picks")
+
+    def test_no_existing_input_and_nothing_to_ask_is_a_compatible_no_op(self):
+        day = self.day(key="")
+        ctx = types.SimpleNamespace(path=lambda artifact: os.path.join(day.ctx.out_dir,
+                                                                      artifact.filename.replace("{version}", "v")))
+        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+             mock.patch.object(daily.changes, "planned", return_value={"added": []}), \
+             mock.patch.object(daily.fan_picks, "daily_update") as update, \
+             contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(daily.update_fan_picks(day))
+        update.assert_not_called()
+        self.assertEqual(day.skipped[0]["stage"], "fan_picks")
+
+    def test_a_live_store_with_fan_picks_refuses_a_bundle_that_lost_the_input(self):
+        day = self.day(key="")
+        ctx = types.SimpleNamespace(path=lambda artifact: os.path.join(day.ctx.out_dir,
+                                                                      artifact.filename.replace("{version}", "v")))
+        os.makedirs(os.path.dirname(day.ctx.path(artifacts.PUBLISHED_META)), exist_ok=True)
+        with open(day.ctx.path(artifacts.PUBLISHED_META), "w", encoding="utf-8") as handle:
+            json.dump({"storeInputs": [{"arg": "fan_picks"}]}, handle)
+        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+             mock.patch.object(daily.changes, "planned", return_value={"added": []}):
+            with self.assertRaisesRegex(StageError, "refusing to build a store that drops"):
+                daily.update_fan_picks(day)
 
 
 class DeltaIds(unittest.TestCase):

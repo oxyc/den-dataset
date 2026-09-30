@@ -22,6 +22,12 @@ again with the release as it is now, signs, and uploads — the manifest last. I
 `corpus-<version>`, which is how what a day bought reaches the next day: an unpublished day's answers are
 bought again by the next run.
 
+Before enabling the daily schedule after adding a new durable store input, republish the live generation's
+bundle once from the out-dir that built it. For fan picks this bundle must contain `fan-picks.json`; both the
+bundle builder and `./den daily` now refuse if the live manifest says the store used fan picks but that input
+is absent. `DEN_DAILY_FAN_PICKS_MAX_SPEND_USD` controls the scheduled Gemini ceiling (default `$1.00`); the
+day refuses the complete new-title ask set before its first call when the projection would cross it.
+
 The publish must run from the repo root: its ownership guard resolves producer paths and `git ls-files`
 against the working directory. Overrides are environment variables (below), and reach the guards either way.
 

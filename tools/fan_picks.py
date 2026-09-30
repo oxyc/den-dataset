@@ -28,6 +28,7 @@ import datetime
 import gzip
 import hashlib
 import json
+import math
 import os
 import random
 import re
@@ -58,6 +59,9 @@ BATCH_FACTOR = 0.5
 PILOT_COST = 351 * PRICE_IN + 665 * PRICE_OUT
 #: A chunk is reserved at the observed cost per title times this.
 MARGIN = 1.3
+#: A scheduled day is small, but a broken change plan must not turn an unattended run into a catalogue
+#: purchase. The CLI may lower or deliberately raise this; the whole set must fit before the first call.
+DAILY_SPEND_CAP = 1.0
 #: Popularity bands the sample is stratified over and a report is broken down by: positions in the order.
 BANDS = ((0, 1000), (1000, 3000), (3000, 6000), (6000, 10000), (10000, 20000), (20000, None))
 
@@ -347,32 +351,10 @@ def admit(w, items, mode, run_cap=None):
 
 def run_online(w, items, workers=8, log=sys.stderr):
     lock = threading.Lock()
-    url = f"{API}/v1beta/models/{MODEL}:generateContent"
 
     def one(item):
         key, ask = item
-        body = request_body(w.titles[key])
-        for attempt in range(6):
-            try:
-                _, response = http("POST", url, body)
-                break
-            except urllib.error.HTTPError as exc:
-                if exc.code in (429, 500, 502, 503, 504) and attempt < 5:
-                    time.sleep(10 * (attempt + 1))
-                    continue
-                response = {"_http": f"HTTP {exc.code} {exc.read()[:300]!r}"}
-                break
-            except (urllib.error.URLError, TimeoutError) as exc:
-                if attempt < 5:
-                    time.sleep(10 * (attempt + 1))
-                    continue
-                response = {"_http": f"{type(exc).__name__}: {exc}"}
-                break
-        if "_http" in response:
-            answer, error = None, {"key": key, "ask": ask, "mode": "online", "error": response["_http"],
-                                   "costUSD": 0.0}
-        else:
-            answer, error = record(response, key, ask, "online")
+        answer, error, _accepted = generate_online(w.titles[key], key, ask)
         with lock:
             name = "answers.jsonl" if answer else "errors.jsonl"
             with open(w.path(name), "a", encoding="utf-8") as fh:
@@ -383,6 +365,33 @@ def run_online(w, items, workers=8, log=sys.stderr):
         ok = sum(pool.map(one, items))
     print(json.dumps({"asked": len(items), "answered": ok, "spentUSD": round(w.spent(), 4)}), file=log)
     return ok
+
+
+def generate_online(title, key, ask=0):
+    """One retried generateContent ask: `(answer, error, accepted)`.
+
+    `accepted` separates an HTTP/transport failure from a response received from the provider. A safety
+    refusal or malformed response is still an error, and the daily job leaves that title unasked so it has
+    the full run's structural-affinity fallback.
+    """
+    url = f"{API}/v1beta/models/{MODEL}:generateContent"
+    for attempt in range(6):
+        try:
+            _, response = http("POST", url, request_body(title), {"Accept": "application/json"}, timeout=90)
+            answer, error = record(response, key, ask, "online")
+            return answer, error, True
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429, 500, 502, 503, 504) and attempt < 5:
+                time.sleep(10 * (attempt + 1))
+                continue
+            return None, {"key": key, "ask": ask, "mode": "online",
+                          "error": f"HTTP {exc.code} {exc.read()[:300]!r}", "costUSD": 0.0}, False
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt < 5:
+                time.sleep(10 * (attempt + 1))
+                continue
+            return None, {"key": key, "ask": ask, "mode": "online",
+                          "error": f"{type(exc).__name__}: {exc}", "costUSD": 0.0}, False
 
 
 # --- batches --------------------------------------------------------------------------------------------
@@ -646,11 +655,19 @@ def related(rows, franchises, follows):
     return out
 
 
-def sequel_keys(rows):
-    """Each follows/followedBy Q-id's corpus keys, from Wikidata through the shared response cache."""
+def sequel_keys(rows, seeds=None):
+    """Relevant follows/followedBy Q-ids' corpus keys, through the shared response cache.
+
+    A full match asks every link. A daily match asks only links out of its new seeds plus each seed's own
+    Wikidata item, which is enough to find links into it too and avoids a catalogue-wide lookup for four titles.
+    """
     from lib import wikidata, wikidata_facts
-    qids = sorted({q for row in rows.values() for f in ("follows", "followedBy")
-                   for q in (row.get("facts") or {}).get(f) or []})
+    selected = rows.values() if seeds is None else (rows[key] for key in seeds)
+    qids = {q for row in selected for f in ("follows", "followedBy")
+            for q in (row.get("facts") or {}).get(f) or []}
+    if seeds is not None:
+        qids |= {rows[key].get("source", {}).get("wikidataItem") for key in seeds}
+        qids.discard(None)
     return wikidata_facts.tmdb_keys(qids, wikidata.cache_for())
 
 
@@ -669,6 +686,99 @@ def match_answer(answer, seed, names, owned):
             seen.add(key)
         out.append({**pick, "status": status, **({"key": key} if key else {})})
     return out
+
+
+def daily_update(corpus_path, articles_path, franchises_path, existing_path, out, keys, workers=8,
+                 generate=generate_online, follows=None, max_spend=DAILY_SPEND_CAP):
+    """Ask Gemini online for new daily titles, match with the full run's rule, and merge the durable input.
+
+    Existing anchors and picks that no longer join the current corpus are removed before the store sees
+    them. A provider refusal or malformed answer remains unasked, matching the full run; a transport failure
+    refuses the update so an outage can never become `fan_picks_a`. The whole request set must fit the
+    invocation's projected spend cap before any request is made.
+    """
+    rows = corpus_rows(corpus_path)
+    if not os.path.exists(existing_path):
+        raise RuntimeError(f"{existing_path}: no existing fan picks to merge; publish it in the corpus bundle first")
+    with open(existing_path, encoding="utf-8") as fh:
+        previous = json.load(fh)
+    anchors = previous.get("anchors")
+    if not isinstance(anchors, dict):
+        raise RuntimeError(f"{existing_path}: no anchors object")
+    current = set(rows)
+    malformed = next(((key, picks) for key, picks in anchors.items()
+                      if not isinstance(key, str) or not isinstance(picks, list)
+                      or any(not isinstance(pick, str) for pick in picks)), None)
+    if malformed:
+        raise RuntimeError(f"{existing_path}: malformed anchor {malformed[0]!r}")
+    anchors = {key: list(dict.fromkeys(pick for pick in picks if pick in current and pick != key))
+               for key, picks in anchors.items() if key in current}
+
+    wanted = set(keys)
+    leads = {}
+    if os.path.exists(articles_path):
+        with open(articles_path, encoding="utf-8") as fh:
+            for line in fh:
+                article = json.loads(line)
+                key = f"{article['mediaType']}:{article['tmdbId']}"
+                if key in wanted:
+                    leads[key] = lead_of(article.get("text"))
+    titles = {}
+    for key in keys:
+        if key in anchors:
+            continue
+        row = rows.get(key)
+        if row is None:
+            raise RuntimeError(f"daily fan picks: {key} is added but is not in {corpus_path}")
+        facts = row.get("facts") or {}
+        title = display_title(facts.get("titles"))
+        if not title:
+            raise RuntimeError(f"daily fan picks: {key} has no store title to ask Gemini about")
+        titles[key] = {"key": key, "title": title, "year": card_year(facts), "lead": leads.get(key, "")}
+
+    if not math.isfinite(max_spend) or max_spend <= 0:
+        raise ValueError("daily fan picks: max spend must be a positive finite dollar amount")
+    projected = len(titles) * PILOT_COST * MARGIN
+    if projected > max_spend:
+        raise RuntimeError(f"daily fan picks: refusing {len(titles)} requests: their ${projected:.4f} "
+                           f"projected spend crosses the ${max_spend:.2f} per-run cap")
+
+    answered, parse_errors, unavailable = {}, {}, {}
+    def one(item):
+        key, title = item
+        return key, generate(title, key, 0)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        for key, (answer, error, accepted) in pool.map(one, titles.items()):
+            if not accepted:
+                unavailable[key] = error
+            elif answer is not None:
+                answered[key] = answer
+            else:
+                parse_errors[key] = error
+    if unavailable:
+        first = next(iter(unavailable.items()))
+        raise RuntimeError(f"daily fan picks: Gemini unreachable for {len(unavailable)} title(s); "
+                           f"{first[0]}: {first[1].get('error')}")
+
+    if titles:
+        with open(franchises_path, encoding="utf-8") as fh:
+            franchises = json.load(fh)
+        names = Names(rows)
+        owned = related(rows, franchises, sequel_keys(rows, titles) if follows is None else follows)
+        for key, answer in answered.items():
+            # Only a parseable answer marks the title asked. This is the full run's rule: safety refusals and
+            # malformed responses are absent from the section and retain atlas's structural-affinity fallback.
+            matched = match_answer(answer, key, names, owned.get(key, set()))
+            anchors[key] = merged([matched])
+
+    costs = [row.get("costUSD", 0.0) for row in [*answered.values(), *parse_errors.values()]]
+    value = {"schema": EXPORT_SCHEMA, "issue": "oxyc/den-atlas#121", "model": MODEL,
+             "count": len(anchors), "anchors": dict(sorted(anchors.items()))}
+    write_json(out, value)
+    return {"asked": len(titles), "answered": len(answered), "emptyAnswers": len(parse_errors),
+            "anchors": len(anchors), "picks": sum(len(v) for v in anchors.values()),
+            "costUSD": round(sum(costs), 6), "projectedSpendUSD": round(projected, 6),
+            "spendCapUSD": max_spend}
 
 
 def match(work, corpus_path, franchises_path, follows_path=None):
