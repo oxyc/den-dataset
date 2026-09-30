@@ -17,6 +17,16 @@ About **5 new titles a day** reach the catalogue. Release years whose admissions
 
 Premise tags aren't in the daily job yet (#141, #179). An early estimate of $0.009 a title was about 5× too high.
 
+**Decided changes** (#183, #187), not built yet:
+
+| Step | Change | New $/title |
+|---|---|---:|
+| Premise tags | gpt-5.6-luna, Haiku as fallback for refusals | ~$0.0003 |
+| Fan picks | compact answer format (format B) | ~$0.0017 |
+| Jev | classify and critique in one call | −13% on those two |
+
+Together that's about **$0.0029 a title, ~$5 a year** at 5 titles a day. Weekly Batch runs for premise tags and fan picks would halve their part again.
+
 **Caching doesn't help here.** Prompt caching only pays when the same prefix repeats within minutes, and the daily job makes about one call per step a day. Haiku 4.5's premise prompt (~2k tokens) is also below its minimum cacheable prefix.
 
 **Batch halves the bill but costs a day of latency.** Batch jobs waited 5 minutes to 13 hours in #121, so the job would submit one day and collect the next. At today's volume that saves ~$4 a year.
@@ -128,11 +138,68 @@ Setup:
 
 Untested: 40 titles a call on Gemini or luna. Test it with a response schema before a full run.
 
+**Decision:** gpt-5.6-luna for new titles, with Haiku 4.5 as fallback for titles luna refuses. Existing tags stay (#183).
+
+## Cost optimizations (#187, 2026-09-30)
+
+Spend on these measurements: $2.80.
+
+**Paying twice.**
+- Paid answers lived only in one run's out-dir, and the workflow keeps nothing between runs. A run that failed or didn't publish had its titles bought again the next day.
+- It happened twice on 2026-09-30, ~$0.009. The failed runs of 09-27/28 ran without spend, so they cost nothing.
+- **Fix:** a paid-answers ledger outside the run, checked before every paid call. This is now a hard rule.
+
+**Combining Jev calls.**
+- Classify and critique in one call: $0.00099 → $0.00087 a title (−13%). The answers differ no more than two runs of the same call.
+- Folding in genres & moods too: rejected. It would read the whole article instead of its selected sections, and its answers drift ~4× past noise.
+- Sharing one call between fan picks and premise tags: rejected. They read different text, so it saves only ~$0.12 a year.
+
+**Jev against cheaper models** (genres & moods, 60 golden titles, one title per call):
+- Gemini 3.5 Flash-Lite, 3.7 Flash and luna scored about the same as Jev.
+- They cost 2–8× more a title ($0.00072–0.0026 against Jev's $0.00034), and label in a different style.
+- Only luna batched 20 a call through Batch would undercut Jev, by ~$0.37 a year. **Jev stays.**
+- Why Jev is cheap: most of its input is question text (the first classify pass sent 487M input tokens, 377M of them questions), billed at roughly $0.04 per 1M.
+
+**Compact fan-pick answers** (Gemini 3.7 Flash, low thinking, still 20 picks):
+
+| 300 titles | Current (keyed objects) | Format B (`{"k":bool,"p":[["Title",1999,"f"]]}`) |
+|---|---:|---:|
+| $/title | $0.00293 | $0.00166 (−43%) |
+| Output tokens/title | 680 | 308 |
+| Picks matched in store | 93.8% | 93.2% (~1.5 points lower past rank 20k) |
+| Picks kept/title | 18.06 | 18.22 |
+| Titles with ≥10 picks | 99.3% | 99.3% |
+| Blind judgment of kept picks, 50 tail titles (0–2) | 2.00 | 1.98 (7 vs 6 preferred, 37 same, p=1.0) |
+
+- Format B's lower match rate is extra names that never match and are dropped, so the row doesn't lose picks. **Ship format B.**
+- A plain-text answer made Gemini think ~15× longer and cost more.
+
+**Cadence.** Each step gets a daily, weekly or "N waiting" setting. Weekly steps run through Batch, submitted in one run and collected in the next. atlas already copes with a title that has no fan picks or premise vector yet.
+
+## Fan picks for new releases (#189)
+
+A model can't know fans of a title released after its training data. In the fan-picks run, Gemini 3.7 Flash didn't know 5.9% of 2025 titles and 35.2% of 2026 titles. For those it guessed picks from the Wikipedia lead.
+
+Web-search test, 50 unknown 2025–26 titles, blind judgment 0–2:
+
+| Option | Score | Matched picks/title | $/title | $/month at ~30 titles |
+|---|---:|---:|---:|---:|
+| Stored answer (no search) | 1.76 | 15.0 | $0.0028 | $0.08 |
+| Gemini 3.8 Flash, no search | 1.64 | 13.9 | $0.0019 | $0.06 |
+| Gemini 3.7 Flash + separate Google-search research call | 1.90 | 17.9 | $0.043 | $1.30 (~$0.14 within the free search allowance) |
+| Claude Sonnet + web search (15 titles) | 1.27 | 17.5 | ~$0.048 | ~$1.43 |
+| Gemini 3.5 Flash-Lite + search (20 titles) | 1.40 | 16.6 | $0.024 | $0.72 |
+| gpt-5.6-luna + web search | 1.26 | 19.0 | $0.012 | $0.37 |
+
+- **A thin prompt is the problem, not a new title.** With a full English lead, the stored answer already scored 2.00. With a one-line foreign stub, the model guesses the premise from the name.
+- **Search pricing:** Gemini Google-search grounding includes 5,000 searches a month free, then $14 per 1,000. It only works as its own call: with JSON output requested, a search-enabled call comes back empty.
+- **For now:** new titles are asked like any other. The better approach is being decided in #189.
+
 ## Notes
 
-- **Output dominates price.** Fan picks stay at 20; compact the answer format instead (the answers were pretty-printed JSON, and whitespace bills as output) (#187).
+- **Output dominates price.** Fan picks stay at 20. The compact answer format cut their output tokens by more than half (#187).
 - **Thinking is the hidden cost.** Default thinking on Gemini Flash was 2.5× the price of low with no clear gain; on Pro it roughly tripled the price.
 - **Monthly plans.** Claude and ChatGPT plans run models through their CLIs at no extra $, limited by plan caps. They suit local backfills and bake-offs, never the daily job.
 - **Refusals** must not sink a batch: retry one title per call, then ask the step's fallback model (#183).
-- **New releases.** A model can't know fans of titles released after its training data. In the fan-picks run, Gemini didn't know 5.9% of 2025 titles and 35.2% of 2026 titles, and guessed picks from the plot for them. Re-ask those later (#187).
+- **Never pay twice.** A paid answer is kept outside the run and reused by every later run; only a deliberate re-ask (new model or spec) pays again (#187).
 - **Price changes.** Update this file when a price changes or a run is measured, and cite the issue.
