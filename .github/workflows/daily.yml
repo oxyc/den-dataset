@@ -130,6 +130,7 @@ jobs:
             ${{ env.OUT }}/daily-report.json
             ${{ env.OUT }}/daily-report.md
             ${{ env.OUT }}/changes/plan.json
+            ${{ env.OUT }}/fan-picks.json.daily-checkpoint.json
           if-no-files-found: ignore
           retention-days: 30
       # Ready to publish: the exact bytes every gate passed, and the record `--checked` holds them to.

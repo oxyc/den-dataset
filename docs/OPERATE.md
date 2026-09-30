@@ -19,8 +19,7 @@ pipeline/publish-dataset.sh daily-<run id> --checked
 
 `--checked` refuses unless the store and the manifest are the bytes the run's check passed, compares them
 again with the release as it is now, signs, and uploads — the manifest last. It also uploads the bundle to
-`corpus-<version>`, which is how what a day bought reaches the next day: an unpublished day's answers are
-bought again by the next run.
+`corpus-<version>`, which is how what a successful day bought reaches the next day.
 
 Before enabling the daily schedule after adding a new durable store input, republish the live generation's
 bundle once from the out-dir that built it. For fan picks this bundle must contain `fan-picks.json`; both the
@@ -35,7 +34,11 @@ against the working directory. Overrides are environment variables (below), and 
 
 Start with the run's summary, which is `out/daily-report.md`: what moved, which stage was skipped for want
 of a credential, what was bought, and the refusal. `daily-report.json` carries the same, and
-`changes/plan.json` is the change set; all three are in the `daily-report-<run id>` artifact.
+`changes/plan.json` is the change set; all three are in the `daily-report-<run id>` artifact. If Gemini
+accepted some fan-picks requests before another request exhausted its retries, that artifact also contains
+`fan-picks.json.daily-checkpoint.json`. Put it beside `fan-picks.json` in the reconstructed out-dir before
+rerunning; responses whose exact model request still matches are reused, and the checkpoint is removed only
+after the merged fan-picks input is written successfully.
 
 To reproduce a run locally, lay out what the job started from and run the same command:
 

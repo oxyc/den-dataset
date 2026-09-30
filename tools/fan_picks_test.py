@@ -6,6 +6,8 @@ import os
 import sys
 import tempfile
 import unittest
+import urllib.error
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -83,6 +85,28 @@ class Parse(unittest.TestCase):
         _, error = fp.record({"candidates": [{"content": {"parts": [{"text": "{not json"}]},
                                               "finishReason": "MAX_TOKENS"}]}, "movie:1", 0, "online")
         self.assertIn("MAX_TOKENS", error["error"])
+
+
+class Retry(unittest.TestCase):
+    def error(self, retry_after):
+        return urllib.error.HTTPError("https://example.test", 429, "slow down",
+                                      {"Retry-After": retry_after}, None)
+
+    def test_retry_after_accepts_seconds_and_http_dates_and_is_bounded(self):
+        now = fp.datetime.datetime(2026, 9, 30, 12, 0, tzinfo=fp.datetime.timezone.utc)
+        self.assertEqual(fp.retry_delay(self.error("17"), 0, now), 17)
+        self.assertEqual(fp.retry_delay(self.error("Wed, 30 Sep 2026 12:01:00 GMT"), 0, now), 60)
+        self.assertEqual(fp.retry_delay(self.error("999"), 0, now), fp.MAX_RETRY_DELAY)
+
+    def test_generate_online_sleeps_for_the_provider_delay_before_retrying(self):
+        response = {"candidates": [{"content": {"parts": [{"text": '{"known":true,"picks":[]}'}]}}]}
+        with mock.patch.object(fp, "http", side_effect=[self.error("23"), ({}, response)]), \
+             mock.patch.object(fp.time, "sleep") as sleep:
+            answer, error, accepted = fp.generate_online({"key": "movie:1", "title": "One"}, "movie:1")
+        sleep.assert_called_once_with(23)
+        self.assertTrue(accepted)
+        self.assertIsNone(error)
+        self.assertEqual(answer["picks"], [])
 
 
 class Matching(unittest.TestCase):
@@ -322,6 +346,38 @@ class Daily(unittest.TestCase):
                                 generate=lambda *_: (None, {"error": "HTTP 503"}, False), follows={})
             with open(existing, encoding="utf-8") as fh:
                 self.assertEqual(fh.read(), before)
+
+    def test_successes_are_checkpointed_before_an_aggregate_failure_and_resumed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, articles, franchises, existing = self.fixture(directory, {"movie:8": []})
+            calls = []
+
+            def first_generate(_title, key, _ask):
+                calls.append(key)
+                if key == "movie:2":
+                    return None, {"error": "HTTP 503"}, False
+                return {"picks": [], "costUSD": 0.001}, None, True
+
+            with self.assertRaisesRegex(RuntimeError, "Gemini unreachable"):
+                fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1", "movie:2"],
+                                workers=1, generate=first_generate, follows={})
+            checkpoint = fp.daily_checkpoint_path(existing)
+            with open(checkpoint, encoding="utf-8") as fh:
+                saved = json.load(fh)
+            self.assertEqual(set(saved["responses"]), {"movie:1"})
+
+            resumed_calls = []
+            result = fp.daily_update(
+                corpus, articles, franchises, existing, existing, ["movie:1", "movie:2"], workers=1,
+                generate=lambda _title, key, _ask: (resumed_calls.append(key) or {"picks": [], "costUSD": 0.002},
+                                                     None, True), follows={})
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertEqual(calls, ["movie:1", "movie:2"])
+        self.assertEqual(resumed_calls, ["movie:2"])
+        self.assertEqual((result["generated"], result["resumed"]), (1, 1))
+        self.assertEqual(out["anchors"], {"movie:1": [], "movie:2": [], "movie:8": []})
+        self.assertFalse(os.path.exists(checkpoint))
 
     def test_withdrawn_anchors_and_picks_are_removed_before_the_store_build(self):
         with tempfile.TemporaryDirectory() as directory:

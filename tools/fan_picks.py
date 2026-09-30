@@ -25,6 +25,7 @@ import argparse
 import collections
 import concurrent.futures
 import datetime
+import email.utils
 import gzip
 import hashlib
 import json
@@ -66,6 +67,8 @@ DAILY_SPEND_CAP = 1.0
 BANDS = ((0, 1000), (1000, 3000), (3000, 6000), (6000, 10000), (10000, 20000), (20000, None))
 
 API = "https://generativelanguage.googleapis.com"
+DAILY_CHECKPOINT_SCHEMA = "fan-picks-daily-responses-v1"
+MAX_RETRY_DELAY = 120.0
 
 
 def digest(value):
@@ -367,6 +370,24 @@ def run_online(w, items, workers=8, log=sys.stderr):
     return ok
 
 
+def retry_delay(error, attempt, now=None):
+    """Provider-directed delay when present, else bounded exponential backoff with small jitter."""
+    value = error.headers.get("Retry-After") if error.headers else None
+    if value:
+        try:
+            seconds = float(value)
+        except ValueError:
+            try:
+                retry_at = email.utils.parsedate_to_datetime(value)
+                current = now or datetime.datetime.now(datetime.timezone.utc)
+                seconds = (retry_at - current).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                seconds = None
+        if seconds is not None and math.isfinite(seconds):
+            return min(MAX_RETRY_DELAY, max(0.0, seconds))
+    return min(MAX_RETRY_DELAY, 2 ** attempt + random.uniform(0.0, 1.0))
+
+
 def generate_online(title, key, ask=0):
     """One retried generateContent ask: `(answer, error, accepted)`.
 
@@ -382,13 +403,13 @@ def generate_online(title, key, ask=0):
             return answer, error, True
         except urllib.error.HTTPError as exc:
             if exc.code in (429, 500, 502, 503, 504) and attempt < 5:
-                time.sleep(10 * (attempt + 1))
+                time.sleep(retry_delay(exc, attempt))
                 continue
             return None, {"key": key, "ask": ask, "mode": "online",
                           "error": f"HTTP {exc.code} {exc.read()[:300]!r}", "costUSD": 0.0}, False
         except (urllib.error.URLError, TimeoutError) as exc:
             if attempt < 5:
-                time.sleep(10 * (attempt + 1))
+                time.sleep(min(MAX_RETRY_DELAY, 2 ** attempt + random.uniform(0.0, 1.0)))
                 continue
             return None, {"key": key, "ask": ask, "mode": "online",
                           "error": f"{type(exc).__name__}: {exc}", "costUSD": 0.0}, False
@@ -694,6 +715,24 @@ def accepted_empty(error):
         and isinstance(error.get("text"), str) and not error["text"].strip()
 
 
+def daily_checkpoint_path(out):
+    return out + ".daily-checkpoint.json"
+
+
+def load_daily_checkpoint(path):
+    if not os.path.exists(path):
+        return {"schema": DAILY_CHECKPOINT_SCHEMA, "model": MODEL, "responses": {}}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            value = json.load(fh)
+    except (OSError, ValueError) as error:
+        raise RuntimeError(f"daily fan picks: unreadable response checkpoint {path}: {error}") from error
+    if not isinstance(value, dict) or (value.get("schema"), value.get("model")) != (DAILY_CHECKPOINT_SCHEMA, MODEL) \
+            or not isinstance(value.get("responses"), dict):
+        raise RuntimeError(f"daily fan picks: incompatible response checkpoint {path}")
+    return value
+
+
 def daily_update(corpus_path, articles_path, franchises_path, existing_path, out, keys, workers=8,
                  generate=generate_online, follows=None, max_spend=DAILY_SPEND_CAP):
     """Ask Gemini online for new daily titles, match with the full run's rule, and merge the durable input.
@@ -754,19 +793,47 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
                            f"projected spend crosses the ${max_spend:.2f} per-run cap")
 
     answered, empty_answers, parse_errors, unavailable = {}, {}, {}, {}
+    checkpoint_path = daily_checkpoint_path(out)
+    checkpoint = load_daily_checkpoint(checkpoint_path)
+    fingerprints = {key: digest(request_body(title)) for key, title in titles.items()}
+
+    def classify(key, result):
+        answer, error, accepted = result
+        if not accepted:
+            unavailable[key] = error
+        elif answer is not None:
+            answered[key] = answer
+        elif accepted_empty(error):
+            empty_answers[key] = error
+        else:
+            parse_errors[key] = error
+
+    pending = {}
+    resumed = 0
+    for key, title in titles.items():
+        saved = checkpoint["responses"].get(key)
+        if isinstance(saved, dict) and saved.get("requestSha256") == fingerprints[key] \
+                and saved.get("accepted") is True:
+            classify(key, (saved.get("answer"), saved.get("error"), True))
+            resumed += 1
+        else:
+            pending[key] = title
+
     def one(item):
         key, title = item
         return key, generate(title, key, 0)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        for key, (answer, error, accepted) in pool.map(one, titles.items()):
-            if not accepted:
-                unavailable[key] = error
-            elif answer is not None:
-                answered[key] = answer
-            elif accepted_empty(error):
-                empty_answers[key] = error
-            else:
-                parse_errors[key] = error
+        futures = [pool.submit(one, item) for item in pending.items()]
+        for future in concurrent.futures.as_completed(futures):
+            key, result = future.result()
+            answer, error, accepted = result
+            classify(key, result)
+            if accepted:
+                checkpoint["responses"][key] = {
+                    "requestSha256": fingerprints[key], "accepted": True,
+                    "answer": answer, "error": error,
+                }
+                write_json(checkpoint_path, checkpoint)
     if unavailable:
         first = next(iter(unavailable.items()))
         raise RuntimeError(f"daily fan picks: Gemini unreachable for {len(unavailable)} title(s); "
@@ -788,8 +855,11 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     value = {"schema": EXPORT_SCHEMA, "issue": "oxyc/den-atlas#121", "model": MODEL,
              "count": len(anchors), "anchors": dict(sorted(anchors.items()))}
     write_json(out, value)
+    if os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)
     return {"asked": len(titles), "answered": len(answered), "emptyAnswers": len(empty_answers),
             "parseErrors": len(parse_errors),
+            "generated": len(pending), "resumed": resumed,
             "notInCorpus": not_in_corpus,
             "anchors": len(anchors), "picks": sum(len(v) for v in anchors.values()),
             "costUSD": round(sum(costs), 6), "projectedSpendUSD": round(projected, 6),
