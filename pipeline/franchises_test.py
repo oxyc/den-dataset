@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from . import franchise_groups as fg
 from . import franchises
 from . import run_combined as rc
 from .contract import Context, StageError
@@ -154,6 +155,33 @@ class Stage(unittest.TestCase):
         self.assertEqual(doc["titles"]["movie:5"], {"primary": "Qsm"})
         for key in ("movie:1", "movie:3", "movie:8"):
             self.assertNotIn(key, doc["titles"], "asked, and not answered yet")
+
+    def test_own_wikidata_name_distinguishes_the_norwegian_olsen_line(self):
+        groups = {
+            "Q1047863": fg.Group("Q1047863", "series", "Olsen Gang", {"movie:1", "movie:2"}),
+            "Q3905033": fg.Group("Q3905033", "series", "Olsen Gang", {"movie:24667", "movie:3"}),
+        }
+        names = {qid: group.name for qid, group in groups.items()}
+        changed = franchises.prefer_distinct_wikidata_names(
+            groups, names, {"_": "fixture", "Q3905033": "Olsenbanden"})
+        self.assertEqual(changed, {"Q3905033": "Olsenbanden"})
+        self.assertEqual(groups["Q1047863"].name, "Olsen Gang")
+        self.assertEqual(groups["Q3905033"].name, "Olsenbanden")
+
+    def test_duplicate_display_names_are_a_build_failure_and_list_every_group(self):
+        duplicate = {"Q1047863": {"name": "Olsen Gang"}, "Q3905033": {"name": "Olsen Gang"}}
+        with self.assertRaisesRegex(StageError, "'Olsen Gang': Q1047863, Q3905033"):
+            franchises.check_unique_names(duplicate)
+
+    def test_other_duplicate_names_are_qualified_by_first_release_and_medium(self):
+        duplicate = {
+            "film": {"name": "Assassination Classroom", "members": [{"key": "movie:1", "year": 2015}]},
+            "tv": {"name": "Assassination Classroom", "members": [{"key": "tv:2", "year": 2015}]},
+        }
+        changed = franchises.disambiguate_duplicate_names(duplicate)
+        self.assertEqual(changed, {"film": "Assassination Classroom (2015 films)",
+                                   "tv": "Assassination Classroom (2015 series)"})
+        franchises.check_unique_names(duplicate)
 
     def test_the_ask_sends_the_candidates_and_the_answers_join_beck_and_leave_ghibli_out(self):
         self.run_stage(spend=True)

@@ -45,6 +45,15 @@ NAME_SHARE = 1 / 3
 _STOP = {"the", "a", "an", "of", "and", "in", "film", "films", "series", "feature", "trilogy", "movies",
          "movie", "saga", "collection", "animated", "original", "universe", "cinematic", "television"}
 _WORD = re.compile(r"[^\W_]+", re.UNICODE)
+#: Country adjectives needed by split screen-production lines. Unknown or mixed origins fall back to the
+#: first release year, which is stable and still distinguishes the lines without inventing a demonym.
+COUNTRY_ADJECTIVES = {
+    "AR": "Argentine", "AU": "Australian", "BR": "Brazilian", "CA": "Canadian", "CN": "Chinese",
+    "DE": "German", "DK": "Danish", "ES": "Spanish", "FI": "Finnish", "FR": "French",
+    "GB": "British", "HK": "Hong Kong", "IN": "Indian", "IT": "Italian", "JP": "Japanese",
+    "KR": "South Korean", "MX": "Mexican", "NO": "Norwegian", "NZ": "New Zealand",
+    "SE": "Swedish", "US": "American",
+}
 
 
 def words(text):
@@ -57,14 +66,15 @@ class Title:
     its actors."""
 
     __slots__ = ("key", "name", "year", "date", "media", "series", "franchises", "sources", "follows",
-                 "characters", "cast")
+                 "characters", "cast", "countries")
 
     def __init__(self, key, name="", year=None, series=(), franchises=(), sources=(), follows=(),
-                 characters=(), cast=(), date=None):
+                 characters=(), cast=(), date=None, countries=()):
         self.key, self.name, self.year, self.date = key, name or "", year, date or ""
         self.media = key.partition(":")[0]
         self.series, self.franchises, self.sources = tuple(series), tuple(franchises), tuple(sources)
         self.follows, self.characters, self.cast = tuple(follows), tuple(characters), frozenset(cast)
+        self.countries = frozenset(countries)
 
 
 class Group:
@@ -119,6 +129,8 @@ def build(titles, names, parents=None):
     # One sequel chain adapting one book line adds no information and remains suppressed as before.
     split_books = {g.id for g in groups.values() if g.kind == "book-series"
                    and sum(chain <= g.members for chain in chains) >= 2}
+    split_lines = {book: [chain for chain in chains if chain <= groups[book].members]
+                   for book in split_books}
     for chain in chains:
         containing_books = [g for g in groups.values() if g.id in split_books and chain <= g.members]
         if not any(chain <= g.members for g in groups.values() if g.kind != "book-series") \
@@ -129,10 +141,35 @@ def build(titles, names, parents=None):
             ordered = sorted((titles[k] for k in chain), key=order_key)
             first = ordered[0]
             gid = f"chain:{first.key}"
-            name = min(containing_books, key=lambda g: (len(g.members), g.id)).name if containing_books \
-                else chain_name([t.name for t in ordered]) or first.name
+            if containing_books:
+                source = min(containing_books, key=lambda g: (len(g.members), g.id))
+                name = f"{source.name} ({line_qualifier(chain, split_lines[source.id], titles)})"
+            else:
+                name = chain_name([t.name for t in ordered]) or first.name
             groups[gid] = Group(gid, "chain", name, chain)
     return groups
+
+
+def line_qualifier(chain, siblings, titles):
+    """Country adjective when every line has a different unambiguous origin; otherwise first year."""
+    common = [set.intersection(*(set(titles[key].countries) for key in line)) if line else set()
+              for line in siblings]
+    shared = set.intersection(*common) if common else set()
+    origins = []
+    for countries in common:
+        distinctive = countries - shared
+        if len(distinctive) == 1:
+            origins.append(next(iter(distinctive)))
+        elif not distinctive and len(shared) == 1:
+            origins.append(next(iter(shared)))
+        else:
+            origins.append(None)
+    own = origins[siblings.index(chain)]
+    kind = "films" if all(titles[key].media == "movie" for key in chain) else "series"
+    if own in COUNTRY_ADJECTIVES and None not in origins and len(set(origins)) == len(origins):
+        return f"{COUNTRY_ADJECTIVES[own]} {kind}"
+    first = min((titles[key] for key in chain), key=order_key)
+    return f"{first.year} {kind}" if first.year is not None else kind
 
 
 def chain_name(names):
