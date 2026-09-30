@@ -157,15 +157,24 @@ class Stage(unittest.TestCase):
             self.assertNotIn(key, doc["titles"], "asked, and not answered yet")
 
     def test_own_wikidata_name_distinguishes_the_norwegian_olsen_line(self):
+        titles = {
+            "movie:1": fg.Title("movie:1", "The Olsen Gang", 1968),
+            "movie:2": fg.Title("movie:2", "The Olsen Gang in a Fix", 1969),
+            "movie:24667": fg.Title("movie:24667", "Olsenbanden", 1969),
+            "movie:3": fg.Title("movie:3", "Olsenbanden og Dynamitt-Harry", 1970),
+        }
         groups = {
             "Q1047863": fg.Group("Q1047863", "series", "Olsen Gang", {"movie:1", "movie:2"}),
             "Q3905033": fg.Group("Q3905033", "series", "Olsen Gang", {"movie:24667", "movie:3"}),
         }
         names = {qid: group.name for qid, group in groups.items()}
-        changed = franchises.prefer_distinct_wikidata_names(
-            groups, names, {"_": "fixture", "Q3905033": "Olsenbanden"})
-        self.assertEqual(changed, {"Q3905033": "Olsenbanden"})
-        self.assertEqual(groups["Q1047863"].name, "Olsen Gang")
+        _, _, asked = franchises.plan_before_display_names(titles, groups, names, {
+            "_": "fixture", "Q3905033": "Olsenbanden",
+            "Q1047863": "Olsen Gang (Danish films)",
+        })
+        self.assertEqual(asked["movie:1"], ["Q1047863", "Q3905033"],
+                         "the viewer-facing rename must not invalidate the paid candidate list")
+        self.assertEqual(groups["Q1047863"].name, "Olsen Gang (Danish films)")
         self.assertEqual(groups["Q3905033"].name, "Olsenbanden")
 
     def test_duplicate_display_names_are_a_build_failure_and_list_every_group(self):

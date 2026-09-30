@@ -27,7 +27,7 @@ are Wikidata. Licences per file are in [`LICENSES.md`](../LICENSES.md).
 | `alias-decisions.json` | keep/drop judgements on alternate titles that collide with another title's name | by hand |
 | `iconic-studios.json` | the studios a viewer browses by, each with every Wikidata item that is the same studio; the store writes the ones the corpus credits | by hand ([den#132](https://github.com/oxyc/den/issues/132)) |
 | `award-ceremony-merges.json` | awarding bodies Wikidata splits across an organisation and its "Awards" group, each `from` filed under its `into` before the store's ceremony table is built; `check_award_merges.py --gate` refuses a stale one | by hand ([den#135](https://github.com/oxyc/den/issues/135)) |
-| `franchise-display-names.json` | native Wikidata labels for own production-series items whose English labels collapse distinct lines; the franchise gate rejects unresolved duplicate names | by hand ([#177](https://github.com/oxyc/den-dataset/issues/177)) |
+| `franchise-display-names.json` | stable display names for production groups whose source labels or multinational credits cannot distinguish split lines; the franchise gate rejects unresolved duplicate names | by hand ([#177](https://github.com/oxyc/den-dataset/issues/177)) |
 | `wikidata-item-decisions.json` | which Wikidata item answers for a title whose TMDB id several items claim, where no rule decides | by hand |
 | `implementation-lineage.json` | the superseded source and input digests a paid classify shard may still be audited on, each with the reason its rows did not move | by hand, after reading the diff |
 | `classify-queue.json` | titles whose labels were not read from the plot the corpus now holds | derived |
