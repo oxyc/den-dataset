@@ -62,6 +62,7 @@ LIVE = {
     "storeBytes": 135146098,
     "storeFile": "den-5b1c3213b6a1.store",
     "storeRecords": 47618,
+    "storeSections": ["keys", "strings"],
     "storeSha256": "ca",
     "taxonomyVersion": "t02",
     "vectorsBytes": 48679944,
@@ -78,7 +79,7 @@ LIVE = {
 KEPT = {
     "builtAt", "datasetVersion", "dims", "embedderMaxTokens", "embedderRuntime",
     "embeddingModel", "lastModifiedHttp", "maxBatchId", "quantization", "storeBytes", "storeFile",
-    "storeRecords", "storeSha256", "taxonomyVersion",
+    "storeRecords", "storeSections", "storeSha256", "taxonomyVersion",
     "plotVectorTransformSha256",
 }
 

@@ -80,9 +80,18 @@ case "$2" in
     if [[ "$*" == *"--json assets"* ]]; then cat "$UPLOADS"; fi
     exit 0 ;;
   download)
-    out=""; prev=""
-    for a in "$@"; do [ "$prev" = "-O" ] && out="$a"; prev="$a"; done
-    if [ -f "$PUBLISHED_META" ]; then cp "$PUBLISHED_META" "$out"; exit 0; fi
+    out=""; pattern=""; prev=""
+    for a in "$@"; do
+      [ "$prev" = "-O" ] && out="$a"
+      [ "$prev" = "-p" ] && pattern="$a"
+      prev="$a"
+    done
+    if [ "$pattern" = "dataset.meta.json" ] && [ -f "$PUBLISHED_META" ]; then
+      cp "$PUBLISHED_META" "$out"; exit 0
+    fi
+    if [[ "$pattern" = *.store ]] && [ -f "$PUBLISHED_STORE" ]; then
+      cp "$PUBLISHED_STORE" "$out"; exit 0
+    fi
     echo "release not found" >&2; exit 1 ;;
   upload)
     # data-latest's uploads in $UPLOADS, every other release's in $UPLOADS.<tag>.
@@ -101,7 +110,8 @@ STUB
   printf '{"records":[]}' > "$DIR/labels-cc0.json"
   printf 'unmanifested' > "$DIR/vectors-cc0.bin"
   PUBLISHED_META="$WORK/published.json"
-  export UPLOADS PUBLISHED_META
+  PUBLISHED_STORE="$WORK/published.store"
+  export UPLOADS PUBLISHED_META PUBLISHED_STORE
 }
 
 teardown() { rm -rf "$WORK"; }
@@ -144,13 +154,16 @@ MKLABELS
   #
   # Its rows are movie:1..N with the `keys` and `vec_plot_has` sections the plot-vector gate reads; every
   # row has a vector unless `$NO_PLOT_VEC` (comma-separated tmdb ids) says otherwise.
-  python3 - "$DIR/den-$version.store" "$labels_records" "${NO_PLOT_VEC:-}" <<'MKSTORE'
+  python3 - "$DIR/den-$version.store" "$labels_records" "${NO_PLOT_VEC:-}" \
+    "${EXTRA_STORE_SECTION:-}" <<'MKSTORE'
 import struct, sys
 path, rows = sys.argv[1], int(sys.argv[2])
 no_vec = {int(i) for i in sys.argv[3].split(",") if i}
 keys = list(range(1, rows + 1))
 sections = [("keys", struct.pack(f"<{rows}Q", *keys), 8),
             ("vec_plot_has", bytes(0 if k in no_vec else 1 for k in keys), 1)]
+if sys.argv[4]:
+    sections.append((sys.argv[4], bytes([1]) * rows, 1))
 head = bytearray(64)
 head[0:8] = b"DENSTOR1"
 struct.pack_into("<I", head, 8, 1)            # format_version
@@ -212,7 +225,12 @@ write_bundle_inputs() {
 }
 
 # The manifest as it is "already published", so the drop/shrink guards have a baseline.
-publish_baseline() { cp "$DIR/dataset.meta.json" "$PUBLISHED_META"; }
+publish_baseline() {
+  cp "$DIR/dataset.meta.json" "$PUBLISHED_META"
+  local store
+  store="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["storeFile"])' "$PUBLISHED_META")"
+  cp "$DIR/$store" "$PUBLISHED_STORE"
+}
 
 # The publisher, invoked the way this run is testing it. Both forms take the publish dir as their only
 # argument and leave the same two logs behind, so a case reads identically either way. The stage is given
@@ -296,6 +314,46 @@ if run_publish; then
     || bad "the bundle was not published: $(cat "$UPLOADS.corpus-aaaaaaaaaaaa" 2>/dev/null | tr '\n' ' ')"
 else
   bad "the happy path failed: $(tail -3 "$WORK/err.log")"
+fi
+teardown
+
+# --- a store that silently loses an optional section -------------------------------------------------
+#
+# Readers tolerate optional sections so old stores remain valid. A rebuild dropping a section is a feature
+# disappearing from the live dataset, and has to be an explicit retirement instead.
+
+setup
+EXTRA_STORE_SECTION=fan_picks_a write_meta
+publish_baseline
+write_meta
+if run_publish; then
+  bad "a store that dropped a published section went out"
+else
+  grep -q "store would lose sections" "$WORK/err.log" && grep -q "fan_picks_a" "$WORK/err.log" \
+    && ok "a store missing a published section is refused and names it" \
+    || bad "refused, but not for the missing section: $(tail -3 "$WORK/err.log")"
+fi
+[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
+teardown
+
+setup
+EXTRA_STORE_SECTION=fan_picks_a write_meta
+publish_baseline
+write_meta
+if DEN_ALLOW_DROPPING_STORE_SECTIONS="fan picks retired in a new store format" \
+   DEN_STORE_REBUILD="retired fan picks" run_publish; then
+  if python3 - "$DIR/dataset.meta.json" <<'PY'
+import json, sys
+value = json.load(open(sys.argv[1]))["droppedStoreSections"]
+assert value == {"reason": "fan picks retired in a new store format", "sections": ["fan_picks_a"]}, value
+PY
+  then
+    ok "a reasoned section retirement is recorded"
+  else
+    bad "the reasoned section retirement was not recorded"
+  fi
+else
+  bad "a reasoned section retirement was refused: $(tail -3 "$WORK/err.log")"
 fi
 teardown
 

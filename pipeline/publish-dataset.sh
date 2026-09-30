@@ -271,7 +271,8 @@ done < "$manifest_files"
 # den-atlas — with no error on either side.
 published_meta="$(mktemp)"
 download_err="$(mktemp)"
-trap 'rm -f "$manifest_files" "$published_meta" "$download_err"' EXIT
+published_store="$(mktemp)"
+trap 'rm -f "$manifest_files" "$published_meta" "$published_store" "$download_err"' EXIT
 
 # A guard that cannot tell "there is no release yet" from "I could not ask" is not a guard. Bare
 # `2>/dev/null` collapsed an expired token, a 5xx, a rate limit and a `gh` too old for these flags all into
@@ -297,6 +298,64 @@ else
   sed 's/^/       /' "$download_err" >&2
   echo "       Refusing to publish blind. Fix the above, or set DEN_ALLOW_DROPPING_BLOBS=1 to skip." >&2
   [ "${DEN_ALLOW_DROPPING_BLOBS:-0}" = "1" ] || exit 1
+fi
+
+# STORE-SECTION GUARD. Optional means an old store without a section still opens; it does not mean a new
+# publish may silently drop a live feature. The writer now stamps the complete table as `storeSections`, so
+# after the transition this comparison needs no second download. The currently live manifest predates that
+# field, and for it alone the actual store is downloaded and its table read.
+if [ "$have_published" -eq 1 ]; then
+  live_has_sections="$(python3 -c 'import json,sys; print(int(isinstance(json.load(open(sys.argv[1])).get("storeSections"), list)))' "$published_meta")"
+  section_args=()
+  if [ "$live_has_sections" -ne 1 ]; then
+    live_store_name="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("storeFile") or "")' "$published_meta")"
+    if [ -z "$live_store_name" ]; then
+      echo "error: the published manifest names no store to compare sections with." >&2
+      exit 1
+    fi
+    if ! gh release download data-latest -R "$REPO" -p "$live_store_name" -O "$published_store" --clobber \
+         2>"$download_err"; then
+      echo "error: could not download the published store to compare its sections:" >&2
+      sed 's/^/       /' "$download_err" >&2
+      echo "       Refusing to publish blind." >&2
+      exit 1
+    fi
+    section_args=(--published-store "$published_store")
+  fi
+  candidate_store="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("storeFile") or "")' "$meta")"
+  # A missing store is the manifest-drop guard below, which gives the operator its build recipe. Do not
+  # turn that into the less useful "is a directory" from trying to open `$DIR/` as a store.
+  if [ -n "$candidate_store" ]; then
+    if missing_sections="$(python3 "$(dirname "$0")/check_store_sections.py" "$published_meta" \
+                          "$DIR/$candidate_store" "${section_args[@]}")"; then
+      section_status=0
+    else
+      section_status=$?
+    fi
+  else
+    section_status=0
+    missing_sections=""
+  fi
+  if [ "$section_status" -eq 2 ]; then
+    exit 1
+  elif [ "$section_status" -eq 1 ]; then
+    echo "error: the store would lose sections the published store has:" >&2
+    echo "$missing_sections" | sed 's/^/       /' >&2
+    if [ -z "${DEN_ALLOW_DROPPING_STORE_SECTIONS:-}" ]; then
+      echo "       Restore the missing store input, or for a deliberate retirement name the reason in" >&2
+      echo "       DEN_ALLOW_DROPPING_STORE_SECTIONS='<why these sections are retired>'." >&2
+      exit 1
+    fi
+    echo "       DEN_ALLOW_DROPPING_STORE_SECTIONS: $DEN_ALLOW_DROPPING_STORE_SECTIONS" >&2
+    python3 - "$meta" "$DEN_ALLOW_DROPPING_STORE_SECTIONS" $missing_sections <<'PY'
+import json, sys
+path, reason, *sections = sys.argv[1:]
+meta = json.load(open(path))
+meta["droppedStoreSections"] = {"reason": reason, "sections": sections}
+with open(path, "w") as handle:
+    json.dump(meta, handle, indent=2, sort_keys=True)
+PY
+  fi
 fi
 
 # RECORD-COUNT GUARD. The blob-drop check below catches a whole FILE disappearing; it cannot see a file that

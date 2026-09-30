@@ -562,6 +562,7 @@ class StampsTheManifest(unittest.TestCase):
                 blob = fh.read()
             self.assertEqual(stamped["storeBytes"], len(blob))
             self.assertEqual(stamped["storeSha256"], hashlib.sha256(blob).hexdigest())
+            self.assertEqual(stamped["storeSections"], list(build_store_module().PROVENANCE))
             self.assertEqual(
                 stamped["labelsFile"], "labels.json", "stamping must not drop the keys already there"
             )
