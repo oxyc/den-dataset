@@ -114,15 +114,24 @@ def build(titles, names, parents=None):
             kinds.setdefault(p, "franchise")
             stack.extend(parents.get(p, ()))
     groups = {q: Group(q, kinds[q], names.get(q) or q, keys) for q, keys in members.items() if len(keys) >= 2}
-    for chain in _chains(titles):
-        if not any(chain <= g.members for g in groups.values() if g.kind != "book-series"):
+    chains = _chains(titles)
+    # A book series becomes a source umbrella only when it contains at least two distinct screen lines.
+    # One sequel chain adapting one book line adds no information and remains suppressed as before.
+    split_books = {g.id for g in groups.values() if g.kind == "book-series"
+                   and sum(chain <= g.members for chain in chains) >= 2}
+    for chain in chains:
+        containing_books = [g for g in groups.values() if g.id in split_books and chain <= g.members]
+        if not any(chain <= g.members for g in groups.values() if g.kind != "book-series") \
+                and (containing_books or not any(chain <= g.members for g in groups.values())):
             # Release order, not the set's: `chain_name` keeps the first title's spelling of the shared words,
             # and a set of strings iterates in a hash order that changes per process — "Plaga Zombie" in one
             # run, "Plaga zombie" in the next, and the same corpus built two different stores.
             ordered = sorted((titles[k] for k in chain), key=order_key)
             first = ordered[0]
             gid = f"chain:{first.key}"
-            groups[gid] = Group(gid, "chain", chain_name([t.name for t in ordered]) or first.name, chain)
+            name = min(containing_books, key=lambda g: (len(g.members), g.id)).name if containing_books \
+                else chain_name([t.name for t in ordered]) or first.name
+            groups[gid] = Group(gid, "chain", name, chain)
     return groups
 
 
@@ -247,7 +256,13 @@ def related(groups):
     for gids in by_word.values():
         for a in gids:
             for b in gids:
-                if a != b and not (groups[a].members & groups[b].members):
+                # Two disjoint sequel chains under the same source books are the separate production lines
+                # this grouping exists to preserve, not an ambiguity to send back for a name-based merge.
+                sibling_lines = groups[a].kind == groups[b].kind == "chain" and any(
+                    g.kind == "book-series" and groups[a].members < g.members and groups[b].members < g.members
+                    for g in groups.values())
+                if a != b and not sibling_lines \
+                        and not (groups[a].members & groups[b].members):
                     out[a].add(b)
     return {gid: sorted(others) for gid, others in out.items()}
 
@@ -265,11 +280,11 @@ def plan(titles, groups, flagged=None):
     automatic, asked = {}, {}
     for key in sorted(titles):
         mine = of.get(key, [])
-        # A source book series can contain several unrelated screen productions. When Wikidata supplies a
-        # production group inside it, that group is the title's root; the book series remains useful only as
-        # a candidate for adaptations for which no production line is known.
-        production = [g for g in mine if g.kind != "book-series"]
-        root_pool = production or mine
+        # Two sequel chains inside one source book series are separate screen productions. Those chains are
+        # the roots; a lone chain or an ordinary screen-series child keeps the existing book-root treatment.
+        book_lines = [g for g in mine if g.kind == "chain"
+                      and any(book.kind == "book-series" and g.members < book.members for book in mine)]
+        root_pool = book_lines or mine
         roots = [g for g in root_pool if not any(g.members < h.members for h in root_pool)]
         mine_keys = set().union(*(g.members for g in mine)) if mine else set()
         outside = linked.get(key, set()) - mine_keys
