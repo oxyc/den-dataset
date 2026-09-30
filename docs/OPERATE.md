@@ -3,23 +3,28 @@
 The daily job builds the dataset: `.github/workflows/daily.yml` runs `./den daily`, which runs every stage
 in `STAGES` order over what moved since the live dataset and stops at "ready to publish". `./den stages`
 lists what each stage reads and writes; `pipeline/daily.py` says what a day runs, skips and refuses. This
-file is what a person does by hand: sign and publish a ready run, and get a run that is not ready going
-again.
+file is what an operator checks after the workflow publishes a ready run, and how to get a run that is not
+ready going again.
 
 ## Publishing a daily run
 
-Nothing in the job signs or uploads; the signing key is only on the owner's machine. A ready run uploads
-the store, the manifest, `checked.json` and the bundle as the artifact `dataset-<run id>` (kept 14 days).
-From the repo root, with the signing key where `publish-dataset.sh` looks for it:
+A ready scheduled or manually dispatched run publishes itself. After `./den daily` leaves
+`checked.json`, the workflow calls `publish-dataset.sh --checked --keyless`: every gate remains in front of
+the publish, Cosign binds the exact manifest to `daily.yml` on `refs/heads/main` with GitHub OIDC, the
+Sigstore bundle is uploaded as `dataset.meta.json.bundle`, and the manifest is the final commit. The same
+checked store, manifest and corpus bundle remain downloadable as `dataset-<run id>` for 14 days.
+
+An owner-requested build uses the same path; only `main` in `oxyc/den-dataset` is allowed to run it:
 
 ```sh
-gh run download <run id> -R oxyc/den-dataset -n dataset-<run id> -D daily-<run id>
-pipeline/publish-dataset.sh daily-<run id> --checked
+gh workflow run daily.yml -R oxyc/den-dataset --ref main -f spend=false
 ```
 
-`--checked` refuses unless the store and the manifest are the bytes the run's check passed, compares them
-again with the release as it is now, signs, and uploads — the manifest last. It also uploads the bundle to
-`corpus-<version>`, which is how what a successful day bought reaches the next day.
+A run that does not reach "Ready to publish" uploads its report and recovery inputs, publishes nothing, and
+fails visibly. `--checked` refuses unless the store and manifest are the exact bytes the run's check passed,
+compares them again with the release as it is now, and uploads the corpus bundle to `corpus-<version>` so
+what a successful day bought reaches the next day. The legacy Ed25519 signer remains available for a manual
+operator publish during the migration, but it is not part of the daily path.
 
 Before enabling the daily schedule after adding a new durable store input, republish the live generation's
 bundle once from the out-dir that built it. For fan picks this bundle must contain `fan-picks.json`; both the

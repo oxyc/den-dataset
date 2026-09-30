@@ -18,12 +18,13 @@ service (bge-m3, 1024-dim int8).
 ## What is published
 
 `data-latest` is a moving release: each publish replaces it, so there is one live dataset, currently
-**`5b1c3213b6a1`**. Only what `dataset.meta.json` names is uploaded.
+**`5b1c3213b6a1`**. The manifest names the data file; its keyless workflow proof sits beside it.
 
 | asset | what it is |
 |---|---|
 | `den-<ver>.store` | everything den-atlas reads — facts, genres & moods, cards, facets, the entity table, alias titles and both vector matrices — 47,618 rows, 133 MB, mmapped |
 | `dataset.meta.json` | version, embedder, dims, quantization, and the store's name, hash, size and row count |
+| `dataset.meta.json.bundle` | Sigstore proof that the manifest came from `daily.yml` on this repository's `main` branch |
 
 The **corpus** ships separately under `corpus-<ver>`, and is kept out of the serving manifest so the box
 never downloads it: `corpus-<ver>.jsonl.gz` (47,529 titles, one JSON object per line) is the source of truth
