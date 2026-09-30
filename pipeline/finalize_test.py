@@ -239,6 +239,25 @@ class Bytes(Staged):
         self.assertEqual(read(premise, "rb"), original)
         self.assertNotIn(artifacts.PREMISE_VECTORS, finalize.INPUTS)
 
+    def test_the_absolute_corpus_snapshot_moves_and_stabilises_the_generation(self):
+        lay_down(self.out)
+        changes = os.path.join(self.out, "changes")
+        os.makedirs(changes)
+        with open(os.path.join(changes, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"snapshotSha256": "1" * 64}, fh)
+        self.run_stage()
+        first = json.loads(read(os.path.join(self.out, "dataset.meta.json")))
+        self.assertEqual(first["corpusSnapshotSha256"], "1" * 64)
+        self.assertNotEqual(first["datasetVersion"], "0989d9094945")
+        self.run_stage()
+        stable = json.loads(read(os.path.join(self.out, "dataset.meta.json")))
+        self.assertEqual(stable["datasetVersion"], first["datasetVersion"])
+        with open(os.path.join(changes, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"snapshotSha256": "2" * 64}, fh)
+        self.run_stage()
+        moved = json.loads(read(os.path.join(self.out, "dataset.meta.json")))
+        self.assertNotEqual(moved["datasetVersion"], first["datasetVersion"])
+
     def test_the_precompressed_labels_are_not_written(self):
         """`labels-t02.json.gz` was the copy den-atlas served to clients asking for gzip. The blobs were
         retired for the store, `prune_manifest.py` drops every `*GzFile` key, and nothing in this repo, in

@@ -81,7 +81,16 @@ class Rules(unittest.TestCase):
         plan = out.plan()
         self.assertIsNone(plan["baseline"])
         self.assertEqual(plan["added"], ["movie:1", "movie:2", "tv:1"], "movies first, then by number")
+        self.assertEqual(len(plan["snapshotSha256"]), 64)
         self.assertEqual(out.read("keys.txt"), ["movie:1", "movie:2", "tv:1"])
+
+    def test_the_absolute_snapshot_identity_does_not_chain_the_live_version(self):
+        out = Batches(self)
+        through = out.add(row(1), row(2))
+        out.publish(through, version="first")
+        first = out.plan()["snapshotSha256"]
+        out.publish(through, version="second")
+        self.assertEqual(out.plan()["snapshotSha256"], first)
 
     def test_a_title_in_a_batch_after_the_live_one_is_added(self):
         out = Batches(self)
