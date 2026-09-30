@@ -370,20 +370,18 @@
    ]
   },
   {
-   "name": "Millennium",
+   "name": "Millennium (Swedish)",
    "together": [
     "movie:15472",
     "movie:24253",
-    "movie:65754"
-   ],
-   "eras": [
-    [
-     "movie:15472",
-     "movie:24253"
-    ],
-    [
-     "movie:65754"
-    ]
+    "movie:33613"
+   ]
+  },
+  {
+   "name": "Millennium (American)",
+   "together": [
+    "movie:65754",
+    "movie:446807"
    ]
   },
   {
@@ -418,18 +416,30 @@
    ]
   },
   {
-   "name": "Olsen Gang",
+   "name": "Olsen Gang (Danish)",
    "together": [
     "movie:11389",
-    "movie:24667"
-   ],
-   "eras": [
-    [
-     "movie:11389"
-    ],
-    [
-     "movie:24667"
-    ]
+    "movie:12231",
+    "movie:11390",
+    "movie:15498",
+    "movie:15499",
+    "movie:12269",
+    "movie:11391",
+    "movie:11392",
+    "movie:12711",
+    "movie:12592",
+    "movie:12712",
+    "movie:15539",
+    "movie:15537",
+    "movie:12549"
+   ]
+  },
+  {
+   "name": "Olsen Gang (Norwegian)",
+   "together": [
+    "movie:24667",
+    "movie:24670",
+    "movie:24693"
    ]
   },
   {
@@ -444,6 +454,14 @@
   }
  ],
  "apart": [
+  [
+   "movie:15472",
+   "movie:65754"
+  ],
+  [
+   "movie:11389",
+   "movie:24667"
+  ],
   [
    "movie:10528",
    "tv:19885"

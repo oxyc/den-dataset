@@ -405,13 +405,23 @@ class Stage(unittest.TestCase):
     def test_a_continuing_cast_merges_two_groups_sharing_only_a_name_word(self):
         cast = {"cast": ["Qa", "Qb", "Qc"]}
         titles, groups, asked, answers = self.name_word_pair(**{"movie:1": cast, "movie:3": cast})
+        groups["Qday"] = franchises.fg.Group("Qday", "book-series", "A Hard Day's Night",
+                                              ["movie:3", "movie:4"])
         got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
         self.assertEqual(set(got), {"Qday"})
 
         two = {"cast": ["Qa", "Qb"]}
         titles, groups, asked, answers = self.name_word_pair(**{"movie:1": two, "movie:3": two})
+        groups["Qday"] = franchises.fg.Group("Qday", "book-series", "A Hard Day's Night",
+                                              ["movie:3", "movie:4"])
         got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
         self.assertEqual(set(got), {"Qdie", "Qday"}, "two shared actors are not a continuing cast")
+
+    def test_cast_overlap_does_not_join_two_explicit_production_series(self):
+        cast = {"cast": ["Qa", "Qb", "Qc"]}
+        titles, groups, asked, answers = self.name_word_pair(**{"movie:1": cast, "movie:3": cast})
+        got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
+        self.assertEqual(set(got), {"Qdie", "Qday"})
 
     def test_a_wikidata_series_holding_titles_of_both_merges_them(self):
         titles, groups, asked, answers = self.name_word_pair()
@@ -423,12 +433,13 @@ class Stage(unittest.TestCase):
         got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
         self.assertEqual(set(got), {"Qdie", "Qday"}, "a book series' adaptations are no line")
 
-    def test_a_title_choosing_the_other_group_merges_them(self):
+    def test_a_title_choosing_a_disjoint_group_does_not_merge_them(self):
         titles, groups, asked, answers = self.name_word_pair()
         answers["movie:4"] = (decision(choice="B", one=0.9), asked["movie:4"])
         got, _ = franchises.resolve(titles, groups, {}, {}, asked, answers, {})
-        self.assertEqual(set(got), {"Qday"})
-        self.assertEqual(set(got["Qday"]["members"]), {"movie:1", "movie:2", "movie:3", "movie:4"})
+        self.assertEqual(set(got), {"Qdie", "Qday"})
+        self.assertEqual(set(got["Qdie"]["members"]), {"movie:1", "movie:2"})
+        self.assertEqual(set(got["Qday"]["members"]), {"movie:3", "movie:4"})
 
     def test_titles_of_one_year_are_in_release_order_where_wikidata_dates_them(self):
         titles = {"movie:1": franchises.fg.Title("movie:1", "October", 1997, date="1997-10-31"),

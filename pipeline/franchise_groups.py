@@ -91,7 +91,9 @@ def release_key(title):
 def build(titles, names, parents=None):
     """`{group id: Group}` over `titles` (`{key: Title}`). `names` names a Q-id; `parents` maps a group's
     Q-id to the bigger ones it is part of, and a parent holds every title its children hold. A group of one
-    title groups nothing and is dropped; a sequel chain inside one series adds nothing and is dropped."""
+    title groups nothing and is dropped; a sequel chain inside one production series adds nothing and is
+    dropped. A chain inside only a book series is kept: the books are shared source material, while the
+    chain identifies one production line among their adaptations."""
     parents = parents or {}
     members = collections.defaultdict(set)
     kinds = {}
@@ -113,7 +115,7 @@ def build(titles, names, parents=None):
             stack.extend(parents.get(p, ()))
     groups = {q: Group(q, kinds[q], names.get(q) or q, keys) for q, keys in members.items() if len(keys) >= 2}
     for chain in _chains(titles):
-        if not any(chain <= g.members for g in groups.values()):
+        if not any(chain <= g.members for g in groups.values() if g.kind != "book-series"):
             # Release order, not the set's: `chain_name` keeps the first title's spelling of the shared words,
             # and a set of strings iterates in a hash order that changes per process — "Plaga Zombie" in one
             # run, "Plaga zombie" in the next, and the same corpus built two different stores.
@@ -263,7 +265,12 @@ def plan(titles, groups, flagged=None):
     automatic, asked = {}, {}
     for key in sorted(titles):
         mine = of.get(key, [])
-        roots = [g for g in mine if not any(g.members < h.members for h in mine)]
+        # A source book series can contain several unrelated screen productions. When Wikidata supplies a
+        # production group inside it, that group is the title's root; the book series remains useful only as
+        # a candidate for adaptations for which no production line is known.
+        production = [g for g in mine if g.kind != "book-series"]
+        root_pool = production or mine
+        roots = [g for g in root_pool if not any(g.members < h.members for h in root_pool)]
         mine_keys = set().union(*(g.members for g in mine)) if mine else set()
         outside = linked.get(key, set()) - mine_keys
         kin = sorted({r for g in roots for r in relatives.get(g.id, ())} - {g.id for g in mine})
