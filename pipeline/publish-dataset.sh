@@ -3,23 +3,26 @@
 # dataset artifact, which den-atlas fetches. `data-latest` is a MOVING release: this clobbers its assets on
 # every publish, so consumers always pull the current dataset.
 #
-# TWO FILES SHIP (oxyc/den#113): `den-<version>.store` and the `dataset.meta.json` describing it. The store
-# carries what the per-blob artifacts carried — facts, labels, cards, facets, rail facets, the entity table,
-# alias titles, and both vector matrices as sections — and atlas mmaps it. Everything else in the out-dir is
-# an INPUT to that build and stays there; step 0 prunes their keys out of the manifest.
+# TWO DATA FILES SHIP (oxyc/den#113): `den-<version>.store` and the `dataset.meta.json` describing it. CI
+# also puts the manifest's Sigstore proof beside them as `dataset.meta.json.bundle`. The store carries what
+# the per-blob artifacts carried — facts, labels, cards, facets, rail facets, the entity table, alias titles,
+# and both vector matrices as sections — and atlas mmaps it. Everything else in the out-dir is an INPUT to
+# that build and stays there; step 0 prunes their keys out of the manifest.
 #
 #   ./den stage finalize --out-dir out                           # labels-*.json + vectors-*.bin + manifest
 #   python3 pipeline/build_store.py … --stamp-meta out/dataset.meta.json    # THE artifact
 #   pipeline/publish-dataset.sh [OUT_DIR] [--unsigned]       # default: ./out, then ./data
 #   pipeline/publish-dataset.sh OUT_DIR --check              # every gate; nothing signed, nothing uploaded
 #   pipeline/publish-dataset.sh ARTIFACT_DIR --checked       # what a --check passed: sign and publish it
+#   pipeline/publish-dataset.sh ARTIFACT_DIR --checked --keyless  # CI: GitHub OIDC bundle, then publish
 #
 # Requires `gh` authenticated with write access to the repo. The blobs are gitignored (large derived data),
 # so they live as release assets, never in git.
 #
-# SIGNED (oxyc/den#127): the meta is signed with the Ed25519 key at $DEN_DATASET_SIGNING_KEY (default
-# ~/.config/den/dataset-signing.pem) just before anything uploads — see pipeline/sign_manifest.py. No key
-# is a refusal; `--unsigned` publishes without a signature, deliberately.
+# SIGNED (oxyc/den#127, oxyc/den-dataset#178): CI signs the meta keyless with Cosign and publishes its
+# Sigstore bundle beside the meta. A manual publish may instead use the Ed25519 key at
+# $DEN_DATASET_SIGNING_KEY (default ~/.config/den/dataset-signing.pem) — see pipeline/sign_manifest.py.
+# No proof is a refusal; `--unsigned` publishes without either proof, deliberately.
 #
 # CHECK (oxyc/den-dataset#27): `--check` runs every gate below exactly as a publish does and stops where the
 # signing starts, so an unattended job with no key and no write access can end at "ready to publish". It
@@ -53,11 +56,13 @@ DIR=""
 unsigned=0
 check=0
 checked=0
+keyless=0
 for arg in "$@"; do
   case "$arg" in
     --unsigned) unsigned=1 ;;
     --check) check=1 ;;
     --checked) checked=1 ;;
+    --keyless) keyless=1 ;;
     -*) echo "error: unknown option $arg" >&2; exit 2 ;;
     *) [ -z "$DIR" ] || { echo "error: one out-dir only (got $DIR and $arg)" >&2; exit 2; }; DIR="$arg" ;;
   esac
@@ -72,11 +77,13 @@ fi
 
 REPO="${DEN_DATASET_REPO:-oxyc/den-dataset}"
 [ "$check" -eq 1 ] && [ "$checked" -eq 1 ] && { echo "error: --check and --checked are two different runs" >&2; exit 2; }
+[ "$keyless" -eq 1 ] && [ "$check" -eq 1 ] && { echo "error: --keyless signs only after --check has passed" >&2; exit 2; }
+[ "$keyless" -eq 1 ] && [ "$unsigned" -eq 1 ] && { echo "error: --keyless and --unsigned are mutually exclusive" >&2; exit 2; }
 
 # The signing key is checked FIRST, before the prune rewrites the meta. Publishing unsigned used to be the
 # only thing this script did, silently, and a consumer that pins our key refuses an unsigned meta.
 signing_key="${DEN_DATASET_SIGNING_KEY:-$HOME/.config/den/dataset-signing.pem}"
-if [ "$check" -eq 0 ] && [ "$unsigned" -eq 0 ] && [ ! -f "$signing_key" ]; then
+if [ "$check" -eq 0 ] && [ "$unsigned" -eq 0 ] && [ "$keyless" -eq 0 ] && [ ! -f "$signing_key" ]; then
   echo "error: no dataset signing key at $signing_key — the meta would publish unsigned." >&2
   echo "       Put the Ed25519 key (PKCS#8 PEM) there, or point DEN_DATASET_SIGNING_KEY at it. Its public" >&2
   echo "       half must be PUBLIC_KEY in pipeline/sign_manifest.py, which is what consumers pin." >&2
@@ -734,7 +741,28 @@ fi
 # `--unsigned` also DROPS a signature the meta already carries: `finalize` merges over the previous meta,
 # so one signed for an older generation would ride along, and the app treats a wrong signature as worse
 # than none.
-if [ "$unsigned" -eq 1 ]; then
+keyless_bundle=""
+if [ "$keyless" -eq 1 ]; then
+  # The bundle authenticates THESE exact meta bytes. Drop a carried legacy signature first, then make and
+  # verify the proof before the first data-latest asset moves. The release bundle is uploaded immediately
+  # before the meta commit below; a failure leaves the old manifest live.
+  python3 - "$meta" <<'PY'
+import json, sys
+meta = json.load(open(sys.argv[1]))
+if meta.pop("signature", None) is not None:
+    json.dump(meta, open(sys.argv[1], "w"), indent=1)
+PY
+  keyless_bundle="$DIR/dataset.meta.json.bundle"
+  rm -f "$keyless_bundle"
+  cosign_bin="${DEN_COSIGN:-cosign}"
+  identity="https://github.com/oxyc/den-dataset/.github/workflows/daily.yml@refs/heads/main"
+  issuer="https://token.actions.githubusercontent.com"
+  "$cosign_bin" sign-blob --yes --bundle "$keyless_bundle" "$meta" \
+    || { echo "       Nothing uploaded." >&2; exit 1; }
+  "$cosign_bin" verify-blob --bundle "$keyless_bundle" --certificate-identity "$identity" \
+    --certificate-oidc-issuer "$issuer" "$meta" >/dev/null \
+    || { echo "error: Cosign did not verify the pinned daily workflow identity. Nothing uploaded." >&2; exit 1; }
+elif [ "$unsigned" -eq 1 ]; then
   echo "publishing UNSIGNED (--unsigned): a consumer that pins the dataset key will refuse this dataset." >&2
   python3 - "$meta" <<'PY'
 import json, sys
@@ -808,6 +836,13 @@ while read -r name _sha; do
     || { echo "error: meta references '$name' but it is NOT on the release" >&2; missing=1; }
 done < "$manifest_files"
 [ "$missing" -eq 0 ] || { echo "aborting: refusing to publish a meta that points at missing blobs (half-published release)" >&2; exit 1; }
+
+# The keyless proof is part of the commit. Put it beside the release before the meta that requires it, and
+# never upload a bundle on the legacy or deliberately unsigned paths (an old bundle must not look current).
+if [ -n "$keyless_bundle" ]; then
+  echo "→ dataset.meta.json.bundle (workflow identity)"
+  upload_one "$keyless_bundle" || exit 1
+fi
 
 # 5) META LAST — the atomic commit point. It declares the new datasetVersion + names the blobs, so it must be
 # the final write. If any blob upload above failed, we already exited and the OLD meta still stands, so

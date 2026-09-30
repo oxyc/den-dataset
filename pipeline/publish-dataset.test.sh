@@ -103,6 +103,39 @@ esac
 exit 0
 STUB
   chmod +x "$BIN/gh"
+  cat > "$BIN/cosign" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+expected_identity="https://github.com/oxyc/den-dataset/.github/workflows/daily.yml@refs/heads/main"
+expected_issuer="https://token.actions.githubusercontent.com"
+case "$1" in
+  sign-blob)
+    bundle=""; meta=""; prev=""
+    for a in "$@"; do
+      [ "$prev" = "--bundle" ] && bundle="$a"
+      prev="$a"
+      [[ "$a" != -* ]] && [ "$a" != "sign-blob" ] && meta="$a"
+    done
+    [ -n "$bundle" ] && [ -s "$meta" ]
+    printf '%s\n%s\n' "${FAKE_COSIGN_IDENTITY:-$expected_identity}" "$expected_issuer" > "$bundle"
+    ;;
+  verify-blob)
+    bundle=""; identity=""; issuer=""; prev=""
+    for a in "$@"; do
+      [ "$prev" = "--bundle" ] && bundle="$a"
+      [ "$prev" = "--certificate-identity" ] && identity="$a"
+      [ "$prev" = "--certificate-oidc-issuer" ] && issuer="$a"
+      prev="$a"
+    done
+    [ "$identity" = "$expected_identity" ]
+    [ "$issuer" = "$expected_issuer" ]
+    [ "$(sed -n '1p' "$bundle")" = "$identity" ]
+    [ "$(sed -n '2p' "$bundle")" = "$issuer" ]
+    ;;
+  *) exit 2 ;;
+esac
+STUB
+  chmod +x "$BIN/cosign"
   # A real out-dir holds the store's INPUTS beside it — labels, vectors, the cc0 experimental pair — and
   # none of them publish any more. They are here so the cases below prove that: what lands on the release
   # is the store and the meta, with these sitting right next to them untouched.
@@ -1095,8 +1128,9 @@ teardown
 
 # --- publishing what a --check passed elsewhere (oxyc/den-dataset#27) ------------------------------------
 #
-# The daily job ends at `--check` and uploads the store, the manifest and `checked.json` as its artifact;
-# the owner publishes those bytes with `--checked`. Run once, not per mode: `--checked` is its own entry.
+# The daily job ends at `--check` and uploads the store, manifest and `checked.json`; CI publishes those
+# exact bytes with `--checked --keyless`. The legacy checked path remains covered too. Run once, not per
+# mode: `--checked` is its own entry.
 
 if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
   # A checked artifact: the check run in $DIR, its three files copied to $WORK/artifact.
@@ -1111,6 +1145,7 @@ if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
     cp -r "$DIR/bundle" "$ARTIFACT/"
   }
   run_checked() { PATH="$BIN:$PATH" bash "$PUBLISH" "$ARTIFACT" --checked > "$WORK/out.log" 2> "$WORK/err.log"; }
+  run_checked_keyless() { PATH="$BIN:$PATH" bash "$PUBLISH" "$ARTIFACT" --checked --keyless > "$WORK/out.log" 2> "$WORK/err.log"; }
 
   setup
   write_meta
@@ -1128,6 +1163,35 @@ if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
       || bad "--checked did not say the quality gate ran in the check"
   else
     bad "--checked refused a checked artifact: $(tail -3 "$WORK/err.log")"
+  fi
+  teardown
+
+  setup
+  write_meta
+  publish_baseline
+  if checked_artifact && run_checked_keyless; then
+    [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store dataset.meta.json.bundle dataset.meta.json " ] \
+      && ok "--checked --keyless publishes the store, workflow bundle, then meta" \
+      || bad "--checked --keyless uploaded $(tr '\n' ' ' < "$UPLOADS")"
+    [ -s "$ARTIFACT/dataset.meta.json.bundle" ] \
+      && ok "…keeps the verified Sigstore bundle beside the meta" \
+      || bad "--checked --keyless produced no bundle"
+  else
+    bad "--checked --keyless refused a checked artifact: $(tail -3 "$WORK/err.log")"
+  fi
+  teardown
+
+  setup
+  write_meta
+  publish_baseline
+  if checked_artifact; then
+    if FAKE_COSIGN_IDENTITY="https://github.com/oxyc/den-dataset/.github/workflows/fork.yml@refs/heads/main" run_checked_keyless; then
+      bad "--keyless published a proof from the wrong workflow identity"
+    else
+      [ ! -s "$UPLOADS" ] \
+        && ok "--keyless refuses a wrong workflow identity before uploading anything" \
+        || bad "--keyless uploaded assets before refusing the wrong identity"
+    fi
   fi
   teardown
 
