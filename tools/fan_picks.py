@@ -714,7 +714,13 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     anchors = {key: list(dict.fromkeys(pick for pick in picks if pick in current and pick != key))
                for key, picks in anchors.items() if key in current}
 
-    wanted = set(keys)
+    # `changes.added` is the discovery/change-plan set. A tags-only title with no article can be admitted
+    # there but still have no corpus/store row after the model and composition stages. There is nowhere to
+    # attach `fan_picks_a` for such a key, so report it and ask only titles the store will actually carry.
+    keys = list(dict.fromkeys(keys))
+    not_in_corpus = [key for key in keys if key not in rows]
+    corpus_keys = [key for key in keys if key in rows]
+    wanted = set(corpus_keys)
     leads = {}
     if os.path.exists(articles_path):
         with open(articles_path, encoding="utf-8") as fh:
@@ -724,12 +730,10 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
                 if key in wanted:
                     leads[key] = lead_of(article.get("text"))
     titles = {}
-    for key in keys:
+    for key in corpus_keys:
         if key in anchors:
             continue
-        row = rows.get(key)
-        if row is None:
-            raise RuntimeError(f"daily fan picks: {key} is added but is not in {corpus_path}")
+        row = rows[key]
         facts = row.get("facts") or {}
         title = display_title(facts.get("titles"))
         if not title:
@@ -776,6 +780,7 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
              "count": len(anchors), "anchors": dict(sorted(anchors.items()))}
     write_json(out, value)
     return {"asked": len(titles), "answered": len(answered), "emptyAnswers": len(parse_errors),
+            "notInCorpus": not_in_corpus,
             "anchors": len(anchors), "picks": sum(len(v) for v in anchors.values()),
             "costUSD": round(sum(costs), 6), "projectedSpendUSD": round(projected, 6),
             "spendCapUSD": max_spend}

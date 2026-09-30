@@ -327,7 +327,9 @@ def report(day, ready, why, tokens):
              f"- spend: ${out['spend']['usd']:.2f} ({tokens:,} input tokens)", ""]
     if out["fanPicks"]:
         lines += [f"- fan picks: {out['fanPicks']['asked']} asked, {out['fanPicks']['answered']} answered, "
-                  f"{out['fanPicks']['emptyAnswers']} empty; ${out['fanPicks']['costUSD']:.4f}", ""]
+                  f"{out['fanPicks']['emptyAnswers']} empty, "
+                  f"{len(out['fanPicks'].get('notInCorpus') or [])} plan-only/not in corpus; "
+                  f"${out['fanPicks']['costUSD']:.4f}", ""]
     counts = out["counts"] or {}
     lines += [f"| added | changed | withdrawn | revised | revisited |", "|---|---|---|---|---|",
               f"| {counts.get('added', 0)} | {counts.get('changed', 0)} | {counts.get('withdrawn', 0)} | "
