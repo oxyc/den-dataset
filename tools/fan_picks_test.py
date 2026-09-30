@@ -270,6 +270,19 @@ class Daily(unittest.TestCase):
                                 generate=lambda *args: called.append(args), follows={}, max_spend=0.000001)
             self.assertEqual(called, [])
 
+    def test_a_plan_only_title_with_no_corpus_row_is_reported_and_not_asked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
+            called = []
+            result = fp.daily_update(
+                corpus, articles, franchises, existing, existing, ["movie:1", "tv:290720", "movie:1"],
+                workers=1,
+                generate=lambda title, key, ask: (called.append(key) or {"picks": [], "costUSD": 0.001},
+                                                   None, True), follows={})
+        self.assertEqual(called, ["movie:1"])
+        self.assertEqual(result["notInCorpus"], ["tv:290720"])
+        self.assertEqual(result["asked"], 1)
+
     def test_an_unreachable_provider_refuses_without_replacing_the_input(self):
         with tempfile.TemporaryDirectory() as directory:
             corpus, articles, franchises, existing = self.fixture(directory)
