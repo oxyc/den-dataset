@@ -15,6 +15,7 @@ runs, and `check_producers.py` reads the same tuple instead of keeping a copy.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -57,6 +58,19 @@ WRITER = os.path.join(REPO, PRODUCER)
 #: Inputs that are committed files rather than out-dir artifacts: the path read when the out-dir holds no
 #: copy and no override names one.
 COMMITTED = {artifacts.PREMISE_TAGS.name: os.path.join(REPO, "data", artifacts.PREMISE_TAGS.filename)}
+
+
+def materialize_committed(ctx):
+    """Carry committed durable inputs into the generation before the store records what it read."""
+    by_name = {artifact.name: artifact for artifact in INPUTS}
+    for name, source in COMMITTED.items():
+        if name in ctx.overrides:
+            continue
+        target = ctx.path(by_name[name])
+        if os.path.exists(target):
+            continue
+        os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
+        shutil.copyfile(source, target)
 
 
 def argv(ctx):
@@ -102,6 +116,9 @@ def run(ctx):
     """Build the store. Returns its path."""
     out = ctx.path(artifacts.STORE)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    # A stateless daily run must receive every durable input the store used. Materializing the committed
+    # baseline here makes it part of this generation's corpus bundle even when no paid premise step ran.
+    materialize_committed(ctx)
     result = subprocess.run(argv(ctx))
     if result.returncode != 0:
         raise StageError(f"store: {WRITER} exited {result.returncode}")

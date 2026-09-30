@@ -12,11 +12,18 @@ name: daily
 #   secrets  TMDB_API_KEY                       the delta worklist; without it no new titles are discovered
 #            TYPESAFE_API_KEY                   the classify, critique and genres & moods answers (with spend)
 #            GEMINI_API_KEY                     new titles' fan picks (with spend)
+#            ANTHROPIC_API_KEY                  new titles' premise tags (with spend)
 #            WIKIMEDIA_ENTERPRISE_USERNAME/_PASSWORD   optional plot source
 #            DEN_EMBED_URL                      a den-embed to embed against instead of the job's own
 #   vars     DEN_DAILY_ENABLED                  `true` to run on the schedule
 #            DEN_DAILY_SPEND                    `true` to let the scheduled run buy the day's answers
+#            DEN_DAILY_SPEND_TYPESAFE           `false` disables TypeSafe while master spend is on
+#            DEN_DAILY_SPEND_FAN_PICKS          `false` disables fan picks while master spend is on
+#            DEN_DAILY_SPEND_PREMISE            `false` disables premise tags while master spend is on
+#            DEN_DAILY_TYPESAFE_MAX_SPEND_USD    projected TypeSafe cap for one day; default $1.00
 #            DEN_DAILY_FAN_PICKS_MAX_SPEND_USD  projected Gemini cap for one day; default $1.00
+#            DEN_DAILY_PREMISE_MAX_SPEND_USD    projected Haiku cap for one day; default $1.00
+#            DEN_DAILY_MAX_SPEND_USD_MONTH      all three steps, from published reports; default $10.00
 #            DEN_DAILY_RUNS_ON                  a JSON runner label list, e.g. ["self-hosted","den"]; default
 #                                               ubuntu-latest
 #            DEN_REVISIT_WEEKS                  the weekly slice's cycle, default 8
@@ -94,23 +101,48 @@ jobs:
             sleep 5
           done
           docker logs den-embed >&2; exit 1
+      - name: Published spend reports
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$OUT/published-reports"
+          if gh release view daily-reports -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release download daily-reports -R "$GITHUB_REPOSITORY" -p 'daily-report-*.json' \
+              -D "$OUT/published-reports"
+          fi
       - name: The day
         id: day
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WIKIMEDIA_ENTERPRISE_USERNAME: ${{ secrets.WIKIMEDIA_ENTERPRISE_USERNAME }}
           WIKIMEDIA_ENTERPRISE_PASSWORD: ${{ secrets.WIKIMEDIA_ENTERPRISE_PASSWORD }}
           DEN_EMBED_URL: ${{ secrets.DEN_EMBED_URL || (vars.DEN_EMBED_IMAGE != '' && 'http://127.0.0.1:8080' || '') }}
           WEEKS: ${{ github.event_name == 'workflow_dispatch' && inputs.revisit_weeks || (github.event.schedule == '47 4 * * 1' && (vars.DEN_REVISIT_WEEKS || '8') || '') }}
           # format() so a dispatch's `false` is a non-empty string and is not replaced by the schedule's variable.
           SPEND: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.spend) || format('{0}', vars.DEN_DAILY_SPEND == 'true') }}
+          SPEND_TYPESAFE: ${{ vars.DEN_DAILY_SPEND_TYPESAFE != 'false' }}
+          SPEND_FAN_PICKS: ${{ vars.DEN_DAILY_SPEND_FAN_PICKS != 'false' }}
+          SPEND_PREMISE: ${{ vars.DEN_DAILY_SPEND_PREMISE != 'false' }}
+          TYPESAFE_MAX_SPEND_USD: ${{ vars.DEN_DAILY_TYPESAFE_MAX_SPEND_USD || '1.00' }}
           FAN_PICKS_MAX_SPEND_USD: ${{ vars.DEN_DAILY_FAN_PICKS_MAX_SPEND_USD || '1.00' }}
+          PREMISE_MAX_SPEND_USD: ${{ vars.DEN_DAILY_PREMISE_MAX_SPEND_USD || '1.00' }}
+          MAX_SPEND_USD_MONTH: ${{ vars.DEN_DAILY_MAX_SPEND_USD_MONTH || '10.00' }}
         run: |
-          args=(--out-dir "$OUT" --fan-picks-max-spend-usd "$FAN_PICKS_MAX_SPEND_USD")
+          args=(--out-dir "$OUT" --published-reports-dir "$OUT/published-reports"
+                --typesafe-max-spend-usd "$TYPESAFE_MAX_SPEND_USD"
+                --fan-picks-max-spend-usd "$FAN_PICKS_MAX_SPEND_USD"
+                --premise-max-spend-usd "$PREMISE_MAX_SPEND_USD"
+                --max-spend-usd-month "$MAX_SPEND_USD_MONTH")
           [ -n "$WEEKS" ] && args+=(--revisit-weeks "$WEEKS")
-          [ "$SPEND" = "true" ] && args+=(--spend)
+          if [ "$SPEND" = "true" ]; then
+            args+=(--spend)
+            [ "$SPEND_TYPESAFE" = "true" ] && args+=(--spend-typesafe) || args+=(--no-spend-typesafe)
+            [ "$SPEND_FAN_PICKS" = "true" ] && args+=(--spend-fan-picks) || args+=(--no-spend-fan-picks)
+            [ "$SPEND_PREMISE" = "true" ] && args+=(--spend-premise) || args+=(--no-spend-premise)
+          fi
           ./den daily "${args[@]}"
       - name: Report
         if: always()
@@ -132,8 +164,23 @@ jobs:
             ${{ env.OUT }}/daily-report.md
             ${{ env.OUT }}/changes/plan.json
             ${{ env.OUT }}/fan-picks.json.daily-checkpoint.json
+            ${{ env.OUT }}/premise-increment/
           if-no-files-found: ignore
           retention-days: 30
+      # Cost was incurred even when a later gate refuses. Publish this before any dataset upload so every
+      # paid run is in the next run's monthly ledger; a report-publish failure prevents dataset publication.
+      - name: Publish the spend report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f "$OUT/daily-report.json" ] || exit 0
+          report="daily-report-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          cp "$OUT/daily-report.json" "$report"
+          gh release view daily-reports -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create daily-reports -R "$GITHUB_REPOSITORY" --title "Daily spend reports" \
+              --notes "Machine-readable reports used by the unattended monthly spend cap."
+          gh release upload daily-reports -R "$GITHUB_REPOSITORY" "$report"
       # Ready to publish: the exact bytes every gate passed, and the record `--checked` holds them to.
       - name: Upload the dataset, ready to publish
         if: steps.day.outcome == 'success' && steps.report.outputs.store != ''

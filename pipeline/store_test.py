@@ -111,6 +111,15 @@ class CommandLine(unittest.TestCase):
             self.assertEqual(parsed.premise_tags, store.COMMITTED["premise_tags"])
             self.assertTrue(os.path.isfile(parsed.premise_tags))
 
+    def test_a_store_run_carries_the_committed_premise_tags_into_its_generation(self):
+        """The next stateless day needs the exact strings this generation's store embedded."""
+        with tempfile.TemporaryDirectory() as out:
+            ctx = Context(out_dir=out, dataset_version="test")
+            store.materialize_committed(ctx)
+            carried = ctx.path(artifacts.PREMISE_TAGS)
+            self.assertTrue(os.path.isfile(carried))
+            self.assertEqual(sha256(carried), sha256(store.COMMITTED["premise_tags"]))
+
     def test_an_absent_required_input_stops_the_stage(self):
         with tempfile.TemporaryDirectory() as out:
             with self.assertRaises(StageError) as refused:

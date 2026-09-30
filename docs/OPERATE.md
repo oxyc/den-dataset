@@ -32,6 +32,30 @@ bundle builder and `./den daily` now refuse if the live manifest says the store 
 is absent. `DEN_DAILY_FAN_PICKS_MAX_SPEND_USD` controls the scheduled Gemini ceiling (default `$1.00`); the
 day refuses the complete new-title ask set before its first call when the projection would cross it.
 
+## What the daily job spends
+
+`DEN_DAILY_SPEND` is the master switch. The three independent repository variables
+`DEN_DAILY_SPEND_TYPESAFE`, `DEN_DAILY_SPEND_FAN_PICKS`, and `DEN_DAILY_SPEND_PREMISE` can each be set to
+`false` to stop that purchase without stopping the other two. Unset preserves the enabled behaviour under
+the master switch. TypeSafe covers classify, critique, genres/moods, and franchise questions; fan picks use
+Gemini; premise tags use `claude-haiku-4-5-20251001` only for newly admitted or legitimately regained
+titles which do not already have tags.
+
+Each step projects the complete request set before its first call. The per-day ceilings are
+`DEN_DAILY_TYPESAFE_MAX_SPEND_USD`, `DEN_DAILY_FAN_PICKS_MAX_SPEND_USD`, and
+`DEN_DAILY_PREMISE_MAX_SPEND_USD` (each defaults to `$1.00`). The all-step monthly ceiling is
+`DEN_DAILY_MAX_SPEND_USD_MONTH` (default `$10.00`). Every run that reaches its report, including one a
+later gate refuses, publishes its measured
+`daily-report-<run id>.json` on the `daily-reports` release; a run downloads and strictly parses those
+public reports, sums `spend.totalUSD` for the UTC calendar month, and refuses a step whose projection would
+cross either ceiling. An unreadable report is fatal rather than counted as zero.
+
+The report records projection, cap, measured cost, provider token counts, today's total, and the
+month-to-date total per step. Premise generation is batch-resumable, audits exact media-type-qualified keys,
+applies the placeholder and storytelling-property guards, and repairs only rows that fall below the 8-tag
+floor after invalid tags are removed. Its merged strings, vectors, labels, coverage, and provenance travel
+in the corpus bundle together.
+
 The publish must run from the repo root: its ownership guard resolves producer paths and `git ls-files`
 against the working directory. Overrides are environment variables (below), and reach the guards either way.
 
