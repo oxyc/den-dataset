@@ -171,8 +171,12 @@ class DenDaily(fixture.DenRun):
         self.assertEqual((report["added"], report["changed"]), ([], {}))
         self.assertEqual(report["datasetVersion"], self.day_two["version"])
         self.assertEqual([s["stage"] for s in report["skipped"]], ["classify", "critique", "genres_moods (ask)",
-                                                                   "franchises (ask)", "fan_picks"])
-        self.assertEqual(report["spend"], {"inputTokens": 0, "usd": 0.0})
+                                                                   "premise_tags", "franchises (ask)", "fan_picks"])
+        self.assertEqual(report["spend"], {
+            "steps": {}, "todayUSD": 0, "monthBeforeUSD": 0.0, "monthToDateUSD": 0.0,
+            "monthlyCapUSD": 10.0, "publishedReportsThisMonth": 0, "totalUSD": 0,
+            "typesafeInputTokens": 0, "typesafeUSD": 0.0,
+        })
         with open(os.path.join(self.out, "daily-report.md"), encoding="utf-8") as fh:
             summary = fh.read()
         self.assertIn("Not ready", summary)
