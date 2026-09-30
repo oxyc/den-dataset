@@ -60,11 +60,21 @@ class Groups(unittest.TestCase):
         self.assertEqual(groups["Qbooks"].members, set(titles))
         self.assertEqual(groups["chain:movie:1"].members, {"movie:1", "movie:2"})
         self.assertEqual(groups["chain:movie:3"].members, {"movie:3", "movie:4"})
+        self.assertEqual(groups["chain:movie:1"].name, "The novels")
+        self.assertEqual(groups["chain:movie:3"].name, "The novels")
 
         automatic, asked = fg.plan(titles, groups)
         self.assertEqual(automatic["movie:1"], ("chain:movie:1", None))
         self.assertEqual(automatic["movie:4"], ("chain:movie:3", None))
         self.assertEqual(asked, {})
+
+    def test_one_screen_chain_inside_a_book_series_adds_no_group(self):
+        titles = {
+            "movie:1": fg.Title("movie:1", "Adaptation One", 2009, sources=["Qbooks"], follows=["movie:2"]),
+            "movie:2": fg.Title("movie:2", "Adaptation Two", 2011, sources=["Qbooks"], follows=["movie:1"]),
+        }
+        groups = fg.build(titles, {"Qbooks": "The novels"})
+        self.assertEqual(set(groups), {"Qbooks"})
 
 
 class Plan(unittest.TestCase):
