@@ -193,7 +193,23 @@ Web-search test, 50 unknown 2025–26 titles, blind judgment 0–2:
 
 - **A thin prompt is the problem, not a new title.** With a full English lead, the stored answer already scored 2.00. With a one-line foreign stub, the model guesses the premise from the name.
 - **Search pricing:** Gemini Google-search grounding includes 5,000 searches a month free, then $14 per 1,000. It only works as its own call: with JSON output requested, a search-enabled call comes back empty.
-- **For now:** new titles are asked like any other. The better approach is being decided in #189.
+- These scores are one model's judgment, and the judge didn't know the titles either, so they measure plot fit more than taste.
+
+**Checked against viewers instead.** 32 unknown 2025–26 titles with Reddit "like X" threads: 326 threads, 6,184 viewer recommendations. Critic text was kept out of this ruler.
+
+| Context given to Gemini 3.7 Flash | Picks of 20 viewers also named | $/title |
+|---|---:|---:|
+| Title + lead (today) | 0.42 | $0.003 |
+| + Wikipedia Reception section | 0.43 | $0.004 |
+| Critics' comparison sentences | 0.43 | ~$0.03 |
+| Comparisons + lead + Reception | 0.46 | ~$0.03 |
+| Gemini search, critic reviews only | 0.44 | $0.044 ($0.004 billed) |
+| Makers' interviews and festival notes | 0.44 | ~$0.03 |
+| Full stored article | 0.42 | $0.004 |
+
+- No method differs from today's prompt (every p ≥ 0.68). A list made for a different title scores 0.07.
+- Critic comparisons fix some titles (*Sorry, Baby* 1 → 7 hits) and hurt others (*Stick*: golf films).
+- **Decision:** new titles keep today's prompt (#189). Test cost $0.76 API; the searching and reading ran on the Claude plan.
 
 ## Notes
 
