@@ -237,6 +237,9 @@ def fan_picks_step(day):
         held = pending_keys(day, "fan_picks")
         titles = fan_picks.titles_for(sorted(set(waiting) | set(reasks) | {k for k in held if k in rows}),
                                       rows, ctx.path(artifacts.ARTICLES))
+        # A title with no name has no card to ask about (`titles_for`).
+        waiting = [key for key in waiting if key in titles]
+        reasks = {key: dates for key, dates in reasks.items() if key in titles}
         task = fan_picks.Task(cfg)
 
         def record(job, key, row):
