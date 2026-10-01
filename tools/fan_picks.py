@@ -708,7 +708,10 @@ def load_daily_checkpoint(path):
 
 def titles_for(keys, rows, articles_path):
     """`{key: title}` — what the prompt is built from — for corpus `keys`: the store's display title, its
-    year and the lead of its article in `articles_path` (empty when the dump does not hold it)."""
+    year and the lead of its article in `articles_path` (empty when the dump does not hold it).
+
+    A key with no display title is left out, as `prepare` leaves it out: it has no card, so there is nothing
+    to ask about and nowhere its picks would show."""
     wanted, leads = set(keys), {}
     if os.path.exists(articles_path):
         with open(articles_path, encoding="utf-8") as fh:
@@ -721,9 +724,8 @@ def titles_for(keys, rows, articles_path):
     for key in keys:
         facts = rows[key].get("facts") or {}
         title = display_title(facts.get("titles"))
-        if not title:
-            raise RuntimeError(f"fan picks: {key} has no store title to ask about")
-        titles[key] = {"key": key, "title": title, "year": card_year(facts), "lead": leads.get(key, "")}
+        if title:
+            titles[key] = {"key": key, "title": title, "year": card_year(facts), "lead": leads.get(key, "")}
     return titles
 
 

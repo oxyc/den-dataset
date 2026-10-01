@@ -92,10 +92,13 @@ class FanPicksWeekly(unittest.TestCase):
                       contextlib.redirect_stderr(io.StringIO())):
             self.enterContext(patch)
 
-    def run_day(self, now, waiting=("movie:1",), anchors=None, cap=1.0, spend=True, monthly=10.0):
+    def run_day(self, now, waiting=("movie:1",), anchors=None, cap=1.0, spend=True, monthly=10.0, unnamed=()):
         out = os.path.join(self.root, now.date().isoformat())
         os.makedirs(out)
         corpus, articles, franchises, existing = fan_tests.Daily().fixture(out, anchors or {"movie:2": []})
+        with gzip.open(corpus, "at", encoding="utf-8") as fh:
+            for key in unnamed:
+                fh.write(json.dumps({"key": key, "facts": {"released": {"date": "2024"}}}) + "\n")
         paths = {artifacts.CORPUS: corpus, artifacts.ARTICLES: articles, artifacts.FRANCHISES: franchises,
                  artifacts.FAN_PICKS: existing}
         ctx = types.SimpleNamespace(path=lambda artifact: paths.get(artifact, os.path.join(out, "x")))
@@ -124,6 +127,13 @@ class FanPicksWeekly(unittest.TestCase):
         self.assertAlmostEqual(report["costUSD"], llm.cost(model_steps.fan_picks.CFG, USAGE, "batch"), places=6)
         self.assertEqual(tuesday.paid.data["batches"], [])
         self.assertEqual(self.provider.online_calls, [])
+
+    def test_a_corpus_title_with_no_name_is_not_asked(self):
+        # The 2026-10-01 daily: 134 corpus titles have no Wikidata name, so no card to ask about, and the first
+        # of them stopped the store stage.
+        monday, _ = self.run_day(MONDAY, waiting=("movie:1", "movie:1000127"), unnamed=("movie:1000127",))
+        self.assertEqual(monday.models["fan_picks"]["submitted"]["titles"], 1)
+        self.assertEqual(len(self.provider.submitted), 1)
 
     def test_a_submitted_job_is_committed_spend_until_it_is_collected(self):
         monday, _ = self.run_day(MONDAY)
