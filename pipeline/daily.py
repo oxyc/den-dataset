@@ -276,7 +276,8 @@ def update_premise(day):
     day.ledger.reserve("premiseTags", projected, premise_cap)
     if not manifest["titles"]:
         result = {"provider": cfg["provider"], "model": cfg["model"], "titles": 0, "generated": 0,
-                  "resumed": 0, "byModel": {}, "untagged": [], "inputTokens": 0, "outputTokens": 0,
+                  "resumed": 0, "byModel": {}, "untagged": [], "refused": [], "short": [],
+                  "inputTokens": 0, "outputTokens": 0,
                   "reasoningTokens": 0, "costUSD": 0.0, "projectedSpendUSD": 0.0, "spendCapUSD": premise_cap}
     else:
         try:

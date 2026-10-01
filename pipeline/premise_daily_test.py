@@ -106,6 +106,26 @@ class PremiseGeneration(unittest.TestCase):
         self.assertEqual(out["movie:7"]["tags"][0], "identity-swap")
         self.assertNotIn("movie:8", out, "a row luna keeps answering short is left for a later run")
         self.assertEqual(len(wire.sent), 2)
+        self.assertEqual((_result["short"], _result["refused"]), (["movie:8"], []))
+
+    def test_an_answer_missing_a_row_keeps_the_rows_it_has_and_asks_only_the_missing_one(self):
+        class Short(Wire):
+            def __call__(self, request, timeout=None):
+                reply = super().__call__(request, timeout)
+                if request.full_url.endswith("/v1/responses"):
+                    body = reply.value
+                    text = json.loads(body["output"][0]["content"][0]["text"])
+                    if len(text["rows"]) > 1:
+                        text["rows"] = text["rows"][:1]
+                        body["output"][0]["content"][0]["text"] = json.dumps(text)
+                return reply
+        wire = Short({"movie:7": TAGS, "movie:8": TAGS})
+        with mock.patch("urllib.request.urlopen", wire), \
+                mock.patch.dict(os.environ, {"OPENAI_API_KEY": "o", "ANTHROPIC_API_KEY": "a"}):
+            result = premise_daily.generate(self.phase(), 1.0)
+        self.assertEqual(result["generated"], 2)
+        asked = [json.loads(body["input"][-1]["content"].split("\n", 1)[1]) for _, body in wire.sent]
+        self.assertEqual([[row["key"] for row in rows] for rows in asked], [["movie:7", "movie:8"], ["movie:8"]])
 
     def test_a_resumed_run_asks_nothing_it_already_has(self):
         phase = self.phase()

@@ -131,12 +131,18 @@ class Task:
 
     def parse(self, rows, answer):
         """The rows' cleaned tags. A row left under the floor once its invalid tags are dropped is not
-        returned, so `lib/llm.py` asks that title again on its own — the repair, by another name."""
+        returned, so `lib/llm.py` asks that title again on its own — the repair, by another name.
+
+        An answer that left a title out is read for the titles it has: only the missing ones are asked
+        again, not the whole call. A key it invented, a duplicate or a shifted batch still condemns it."""
         value = answer["value"] if answer["value"] is not None else _extract(answer["text"])
         if isinstance(value, dict):
             value = value.get("rows")
+        if not isinstance(value, list):
+            raise ValueError("the answer has no rows")
+        answered = {row.get("key") for row in value if isinstance(row, dict)}
         try:
-            cleaned = _checked(rows, value)
+            cleaned = _checked([row for row in rows if row["key"] in answered] or rows, value)
         except RuntimeError as error:
             raise ValueError(str(error)) from None
         return {row["key"]: row["tags"] for row in cleaned if len(row["tags"]) >= validate.MIN_TAGS}
@@ -191,6 +197,11 @@ def generate(phase, cap, cfg=None, workers=1):
             "titles": manifest["titles"], "generated": len(answered), "resumed": resumed,
             "byModel": dict(sorted(collections.Counter(row["by"]["model"] for row in answered).items())),
             "untagged": sorted(key for key, row in rows.items() if "value" not in row),
+            # Why: refused by every model, or answered without 8 usable tags. A title the provider could not
+            # be reached for is untagged and in neither: it is asked again on the next run.
+            "refused": sorted(key for key, row in rows.items() if row.get("refused")),
+            "short": sorted(key for key, row in rows.items()
+                            if "value" not in row and not row.get("refused") and not row.get("unavailable")),
             "calls": len(calls), **usage, "costUSD": round(sum(call["costUSD"] for call in calls), 6),
             "projectedSpendUSD": estimate, "spendCapUSD": cap}
 

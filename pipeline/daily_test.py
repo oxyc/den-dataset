@@ -238,6 +238,19 @@ class PremiseCorrections(unittest.TestCase):
             self.assertIsNone(daily.correct_premise(day))
         self.assertEqual((day.ran, day.skipped), ([], []))
 
+    def test_the_summary_reports_generated_tags_and_corrections_together(self):
+        """The premise result's shape changed with the provider layer (#200): the summary reads what it has."""
+        day = self.day({})
+        day.premise = {"titles": 3, "generated": 2, "byModel": {"gpt-5.6-luna": 2}, "untagged": ["movie:9"],
+                       "refused": [], "short": ["movie:9"], "costUSD": 0.0007}
+        day.premise_corrections = {"corrected": 1, "reembedded": 1}
+        with contextlib.redirect_stderr(io.StringIO()):
+            daily.report(day, False, "test", 0)
+        with open(os.path.join(day.ctx.out_dir, daily.SUMMARY), encoding="utf-8") as fh:
+            summary = fh.read()
+        self.assertIn("premise tags: 3 title(s), 2 tagged (gpt-5.6-luna 2), 1 left for a later run", summary)
+        self.assertIn("premise corrections: 1 row(s) corrected", summary)
+
 
 class FanPicks(unittest.TestCase):
     def day(self, spend=True, key="g"):
