@@ -256,8 +256,10 @@ def selection(ctx, records):
     answered = answered_keys(ctx.paths(artifacts.GENRES_MOODS_ANSWERS))
     todo, skipped, done = [], {}, 0
     for key in gm.select("missing", titles, classify):
-        reason = unaskable.get(key) or ("new, with no enrichment row to take `animated` from"
-                                        if key not in titles and key not in animated else None)
+        # A curated title with neither subgenres nor moods is selected whether or not this run classified it.
+        reason = (unaskable.get(key) if key in classify else gm.skip_reason(None, None)) or \
+            ("new, with no enrichment row to take `animated` from" if key not in titles and key not in animated
+             else None)
         if reason:
             skipped.setdefault(reason, []).append(key)
         elif key in answered:

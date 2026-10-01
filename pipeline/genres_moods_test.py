@@ -171,6 +171,16 @@ class Ask(Fixture):
             self.assertEqual([s["heading"] for s in sections.values()], ["Lead", "Plot"],
                              "Reception is not premise text")
 
+    def test_a_curated_title_with_an_article_and_no_classify_row_is_skipped(self):
+        # The 2026-10-01 daily: a curated title with neither subgenres nor moods had an article in the day's
+        # dump but no classify row, so it was selected with no state to send and the stage crashed.
+        keys = self.keys
+        self.keys = [key for key in keys if key != "movie:2"]
+        self.write_classify()
+        self.keys = keys
+        self.run_stage(spend=True)
+        self.assertEqual(sorted(self.answers(), key=genres_moods.gm.sort_key), ["movie:3", "tv:8"])
+
     def test_a_second_run_buys_nothing(self):
         self.run_stage(spend=True)
         bought = len(Jev.sent)
