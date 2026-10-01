@@ -5,6 +5,8 @@ for those titles — classify (with its critique), fan picks and premise tags al
 import gzip
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -18,6 +20,8 @@ from tools import fan_picks
 from tools import fan_picks_test as fan_tests
 
 TAGS = premise_tests.TAGS
+#: The real `subprocess.run`, for the premise worklist script while classify's passes run in process.
+RUN = subprocess.run
 
 
 class Ledger(unittest.TestCase):
@@ -149,12 +153,12 @@ class KilledAndRunAgain(unittest.TestCase):
     """A run that bought and was killed before the store, and the next one, which starts from nothing but
     the ledger."""
 
-    def out_dir(self, root, name):
+    def out_dir(self, root, name, ids=(1, 2, 3)):
         out = os.path.join(root, name)
         os.makedirs(os.path.join(out, artifacts.ENRICHED.filename))
         with open(os.path.join(out, artifacts.ARTICLES.filename), "w", encoding="utf-8") as fh:
-            fh.writelines(json.dumps(article(i)) + "\n" for i in (1, 2, 3))
-        change_set(out, ["movie:2", "movie:3"])
+            fh.writelines(json.dumps(article(i)) + "\n" for i in ids)
+        change_set(out, [f"movie:{i}" for i in ids[1:]])
         return Context(out_dir=out, spend=True)
 
     def test_classify_and_critique_are_not_bought_again(self):
@@ -195,6 +199,57 @@ class KilledAndRunAgain(unittest.TestCase):
             paid.Ledger(ledger_path).restore(second)
             classify.run(second)
         self.assertEqual([state["requestedTarget"]["tmdbId"] for state, _ in StubTypeSafe.requests], [3])
+
+    def test_a_title_waiting_for_premise_tags_is_classified_again_when_its_article_changed(self):
+        """Classified on day one, its article edited before the weekly premise ask: the worklist would turn it
+        away as `articleChanged` for good. Listed in `changes/reclassify.txt`, classify asks it again on the
+        new article — and only it — and the worklist then takes it."""
+        ids = (990000001, 990000002, 990000003)  # titles no committed premise-tags file holds
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(classify.subprocess, "run", in_process):
+            ledger_path = os.path.join(root, "paid-state.json.gz")
+            first = self.out_dir(root, "first", ids)
+            ledger = paid.Ledger(ledger_path)
+            ledger.restore(first)
+            classify.run(first)
+            ledger.keep(first)
+            ledger.save()
+            StubTypeSafe.requests = []
+            second = self.out_dir(root, "second", ids)
+            change_set(second.out_dir, [], new=[])
+            with open(os.path.join(second.out_dir, "changes", "reclassify.txt"), "w") as fh:
+                fh.write("movie:990000002\nmovie:990000003\n")
+            moved = dict(article(ids[2]), text=article(ids[2])["text"].replace("A story happens.", "A story unfolds."))
+            with open(second.path(artifacts.ARTICLES), "w", encoding="utf-8") as fh:
+                fh.writelines(json.dumps(record) + "\n" for record in (article(ids[0]), article(ids[1]), moved))
+            paid.Ledger(ledger_path).restore(second)
+            before = self.worklist(second, "before", ids)
+            self.assertEqual(classify.reclassified(second), {"movie:990000003"}, "the other article did not change")
+            classify.run(second)
+            self.assertEqual([state["requestedTarget"]["tmdbId"] for state, _ in StubTypeSafe.requests], [ids[2]])
+            self.assertEqual(classify.reclassified(second), set(), "classified on today's article")
+            after = self.worklist(second, "after", ids)
+        self.assertEqual(before.get("movie:990000003", {}).get("reason"), "articleChanged")
+        self.assertEqual(after, {}, "both titles are in the worklist, so the next weekly submit asks them")
+
+    @staticmethod
+    def worklist(ctx, name, ids):
+        """The premise worklist's turned-away titles, built from `ctx`'s shards."""
+        plan = os.path.join(ctx.out_dir, f"premise-plan-{name}.json")
+        with open(plan, "w") as fh:
+            json.dump({"baseline": {"datasetVersion": "live"}, "added": [f"movie:{i}" for i in ids[1:]],
+                       "changed": {}}, fh)
+        tags = os.path.join(ctx.out_dir, "no-tags.json")
+        with open(tags, "w") as fh:
+            json.dump({"tags": {}}, fh)
+        out = os.path.join(ctx.out_dir, f"premise-{name}")
+        command = [sys.executable, os.path.join(premise_daily.REPO, "pipeline", "build_premise_worklist.py"),
+                   "--articles", ctx.path(artifacts.ARTICLES), "--changes", plan, "--token-ceiling", "100000",
+                   "--existing-tags", tags, "--out-dir", out]
+        for path in ctx.paths(artifacts.COMBINED):
+            command += ["--combined", path]
+        RUN(command, check=True, capture_output=True)
+        with open(os.path.join(out, "gen", "manifest.json"), encoding="utf-8") as fh:
+            return json.load(fh)["skippedKeys"]
 
     def test_fan_picks_are_not_bought_again(self):
         calls, kept = [], {}

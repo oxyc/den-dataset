@@ -114,6 +114,18 @@ premise answers before asking anything. Rerunning a failed day buys nothing it a
 older ones. A run that cannot read it fails rather than start without it, and a published run prunes what the
 publish carries. The release is public, so the ledger carries no TMDB title or year and no article text.
 
+A publish made by hand — anything but the workflow's own publish step — leaves the ledger unpruned, so its
+old shards would be laid back beside the published rows. Prune it the same way afterwards, uploading it under
+the newest asset's name with its attempt number raised, so it sorts newest, before deleting the old one:
+
+```sh
+gh release download paid-state -p 'paid-state-*.json.gz' -D paid --clobber   # e.g. paid-state-123-1.json.gz
+python3 pipeline/paid.py prune paid/paid-state-123-1.json.gz
+mv paid/paid-state-123-1.json.gz paid/paid-state-123-2.json.gz
+gh release upload paid-state paid/paid-state-123-2.json.gz
+gh release delete-asset paid-state paid-state-123-1.json.gz --yes
+```
+
 To reproduce a run locally, lay out what the job started from and run the same command:
 
 ```sh

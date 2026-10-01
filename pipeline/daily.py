@@ -215,12 +215,18 @@ def planned_title_count(plan):
     return len(keys)
 
 
+def reserve_typesafe(day, extra=0):
+    """Reserve the day's TypeSafe titles: the change plan's, and `extra` classified again."""
+    count = planned_title_count(changes.planned(day.ctx) or {}) + extra
+    day.ledger.reserve("typesafe", count * TYPESAFE_PROJECTED_PER_TITLE,
+                       getattr(day.args, "typesafe_max_spend_usd", 1.0))
+
+
 def reserve_known_spend(day):
     """Reserve every step whose request count is known at the change-plan boundary."""
     plan = changes.planned(day.ctx) or {}
     if day.can_buy:
-        day.ledger.reserve("typesafe", planned_title_count(plan) * TYPESAFE_PROJECTED_PER_TITLE,
-                           getattr(day.args, "typesafe_max_spend_usd", 1.0))
+        reserve_typesafe(day)
         day.typesafe_before = paid_tokens(day.ctx)
     # A weekly fan-picks step reserves when it submits (`pipeline/model_steps.py`).
     if day.can_buy_fan_picks and not model_steps.weekly(fan_picks.CFG):
@@ -270,6 +276,11 @@ def run_day(day):
                 continue
             if name == "classify":
                 day.classifiable_changes = classify.changed_articles(ctx, skip_answered=False) is not None
+                # A title waiting for premise tags whose article changed is classified again, inside the day's
+                # TypeSafe reservation.
+                again = len(classify.reclassified(ctx) - changes.listed(ctx, "new"))
+                if again:
+                    reserve_typesafe(day, again)
             if day.classifiable_changes is False:
                 day.skip(name, "no newly admitted or regained title has an article to classify")
                 continue

@@ -122,6 +122,25 @@ class IncrementalPremiseWorklistTest(unittest.TestCase):
         with open(os.path.join(self.directory, "two-shards", "gen", "manifest.json"), encoding="utf-8") as handle:
             self.assertNotIn("tv:990000004", json.load(handle)["ids"], "the newer row's validity counts")
 
+    def test_the_model_is_shown_no_title_or_year_so_a_stripped_shard_changes_no_prompt(self):
+        """The prompt rows are the generation batches: key, media type, id and evidence. A classify row's
+        `title`/`year` reach only the local review file, so a shard kept without them (`pipeline/paid.py`)
+        builds the same prompt on a later day as on the day it was classified."""
+        with open(self.combined, encoding="utf-8") as handle:
+            rows = [json.loads(line) for line in handle]
+
+        def batches(out):
+            result = self.run_script(out=out)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with open(os.path.join(self.directory, out, "gen", "in", "batch-0000.json"), encoding="utf-8") as fh:
+                return json.load(fh)
+        with_titles = batches("with-titles")
+        with open(self.combined, "w", encoding="utf-8") as handle:
+            handle.writelines(json.dumps({k: v for k, v in row.items() if k not in ("title", "year")}) + "\n"
+                              for row in rows)
+        self.assertEqual(batches("stripped"), with_titles)
+        self.assertEqual({key for row in with_titles for key in row}, {"key", "mediaType", "tmdbId", "plot"})
+
     def test_each_title_turned_away_says_why_and_which_article_its_classification_read(self):
         """A verdict on the classification (not a screen work, not narrative, no story-premise section) is
         told apart from a title that only waits (its article changed, or is not in today's dump)."""

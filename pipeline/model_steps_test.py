@@ -390,6 +390,8 @@ class Waiting(unittest.TestCase):
                 waiting = model_steps.write_waiting(day)
             with open(os.path.join(out, "changes", "waiting.txt")) as fh:
                 listed = fh.read().split()
+            with open(os.path.join(out, "changes", "reclassify.txt")) as fh:
+                self.assertEqual(fh.read().split(), ["tv:6"], "classify looks again at a waiting title's article")
             # Classified again on a new article: the verdict on the old one no longer holds.
             day.paid.data["shards"]["combined-v1-r2-def.jsonl"] = {
                 "rows": '{"mediaType": "tv", "tmdbId": 7, "articleSha256": "b"}\n',

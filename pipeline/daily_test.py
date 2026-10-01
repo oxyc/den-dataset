@@ -39,9 +39,10 @@ class Recorded(unittest.TestCase):
         patch = mock.patch.object(daily, "load", self.stage)
         patch.start()
         self.addCleanup(patch.stop)
-        changed = mock.patch.object(daily.classify, "changed_articles", return_value=("articles", "digest"))
-        changed.start()
-        self.addCleanup(changed.stop)
+        for name, value in (("changed_articles", ("articles", "digest")), ("reclassified", set())):
+            changed = mock.patch.object(daily.classify, name, return_value=value)
+            changed.start()
+            self.addCleanup(changed.stop)
         fan = mock.patch.object(daily.model_steps, "fan_picks_step", lambda day: {
             "asked": 0, "answered": 0, "emptyAnswers": 0, "anchors": 1, "picks": 1, "costUSD": 0.0})
         fan.start()

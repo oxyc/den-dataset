@@ -93,8 +93,13 @@ def changed_articles(ctx, skip_answered=True):
     The rows are the shared dump's bytes, line for line, so the pass reads exactly what it would have read
     there. The digest names the dump and both passes' shards, so the same change set resumes the same
     shards however often the stage is started.
+
+    A title waiting for premise tags (`changes/reclassify.txt`) is in it too once its article is no longer
+    the one its newest classification read: the premise worklist cuts sections from that article by offset,
+    so the title would otherwise wait for good.
     """
     keys = changes.listed(ctx, "new")
+    again = reclassified(ctx)
     done = answered(ctx) if skip_answered else {}
     kept = []
     with open(ctx.require(artifacts.ARTICLES), "rb") as handle:
@@ -102,7 +107,7 @@ def changed_articles(ctx, skip_answered=True):
             if line.strip():
                 record = json.loads(line)
                 key = f"{record['mediaType']}:{record['tmdbId']}"
-                if key in keys and done.get(key) != rc.sha256_text(record["text"]):
+                if key in keys and done.get(key) != rc.sha256_text(record["text"]) or key in again:
                     kept.append(line if line.endswith(b"\n") else line + b"\n")
     if not kept:
         return None
@@ -136,6 +141,30 @@ def answered(ctx):
                     row = json.loads(line)
                     done[f"{row['mediaType']}:{row['tmdbId']}"] = row.get("articleSha256")
     return done
+
+
+def reclassified(ctx):
+    """The titles of `changes/reclassify.txt` whose article in today's dump is not the one their newest
+    classify row in the out-dir read, whatever that row was asked with."""
+    again = changes.listed(ctx, "reclassify")
+    if not again:
+        return set()
+    read = {}
+    for shard in consolidate_corpus.shard_order(ctx.paths(artifacts.COMBINED)):
+        with open(shard, encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    row = json.loads(line)
+                    read[f"{row['mediaType']}:{row['tmdbId']}"] = row.get("articleSha256")
+    changed = set()
+    with open(ctx.require(artifacts.ARTICLES), encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                record = json.loads(line)
+                key = f"{record['mediaType']}:{record['tmdbId']}"
+                if key in again and read.get(key) not in (None, rc.sha256_text(record["text"])):
+                    changed.add(key)
+    return changed
 
 
 def argv(ctx, articles=None, out=None):

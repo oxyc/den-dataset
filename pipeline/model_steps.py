@@ -25,7 +25,8 @@ Which titles wait:
   * premise tags — every title a kept classify shard holds that has no tags, less those the worklist turned
     away for good on that classification (not a screen work, not narrative, no story-premise section). A
     title whose article changed since it was classified, or since it was submitted, waits: it is never
-    settled, and an answer bought for the old article is kept but not used.
+    settled, an answer bought for the old article is kept but not used, and classify asks it again on the
+    new article (`changes/reclassify.txt`), after which the next submit asks for its tags.
 
 Their articles are dumped again each day they wait (`changes/waiting.txt`): a prompt needs the lead or the
 premise sections, and no out-dir keeps an article between runs.
@@ -157,12 +158,18 @@ def write_waiting(day):
     if weekly(premise_cfg) and day.paid.path:
         with open(premise_daily.ensure_tags(ctx), encoding="utf-8") as fh:
             tagged = set(json.load(fh).get("tags") or {})
-        shas = {**{key: None for key in changes.listed(ctx, "new")}, **classified(day)}
+        kept = classified(day)
+        shas = {**{key: None for key in changes.listed(ctx, "new")}, **kept}
         st = state(day, "premise_tags")
         settled = st.get("settled") or {}
         # A verdict holds for the classification it was made on: a title classified again is looked at again.
         st["waiting"] = day.waiting["premise_tags"] = sorted(
             key for key, sha in shas.items() if key not in tagged and not (key in settled and settled[key] == sha))
+        # Classify asks one of these again once its article is not the one its row read
+        # (`classify.changed_articles`): the worklist cuts the premise sections from that article by offset.
+        reclassify = [key for key in day.waiting["premise_tags"] if key in kept]
+        caching.write_atomically(os.path.join(ctx.path(artifacts.CHANGES), "reclassify.txt"),
+                                 "".join(f"{key}\n" for key in reclassify).encode("utf-8"))
         day.paid.save()
     listed = set().union(*day.waiting.values(), day.reasks, *(pending_keys(day, step) for step in REPORT_KEYS))
     caching.write_atomically(os.path.join(ctx.path(artifacts.CHANGES), "waiting.txt"),
