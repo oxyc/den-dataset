@@ -185,6 +185,10 @@ jobs:
           print("store=" + (json.load(open(path))["storeFile"] if os.path.exists(path) else ""))
           PY
         id: report
+      # A public repo's artifacts are downloadable by anyone signed in, so this carries no article text and no
+      # classify-row title: of the premise worklist, only its manifests (keys, counts, digests, why a title was
+      # turned away) — never worklist.jsonl, review-queue.jsonl or the batches, which hold the evidence.
+      # pipeline/daily_test.py (`ReportArtifact`) holds this list to that.
       - name: Upload the report
         if: always()
         uses: actions/upload-artifact@v7
@@ -195,7 +199,7 @@ jobs:
             ${{ env.OUT }}/daily-report.md
             ${{ env.OUT }}/changes/plan.json
             ${{ env.OUT }}/fan-picks.json.daily-checkpoint.json
-            ${{ env.OUT }}/premise-increment/
+            ${{ env.OUT }}/premise-increment/**/manifest.json
           if-no-files-found: ignore
           retention-days: 30
       # Cost was incurred even when a later gate refuses. Publish this before any dataset upload so every

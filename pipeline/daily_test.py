@@ -8,6 +8,9 @@ import datetime
 import io
 import json
 import os
+import re
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -379,6 +382,70 @@ class DeltaIds(unittest.TestCase):
             self.write(out, artifacts.VECTOR_LABELS.filename, ["movie:1"])
             with self.assertRaisesRegex(StageError, "did not build the live dataset"):
                 daily.write_delta_ids(Context(out_dir=out), "live")
+
+
+class ReportArtifact(unittest.TestCase):
+    """The daily workflow's report artifact is public (a public repo's artifacts are downloadable by anyone
+    signed in): it must carry no article text and no classify-row title. Held against the files a real premise
+    worklist and a collected Batch write, not against a list of names someone remembered."""
+
+    REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    WORKFLOW = os.path.join(REPO, ".github", "workflows", "daily.yml")
+
+    def uploaded(self):
+        """The report step's `path:` patterns, relative to the out-dir."""
+        with open(self.WORKFLOW, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        start = lines.index("      - name: Upload the report")
+        at = next(i for i in range(start, len(lines)) if lines[i].strip() == "path: |")
+        patterns = []
+        for line in lines[at + 1:]:
+            if not line.startswith(" " * 12):
+                break
+            patterns.append(line.strip().replace("${{ env.OUT }}/", ""))
+        return patterns
+
+    @staticmethod
+    def matches(pattern, path):
+        """upload-artifact's glob: `**/` any depth (none included), `*` within a segment, a trailing `/` the
+        whole directory."""
+        if pattern.endswith("/"):
+            return path.startswith(pattern)
+        regex = re.escape(pattern).replace(r"\*\*/", "(?:.*/)?").replace(r"\*", "[^/]*")
+        return re.fullmatch(regex, path) is not None
+
+    def test_no_uploaded_file_carries_article_text_or_a_title(self):
+        title, evidence = "A Distinctive Title", "Twin sisters swap places to expose a smuggling ring."
+        with tempfile.TemporaryDirectory() as out:
+            with open(os.path.join(out, "articles.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"mediaType": "movie", "tmdbId": 990000001, "text": evidence}) + "\n")
+            with open(os.path.join(out, "combined.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({
+                    "mediaType": "movie", "tmdbId": 990000001, "title": title, "year": 2026, "language": "en",
+                    "article": title, "answers": {"validity": {"choice": "correct-screen-work"},
+                                                  "narrative_applicability": {"choice": "narrative"}},
+                    "sections": [{"heading": "Plot", "start": 0, "end": len(evidence),
+                                  "role": {"value": "story-premise"}}]}) + "\n")
+            plan = os.path.join(out, "plan.json")
+            with open(plan, "w", encoding="utf-8") as fh:
+                json.dump({"baseline": {"datasetVersion": "live"}, "added": ["movie:990000001"], "changed": {}}, fh)
+            work = os.path.join(out, "premise-increment", "weekly")
+            subprocess.run([sys.executable, os.path.join(self.REPO, "pipeline", "build_premise_worklist.py"),
+                            "--combined", os.path.join(out, "combined.jsonl"),
+                            "--articles", os.path.join(out, "articles.jsonl"), "--changes", plan,
+                            "--token-ceiling", "100000", "--out-dir", work], check=True, capture_output=True)
+            daily.premise_daily.write_collected(os.path.join(out, "premise-increment", "collected"),
+                                                {"movie:990000001": {"tags": ["twin-swap"], "by": {}}})
+            written = sorted(os.path.relpath(os.path.join(root, name), out)
+                             for root, _, names in os.walk(os.path.join(out, "premise-increment")) for name in names)
+            sent = [path for path in written if any(self.matches(p, path) for p in self.uploaded())]
+            self.assertTrue(any(path.endswith("worklist.jsonl") for path in written), "the fixture wrote the worklist")
+            for path in sent:
+                with open(os.path.join(out, path), encoding="utf-8") as fh:
+                    body = fh.read()
+                self.assertNotIn(title, body, path)
+                self.assertNotIn(evidence[:20], body, path)
+        self.assertEqual(sent, ["premise-increment/weekly/gen/manifest.json"])
 
 
 if __name__ == "__main__":
