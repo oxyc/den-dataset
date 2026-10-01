@@ -28,6 +28,7 @@ from pipeline.article_sections import (encoded_chars, is_oversized, parse_sectio
                                        section_groups, select_global_sections, sha256_text, state_for)
 from pipeline.combined_questions import (PINNED_MODEL, PROMPT, ROOT, TAXONOMY, global_questions,
                                          section_question)
+from pipeline.delta_questions import delta_questions
 
 SCHEMA_VERSION = "combined-jev-v1"
 #: Bumped when the shape of the recorded configuration changes rather than when the questions do. `-v2`
@@ -52,6 +53,14 @@ IMPLEMENTATION = {name: os.path.abspath(path) for name, path in (
 
 class RunAborted(RuntimeError):
     """A worker observed the shared circuit breaker before making another paid call."""
+
+
+class InvalidAnswers(TypeSafeError):
+    """A paid answer that failed validation, kept with what came back so it can be quarantined, not lost."""
+
+    def __init__(self, message, answers, metadata):
+        super().__init__(message)
+        self.answers, self.metadata = answers, metadata
 
 
 def canonical(value):
@@ -368,7 +377,10 @@ def call(client, state, questions, phase, section_ids, abort_event=None):
     if not state["article"]["sections"]:
         raise ValueError(f"{phase}: refusing to send a state that carries no article section")
     answers, metadata = client.ask_with_metadata(state, questions)
-    validate_answers(answers, questions)
+    try:
+        validate_answers(answers, questions)
+    except TypeSafeError as invalid:
+        raise InvalidAnswers(str(invalid), {"phase": phase, "answers": answers}, metadata) from None
     response_model = metadata.get("model")
     if not isinstance(response_model, str) or not response_model:
         raise TypeSafeError(f"{phase}: provider response omitted its model identifier")
@@ -605,6 +617,14 @@ def paid_run(args, global_qs, label_mapping, tax, enriched_evidence_sha,
         except RunAborted:
             return
         except (TypeSafeError, ValueError) as exc:
+            if isinstance(exc, InvalidAnswers):
+                # Paid for, so kept: a malformed answer is evidence of what the provider returned and of
+                # what was billed, and dropping it would leave nothing to show for the spend (#187).
+                with lock, open(args.out + ".quarantine.jsonl", "a", encoding="utf-8") as fh:
+                    fh.write(canonical({"key": article_key(rec), "runId": manifest["runId"],
+                                        "configSha256": manifest["configSha256"], "error": str(exc),
+                                        **exc.answers, "responseModel": exc.metadata.get("model"),
+                                        "usage": exc.metadata.get("usage")}) + "\n")
             with lock:
                 if not abort_event.is_set():
                     failed += 1
@@ -634,6 +654,20 @@ def paid_run(args, global_qs, label_mapping, tax, enriched_evidence_sha,
     return 1 if failed else 0
 
 
+def with_critique(global_qs):
+    """The global questions and the delta pass's in one set (oxyc/den-dataset#187).
+
+    The delta pass sends each title the state its classify call sent, so one call can carry both: measured
+    on 10 titles, the answers moved no more than two runs of either call alone, for 13% less. The questions
+    are part of the manifest's `globalQuestions`, so a shard bought this way is its own configuration, and
+    the corpus join reads its critique fields from the classify row."""
+    delta = delta_questions()
+    clash = sorted(set(global_qs) & set(delta))
+    if clash:
+        raise SystemExit(f"--with-critique: question ids in both sets: {clash}")
+    return {**global_qs, **delta}
+
+
 def argument_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--articles", required=True)
@@ -650,6 +684,8 @@ def argument_parser():
     parser.add_argument("--limit", type=int)
     parser.add_argument("--only-key", help="classify one exact movie:<id>/tv:<id> key (targeted smoke)")
     parser.add_argument("--plan", action="store_true", help="validate and report; make no API calls or files")
+    parser.add_argument("--with-critique", action="store_true",
+                        help="also ask the delta pass's questions in the same global call (oxyc/den-dataset#187)")
     return parser
 
 
@@ -660,6 +696,8 @@ def main(argv=None):
     if args.max_state_chars < 10_000:
         raise SystemExit("--max-state-chars is implausibly small")
     global_qs, label_mapping, tax = global_questions(args.prompt, args.taxonomy)
+    if args.with_critique:
+        global_qs = with_critique(global_qs)
     records, input_keys = load_articles(args.articles)
     enriched_evidence_sha = attach_enriched_evidence(records, args.enriched_dir)
     if args.only_key and args.limit:

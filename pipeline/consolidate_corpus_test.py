@@ -357,6 +357,18 @@ class Supersede(unittest.TestCase):
         self.assertIn("read a different article", done.stderr)
         self.assertIn("movie:1", done.stderr)
 
+    def test_a_classify_row_that_asked_the_critique_supersedes_the_old_pair(self):
+        """#187: a change set is classified and critiqued in one call, so its row carries both; the older
+        critique, read from the old article, goes with the classify row it was paired with."""
+        write(self.new, [combined(1, answers={"tone": {"choice": "hopeful"}, "critique__craft": {"p": 0.7},
+                                              "made_for_teens": {"noul": 0.2}}) | {"articleSha256": "right"}])
+        done = self.join([self.old, self.new], [self.old_d])
+        self.assertEqual(done.returncode, 0, done.stderr)
+        rows = {r["key"]: r for r in read(self.p["corpus.jsonl"])}
+        self.assertEqual(rows["movie:1"]["critique"], {"craft": {"p": 0.7}})
+        self.assertEqual(rows["movie:1"]["audience"], {"made_for_teens": {"noul": 0.2}})
+        self.assertNotIn("craft", rows["movie:1"]["nouls"], "the critique is not read as a facet")
+
 
 class Withdrawn(unittest.TestCase):
     """A title a re-fetch left with no plot: its rows stop shipping, the title does not."""

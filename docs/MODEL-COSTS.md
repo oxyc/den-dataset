@@ -12,8 +12,8 @@ About **5 new titles a day** reach the catalogue. Release years whose admissions
 |---|---|---:|---:|---|
 | Fan picks | Gemini 3.7 Flash, low thinking, online | ~$0.003 | ~$5.50 | measured, daily run 2026-09-30 |
 | Premise tags | gpt-5.6-luna, 10 a call, JSON schema; Claude Haiku 4.5 for a title luna refuses | ~$0.0003 | ~$0.55 | #182 bake-off; in the daily job since #183 |
-| Genre & mood labels, facts delta | TypeSafe (Jev) | ~$0.0009 | ~$1.60 | measured, daily run 2026-09-30 |
-| **Total** | | **~$0.0042** | **~$7.70** | |
+| Genre & mood labels, facts delta | TypeSafe (Jev); classify and critique in one call since #187 | ~$0.0008 | ~$1.45 | measured, daily run 2026-09-30, less the measured 13% on those two |
+| **Total** | | **~$0.0041** | **~$7.50** | |
 
 Premise tags were Claude Haiku 4.5 until #183: $0.0017 a title at 5 a call, $0.0012 at 40 (#146's real batches). An early estimate of $0.009 a title was about 5× too high.
 
@@ -22,7 +22,6 @@ Premise tags were Claude Haiku 4.5 until #183: $0.0017 a title at 5 a call, $0.0
 | Step | Change | New $/title |
 |---|---|---:|
 | Fan picks | compact answer format (format B) | ~$0.0017 |
-| Jev | classify and critique in one call | −13% on those two |
 
 Together that's about **$0.0029 a title, ~$5 a year** at 5 titles a day. Weekly Batch runs for premise tags and fan picks would halve their part again.
 

@@ -388,6 +388,11 @@ def base_rows(path):
     return out
 
 
+def critiqued(answers):
+    """Whether a classify row's answers include the delta pass's, asked in the same call (#187)."""
+    return any(name.startswith("critique__") for name in answers)
+
+
 def pass_row(record):
     """What the join reads from a pass row: its identity, its answers and the article it read."""
     return {"mediaType": record["mediaType"], "tmdbId": record["tmdbId"],
@@ -419,6 +424,12 @@ def main():
     delta_rows, delta_report, _ = latest(args.delta, "delta", withdrawals, keep=pass_row)
     structural_rows, structural_report, _ = latest(
         args.structural, "structural", withdrawals, keep=pass_row)
+    # A classify row bought with the critique questions (#187) carries its own critique, read from its own
+    # article; an older delta row read from another article is superseded by it, as an older classify row is.
+    for key, row in combined_rows.items():
+        if critiqued(row["answers"]) and key in delta_rows \
+                and delta_rows[key]["articleSha256"] != row["articleSha256"]:
+            del delta_rows[key]
     unpaired = sorted(k for rows in (delta_rows, structural_rows) for k, r in rows.items()
                       if k not in combined_rows or combined_rows[k]["articleSha256"] != r["articleSha256"])
     if unpaired:
@@ -461,7 +472,7 @@ def main():
 
             if leaked:
                 sys.exit(f"{key}: refusing to write source prose ({', '.join(sorted(leaked))})")
-            d = delta.get(key, {})
+            d = delta.get(key) or (answers if critiqued(answers) else {})
             s = structural.get(key, {})
             fact = facts.get(key)
             # No shard answered this title, and no tombstone took its answers: the published ones stand.

@@ -27,6 +27,12 @@
         "commit": "a42042a",
         "supersededBy": "the commits that moved the pass out of scripts/ (oxyc/den-dataset#73)",
         "why": "#73 moved the pass's modules into pipeline/ and lib/, one file per commit, this one into pipeline/. What changed here is where things are found, not what is done: the import lines, a file run by path making the repo its import root instead of adding directories to sys.path, the resume refusal naming the bundle auditor at its new path, and `implementationSha256` hashing each of the four at its module's own path (`IMPLEMENTATION`) instead of all four in this file's directory — the keys are still the four file names, so a manifest reads the same. The state, the questions, the planner, the validator and the row are untouched."
+      },
+      {
+        "sha256": "82fd710150022c8e1418e163ad27c36e969cfd96518d6b40d57b890f56a9c721",
+        "commit": "640f456",
+        "supersededBy": "the change that asks a change set's critique in its classify call (oxyc/den-dataset#187)",
+        "why": "#187 added `--with-critique`, which folds the delta pass's questions into the global question set, and a quarantine file for an answer that fails validation. Without the flag the pass asks the same questions of the same state and writes the same row; the flag's question set is recorded in the manifest's `globalQuestions`, so a shard bought with it is its own configuration. The quarantine only writes beside a run that was already aborting, so a row this file writes is the row the old one wrote."
       }
     ],
     "combined_questions.py": [

@@ -44,6 +44,7 @@ from lib import cache as caching
 
 from . import artifacts, changes
 from .contract import REPO, StageError, bind
+from .delta_questions import delta_questions
 
 NAME = "classify"
 
@@ -124,9 +125,20 @@ def argv(ctx, articles=None, out=None):
         if path is not None:
             command += [entry.flag(), articles if articles and entry.artifact is artifacts.ARTICLES else path]
     command += ["--out", out or ctx.shard(artifacts.COMBINED)]
+    if articles:
+        # A change set's titles are classified and critiqued in one call (#187); the whole-corpus pass keeps
+        # the question set its shipped shard was bought with, so it still resumes.
+        command.append("--with-critique")
     if ctx.plan:
         command.append("--plan")
     return command
+
+
+def asks_critique(shard):
+    """Whether `shard` was bought with the critique questions in its classify call (`--with-critique`)."""
+    with open(shard + ".manifest.json", encoding="utf-8") as handle:
+        asked = (json.load(handle).get("config") or {}).get("globalQuestions") or {}
+    return set(delta_questions()) <= set(asked)
 
 
 def check_outputs(ctx):

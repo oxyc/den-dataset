@@ -70,21 +70,23 @@ class ChangeSet(unittest.TestCase):
         with open(path, encoding="utf-8") as fh:
             return [json.loads(line) for line in fh if line.strip()]
 
-    def test_the_passes_buy_the_change_sets_titles_into_shards_of_their_own(self):
+    def test_a_change_set_is_classified_and_critiqued_in_one_call_into_a_shard_of_its_own(self):
         change_set(self.out, ["movie:2", "movie:9"])
         dump, digest = classify.changed_articles(self.ctx())
         with open(dump, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), self.lines[1], "the shared dump's bytes, for the listed title with one")
         shard = classify.run(self.ctx())
         self.assertEqual(os.path.basename(shard), f"combined-v1-r2-{digest}.jsonl")
-        delta = critique.run(self.ctx())
-        self.assertEqual(os.path.basename(delta), f"delta-v2-{digest}.jsonl")
-        for path in (shard, delta):
-            self.assertEqual([(r["mediaType"], r["tmdbId"]) for r in self.rows(path)], [("movie", 2)])
-            self.assertTrue(os.path.exists(path + ".manifest.json"))
-        # The corpus join's globs find both, and their manifests are the ones the audit reads.
+        self.assertIn("asked the critique in its classify call", critique.run(self.ctx()))
+        self.assertEqual(len(StubTypeSafe.requests), 1, "one call, not two")
+        self.assertTrue(set(run_delta.delta_questions()) <= set(StubTypeSafe.requests[0][1]))
+        [row] = self.rows(shard)
+        self.assertEqual((row["mediaType"], row["tmdbId"]), ("movie", 2))
+        self.assertTrue(consolidate_corpus.critiqued(row["answers"]))
+        self.assertTrue(classify.asks_critique(shard))
+        # The corpus join's glob finds it, and its manifest is the one the audit reads.
         self.assertIn(shard, self.ctx().paths(artifacts.COMBINED))
-        self.assertIn(delta, self.ctx().paths(artifacts.DELTA))
+        self.assertEqual(self.ctx().paths(artifacts.DELTA), ())
 
     def test_a_second_start_resumes_and_buys_nothing(self):
         change_set(self.out, ["movie:2"])
@@ -95,9 +97,10 @@ class ChangeSet(unittest.TestCase):
         critique.run(self.ctx())
         self.assertEqual(StubTypeSafe.requests, [])
 
-    def test_the_pair_supersedes_the_older_shards_in_the_join(self):
-        """Bought first over the whole dump, then over a change set whose article moved: the join takes the
-        change set's pair for that title and refuses nothing — each kept critique read its classify's article."""
+    def test_the_critiqued_classify_row_supersedes_the_older_pair_in_the_join(self):
+        """Bought first over the whole dump as two passes, then over a change set whose article moved: the
+        change set's one row is kept for that title, critique included, and the older pair stands for the
+        others."""
         classify.run(self.ctx())
         critique.run(self.ctx())
         moved = dict(article(2), text=article(2)["text"].replace("A story happens.", "A story unfolds."))
@@ -105,18 +108,17 @@ class ChangeSet(unittest.TestCase):
         with open(os.path.join(self.out, artifacts.ARTICLES.filename), "w", encoding="utf-8") as fh:
             fh.writelines(self.lines)
         change_set(self.out, ["movie:2"])
-        shard, delta = classify.run(self.ctx()), critique.run(self.ctx())
+        shard = classify.run(self.ctx())
+        self.assertIn("nothing to buy", critique.run(self.ctx()))
         combined = self.ctx().paths(artifacts.COMBINED)
         kept, _report, _ = consolidate_corpus.latest(combined, "combined", {}, keep=consolidate_corpus.pass_row)
-        kept_delta, _report, _ = consolidate_corpus.latest(self.ctx().paths(artifacts.DELTA), "delta", {},
-                                                           keep=consolidate_corpus.pass_row)
         by_new = {f"{r['mediaType']}:{r['tmdbId']}": r["articleSha256"] for r in self.rows(shard)}
         self.assertEqual(kept["movie:2"]["articleSha256"], by_new["movie:2"])
-        self.assertEqual(kept_delta["movie:2"]["articleSha256"], by_new["movie:2"])
-        self.assertEqual({r["tmdbId"] for r in self.rows(delta)}, {2})
+        self.assertTrue(consolidate_corpus.critiqued(kept["movie:2"]["answers"]))
+        self.assertFalse(consolidate_corpus.critiqued(kept["movie:1"]["answers"]), "the old pair stands for movie:1")
 
     def test_without_spend_the_pass_keeps_its_own_refusal(self):
-        change_set(self.out, ["movie:2"])
+        change_set(self.out, ["movie:2"], baseline=False)
         classify.run(self.ctx())
         StubTypeSafe.requests = []
         with self.assertRaisesRegex(StageError, "not given --spend"):
