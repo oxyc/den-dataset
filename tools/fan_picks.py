@@ -842,8 +842,8 @@ def backfill(work, keys_path, out=BACKFILL, max_spend=1.0, cfg=None, log=sys.std
     """Ask the fallback model about `keys_path`'s titles with the full run's frozen inputs, and keep each
     answer in `out` for the daily job to match (oxyc/den-dataset#183: the titles Gemini always refused).
 
-    A key `out` already answers or records as refused is not asked again. Every call is logged with its cost
-    and checked against `max_spend` before it is sent."""
+    A key `out` already answers is not asked again; one it records as refused or malformed is. Every call is
+    logged with its cost and checked against `max_spend` before it is sent."""
     w, cfg = Work(work), cfg or CFG["fallback"]
     with open(keys_path, encoding="utf-8") as fh:
         keys = [key for key in json.load(fh) if key in w.titles]
@@ -853,7 +853,7 @@ def backfill(work, keys_path, out=BACKFILL, max_spend=1.0, cfg=None, log=sys.std
             value = json.load(fh)
     budget = llm.Budget(max_spend)
     for key in keys:
-        if key in value["answers"] or key in value["refused"]:
+        if key in value["answers"]:
             continue
         try:
             result = llm.online(cfg, question(w.titles[key], cfg), budget)
@@ -868,6 +868,7 @@ def backfill(work, keys_path, out=BACKFILL, max_spend=1.0, cfg=None, log=sys.std
         if answer is not None:
             value["answers"][key] = {**{k: answer.get(k) for k in keep}, "known": answer["known"],
                                      "picks": answer["picks"]}
+            value["refused"].pop(key, None)
         else:
             value["refused"][key] = {**{k: row.get(k) for k in keep}, "error": row.get("error")}
         value["answers"] = dict(sorted(value["answers"].items()))

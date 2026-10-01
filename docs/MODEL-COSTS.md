@@ -90,6 +90,8 @@ All four know the whole catalogue, deep tail included. A split by popularity is 
 
 **Outcome:**
 - 52,927 of 52,985 titles answered; 58 are refused by Gemini every time.
+  - **Re-asked through the fallback (#183, 2026-10-01):** Claude Sonnet 5 answered all 58 (3 only on a second ask: their first answers were malformed JSON). Run through `claude -p` on the owner's plan, so $0 API; at list price it is ~$0.45. Against the 09f corpus, 80% of the named picks matched a stored title (Sonnet names more titles the store doesn't hold) and a title keeps 13.5 picks, 45 of 58 at least 10. The answers are in `data/fan-picks-backfill.json`; the next published dataset carries them.
+  - The daily job now asks a refused title once more and then the fallback, Claude Sonnet 5 (`data/models.json`).
 - 92.0% of picks matched a stored title: 97.4% in the top 5k, 86.7% at the tail.
 - 99.2% of titles keep ≥10 picks.
 - The model said it didn't know 0.4% of titles.
