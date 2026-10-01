@@ -682,8 +682,22 @@ def load_daily_checkpoint(path):
     return value
 
 
+def fingerprint(title, cfg=CFG):
+    """What an answer was bought for: who was asked, and the request on the wire. A kept answer is reused
+    only for the same fingerprint, so a new prompt or model is the one way to pay for a title again."""
+    return digest({"provider": cfg["provider"], "model": cfg["model"], "request": request_body(title, cfg)})
+
+
+def reusable(saved, wanted):
+    """A kept response is an answer, or a provider's accepted empty answer, bought for this request. A
+    malformed one is asked again: the title would otherwise never get picks."""
+    return isinstance(saved, dict) and saved.get("requestSha256") == wanted and saved.get("accepted") is True \
+        and (saved.get("answer") is not None or accepted_empty(saved.get("error")))
+
+
 def daily_update(corpus_path, articles_path, franchises_path, existing_path, out, keys, workers=8,
-                 generate=answer_title, follows=None, max_spend=DAILY_SPEND_CAP, backfill=None):
+                 generate=answer_title, follows=None, max_spend=DAILY_SPEND_CAP, backfill=None,
+                 kept=None, persist=None):
     """Ask the fan-picks model online for new daily titles, match with the full run's rule, and merge the
     durable input.
 
@@ -694,6 +708,11 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
 
     `backfill` is answers bought outside the daily job (`data/fan-picks-backfill.json`): each is matched into
     a title the input has no picks for, so a title the primary model refused gets the fallback's picks.
+
+    `kept` is the paid-answers ledger's fan-picks section (`pipeline/paid.py`): every accepted response by
+    title, reused while its fingerprint matches, and `persist` is called after each one is added, so a run
+    that stops later loses nothing it paid for. Without it, a checkpoint file beside `out` does the same for
+    one out-dir and is removed once the update succeeds.
     """
     rows = corpus_rows(corpus_path)
     if not os.path.exists(existing_path):
@@ -747,8 +766,8 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
 
     answered, empty_answers, parse_errors, unavailable = {}, {}, {}, {}
     checkpoint_path = daily_checkpoint_path(out)
-    checkpoint = load_daily_checkpoint(checkpoint_path)
-    fingerprints = {key: digest(request_body(title)) for key, title in titles.items()}
+    checkpoint = load_daily_checkpoint(checkpoint_path) if kept is None else {"responses": kept}
+    fingerprints = {key: fingerprint(title) for key, title in titles.items()}
 
     def classify(key, result):
         answer, error, accepted = result
@@ -765,8 +784,7 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     resumed = 0
     for key, title in titles.items():
         saved = checkpoint["responses"].get(key)
-        if isinstance(saved, dict) and saved.get("requestSha256") == fingerprints[key] \
-                and saved.get("accepted") is True:
+        if reusable(saved, fingerprints[key]):
             classify(key, (saved.get("answer"), saved.get("error"), True))
             resumed += 1
         else:
@@ -786,7 +804,10 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
                     "requestSha256": fingerprints[key], "accepted": True,
                     "answer": answer, "error": error,
                 }
-                write_json(checkpoint_path, checkpoint)
+                if kept is None:
+                    write_json(checkpoint_path, checkpoint)
+                elif persist is not None:
+                    persist()
     if unavailable:
         first = next(iter(unavailable.items()))
         raise RuntimeError(f"daily fan picks: Gemini unreachable for {len(unavailable)} title(s); "
@@ -811,7 +832,7 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     value = {"schema": EXPORT_SCHEMA, "issue": "oxyc/den-atlas#121", "model": MODEL,
              "count": len(anchors), "anchors": dict(sorted(anchors.items()))}
     write_json(out, value)
-    if os.path.exists(checkpoint_path):
+    if kept is None and os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
     return {"asked": len(titles), "answered": len(answered), "emptyAnswers": len(empty_answers),
             "parseErrors": len(parse_errors),

@@ -173,12 +173,31 @@ def bundle(paths):
                     yield json.loads(line)
 
 
+def started(path):
+    """When the run that wrote a shard started, from its manifest; a shard with none sorts first."""
+    try:
+        with open(path + ".manifest.json", encoding="utf-8") as fh:
+            return json.load(fh).get("runStartedAt") or ""
+    except OSError:
+        return ""
+
+
+def increment(paths, eligible):
+    """An increment's eligible records, the newest run's row for a title two shards hold: a title classified
+    again on a changed article sits beside the row it supersedes (as `consolidate_corpus` reads them), which a
+    kept paid-answers ledger (`pipeline/paid.py`) makes ordinary rather than an error."""
+    latest = {}
+    for record in bundle(sorted(paths, key=started)):
+        key = f"{record['mediaType']}:{record['tmdbId']}"
+        if key in eligible:
+            latest[key] = record
+    return latest.values()
+
+
 work, review, seen = [], [], set()
 skipped = {"hasTags": 0, "badValidity": 0, "nonNarrative": 0, "noArticleText": 0}
-for r in bundle(args.combined):
+for r in (bundle(args.combined) if eligible is None else increment(args.combined, eligible)):
     key = f"{r['mediaType']}:{r['tmdbId']}"
-    if eligible is not None and key not in eligible:
-        continue
     if key in seen:
         sys.exit(f"{key} occurs in more than one combined shard; refusing an ambiguous source record")
     seen.add(key)

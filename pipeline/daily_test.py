@@ -252,6 +252,41 @@ class PremiseCorrections(unittest.TestCase):
         self.assertIn("premise corrections: 1 row(s) corrected", summary)
 
 
+class PaidLedger(Recorded):
+    """#187 item 1: what a day bought survives a day that fails, and the next day starts with it."""
+
+    def stage(self, name):
+        module = super().stage(name)
+        inner = module.run
+
+        def run(ctx):
+            if name == "classify":
+                self.saw_restored = os.path.exists(os.path.join(ctx.out_dir, "combined-v1-r2-abc.jsonl"))
+                if not self.saw_restored:
+                    for suffix, body in (("", '{"mediaType": "movie", "tmdbId": 1}\n'),
+                                         (".manifest.json", '{"runId": "r"}')):
+                        with open(os.path.join(ctx.out_dir, "combined-v1-r2-abc.jsonl" + suffix), "w") as fh:
+                            fh.write(body)
+            if name == "store" and self.store_fails:
+                raise StageError("store: killed")
+            return inner(ctx)
+        module.run = run
+        return module
+
+    def test_a_day_that_fails_after_buying_keeps_it_for_the_next_day(self):
+        ledger = os.path.join(self.out, "paid", "paid-state.json.gz")
+        env = {"TYPESAFE_API_KEY": "j", "DEN_EMBED_URL": "http://embed.invalid"}
+        self.store_fails = True
+        code, _ = self.day(env, spend=True, paid_state=ledger)
+        self.assertEqual((code, self.saw_restored), (1, False))
+        self.assertIn("combined-v1-r2-abc.jsonl", daily.paid.Ledger(ledger).data["shards"])
+        self.out = os.path.join(self.out, "next-day")
+        os.makedirs(self.out)
+        self.store_fails = False
+        self.day(env, spend=True, paid_state=ledger)
+        self.assertTrue(self.saw_restored, "the shard was laid back before the classify stage ran")
+
+
 class FanPicks(unittest.TestCase):
     def day(self, spend=True, key="g"):
         directory = self.enterContext(tempfile.TemporaryDirectory())

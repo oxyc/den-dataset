@@ -82,20 +82,23 @@ against the working directory. Overrides are environment variables (below), and 
 
 Start with the run's summary, which is `out/daily-report.md`: what moved, which stage was skipped for want
 of a credential, what was bought, and the refusal. `daily-report.json` carries the same, and
-`changes/plan.json` is the change set; all three are in the `daily-report-<run id>` artifact. If Gemini
-accepted some fan-picks requests before another request exhausted its retries, that artifact also contains
-`fan-picks.json.daily-checkpoint.json`. Put it beside `fan-picks.json` in the reconstructed out-dir before
-rerunning; responses whose exact model request still matches are reused, and the checkpoint is removed only
-after the merged fan-picks input is written successfully.
+`changes/plan.json` is the change set; all three are in the `daily-report-<run id>` artifact.
+
+Nothing a failed run paid for is lost: the job uploads the paid-answers ledger (`pipeline/paid.py`) to the
+`paid-state` release after every run, and the next run lays its Jev shards back and reuses its fan-pick and
+premise answers before asking anything. Rerunning a failed day buys nothing it already bought.
 
 To reproduce a run locally, lay out what the job started from and run the same command:
 
 ```sh
 gh release download data-latest -p dataset.meta.json -D out/published --clobber
 gh release download corpus-<datasetVersion> -D out/published --clobber
-./den daily --out-dir out
+gh release download paid-state -p paid-state.json.gz -D paid --clobber
+./den daily --out-dir out --paid-state paid/paid-state.json.gz
 ./den stage publish --out-dir out --plan     # every gate again, against the same published manifest
 ```
+
+A local run given the ledger writes back to that copy, never to the release.
 
 `./den daily` reads `TMDB_API_KEY` (and `TYPESAFE_API_KEY` with `--spend`) from the environment or
 `den.env`; `DEN_EMBED_URL` must name a den-embed whose canary answers match (next section).

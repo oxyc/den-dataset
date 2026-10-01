@@ -105,6 +105,23 @@ class IncrementalPremiseWorklistTest(unittest.TestCase):
             manifest = json.load(handle)
         self.assertEqual(manifest["ids"], ["movie:990000002", "tv:990000004"])
 
+    def test_a_title_classified_again_is_read_from_the_newer_run(self):
+        """A kept shard from an earlier run beside today's, both holding a title whose article changed:
+        the increment reads the run that started later, as the corpus join does, instead of refusing."""
+        newer = os.path.join(self.directory, "combined-newer.jsonl")
+        with open(self.combined, encoding="utf-8") as handle:
+            row = json.loads(handle.readline())
+        row["answers"]["validity"]["choice"] = "wrong-work"
+        with open(newer, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(row) + "\n")
+        for path, started in ((self.combined, "2026-09-30T00:00:00+00:00"), (newer, "2026-10-01T00:00:00+00:00")):
+            with open(path + ".manifest.json", "w", encoding="utf-8") as handle:
+                json.dump({"runStartedAt": started}, handle)
+        result = self.run_script(out="two-shards", extra=("--combined", newer))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(os.path.join(self.directory, "two-shards", "gen", "manifest.json"), encoding="utf-8") as handle:
+            self.assertNotIn("tv:990000004", json.load(handle)["ids"], "the newer row's validity counts")
+
 
 if __name__ == "__main__":
     unittest.main()

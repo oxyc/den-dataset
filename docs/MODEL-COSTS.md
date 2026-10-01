@@ -149,6 +149,8 @@ Spend on these measurements: $2.80.
 - Paid answers lived only in one run's out-dir, and the workflow keeps nothing between runs. A run that failed or didn't publish had its titles bought again the next day.
 - It happened twice on 2026-09-30, ~$0.009. The failed runs of 09-27/28 ran without spend, so they cost nothing.
 - **Fix:** a paid-answers ledger outside the run, checked before every paid call. This is now a hard rule.
+  - **Built** (`pipeline/paid.py`): the `paid-state` release asset keeps every Jev shard, franchise decision, fan-pick and premise answer a run bought until a publish carries it. A Jev answer that fails validation is quarantined beside its shard instead of dropped, and a malformed fan-pick answer is asked again, then by the fallback.
+  - **Not closable here:** a retry after a TypeSafe response that never arrived may be billed twice; the API takes no idempotency key. At most one state per lost response, ~$0.0004.
 
 **Combining Jev calls.**
 - Classify and critique in one call: $0.00099 → $0.00087 a title (−13%). The answers differ no more than two runs of the same call.

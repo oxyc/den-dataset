@@ -148,12 +148,22 @@ class Task:
         return {row["key"]: row["tags"] for row in cleaned if len(row["tags"]) >= validate.MIN_TAGS}
 
 
-def generate(phase, cap, cfg=None, workers=1):
+def asked_for(cfg, task, row):
+    """What a title's tags were bought for: the configured model, the spec, and the evidence it was shown."""
+    return hashlib.sha256(json.dumps([cfg["provider"], cfg["model"], task.version, row["plot"]],
+                                     ensure_ascii=False).encode()).hexdigest()
+
+
+def generate(phase, cap, cfg=None, workers=1, kept=None, persist=None):
     """Fill missing batch outputs through the configured model, title by title.
 
     A batch output holds every title answered so far, each with `by` (who answered it); a rerun asks only
     the titles no output holds. A title no model could tag is left out and reported, and waits for a later
-    run: it does not stop the day."""
+    run: it does not stop the day.
+
+    `kept` is the paid-answers ledger's premise section (`pipeline/paid.py`): a title it answers for the same
+    model, spec and evidence is written from it and not asked, and every new answer is added to it, with
+    `persist` called after each, so a run that stops later loses nothing it paid for."""
     cfg = cfg or config()
     manifest = _json(os.path.join(phase, "manifest.json"))
     estimate = projected(manifest, cfg)
@@ -172,18 +182,28 @@ def generate(phase, cap, cfg=None, workers=1):
             wanted = {row["key"] for row in batch_in}
             done = {row["key"]: row for row in _json(path)
                     if row.get("key") in wanted and len(row.get("tags") or []) >= validate.MIN_TAGS}
-        batches[name] = done
-        resumed += len(done)
         for row in batch_in:
             where[row["key"]] = name
+            saved = (kept or {}).get(row["key"])
+            if row["key"] not in done and saved and saved.get("ask") == asked_for(cfg, task, row):
+                done[row["key"]] = {"key": row["key"], "tags": saved["tags"], "by": saved["by"]}
             if row["key"] not in done:
                 pending.append(row)
+        batches[name] = done
+        resumed += len(done)
+        if done:
+            _write(path, list(done.values()))
+    asks = {row["key"]: asked_for(cfg, task, row) for row in pending}
 
     def record(key, row):
         if "value" in row:
             name = where[key]
             batches[name][key] = {"key": key, "tags": row["value"], "by": row["by"]}
             _write(os.path.join(out_dir, name), list(batches[name].values()))
+            if kept is not None:
+                kept[key] = {"ask": asks[key], "tags": row["value"], "by": row["by"]}
+                if persist is not None:
+                    persist()
 
     budget = llm.Budget(cap)
     try:

@@ -73,7 +73,10 @@ def run(ctx):
     if changes.planned(ctx) is not None:
         found = classify.changed_articles(ctx)
         if found is None:
-            return "nothing to critique — no title the change set lists has an article"
+            if classify.changed_articles(ctx, skip_answered=False) is None:
+                return "nothing to critique — no title the change set lists has an article"
+            # Every title has a classify row asked with today's questions, which carry the critique.
+            return "nothing to buy — every title the change set lists was asked the critique in its classify call"
         articles, digest = found
         combined = classify.named(ctx, artifacts.COMBINED, digest)
         if not os.path.exists(combined):

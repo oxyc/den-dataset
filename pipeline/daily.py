@@ -53,7 +53,7 @@ import sys
 from lib import cache as caching
 from lib import llm as lib_llm
 
-from . import artifacts, changes, classify, finalize, load, plot_length, premise_daily, published, spend
+from . import artifacts, changes, classify, finalize, load, paid, plot_length, premise_daily, published, spend
 from .contract import Context, StageError
 from . import STAGES
 from tools import fan_picks
@@ -151,6 +151,14 @@ class Day:
         prior = spend.month_to_date(getattr(args, "published_reports_dir", None), now.date())
         self.ledger = spend.Ledger(prior, getattr(args, "max_spend_usd_month", 10.0))
         self.typesafe_before = None
+        self.paid = paid.Ledger(getattr(args, "paid_state", None))
+        self.restored = 0
+
+    def persist(self):
+        """Take what was bought so far into the paid-answers ledger and write it, so a run that stops after
+        this point is not paid for again by the next."""
+        self.paid.keep(self.ctx)
+        self.paid.save()
 
     def skip(self, stage, why):
         self.skipped.append({"stage": stage, "why": why})
@@ -222,12 +230,14 @@ def update_fan_picks(day):
         if not added:
             day.skip("fan_picks", "no titles were added and there is no existing fan-picks input to carry")
         return None
+    day.fan_picks_kept_before = set(day.paid.answers("fan_picks"))
     try:
         result = fan_picks.daily_update(
             corpus_path=ctx.path(artifacts.CORPUS), articles_path=ctx.path(artifacts.ARTICLES),
             franchises_path=ctx.path(artifacts.FRANCHISES), existing_path=existing,
             out=existing, keys=asked, max_spend=day.args.fan_picks_max_spend_usd,
-            backfill=fan_picks.load_backfill())
+            backfill=fan_picks.load_backfill(), kept=day.paid.answers("fan_picks") if day.paid.path else None,
+            persist=day.paid.save)
     except (OSError, ValueError, RuntimeError) as error:
         raise StageError(f"fan_picks: {error}") from error
     day.ran.append("fan_picks")
@@ -281,7 +291,9 @@ def update_premise(day):
                   "reasoningTokens": 0, "costUSD": 0.0, "projectedSpendUSD": 0.0, "spendCapUSD": premise_cap}
     else:
         try:
-            result = premise_daily.generate(os.path.join(work, "gen"), premise_cap, cfg)
+            result = premise_daily.generate(os.path.join(work, "gen"), premise_cap, cfg,
+                                            kept=day.paid.answers("premise_tags") if day.paid.path else None,
+                                            persist=day.paid.save)
             premise_daily.merge(day.ctx, os.path.join(work, "gen"), result, day.now)
         except premise_daily.GenerationError as error:
             day.ledger.actual("premiseTags", error.cost_usd)
@@ -295,11 +307,21 @@ def update_premise(day):
     return result
 
 
-def run_day(day):
-    """Every stage of the day, in `STAGES` order. Returns the check's verdict: `(ready, why)`."""
-    ctx, env = day.ctx, day.environ
+def prepare(day):
+    """The out-dir a day starts from: seeded from the live dataset when empty, and what earlier runs paid for
+    laid back from the ledger (`pipeline/paid.py`) after the seed, so the seed cannot overwrite it."""
+    ctx = day.ctx
     day.seeded = seed_if_empty(ctx)
     refuse_a_first_generation_by_accident(ctx)
+    day.restored = day.paid.restore(ctx)
+    if day.restored:
+        print(f"==> paid answers: {day.restored} shard(s) an earlier run bought, laid back", file=sys.stderr)
+
+
+def run_day(day):
+    """Every stage of the day, in `STAGES` order, over a `prepare`d out-dir. Returns the check's verdict:
+    `(ready, why)`."""
+    ctx, env = day.ctx, day.environ
     for name in STAGES:
         if name == "worklist":
             if ctx.mode in ("delta", "catalogue") and not env.get("TMDB_API_KEY"):
@@ -325,17 +347,19 @@ def run_day(day):
                                "title keeps its old rows and a new one has none")
                 continue
             if name == "classify":
-                day.classifiable_changes = classify.changed_articles(ctx) is not None
+                day.classifiable_changes = classify.changed_articles(ctx, skip_answered=False) is not None
             if day.classifiable_changes is False:
                 day.skip(name, "no newly admitted or regained title has an article to classify")
                 continue
             day.stage(name, spend=True)
+            day.persist()
         elif name in ASKS:
             if not day.can_buy:
                 day.skip(f"{name} (ask)", ASKS[name])
             elif day.classifiable_changes is False:
                 day.skip(f"{name} (ask)", "no newly admitted or regained title has a classified article")
             day.stage(name, spend=day.can_buy and day.classifiable_changes is not False)
+            day.persist()
             if name == "genres_moods":
                 update_premise(day)
             if name == "franchises":
@@ -417,15 +441,18 @@ def report(day, ready, why, tokens):
         day.ledger.actual("typesafe", tokens * rate)
     fan_step = day.ledger.steps.get("fanPicks")
     if fan_step and fan_step.get("actualUSD") is None:
-        checkpoint = fan_picks.daily_checkpoint_path(finalize_ctx(ctx).path(artifacts.FAN_PICKS))
-        amount = 0.0
-        if os.path.exists(checkpoint):
+        # The update stopped before it reported: what it paid for is what it kept, in the ledger or, for a
+        # run with none, in the checkpoint beside the input.
+        kept = day.paid.answers("fan_picks")
+        if not day.paid.path:
+            checkpoint = fan_picks.daily_checkpoint_path(finalize_ctx(ctx).path(artifacts.FAN_PICKS))
             try:
-                responses = fan_picks.load_daily_checkpoint(checkpoint)["responses"].values()
-                amount = sum((row.get("answer") or row.get("error") or {}).get("costUSD", 0.0)
-                             for row in responses if isinstance(row, dict))
+                kept = fan_picks.load_daily_checkpoint(checkpoint)["responses"] if os.path.exists(checkpoint) else {}
             except (OSError, ValueError, RuntimeError):
-                pass
+                kept = {}
+        before = getattr(day, "fan_picks_kept_before", set()) if day.paid.path else set()
+        amount = sum((row.get("answer") or row.get("error") or {}).get("costUSD", 0.0)
+                     for key, row in kept.items() if key not in before and isinstance(row, dict))
         day.ledger.actual("fanPicks", amount)
     boundary = None
     if plot_length.PRE_TRANSFORM_BOUNDARY in why:
@@ -499,9 +526,14 @@ def run(args, environ=None, now=None):
     os.makedirs(os.path.abspath(args.out_dir), exist_ok=True)
     before = paid_tokens(day.ctx)
     try:
+        prepare(day)
+        # What an earlier run bought and the ledger laid back is not today's spend.
+        before = paid_tokens(day.ctx)
         ready, why = run_day(day)
     except StageError as refusal:
         ready, why = False, str(refusal)
+    finally:
+        day.persist()
     out = report(day, ready, why, paid_tokens(day.ctx) - before)
     print(f"daily: {'ready to publish' if ready else 'NOT ready'} — {why}", file=sys.stderr)
     print(json.dumps({k: out[k] for k in ("ready", "datasetVersion", "counts", "spend")}, sort_keys=True))
@@ -532,4 +564,7 @@ def register(commands):
     sub.add_argument("--max-spend-usd-month", type=float, default=10.0, metavar="USD")
     sub.add_argument("--published-reports-dir",
                      help="downloaded public daily-report JSON assets used for the monthly spend total")
+    sub.add_argument("--paid-state", metavar="FILE",
+                     help="the paid-answers ledger (pipeline/paid.py): read before the day, written as it buys; "
+                          "without it a run resumes only within its own out-dir")
     return sub
