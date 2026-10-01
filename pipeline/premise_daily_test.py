@@ -134,6 +134,30 @@ class PremiseGeneration(unittest.TestCase):
         self.assertEqual((wire.sent, result["resumed"], result["generated"]), ([], 2, 0))
         self.assertEqual(sorted(out), ["movie:7", "movie:8"])
 
+    def test_a_title_left_short_is_recorded_and_asked_again_three_then_six_months_on(self):
+        """#200: a title no model would tag is not asked every run, and not given up on either."""
+        kept, short = {}, TAGS[:6] + ["comedy", "character-arc"]
+
+        def run(today, answers):
+            wire = Wire(answers)
+            phase = self.phase()
+            with mock.patch("urllib.request.urlopen", wire), mock.patch("time.sleep"), \
+                    mock.patch.dict(os.environ, {"OPENAI_API_KEY": "o", "ANTHROPIC_API_KEY": "a"}):
+                return premise_daily.generate(phase, 1.0, kept=kept, today=today), wire
+        result, _ = run("2026-10-01", {"movie:7": TAGS, "movie:8": short})
+        self.assertEqual((result["short"], kept["movie:8"]["untaggable"], kept["movie:8"]["asks"]),
+                         (["movie:8"], "short", 1))
+        result, wire = run("2026-12-30", {"movie:8": short})
+        self.assertEqual((result["notRetriedYet"], wire.sent), (["movie:8"], []), "not before 91 days")
+        result, wire = run("2026-12-31", {"movie:8": short})
+        self.assertEqual((result["short"], kept["movie:8"]["asks"], kept["movie:8"]["first"]),
+                         (["movie:8"], 2, "2026-10-01"))
+        _, wire = run("2027-03-31", {"movie:8": short})
+        self.assertEqual(wire.sent, [], "not before 182 days")
+        run("2027-04-01", {"movie:8": short})
+        result, wire = run("2028-01-01", {"movie:8": short})
+        self.assertEqual((kept["movie:8"]["asks"], wire.sent), (3, []), "then only on a new model or evidence")
+
     def test_the_projection_must_fit_the_cap_before_any_call(self):
         with self.assertRaisesRegex(RuntimeError, "daily cap"):
             premise_daily.generate(self.phase(), 1e-9)

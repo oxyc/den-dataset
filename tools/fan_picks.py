@@ -15,6 +15,7 @@ other versions and its sequel links are dropped too: other rows show them.
   match    match every answer's picks to the store, and report a slice's numbers
   export   the store's input: every asked title with its matched picks, in the model's order
   backfill ask the step's fallback model about titles the primary refused, into data/fan-picks-backfill.json
+  reask-seed  the titles a full run's answers make due a re-ask, into data/fan-picks-reask.json
 
 Every answer is appended as it arrives, with its token usage, cost and `modelVersion`; a rerun asks only what
 has no answer. Spend is checked against the manifest's cap before anything is asked: a chunk is admitted only
@@ -135,10 +136,12 @@ def prompt(title):
     lead = title.get("lead") or ""
     if lead and not lead.endswith("."):
         lead += "."
+    # The compact answer (#187, format B): short keys and one array per pick, 43% cheaper than keyed objects
+    # for the same picks kept (300 titles, blind-judged equal). `parse` still reads the keyed shape.
     return (f"A friend loved {title['title']} ({when}). {lead} ".replace("  ", " ")
             + "Name up to 20 films or series they would also love — any genre, era or country; taste, not "
               "similarity. If you don't know this title well, say so and name only picks you're confident in. "
-              'Return only JSON: {"known": bool, "picks":[{"title":str, "year":int, "type":"film"|"series"}]}')
+              'Return only JSON: {"k":bool,"p":[["Title",1999,"f"|"s"]]}')
 
 
 def question(title, cfg=CFG):
@@ -278,11 +281,25 @@ def sample(work, per_band, seed, out):
 
 # --- asking ---------------------------------------------------------------------------------------------
 
+#: Format B's one-letter types, and the words a model sometimes writes there instead.
+SHORT_TYPES = {"f": "film", "s": "series", "film": "film", "series": "series"}
+
+
 def parse(text):
-    """The answer's `known` and picks, or ValueError. A pick needs a title; year and type are kept as given."""
+    """The answer's `known` and picks, or ValueError. A pick needs a title; year and type are kept as given.
+
+    Both answer shapes are read: the compact `{"k", "p": [[title, year, "f"|"s"]]}` the prompt asks for now,
+    and the keyed `{"known", "picks": [{"title", "year", "type"}]}` every answer before it is stored in."""
     found = re.search(r"\{.*\}", text or "", re.S)
     value = json.loads(found.group(0) if found else text)
-    picks = value.get("picks")
+    if "p" in value:
+        picks = [{"title": pick[0], "year": pick[1] if len(pick) > 1 else None,
+                  "type": SHORT_TYPES.get(pick[2]) if len(pick) > 2 and isinstance(pick[2], str) else None}
+                 for pick in value["p"] if isinstance(pick, list) and pick] \
+            if isinstance(value["p"], list) else None
+        known = value.get("k")
+    else:
+        picks, known = value.get("picks"), value.get("known")
     if not isinstance(picks, list):
         raise ValueError("no picks list")
     kept = []
@@ -292,7 +309,7 @@ def parse(text):
             kept.append({"title": pick["title"].strip(),
                          "year": year if isinstance(year, int) and not isinstance(year, bool) else None,
                          "type": pick.get("type") if pick.get("type") in ("film", "series") else None})
-    return bool(value.get("known")), kept
+    return bool(known), kept
 
 
 def record(response, key, ask, mode, batch=None):
@@ -369,22 +386,28 @@ def run_online(w, items, workers=8, log=sys.stderr):
     return ok
 
 
-def generate_online(title, key, ask=0, cfg=CFG):
+#: What `generate_online` says when the run's budget would not admit the call: nothing was sent.
+OVER_BUDGET = llm.OVER_BUDGET
+
+
+def generate_online(title, key, ask=0, cfg=CFG, budget=None):
     """One retried ask through `lib/llm.py`: `(answer, error, accepted)`.
 
     `accepted` separates an HTTP/transport failure from a response received from the provider. A safety
     refusal or malformed response is still an error. A provider-accepted empty response is a durable
-    asked-empty anchor; malformed non-empty output remains unasked.
+    asked-empty anchor; malformed non-empty output remains unasked. A call `budget` will not admit is not
+    sent, and comes back unaccepted with `OVER_BUDGET` as its error.
     """
     try:
-        result = llm.online(cfg, question(title, cfg))
-    except providers.Unavailable as exc:
-        return None, {"key": key, "ask": ask, "mode": "online", "error": str(exc), "costUSD": 0.0}, False
+        result = llm.online(cfg, question(title, cfg), budget)
+    except (providers.Unavailable, llm.OverBudget) as exc:
+        # A code, not the provider's text: the error is kept in the public ledger and named in the report.
+        return None, {"key": key, "ask": ask, "mode": "online", "error": llm.error_code(exc), "costUSD": 0.0}, False
     answer, error = recorded(result, key, ask, "online", cfg=cfg)
     return answer, error, True
 
 
-def answer_title(title, key, ask=0, cfg=CFG):
+def answer_title(title, key, ask=0, cfg=CFG, budget=None):
     """`generate_online`, with what #183 decided for an answer that is not one: a refused, empty or malformed
     answer is asked once more, and then by the step's fallback model. Only a title the fallback cannot answer
     either keeps the refusal (#170's asked-empty rule). The row's `costUSD` is every attempt's.
@@ -394,7 +417,8 @@ def answer_title(title, key, ask=0, cfg=CFG):
     spent, last = 0.0, None
     attempts = [cfg, cfg] + ([cfg["fallback"]] if cfg.get("fallback") else [])
     for n, attempt in enumerate(attempts):
-        answer, error, accepted = generate_online(title, key, ask, attempt)
+        answer, error, accepted = generate_online(title, key, ask, attempt,
+                                                  **({"budget": budget} if budget is not None else {}))
         if not accepted:
             if last is None or n < 2:
                 return answer, error, accepted
@@ -682,8 +706,67 @@ def load_daily_checkpoint(path):
     return value
 
 
+def titles_for(keys, rows, articles_path):
+    """`{key: title}` — what the prompt is built from — for corpus `keys`: the store's display title, its
+    year and the lead of its article in `articles_path` (empty when the dump does not hold it)."""
+    wanted, leads = set(keys), {}
+    if os.path.exists(articles_path):
+        with open(articles_path, encoding="utf-8") as fh:
+            for line in fh:
+                article = json.loads(line)
+                key = f"{article['mediaType']}:{article['tmdbId']}"
+                if key in wanted:
+                    leads[key] = lead_of(article.get("text"))
+    titles = {}
+    for key in keys:
+        facts = rows[key].get("facts") or {}
+        title = display_title(facts.get("titles"))
+        if not title:
+            raise RuntimeError(f"fan picks: {key} has no store title to ask about")
+        titles[key] = {"key": key, "title": title, "year": card_year(facts), "lead": leads.get(key, "")}
+    return titles
+
+
+class Task:
+    """One title's fan picks as `lib/llm.py` asks them, for the weekly Batch and the bake-off: `parse` gives
+    `{key: {"known", "picks"}}`."""
+    name = "fan_picks"
+    version = "fan-picks-prompt@" + digest(prompt({"key": "movie:0", "title": "X", "year": 2000, "lead": "L"}))[:12]
+
+    def __init__(self, cfg=CFG):
+        self.cfg = cfg
+
+    @staticmethod
+    def key(title):
+        return title["key"]
+
+    def request(self, titles):
+        return question(titles[0], self.cfg)
+
+    @staticmethod
+    def parse(titles, answer):
+        known, picks = parse(answer["text"])
+        return {titles[0]["key"]: {"known": known, "picks": picks}}
+
+
+def fingerprint(key, cfg=CFG):
+    """What an answer was bought for: the title, who was asked, and the prompt's version. A kept answer is
+    reused only for the same fingerprint, so a new prompt or model is the one way to pay for a title again.
+    The lead is not in it: an edit to the article between an unpublished run and the next is not a reason to
+    buy the title again."""
+    return digest({"key": key, "provider": cfg["provider"], "model": cfg["model"], "version": Task.version})
+
+
+def reusable(saved, wanted):
+    """A kept response is an answer, or a provider's accepted empty answer, bought for this request. A
+    malformed one is asked again: the title would otherwise never get picks."""
+    return isinstance(saved, dict) and saved.get("requestSha256") == wanted and saved.get("accepted") is True \
+        and (saved.get("answer") is not None or accepted_empty(saved.get("error")))
+
+
 def daily_update(corpus_path, articles_path, franchises_path, existing_path, out, keys, workers=8,
-                 generate=answer_title, follows=None, max_spend=DAILY_SPEND_CAP, backfill=None):
+                 generate=answer_title, follows=None, max_spend=DAILY_SPEND_CAP, backfill=None,
+                 kept=None, persist=None, reasks=None):
     """Ask the fan-picks model online for new daily titles, match with the full run's rule, and merge the
     durable input.
 
@@ -694,6 +777,14 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
 
     `backfill` is answers bought outside the daily job (`data/fan-picks-backfill.json`): each is matched into
     a title the input has no picks for, so a title the primary model refused gets the fallback's picks.
+
+    `reasks` is answers to titles asked again on purpose (#187 item 5): each replaces a title's picks only
+    when the model now knows the title or names more store titles for it.
+
+    `kept` is the paid-answers ledger's fan-picks section (`pipeline/paid.py`): every accepted response by
+    title, reused while its fingerprint matches, and `persist` is called after each one is added, so a run
+    that stops later loses nothing it paid for. Without it, a checkpoint file beside `out` does the same for
+    one out-dir and is removed once the update succeeds.
     """
     rows = corpus_rows(corpus_path)
     if not os.path.exists(existing_path):
@@ -717,38 +808,14 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     # attach `fan_picks_a` for such a key, so report it and ask only titles the store will actually carry.
     keys = list(dict.fromkeys(keys))
     not_in_corpus = [key for key in keys if key not in rows]
-    corpus_keys = [key for key in keys if key in rows]
-    wanted = set(corpus_keys)
-    leads = {}
-    if os.path.exists(articles_path):
-        with open(articles_path, encoding="utf-8") as fh:
-            for line in fh:
-                article = json.loads(line)
-                key = f"{article['mediaType']}:{article['tmdbId']}"
-                if key in wanted:
-                    leads[key] = lead_of(article.get("text"))
-    titles = {}
-    for key in corpus_keys:
-        if key in anchors:
-            continue
-        row = rows[key]
-        facts = row.get("facts") or {}
-        title = display_title(facts.get("titles"))
-        if not title:
-            raise RuntimeError(f"daily fan picks: {key} has no store title to ask Gemini about")
-        titles[key] = {"key": key, "title": title, "year": card_year(facts), "lead": leads.get(key, "")}
-
+    titles = titles_for([key for key in keys if key in rows and key not in anchors], rows, articles_path)
     if not math.isfinite(max_spend) or max_spend <= 0:
         raise ValueError("daily fan picks: max spend must be a positive finite dollar amount")
-    projected = len(titles) * PILOT_COST * MARGIN
-    if projected > max_spend:
-        raise RuntimeError(f"daily fan picks: refusing {len(titles)} requests: their ${projected:.4f} "
-                           f"projected spend crosses the ${max_spend:.2f} per-run cap")
 
     answered, empty_answers, parse_errors, unavailable = {}, {}, {}, {}
     checkpoint_path = daily_checkpoint_path(out)
-    checkpoint = load_daily_checkpoint(checkpoint_path)
-    fingerprints = {key: digest(request_body(title)) for key, title in titles.items()}
+    checkpoint = load_daily_checkpoint(checkpoint_path) if kept is None else {"responses": kept}
+    fingerprints = {key: fingerprint(key) for key in titles}
 
     def classify(key, result):
         answer, error, accepted = result
@@ -765,16 +832,23 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     resumed = 0
     for key, title in titles.items():
         saved = checkpoint["responses"].get(key)
-        if isinstance(saved, dict) and saved.get("requestSha256") == fingerprints[key] \
-                and saved.get("accepted") is True:
+        if reusable(saved, fingerprints[key]):
             classify(key, (saved.get("answer"), saved.get("error"), True))
             resumed += 1
         else:
             pending[key] = title
+    # Only what will be asked is projected: an answer already paid for costs nothing again.
+    projected = len(pending) * PILOT_COST * MARGIN
+    if projected > max_spend:
+        raise RuntimeError(f"daily fan picks: refusing {len(pending)} requests: their ${projected:.4f} "
+                           f"projected spend crosses the ${max_spend:.2f} per-run cap")
+    # And every call, retries and the fallback included, is held to the cap as it is made.
+    budget = llm.Budget(max_spend)
+    ask = (lambda title, key, n: answer_title(title, key, n, budget=budget)) if generate is answer_title else generate
 
     def one(item):
         key, title = item
-        return key, generate(title, key, 0)
+        return key, ask(title, key, 0)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(one, item) for item in pending.items()]
         for future in concurrent.futures.as_completed(futures):
@@ -786,37 +860,54 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
                     "requestSha256": fingerprints[key], "accepted": True,
                     "answer": answer, "error": error,
                 }
-                write_json(checkpoint_path, checkpoint)
-    if unavailable:
-        first = next(iter(unavailable.items()))
-        raise RuntimeError(f"daily fan picks: Gemini unreachable for {len(unavailable)} title(s); "
+                if kept is None:
+                    write_json(checkpoint_path, checkpoint)
+                elif persist is not None:
+                    persist()
+    # A title the cap left unasked waits for a later run; an outage refuses the update.
+    over = {key for key, error in unavailable.items() if error.get("error") == OVER_BUDGET}
+    unreachable = {key: error for key, error in unavailable.items() if key not in over}
+    if unreachable:
+        first = next(iter(unreachable.items()))
+        raise RuntimeError(f"daily fan picks: Gemini unreachable for {len(unreachable)} title(s); "
                            f"{first[0]}: {first[1].get('error')}")
+    titles = {key: title for key, title in titles.items() if key not in over}
 
     backfilled = {key: answer for key, answer in (backfill or {}).items()
                   if key in rows and key not in titles and not anchors.get(key)}
-    if titles or backfilled:
+    reasked = {key: answer for key, answer in (reasks or {}).items() if key in rows}
+    replaced = 0
+    if titles or backfilled or reasked:
         with open(franchises_path, encoding="utf-8") as fh:
             franchises = json.load(fh)
         names = Names(rows)
-        seeds = set(titles) | set(backfilled)
+        seeds = set(titles) | set(backfilled) | set(reasked)
         owned = related(rows, franchises, sequel_keys(rows, seeds) if follows is None else follows)
         for key, answer in [*answered.items(), *backfilled.items()]:
             matched = match_answer(answer, key, names, owned.get(key, set()))
             anchors[key] = merged([matched])
         for key in empty_answers:
             anchors[key] = []
+        # A re-ask (#187 item 5) replaces the picks only when the model now knows the title or names more of
+        # the store's titles for it: a model asked again may still not know a new release.
+        for key, answer in reasked.items():
+            picks = merged([match_answer(answer, key, names, owned.get(key, set()))])
+            if answer.get("known") or len(picks) > len(anchors.get(key) or []):
+                anchors[key] = picks
+                replaced += 1
 
     costs = [row.get("costUSD", 0.0)
              for row in [*answered.values(), *empty_answers.values(), *parse_errors.values()]]
     value = {"schema": EXPORT_SCHEMA, "issue": "oxyc/den-atlas#121", "model": MODEL,
              "count": len(anchors), "anchors": dict(sorted(anchors.items()))}
     write_json(out, value)
-    if os.path.exists(checkpoint_path):
+    if kept is None and os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
     return {"asked": len(titles), "answered": len(answered), "emptyAnswers": len(empty_answers),
             "parseErrors": len(parse_errors),
             "generated": len(pending), "resumed": resumed,
-            "notInCorpus": not_in_corpus, "backfilled": len(backfilled),
+            "notInCorpus": not_in_corpus, "backfilled": len(backfilled), "overBudget": sorted(over),
+            "reasked": len(reasked), "reaskReplaced": replaced,
             "anchors": len(anchors), "picks": sum(len(v) for v in anchors.values()),
             "costUSD": round(sum(costs), 6), "projectedSpendUSD": round(projected, 6),
             "spendCapUSD": max_spend}
@@ -876,6 +967,66 @@ def backfill(work, keys_path, out=BACKFILL, max_spend=1.0, cfg=None, log=sys.std
         write_json(out, value)
     return {"out": out, "answers": len(value["answers"]), "refused": len(value["refused"]),
             "spentUSD": round(budget.spent, 6)}
+
+
+#: Titles asked before the paid-answers ledger existed that are due a re-ask (#187 item 5): every title the
+#: full run's model did not know, or that was released within six months of the ask. Written by `reask-seed`.
+REASK = os.path.join(REPO, "data", "fan-picks-reask.json")
+REASK_SCHEMA = "fan-picks-reask-v1"
+REASK_AFTER_DAYS = (91, 182)
+RECENT_DAYS = 183
+
+
+def release_date(facts):
+    """A title's release or first-air date, when the store has a whole one."""
+    value = ((facts.get("released") or facts.get("started") or {}).get("date") or "")[:10]
+    try:
+        return datetime.date.fromisoformat(value).isoformat()
+    except ValueError:
+        return None
+
+
+def reask_dates(asked_at, known, released):
+    """When a title is asked again: three and six months after its release, if that was within six months of
+    the first ask, else after the ask itself — and only for a title the model did not know or that was that
+    new. A re-ask date on or before the first ask is skipped."""
+    asked = datetime.date.fromisoformat(asked_at[:10])
+    release = datetime.date.fromisoformat(released) if released else None
+    recent = release is not None and (asked - release).days <= RECENT_DAYS
+    if known and not recent:
+        return []
+    start = release if recent else asked
+    return [day.isoformat() for day in (start + datetime.timedelta(days=n) for n in REASK_AFTER_DAYS) if day > asked]
+
+
+def load_reask(path=REASK):
+    """`{key: {"askedAt", "known", "released"}}` from the committed seed, or nothing when there is none."""
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        value = json.load(fh)
+    if value.get("schema") != REASK_SCHEMA or not isinstance(value.get("titles"), dict):
+        raise RuntimeError(f"{path}: not a {REASK_SCHEMA} file")
+    return value["titles"]
+
+
+def reask_seed(work, corpus_path, out=REASK):
+    """The re-ask seed from a full run: every answered title with a re-ask date, when it was asked, whether
+    the model knew it, and its release date. No prose: keys, dates and a flag. Read from the run's answers
+    alone, since a run frozen under an older prompt is still a record of what was asked."""
+    rows, answers = corpus_rows(corpus_path), {}
+    for answer in read_jsonl(os.path.join(work, "answers.jsonl")):
+        answers.setdefault((answer["key"], answer.get("ask", 0)), answer)
+    titles = {}
+    for (key, ask), answer in sorted(answers.items()):
+        if ask or key not in rows:
+            continue
+        entry = {"askedAt": answer["at"][:10], "known": bool(answer.get("known")),
+                 "released": release_date(rows[key].get("facts") or {})}
+        if reask_dates(entry["askedAt"], entry["known"], entry["released"]):
+            titles[key] = entry
+    write_json(out, {"schema": REASK_SCHEMA, "issue": "oxyc/den-dataset#187", "titles": titles})
+    return {"out": out, "titles": len(titles), "unknown": sum(1 for t in titles.values() if not t["known"])}
 
 
 def match(work, corpus_path, franchises_path, follows_path=None):
@@ -1039,6 +1190,10 @@ def main(argv=None):
     p.add_argument("--max-spend-usd", type=float, required=True)
     p.add_argument("--provider", help="instead of the configured fallback's, e.g. claude-cli for a local backfill")
     p.add_argument("--model")
+    p = sub.add_parser("reask-seed", help="the titles a full run's answers make due a re-ask (#187)")
+    p.add_argument("--work", required=True)
+    p.add_argument("--corpus", required=True)
+    p.add_argument("--out", default=REASK)
     args = parser.parse_args(argv)
     if args.command == "prepare":
         result = prepare(args.corpus, args.articles, args.pool, args.work, args.max_spend_usd)
@@ -1057,6 +1212,8 @@ def main(argv=None):
         cfg = {**CFG["fallback"], **{k: v for k, v in (("provider", args.provider), ("model", args.model)) if v}}
         llm.check(cfg)
         result = backfill(args.work, args.keys, args.out, args.max_spend_usd, cfg)
+    elif args.command == "reask-seed":
+        result = reask_seed(args.work, args.corpus, args.out)
     else:
         result = export(args.work, args.out)
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))

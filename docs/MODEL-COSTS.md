@@ -10,25 +10,16 @@ About **5 new titles a day** reach the catalogue. Release years whose admissions
 
 | Step | Model | $/title | $/year at 5/day | Source |
 |---|---|---:|---:|---|
-| Fan picks | Gemini 3.7 Flash, low thinking, online | ~$0.003 | ~$5.50 | measured, daily run 2026-09-30 |
-| Premise tags | gpt-5.6-luna, 10 a call, JSON schema; Claude Haiku 4.5 for a title luna refuses | ~$0.0003 | ~$0.55 | #182 bake-off; in the daily job since #183 |
-| Genre & mood labels, facts delta | TypeSafe (Jev) | ~$0.0009 | ~$1.60 | measured, daily run 2026-09-30 |
-| **Total** | | **~$0.0042** | **~$7.70** | |
+| Fan picks | Gemini 3.7 Flash, low thinking; compact answer (format B); weekly through Batch since #187 | ~$0.0009 | ~$1.55 | the 300-title format test (#187), at Batch price |
+| Premise tags | gpt-5.6-luna, 10 a call, JSON schema, weekly through Batch; Claude Haiku 4.5 for a title luna refuses | ~$0.0002 | ~$0.35 | #182 bake-off; a live 2-title smoke (#183) measured $0.0004 online, ~150 of its tokens reasoning |
+| Genre & mood labels, facts delta | TypeSafe (Jev); classify and critique in one call since #187 | ~$0.0008 | ~$1.45 | measured, daily run 2026-09-30, less the measured 13% on those two |
+| **Total** | | **~$0.0019** | **~$3.35** | |
 
-Premise tags were Claude Haiku 4.5 until #183: $0.0017 a title at 5 a call, $0.0012 at 40 (#146's real batches). An early estimate of $0.009 a title was about 5× too high.
-
-**Decided changes** (#187), not built yet:
-
-| Step | Change | New $/title |
-|---|---|---:|
-| Fan picks | compact answer format (format B) | ~$0.0017 |
-| Jev | classify and critique in one call | −13% on those two |
-
-Together that's about **$0.0029 a title, ~$5 a year** at 5 titles a day. Weekly Batch runs for premise tags and fan picks would halve their part again.
+Fan picks were ~$0.003 a title in the keyed format, online (daily run 2026-09-30). Premise tags were Claude Haiku 4.5 until #183: $0.0017 a title at 5 a call, $0.0012 at 40 (#146's real batches). An early estimate of $0.009 a title was about 5× too high. Fallback calls (a refused title asked again online, then by Claude) and a job finished online after it expired cost standard price on top.
 
 **Caching doesn't help here.** Prompt caching only pays when the same prefix repeats within minutes, and the daily job makes about one call per step a day. Haiku 4.5's premise prompt (~2k tokens) is also below its minimum cacheable prefix.
 
-**Batch halves the bill but costs a day of latency.** Batch jobs waited 5 minutes to 13 hours in #121, so the job would submit one day and collect the next. At today's volume that saves ~$4 a year.
+**Batch halves the bill but costs a day of latency.** Batch jobs waited 5 minutes to 13 hours in #121, so the weekly steps submit on Monday and a later run collects (`pipeline/model_steps.py`); a title waits up to a week for its fan picks and premise tags.
 
 ## Whole-corpus runs
 
@@ -150,6 +141,9 @@ Spend on these measurements: $2.80.
 - Paid answers lived only in one run's out-dir, and the workflow keeps nothing between runs. A run that failed or didn't publish had its titles bought again the next day.
 - It happened twice on 2026-09-30, ~$0.009. The failed runs of 09-27/28 ran without spend, so they cost nothing.
 - **Fix:** a paid-answers ledger outside the run, checked before every paid call. This is now a hard rule.
+  - **Built** (`pipeline/paid.py`): the `paid-state` release asset keeps every Jev shard, franchise decision, fan-pick and premise answer a run bought until a publish carries it. A Jev answer that fails validation is quarantined beside its shard instead of dropped, and a malformed fan-pick answer is asked again, then by the fallback.
+  - The weekly Batch steps follow the same rule: a job that expired is finished online across as many days as the cap needs, asking only what no answer is kept for, and a submit is recorded before it is sent so a lost response is found by its label, not bought again (Gemini and OpenAI list their jobs; Anthropic cannot, and no step submits to it). A premise title no model would tag is asked again at three and six months, not every week.
+  - **Not closable here:** a retry after a TypeSafe response that never arrived may be billed twice; the API takes no idempotency key. At most one state per lost response, ~$0.0004.
 
 **Combining Jev calls.**
 - Classify and critique in one call: $0.00099 → $0.00087 a title (−13%). The answers differ no more than two runs of the same call.
@@ -173,10 +167,10 @@ Spend on these measurements: $2.80.
 | Titles with ≥10 picks | 99.3% | 99.3% |
 | Blind judgment of kept picks, 50 tail titles (0–2) | 2.00 | 1.98 (7 vs 6 preferred, 37 same, p=1.0) |
 
-- Format B's lower match rate is extra names that never match and are dropped, so the row doesn't lose picks. **Ship format B.**
+- Format B's lower match rate is extra names that never match and are dropped, so the row doesn't lose picks. **Shipped** (#187): the prompt asks for it, and the parser still reads the keyed answers stored before it.
 - A plain-text answer made Gemini think ~15× longer and cost more.
 
-**Cadence.** Each step gets a daily, weekly or "N waiting" setting. Weekly steps run through Batch, submitted in one run and collected in the next. atlas already copes with a title that has no fan picks or premise vector yet.
+**Cadence.** Each step gets a daily or weekly setting. Weekly steps run through Batch, submitted in one run and collected in the next. atlas already copes with a title that has no fan picks or premise vector yet. **Built** (#187): fan picks and premise tags are weekly on Mondays; admission and Jev stay daily. The "N waiting" trigger was not built: at ~5 titles a day nothing calls for it. A submitted job counts against the monthly cap from the day it is submitted until it is collected and measured, and a submit only takes what the caps leave room for.
 
 ## Fan picks for new releases (#189)
 
@@ -212,6 +206,7 @@ Web-search test, 50 unknown 2025–26 titles, blind judgment 0–2:
 - No method differs from today's prompt (every p ≥ 0.68). A list made for a different title scores 0.07.
 - Critic comparisons fix some titles (*Sorry, Baby* 1 → 7 hits) and hurt others (*Stick*: golf films).
 - **Decision:** new titles keep today's prompt (#189). Test cost $0.76 API; the searching and reading ran on the Claude plan.
+- **Re-asked later instead** (#187, built): a title the model did not know, or released within six months of its first ask, is asked again in the weekly Batch three and six months on, with today's prompt and a fresh lead. The new answer replaces the old only if the model now knows the title or names more store titles. The 286 titles from the full run that qualify (198 unknown, 88 recent) are in `data/fan-picks-reask.json`; their re-asks fall between October 2026 and March 2027, ~80 a month at ~$0.0009 each at Batch price.
 
 ## Notes
 

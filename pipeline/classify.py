@@ -42,8 +42,10 @@ import sys
 
 from lib import cache as caching
 
-from . import artifacts, changes
+from . import artifacts, changes, consolidate_corpus
+from . import run_combined as rc
 from .contract import REPO, StageError, bind
+from .delta_questions import delta_questions
 
 NAME = "classify"
 
@@ -83,21 +85,29 @@ def named(ctx, artifact, digest):
                                                                 artifacts.CHANGED_ARTICLES else digest))
 
 
-def changed_articles(ctx):
-    """`(dump, digest)` for the change set's titles that have an article, the dump written if it is not
-    there; None when nothing the change set lists has one.
+def changed_articles(ctx, skip_answered=True):
+    """`(dump, digest)` for the change set's titles that have an article and no answer yet, the dump written
+    if it is not there; None when nothing the change set lists needs one. `skip_answered=False` keeps the
+    titles a shard already answers (`answered`), for asking whether the change set has any article at all.
 
     The rows are the shared dump's bytes, line for line, so the pass reads exactly what it would have read
     there. The digest names the dump and both passes' shards, so the same change set resumes the same
     shards however often the stage is started.
+
+    A title waiting for premise tags (`changes/reclassify.txt`) is in it too once its article is no longer
+    the one its newest classification read: the premise worklist cuts sections from that article by offset,
+    so the title would otherwise wait for good.
     """
     keys = changes.listed(ctx, "new")
+    again = reclassified(ctx)
+    done = answered(ctx) if skip_answered else {}
     kept = []
     with open(ctx.require(artifacts.ARTICLES), "rb") as handle:
         for line in handle:
             if line.strip():
                 record = json.loads(line)
-                if f"{record['mediaType']}:{record['tmdbId']}" in keys:
+                key = f"{record['mediaType']}:{record['tmdbId']}"
+                if key in keys and done.get(key) != rc.sha256_text(record["text"]) or key in again:
                     kept.append(line if line.endswith(b"\n") else line + b"\n")
     if not kept:
         return None
@@ -108,6 +118,53 @@ def changed_articles(ctx):
         os.makedirs(os.path.dirname(dump), exist_ok=True)
         caching.write_atomically(dump, body)
     return dump, digest
+
+
+def answered(ctx):
+    """`{key: articleSha256}` for every title a combined shard in the out-dir already answers with the
+    questions and model a change set is asked today — one an earlier run bought, laid back by the
+    paid-answers ledger (`pipeline/paid.py`), or one this run already bought. Such a title is not sent again
+    unless its article changed."""
+    questions = rc.with_critique(rc.global_questions(rc.PROMPT, rc.TAXONOMY)[0])
+    today = (rc.sha256_text(rc.canonical(questions)), rc.PINNED_MODEL)
+    done = {}
+    for shard in consolidate_corpus.shard_order(ctx.paths(artifacts.COMBINED)):
+        if not os.path.exists(shard + ".manifest.json"):
+            continue
+        with open(shard + ".manifest.json", encoding="utf-8") as handle:
+            config = json.load(handle).get("config") or {}
+        if (config.get("globalQuestionsSha256"), config.get("requestedModel")) != today:
+            continue
+        with open(shard, encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    row = json.loads(line)
+                    done[f"{row['mediaType']}:{row['tmdbId']}"] = row.get("articleSha256")
+    return done
+
+
+def reclassified(ctx):
+    """The titles of `changes/reclassify.txt` whose article in today's dump is not the one their newest
+    classify row in the out-dir read, whatever that row was asked with."""
+    again = changes.listed(ctx, "reclassify")
+    if not again:
+        return set()
+    read = {}
+    for shard in consolidate_corpus.shard_order(ctx.paths(artifacts.COMBINED)):
+        with open(shard, encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    row = json.loads(line)
+                    read[f"{row['mediaType']}:{row['tmdbId']}"] = row.get("articleSha256")
+    changed = set()
+    with open(ctx.require(artifacts.ARTICLES), encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                record = json.loads(line)
+                key = f"{record['mediaType']}:{record['tmdbId']}"
+                if key in again and read.get(key) not in (None, rc.sha256_text(record["text"])):
+                    changed.add(key)
+    return changed
 
 
 def argv(ctx, articles=None, out=None):
@@ -124,9 +181,20 @@ def argv(ctx, articles=None, out=None):
         if path is not None:
             command += [entry.flag(), articles if articles and entry.artifact is artifacts.ARTICLES else path]
     command += ["--out", out or ctx.shard(artifacts.COMBINED)]
+    if articles:
+        # A change set's titles are classified and critiqued in one call (#187); the whole-corpus pass keeps
+        # the question set its shipped shard was bought with, so it still resumes.
+        command.append("--with-critique")
     if ctx.plan:
         command.append("--plan")
     return command
+
+
+def asks_critique(shard):
+    """Whether `shard` was bought with the critique questions in its classify call (`--with-critique`)."""
+    with open(shard + ".manifest.json", encoding="utf-8") as handle:
+        asked = (json.load(handle).get("config") or {}).get("globalQuestions") or {}
+    return set(delta_questions()) <= set(asked)
 
 
 def check_outputs(ctx):

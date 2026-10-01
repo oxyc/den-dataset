@@ -8,6 +8,9 @@ import datetime
 import io
 import json
 import os
+import re
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -39,10 +42,11 @@ class Recorded(unittest.TestCase):
         patch = mock.patch.object(daily, "load", self.stage)
         patch.start()
         self.addCleanup(patch.stop)
-        changed = mock.patch.object(daily.classify, "changed_articles", return_value=("articles", "digest"))
-        changed.start()
-        self.addCleanup(changed.stop)
-        fan = mock.patch.object(daily, "update_fan_picks", lambda day: {
+        for name, value in (("changed_articles", ("articles", "digest")), ("reclassified", set())):
+            changed = mock.patch.object(daily.classify, name, return_value=value)
+            changed.start()
+            self.addCleanup(changed.stop)
+        fan = mock.patch.object(daily.model_steps, "fan_picks_step", lambda day: {
             "asked": 0, "answered": 0, "emptyAnswers": 0, "anchors": 1, "picks": 1, "costUSD": 0.0})
         fan.start()
         self.addCleanup(fan.stop)
@@ -58,6 +62,10 @@ class Recorded(unittest.TestCase):
                 os.makedirs(os.path.join(ctx.out_dir, "changes"), exist_ok=True)
                 with open(os.path.join(ctx.out_dir, "changes", "plan.json"), "w", encoding="utf-8") as fh:
                     json.dump(self.plan, fh)
+                for listed, keys in (("new", self.plan["added"]), ("keys", self.plan["added"]), ("withdrawn", []),
+                                     ("items", [])):
+                    with open(os.path.join(ctx.out_dir, "changes", f"{listed}.txt"), "w", encoding="utf-8") as fh:
+                        fh.writelines(f"{key}\n" for key in keys)
             if name == "publish" and self.check_refuses:
                 raise StageError("publish: pipeline/publish-dataset.sh exited 1")
             if name == "plot_length" and self.migration_refuses:
@@ -252,6 +260,41 @@ class PremiseCorrections(unittest.TestCase):
         self.assertIn("premise corrections: 1 row(s) corrected", summary)
 
 
+class PaidLedger(Recorded):
+    """#187 item 1: what a day bought survives a day that fails, and the next day starts with it."""
+
+    def stage(self, name):
+        module = super().stage(name)
+        inner = module.run
+
+        def run(ctx):
+            if name == "classify":
+                self.saw_restored = os.path.exists(os.path.join(ctx.out_dir, "combined-v1-r2-abc.jsonl"))
+                if not self.saw_restored:
+                    for suffix, body in (("", '{"mediaType": "movie", "tmdbId": 1}\n'),
+                                         (".manifest.json", '{"runId": "r"}')):
+                        with open(os.path.join(ctx.out_dir, "combined-v1-r2-abc.jsonl" + suffix), "w") as fh:
+                            fh.write(body)
+            if name == "store" and self.store_fails:
+                raise StageError("store: killed")
+            return inner(ctx)
+        module.run = run
+        return module
+
+    def test_a_day_that_fails_after_buying_keeps_it_for_the_next_day(self):
+        ledger = os.path.join(self.out, "paid", "paid-state.json.gz")
+        env = {"TYPESAFE_API_KEY": "j", "DEN_EMBED_URL": "http://embed.invalid"}
+        self.store_fails = True
+        code, _ = self.day(env, spend=True, paid_state=ledger)
+        self.assertEqual((code, self.saw_restored), (1, False))
+        self.assertIn("combined-v1-r2-abc.jsonl", daily.paid.Ledger(ledger).data["shards"])
+        self.out = os.path.join(self.out, "next-day")
+        os.makedirs(self.out)
+        self.store_fails = False
+        self.day(env, spend=True, paid_state=ledger)
+        self.assertTrue(self.saw_restored, "the shard was laid back before the classify stage ran")
+
+
 class FanPicks(unittest.TestCase):
     def day(self, spend=True, key="g"):
         directory = self.enterContext(tempfile.TemporaryDirectory())
@@ -264,10 +307,10 @@ class FanPicks(unittest.TestCase):
                                                                       artifact.filename.replace("{version}", "v")))
         result = {"asked": 2, "answered": 2, "emptyAnswers": 0,
                   "anchors": 10, "picks": 40, "costUSD": 0.01}
-        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+        with mock.patch.object(daily.model_steps, "finalize_ctx", return_value=ctx), \
              mock.patch.object(daily.changes, "planned", return_value={"added": ["movie:7", "tv:8"]}), \
              mock.patch.object(daily.fan_picks, "daily_update", return_value=result) as update:
-            self.assertEqual(daily.update_fan_picks(day), result)
+            self.assertEqual(daily.model_steps.update_fan_picks(day), result)
         self.assertEqual(update.call_args.kwargs["keys"], ["movie:7", "tv:8"])
         self.assertEqual(update.call_args.kwargs["max_spend"], 1.0)
         self.assertEqual(update.call_args.kwargs["backfill"], daily.fan_picks.load_backfill(),
@@ -282,11 +325,11 @@ class FanPicks(unittest.TestCase):
             handle.write('{"anchors":{"movie:1":[]}}')
         result = {"asked": 0, "answered": 0, "emptyAnswers": 0,
                   "anchors": 8, "picks": 30, "costUSD": 0.0}
-        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+        with mock.patch.object(daily.model_steps, "finalize_ctx", return_value=ctx), \
              mock.patch.object(daily.changes, "planned", return_value={"added": ["movie:7"]}), \
              mock.patch.object(daily.fan_picks, "daily_update", return_value=result) as update, \
              contextlib.redirect_stderr(io.StringIO()):
-            daily.update_fan_picks(day)
+            daily.model_steps.update_fan_picks(day)
         self.assertEqual(update.call_args.kwargs["keys"], [])
         self.assertEqual(day.skipped[0]["stage"], "fan_picks")
 
@@ -294,11 +337,11 @@ class FanPicks(unittest.TestCase):
         day = self.day(key="")
         ctx = types.SimpleNamespace(path=lambda artifact: os.path.join(day.ctx.out_dir,
                                                                       artifact.filename.replace("{version}", "v")))
-        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+        with mock.patch.object(daily.model_steps, "finalize_ctx", return_value=ctx), \
              mock.patch.object(daily.changes, "planned", return_value={"added": []}), \
              mock.patch.object(daily.fan_picks, "daily_update") as update, \
              contextlib.redirect_stderr(io.StringIO()):
-            self.assertIsNone(daily.update_fan_picks(day))
+            self.assertIsNone(daily.model_steps.update_fan_picks(day))
         update.assert_not_called()
         self.assertEqual(day.skipped[0]["stage"], "fan_picks")
 
@@ -309,10 +352,10 @@ class FanPicks(unittest.TestCase):
         os.makedirs(os.path.dirname(day.ctx.path(artifacts.PUBLISHED_META)), exist_ok=True)
         with open(day.ctx.path(artifacts.PUBLISHED_META), "w", encoding="utf-8") as handle:
             json.dump({"storeInputs": [{"arg": "fan_picks"}]}, handle)
-        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+        with mock.patch.object(daily.model_steps, "finalize_ctx", return_value=ctx), \
              mock.patch.object(daily.changes, "planned", return_value={"added": []}):
             with self.assertRaisesRegex(StageError, "refusing to build a store that drops"):
-                daily.update_fan_picks(day)
+                daily.model_steps.update_fan_picks(day)
 
 
 class DeltaIds(unittest.TestCase):
@@ -339,6 +382,70 @@ class DeltaIds(unittest.TestCase):
             self.write(out, artifacts.VECTOR_LABELS.filename, ["movie:1"])
             with self.assertRaisesRegex(StageError, "did not build the live dataset"):
                 daily.write_delta_ids(Context(out_dir=out), "live")
+
+
+class ReportArtifact(unittest.TestCase):
+    """The daily workflow's report artifact is public (a public repo's artifacts are downloadable by anyone
+    signed in): it must carry no article text and no classify-row title. Held against the files a real premise
+    worklist and a collected Batch write, not against a list of names someone remembered."""
+
+    REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    WORKFLOW = os.path.join(REPO, ".github", "workflows", "daily.yml")
+
+    def uploaded(self):
+        """The report step's `path:` patterns, relative to the out-dir."""
+        with open(self.WORKFLOW, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        start = lines.index("      - name: Upload the report")
+        at = next(i for i in range(start, len(lines)) if lines[i].strip() == "path: |")
+        patterns = []
+        for line in lines[at + 1:]:
+            if not line.startswith(" " * 12):
+                break
+            patterns.append(line.strip().replace("${{ env.OUT }}/", ""))
+        return patterns
+
+    @staticmethod
+    def matches(pattern, path):
+        """upload-artifact's glob: `**/` any depth (none included), `*` within a segment, a trailing `/` the
+        whole directory."""
+        if pattern.endswith("/"):
+            return path.startswith(pattern)
+        regex = re.escape(pattern).replace(r"\*\*/", "(?:.*/)?").replace(r"\*", "[^/]*")
+        return re.fullmatch(regex, path) is not None
+
+    def test_no_uploaded_file_carries_article_text_or_a_title(self):
+        title, evidence = "A Distinctive Title", "Twin sisters swap places to expose a smuggling ring."
+        with tempfile.TemporaryDirectory() as out:
+            with open(os.path.join(out, "articles.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({"mediaType": "movie", "tmdbId": 990000001, "text": evidence}) + "\n")
+            with open(os.path.join(out, "combined.jsonl"), "w", encoding="utf-8") as fh:
+                fh.write(json.dumps({
+                    "mediaType": "movie", "tmdbId": 990000001, "title": title, "year": 2026, "language": "en",
+                    "article": title, "answers": {"validity": {"choice": "correct-screen-work"},
+                                                  "narrative_applicability": {"choice": "narrative"}},
+                    "sections": [{"heading": "Plot", "start": 0, "end": len(evidence),
+                                  "role": {"value": "story-premise"}}]}) + "\n")
+            plan = os.path.join(out, "plan.json")
+            with open(plan, "w", encoding="utf-8") as fh:
+                json.dump({"baseline": {"datasetVersion": "live"}, "added": ["movie:990000001"], "changed": {}}, fh)
+            work = os.path.join(out, "premise-increment", "weekly")
+            subprocess.run([sys.executable, os.path.join(self.REPO, "pipeline", "build_premise_worklist.py"),
+                            "--combined", os.path.join(out, "combined.jsonl"),
+                            "--articles", os.path.join(out, "articles.jsonl"), "--changes", plan,
+                            "--token-ceiling", "100000", "--out-dir", work], check=True, capture_output=True)
+            daily.premise_daily.write_collected(os.path.join(out, "premise-increment", "collected"),
+                                                {"movie:990000001": {"tags": ["twin-swap"], "by": {}}})
+            written = sorted(os.path.relpath(os.path.join(root, name), out)
+                             for root, _, names in os.walk(os.path.join(out, "premise-increment")) for name in names)
+            sent = [path for path in written if any(self.matches(p, path) for p in self.uploaded())]
+            self.assertTrue(any(path.endswith("worklist.jsonl") for path in written), "the fixture wrote the worklist")
+            for path in sent:
+                with open(os.path.join(out, path), encoding="utf-8") as fh:
+                    body = fh.read()
+                self.assertNotIn(title, body, path)
+                self.assertNotIn(evidence[:20], body, path)
+        self.assertEqual(sent, ["premise-increment/weekly/gen/manifest.json"])
 
 
 if __name__ == "__main__":

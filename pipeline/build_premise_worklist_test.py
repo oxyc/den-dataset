@@ -105,6 +105,63 @@ class IncrementalPremiseWorklistTest(unittest.TestCase):
             manifest = json.load(handle)
         self.assertEqual(manifest["ids"], ["movie:990000002", "tv:990000004"])
 
+    def test_a_title_classified_again_is_read_from_the_newer_run(self):
+        """A kept shard from an earlier run beside today's, both holding a title whose article changed:
+        the increment reads the run that started later, as the corpus join does, instead of refusing."""
+        newer = os.path.join(self.directory, "combined-newer.jsonl")
+        with open(self.combined, encoding="utf-8") as handle:
+            row = json.loads(handle.readline())
+        row["answers"]["validity"]["choice"] = "wrong-work"
+        with open(newer, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(row) + "\n")
+        for path, started in ((self.combined, "2026-09-30T00:00:00+00:00"), (newer, "2026-10-01T00:00:00+00:00")):
+            with open(path + ".manifest.json", "w", encoding="utf-8") as handle:
+                json.dump({"runStartedAt": started}, handle)
+        result = self.run_script(out="two-shards", extra=("--combined", newer))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(os.path.join(self.directory, "two-shards", "gen", "manifest.json"), encoding="utf-8") as handle:
+            self.assertNotIn("tv:990000004", json.load(handle)["ids"], "the newer row's validity counts")
+
+    def test_the_model_is_shown_no_title_or_year_so_a_stripped_shard_changes_no_prompt(self):
+        """The prompt rows are the generation batches: key, media type, id and evidence. A classify row's
+        `title`/`year` reach only the local review file, so a shard kept without them (`pipeline/paid.py`)
+        builds the same prompt on a later day as on the day it was classified."""
+        with open(self.combined, encoding="utf-8") as handle:
+            rows = [json.loads(line) for line in handle]
+
+        def batches(out):
+            result = self.run_script(out=out)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with open(os.path.join(self.directory, out, "gen", "in", "batch-0000.json"), encoding="utf-8") as fh:
+                return json.load(fh)
+        with_titles = batches("with-titles")
+        with open(self.combined, "w", encoding="utf-8") as handle:
+            handle.writelines(json.dumps({k: v for k, v in row.items() if k not in ("title", "year")}) + "\n"
+                              for row in rows)
+        self.assertEqual(batches("stripped"), with_titles)
+        self.assertEqual({key for row in with_titles for key in row}, {"key", "mediaType", "tmdbId", "plot"})
+
+    def test_each_title_turned_away_says_why_and_which_article_its_classification_read(self):
+        """A verdict on the classification (not a screen work, not narrative, no story-premise section) is
+        told apart from a title that only waits (its article changed, or is not in today's dump)."""
+        with open(self.combined, encoding="utf-8") as handle:
+            rows = [json.loads(line) for line in handle]
+        by_id = {row["tmdbId"]: row for row in rows}
+        by_id[990000001]["answers"]["narrative_applicability"]["choice"] = "documentary-or-factual"
+        by_id[990000001]["articleSha256"] = "s1"
+        by_id[990000002]["articleSha256"] = "not-the-article-today"
+        by_id[990000004]["sections"][0]["role"]["value"] = "production"
+        with open(self.combined, "w", encoding="utf-8") as handle:
+            handle.writelines(json.dumps(row) + "\n" for row in rows)
+        result = self.run_script(out="turned-away")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(os.path.join(self.directory, "turned-away", "gen", "manifest.json"), encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        self.assertEqual(manifest["skippedKeys"], {
+            "movie:990000001": {"reason": "nonNarrative", "articleSha256": "s1"},
+            "movie:990000002": {"reason": "articleChanged", "articleSha256": "not-the-article-today"},
+            "tv:990000004": {"reason": "review", "articleSha256": None}})
+
 
 if __name__ == "__main__":
     unittest.main()

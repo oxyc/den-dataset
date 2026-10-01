@@ -6,6 +6,10 @@ depiction, audience), sent with the SAME state the classify pass sent each title
 rows, over `run_combined`'s machinery unchanged. None of it is reimplemented here: this stage decides which
 article dump and which classify shards the pass is handed, and runs it.
 
+**A change set is critiqued in its classify call** (#187): the classify stage asks these questions with its
+own, in the same state, so with a change set this stage finds them answered and buys nothing. What follows is
+the whole-corpus pass, and a classify shard bought before that change.
+
 **It runs after the classify stage, over what that stage just classified.** The corpus join refuses a title
 whose kept critique row read a different article from its kept classify row
 (`pipeline/consolidate_corpus.py`), so a title classified again must be critiqued again from the same
@@ -69,7 +73,10 @@ def run(ctx):
     if changes.planned(ctx) is not None:
         found = classify.changed_articles(ctx)
         if found is None:
-            return "nothing to critique — no title the change set lists has an article"
+            if classify.changed_articles(ctx, skip_answered=False) is None:
+                return "nothing to critique — no title the change set lists has an article"
+            # Every title has a classify row asked with today's questions, which carry the critique.
+            return "nothing to buy — every title the change set lists was asked the critique in its classify call"
         articles, digest = found
         combined = classify.named(ctx, artifacts.COMBINED, digest)
         if not os.path.exists(combined):
@@ -77,6 +84,8 @@ def run(ctx):
                 return f"nothing to plan — {combined} is not classified yet, and each title is sent its state"
             raise StageError(f"critique: {combined} does not exist, and each title is sent the state the "
                              f"classify pass sent it. Run ./den stage classify --spend first.")
+        if classify.asks_critique(combined):
+            return f"nothing to buy — {os.path.basename(combined)} asked the critique in its classify call"
         out = classify.named(ctx, artifacts.DELTA, digest)
     out = out or ctx.shard(artifacts.DELTA)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)

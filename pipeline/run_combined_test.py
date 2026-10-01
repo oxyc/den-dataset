@@ -378,6 +378,63 @@ class RunnerTests(unittest.TestCase):
             self.assertLessEqual(client.calls, 8, "only calls already in flight may escape the breaker")
             self.assertEqual(os.path.getsize(output), 0)
 
+    def test_with_critique_asks_both_question_sets_in_one_call_and_records_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            articles = os.path.join(directory, "articles.jsonl")
+            output = os.path.join(directory, "out.jsonl")
+            with open(articles, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(record("Lead\n\n== Plot ==\nStory")) + "\n")
+            clients = []
+
+            def client(model):
+                made = FakeClient()
+                made.input_tokens = made.output_tokens = 0
+                made.spend, made.summary = 0, lambda: ""
+                clients.append(made)
+                return made
+            with mock.patch.object(run_combined, "TypeSafe", client):
+                status = run_combined.main(["--articles", articles, "--out", output, "--with-critique"])
+            self.assertEqual(status, 0)
+            [(_state, questions)] = clients[0].calls
+            delta = run_combined.delta_questions()
+            self.assertTrue(set(delta) <= set(questions))
+            with open(output + ".manifest.json", encoding="utf-8") as fh:
+                config = json.load(fh)["config"]
+            self.assertTrue(set(delta) <= set(config["globalQuestions"]))
+            self.assertNotEqual(config["globalQuestionsSha256"], SHIPPED_GLOBAL_QUESTIONS_SHA,
+                                "a shard bought with the critique is its own configuration")
+            with self.assertRaisesRegex(SystemExit, "in both sets"):
+                run_combined.with_critique({next(iter(delta)): {}})
+
+    def test_an_answer_that_fails_validation_is_quarantined_not_dropped(self):
+        """It was paid for: kept beside the shard with what came back, while the run aborts as before."""
+        class Malformed(FakeClient):
+            def __init__(self, model):
+                super().__init__()
+                self.input_tokens = self.output_tokens = self.spend = 0
+
+            def ask_with_metadata(self, state, questions):
+                answers, meta = super().ask_with_metadata(state, questions)
+                answers.pop(next(iter(answers)))
+                return answers, meta
+
+            def summary(self):
+                return ""
+        with tempfile.TemporaryDirectory() as directory:
+            articles = os.path.join(directory, "articles.jsonl")
+            output = os.path.join(directory, "out.jsonl")
+            with open(articles, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(record("Lead\n\n== Plot ==\nStory")) + "\n")
+            with mock.patch.object(run_combined, "TypeSafe", Malformed):
+                status = run_combined.main(["--articles", articles, "--out", output])
+            self.assertEqual(status, 1)
+            self.assertEqual(os.path.getsize(output), 0)
+            with open(output + ".quarantine.jsonl", encoding="utf-8") as fh:
+                [kept] = [json.loads(line) for line in fh]
+        self.assertEqual((kept["key"], kept["phase"]), ("movie:7", "combined"))
+        self.assertIn("answer keys differ", kept["error"])
+        self.assertEqual(kept["usage"], {"input_tokens": 10, "output_tokens": 5})
+
     def test_resume_exclusion_requires_an_existing_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
             articles = os.path.join(directory, "articles.jsonl")

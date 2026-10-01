@@ -347,8 +347,12 @@ def planned(ctx):
     return plan if plan.get("baseline") else None
 
 
-#: The lists a later stage can ask for, by the file each is written to.
-LISTS = ("keys", "new", "withdrawn", "items", "revisit")
+#: The lists a later stage can ask for, by the file each is written to. `waiting` and `reclassify` are not this
+#: stage's: the daily job writes them after this stage (`pipeline/model_steps.py`). `waiting` is the titles a
+#: weekly model step still owes, whose articles the articles stage dumps so their prompts can be built;
+#: `reclassify` is those waiting for premise tags, which classify asks again once the article its row read has
+#: changed. A day without them has none.
+LISTS = ("keys", "new", "withdrawn", "items", "revisit", "waiting", "reclassify")
 
 
 def listed(ctx, *names):
@@ -369,7 +373,8 @@ def listed(ctx, *names):
     out = set()
     for name in names:
         path = os.path.join(directory, f"{name}.txt")
-        if name == "revisit" and not plan.get("revisit"):
+        if name == "revisit" and not plan.get("revisit") or \
+                name in ("waiting", "reclassify") and not os.path.exists(path):
             continue
         with open(path, encoding="utf-8") as handle:
             for number, line in enumerate(handle, 1):

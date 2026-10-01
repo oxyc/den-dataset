@@ -48,7 +48,8 @@ class Prompt(unittest.TestCase):
     def test_the_prompt_names_title_year_kind_and_lead_and_asks_for_json(self):
         text = fp.prompt({"key": "tv:1438", "title": "The Wire", "year": 2002, "lead": "A crime drama"})
         self.assertTrue(text.startswith("A friend loved The Wire (2002, series). A crime drama. Name up to 20"))
-        self.assertIn('"known": bool', text)
+        self.assertTrue(text.endswith('Return only JSON: {"k":bool,"p":[["Title",1999,"f"|"s"]]}'),
+                        "the compact answer format (#187, format B)")
         no_year = fp.prompt({"key": "movie:1", "title": "X", "year": None, "lead": ""})
         self.assertTrue(no_year.startswith("A friend loved X (film). Name up to 20"))
 
@@ -72,9 +73,24 @@ class Parse(unittest.TestCase):
         self.assertEqual(picks, [{"title": "Heat", "year": 1995, "type": "film"},
                                  {"title": "X", "year": None, "type": None}])
 
+    def test_a_compact_answer_reads_as_the_keyed_one_does(self):
+        compact = fp.parse('{"k":true,"p":[[" Heat ",1995,"f"],["The Wire",2002,"s"],[2000],["X","1999","tv"],'
+                           '["Y",2001,"film"],["Z"],"loose",["W",2003,["s"]]]}')
+        keyed = fp.parse('{"known": true, "picks": [{"title": "Heat", "year": 1995, "type": "film"}]}')
+        self.assertEqual(compact, (True, [{"title": "Heat", "year": 1995, "type": "film"},
+                                          {"title": "The Wire", "year": 2002, "type": "series"},
+                                          {"title": "X", "year": None, "type": None},
+                                          {"title": "Y", "year": 2001, "type": "film"},
+                                          {"title": "Z", "year": None, "type": None},
+                                          {"title": "W", "year": 2003, "type": None}]))
+        self.assertEqual(keyed[1][0], compact[1][0])
+        self.assertEqual(fp.parse('{"k":false,"p":[]}'), (False, []))
+
     def test_no_picks_list_is_an_error(self):
         with self.assertRaises(ValueError):
             fp.parse('{"known": false}')
+        with self.assertRaises(ValueError):
+            fp.parse('{"k": false, "p": "none"}')
 
     def test_a_record_prices_a_batch_answer_at_half(self):
         response = {"candidates": [{"content": {"parts": [{"text": '{"known":true,"picks":[]}'}]}}],
@@ -386,7 +402,7 @@ class Daily(unittest.TestCase):
     def test_a_refused_title_is_asked_once_more_and_then_by_the_fallback_model(self):
         asked = []
 
-        def online(title, key, ask=0, cfg=fp.CFG):
+        def online(title, key, ask=0, cfg=fp.CFG, budget=None):
             asked.append(cfg["model"])
             if cfg["model"] == fp.MODEL:
                 return None, {"key": key, "costUSD": 0.001, "usage": {}, "text": ""}, True
@@ -402,8 +418,30 @@ class Daily(unittest.TestCase):
         self.assertEqual(out["anchors"]["movie:1"], ["movie:2"])
         self.assertAlmostEqual(result["costUSD"], 0.012)
 
+    def test_the_cap_holds_every_call_fallback_included_and_what_it_leaves_waits(self):
+        """#201 review: the projection covered one Gemini call a title, not its retry and the fallback."""
+        seen = []
+
+        def online(title, key, ask=0, cfg=fp.CFG, budget=None):
+            seen.append((key, cfg["model"]))
+            try:
+                budget.admit(0.4)
+            except fp.llm.OverBudget:
+                return None, {"key": key, "error": fp.OVER_BUDGET, "costUSD": 0.0}, False
+            budget.charge(0.4, held=0.4)
+            return None, {"key": key, "costUSD": 0.4, "usage": {}, "text": ""}, True
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(fp, "generate_online", online):
+            corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1", "movie:8"],
+                                     workers=1, follows={}, max_spend=1.0)
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertLessEqual(result["costUSD"], 1.0)
+        self.assertTrue(result["overBudget"], "a title the cap left unasked waits")
+        self.assertTrue(all(key not in out["anchors"] for key in result["overBudget"]))
+
     def test_a_title_the_fallback_refuses_too_stays_asked_empty(self):
-        refused = lambda title, key, ask=0, cfg=fp.CFG: (  # noqa: E731
+        refused = lambda title, key, ask=0, cfg=fp.CFG, budget=None: (  # noqa: E731
             None, {"key": key, "costUSD": 0.001, "usage": {}, "text": ""}, True)
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(fp, "generate_online", refused):
             corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
@@ -414,7 +452,7 @@ class Daily(unittest.TestCase):
         self.assertEqual((out["anchors"]["movie:1"], result["emptyAnswers"]), ([], 1))
 
     def test_an_unreachable_fallback_leaves_the_refusal_standing_instead_of_refusing_the_day(self):
-        def online(title, key, ask=0, cfg=fp.CFG):
+        def online(title, key, ask=0, cfg=fp.CFG, budget=None):
             if cfg["model"] == fp.MODEL:
                 return None, {"key": key, "costUSD": 0.001, "usage": {}, "text": ""}, True
             return None, {"key": key, "error": "ANTHROPIC_API_KEY is not set", "costUSD": 0.0}, False
@@ -437,6 +475,22 @@ class Daily(unittest.TestCase):
         self.assertEqual(out["anchors"], {"movie:1": ["movie:2"], "movie:2": ["movie:8"]})
         self.assertEqual((result["backfilled"], result["asked"], result["costUSD"]), (1, 0, 0))
 
+    def test_a_reask_replaces_the_picks_only_when_it_knows_the_title_or_matches_more(self):
+        heat = {"title": "Heat", "year": 1995, "type": "film"}
+        samurai = {"title": "Seven Samurai", "year": 1954, "type": "film"}
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, articles, franchises, existing = self.fixture(
+                directory, {"movie:1": ["movie:8"], "movie:2": ["movie:8"], "movie:9": ["movie:2", "movie:8"]})
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, [], follows={}, reasks={
+                "movie:1": {"known": True, "picks": [samurai]},             # known now: replaced
+                "movie:2": {"known": False, "picks": [heat, {"title": "Amélie", "year": 2001, "type": "film"}]},
+                "movie:9": {"known": False, "picks": [samurai]}})           # fewer, still unknown: kept
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)["anchors"]
+        self.assertEqual(out, {"movie:1": ["movie:2"], "movie:2": ["movie:8", "movie:1"],
+                               "movie:9": ["movie:2", "movie:8"]})
+        self.assertEqual((result["reasked"], result["reaskReplaced"]), (3, 2))
+
     def test_withdrawn_anchors_and_picks_are_removed_before_the_store_build(self):
         with tempfile.TemporaryDirectory() as directory:
             corpus, articles, franchises, existing = self.fixture(
@@ -446,6 +500,27 @@ class Daily(unittest.TestCase):
                 out = json.load(fh)
         self.assertEqual(out["anchors"], {"movie:2": ["movie:8"]})
         self.assertEqual((result["asked"], result["anchors"], result["picks"]), (0, 1, 1))
+
+
+class Reask(unittest.TestCase):
+    def test_a_title_the_model_did_not_know_is_asked_again_three_and_six_months_after_the_ask(self):
+        self.assertEqual(fp.reask_dates("2026-09-25T10:00:00+00:00", False, "1999-05-01"),
+                         ["2026-12-25", "2027-03-26"])
+
+    def test_a_new_release_is_asked_again_three_and_six_months_after_it_came_out(self):
+        self.assertEqual(fp.reask_dates("2026-09-25", True, "2026-08-01"), ["2026-10-31", "2027-01-30"])
+        self.assertEqual(fp.reask_dates("2026-09-25", True, "2026-05-01"), ["2026-10-30"],
+                         "a date before the first ask is not asked")
+        self.assertEqual(fp.reask_dates("2026-09-25", True, "2026-12-01"), ["2027-03-02", "2027-06-01"],
+                         "not released yet when asked")
+
+    def test_a_known_older_title_is_not_asked_again(self):
+        self.assertEqual(fp.reask_dates("2026-09-25", True, "2020-01-01"), [])
+        self.assertEqual(fp.reask_dates("2026-09-25", True, None), [])
+
+    def test_the_committed_seed_is_readable_and_every_entry_has_a_date(self):
+        for key, entry in fp.load_reask().items():
+            self.assertTrue(fp.reask_dates(entry["askedAt"], entry["known"], entry["released"]), key)
 
 
 class Frozen(fp.datetime.datetime):
@@ -544,9 +619,10 @@ def digest_of(path):
 class Port(unittest.TestCase):
     """What the tool sends and writes, pinned byte for byte (oxyc/den-dataset#183, step 2).
 
-    The digests below were taken from `tools/fan_picks.py` before it asked through `lib/llm.py`; the port
-    must reproduce them: the same request bodies on the wire and the same `fan-picks.json`, through the
-    daily path, the full run online and the full run's Batch API."""
+    The digests below were taken from `tools/fan_picks.py` before it asked through `lib/llm.py`, and the
+    port reproduced them: the same request bodies on the wire and the same `fan-picks.json`, through the
+    daily path, the full run online and the full run's Batch API. They now pin what it sends and writes, so
+    a change to either is a deliberate re-pin (see below)."""
 
     def wired(self):
         wire = Wire()
@@ -608,13 +684,15 @@ class Port(unittest.TestCase):
         self.assertEqual(self.full_run(online=False), BATCH_DIGESTS)
 
 
-#: `(fan-picks.json, every request on the wire)`, from origin/main at 2af7781 before the port.
+#: `(fan-picks.json, every request on the wire)`. Taken from origin/main at 2af7781 before the port, and
+#: re-taken when the prompt asked for the compact format (#187): that moved every request body and, through
+#: the prompt digest the full run's manifest pins, its export — the daily path's fan-picks.json did not move.
 DAILY_DIGESTS = ("b6db409b24ecf74d8ecf046abaf464743b1e86809c2de920c678ffac48718eb3",
-                 "b8dd4932068d4d7586fa2b769250ff30c5e9b93beb2d4246e4238060e6197d43")
-ONLINE_DIGESTS = ("839afe2ffe4b09922100c949cb2e006e5bc66011a2ea8af3654e8955e4bec856",
-                  "b8dd4932068d4d7586fa2b769250ff30c5e9b93beb2d4246e4238060e6197d43")
-BATCH_DIGESTS = ("b24e5097d9c702eb551e4f1fdb42ef71d17746b08962264d410d84fabb636fbb",
-                 "78fef618acece82c99d9cbdfd66058cbad4551a662f5cb073af6e0e09d28d3fb")
+                 "d3a528f27672870a98eac339b07658dad80695c430d4c8c9c61b3b487d00c0aa")
+ONLINE_DIGESTS = ("e28463221509814b94d46a0fed99b209c5e79ca736d62163ed9eef3ef8e5bcb6",
+                  "d3a528f27672870a98eac339b07658dad80695c430d4c8c9c61b3b487d00c0aa")
+BATCH_DIGESTS = ("969ab80a6005f135417b30cee65d6b8e8abd01d061d11adc90e8b8a3bee10b06",
+                 "a797283a97a8190fc030825e3fe331e00786225d33c7b24731fdf0db2fde44be")
 
 
 if __name__ == "__main__":

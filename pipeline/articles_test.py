@@ -125,6 +125,16 @@ class Selection(Staged):
         self.assertEqual([row["tmdbId"] for row in self.dumped()], [2])
         self.assertEqual(self.fetched, [("Article 2", "en")])
 
+    def test_a_title_a_weekly_step_still_owes_is_dumped_too(self):
+        """`changes/waiting.txt` (`pipeline/model_steps.py`): a title admitted on an earlier day needs its
+        article to build its prompt, and nothing kept one."""
+        self.batch(1, [record(1), record(2), record(3)])
+        self.plan(["movie:2"])
+        with open(os.path.join(self.out, "changes", "waiting.txt"), "w", encoding="utf-8") as fh:
+            fh.write("movie:3\n")
+        articles.run(self.context())
+        self.assertEqual([row["tmdbId"] for row in self.dumped()], [2, 3])
+
     def test_a_change_set_with_nothing_new_leaves_an_empty_dump(self):
         self.batch(1, [record(1)])
         self.plan([])

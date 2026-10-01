@@ -38,6 +38,21 @@ class Caps(unittest.TestCase):
         with self.assertRaisesRegex(StageError, "monthly cap"):
             ledger.reserve("premiseTags", .11, 1.0)
 
+    def test_committed_batch_spend_counts_against_the_month_until_it_is_collected(self):
+        ledger = Ledger({"usd": .50, "reports": 3}, 1.0, pending=.30)
+        self.assertEqual(ledger.report()["monthToDateUSD"], .80)
+        self.assertEqual(ledger.report()["totalUSD"], 0.0, "not measured spend: later runs sum totalUSD")
+        self.assertAlmostEqual(ledger.allowance("fanPicks", 1.0), .20)
+        with self.assertRaisesRegex(StageError, "monthly cap"):
+            ledger.reserve("premiseTags", .21, 1.0)
+        # Collecting the job: its own projection makes room for what it costs, not for anything else.
+        self.assertAlmostEqual(ledger.allowance("fanPicks", 1.0, collecting=.30), .50)
+        ledger.collected(.30)
+        ledger.actual("fanPicks", .25)
+        self.assertEqual((ledger.report()["pendingBatchUSD"], ledger.report()["monthToDateUSD"]), (0.0, .75))
+        ledger.committed(.10)
+        self.assertAlmostEqual(ledger.allowance("premiseTags", 1.0), .15)
+
 
 if __name__ == "__main__":
     unittest.main()
