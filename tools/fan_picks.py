@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """You Might Also Like: titles a fan would love, named by a model and matched to the store (oxyc/den-atlas#121).
 
-For each title, Gemini Flash is told the title, its year, whether it is a film or a series, and the lead of
+For each title, the `fan_picks` model in `data/models.json` (Gemini Flash; asked through `lib/llm.py`) is told
+the title, its year, whether it is a film or a series, and the lead of
 its Wikipedia article — our own data, nothing from TMDB — and names up to 20 films or series a fan would also
 love, in any genre, era or country. Each name is matched to a corpus title by the store's own Wikidata names;
 a name that matches no title or more than one is dropped, never guessed. The seed, its curated franchise, its
@@ -13,19 +14,19 @@ other versions and its sequel links are dropped too: other rows show them.
   collect  poll the submitted batch jobs and record their answers
   match    match every answer's picks to the store, and report a slice's numbers
   export   the store's input: every asked title with its matched picks, in the model's order
+  backfill ask the step's fallback model about titles the primary refused, into data/fan-picks-backfill.json
 
 Every answer is appended as it arrives, with its token usage, cost and `modelVersion`; a rerun asks only what
 has no answer. Spend is checked against the manifest's cap before anything is asked: a chunk is admitted only
 while the recorded spend plus the chunk's projected cost, at the observed cost per title with a margin, stays
 under it.
 
-The key is read from GEMINI_API_KEY and sent only as the `x-goog-api-key` header.
+The key is read from the provider's environment variable (GEMINI_API_KEY) and sent only as a header.
 """
 import argparse
 import collections
 import concurrent.futures
 import datetime
-import email.utils
 import gzip
 import hashlib
 import json
@@ -35,27 +36,28 @@ import random
 import re
 import sys
 import threading
-import time
-import urllib.error
-import urllib.request
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
+from lib import llm  # noqa: E402
+from lib import llm_providers as providers  # noqa: E402
 from store import aliases  # noqa: E402
 from store.cards import display_title, release_year  # noqa: E402
 
 SCHEMA = "fan-picks-run-v1"
 EXPORT_SCHEMA = "fan-picks-v1"
-MODEL = "gemini-3.7-flash"
-THINKING = "low"
-MAX_OUTPUT_TOKENS = 2048
+#: Who answers, from `data/models.json`.
+CFG = llm.step("fan_picks")
+MODEL = CFG["model"]
+THINKING = CFG["thinking"]
+MAX_OUTPUT_TOKENS = CFG["maxOutputTokens"]
 LEAD_CHARS = 1500
-#: Standard price per token, in and out (thinking bills as output); the Batch API is half. Google's list
-#: price for Gemini 3.7 Flash, on its promotion to 31 Dec 2026.
-PRICE_IN, PRICE_OUT = 0.75e-6, 3.75e-6
-BATCH_FACTOR = 0.5
+#: Standard price per token, in and out (thinking bills as output), from `lib/llm.py`'s table; the Batch
+#: API is half.
+PRICE_IN, PRICE_OUT = llm.price(MODEL)[:2]
+BATCH_FACTOR = llm.BATCH_FACTOR
 #: What a title cost in the pilot at standard price (351 in, 665 out), used until this run has its own.
 PILOT_COST = 351 * PRICE_IN + 665 * PRICE_OUT
 #: A chunk is reserved at the observed cost per title times this.
@@ -66,9 +68,7 @@ DAILY_SPEND_CAP = 1.0
 #: Popularity bands the sample is stratified over and a report is broken down by: positions in the order.
 BANDS = ((0, 1000), (1000, 3000), (3000, 6000), (6000, 10000), (10000, 20000), (20000, None))
 
-API = "https://generativelanguage.googleapis.com"
 DAILY_CHECKPOINT_SCHEMA = "fan-picks-daily-responses-v1"
-MAX_RETRY_DELAY = 120.0
 
 
 def digest(value):
@@ -141,10 +141,14 @@ def prompt(title):
               'Return only JSON: {"known": bool, "picks":[{"title":str, "year":int, "type":"film"|"series"}]}')
 
 
-def request_body(title):
-    return {"contents": [{"role": "user", "parts": [{"text": prompt(title)}]}],
-            "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": MAX_OUTPUT_TOKENS,
-                                 "thinkingConfig": {"thinkingLevel": THINKING}}}
+def question(title, cfg=CFG):
+    """The request for one title, as `lib/llm.py` sends it."""
+    return llm.request(prompt(title), cfg["maxOutputTokens"])
+
+
+def request_body(title, cfg=CFG):
+    """What goes on the wire for one title: the request in the configured provider's dialect."""
+    return providers.PROVIDERS[cfg["provider"]].body(cfg, question(title, cfg))
 
 
 def popularity_order(pool, keys):
@@ -238,8 +242,12 @@ class Work:
 
 
 def standard_cost(usage):
-    out = (usage.get("candidatesTokenCount") or 0) + (usage.get("thoughtsTokenCount") or 0)
-    return (usage.get("promptTokenCount") or 0) * PRICE_IN + out * PRICE_OUT
+    """A recorded answer's cost at standard price. Rows keep Gemini's own usage names."""
+    if "inputTokens" in usage:
+        return llm.cost(CFG, usage, "online")
+    return llm.cost(CFG, {"inputTokens": usage.get("promptTokenCount") or 0, "cachedTokens": 0,
+                          "outputTokens": usage.get("candidatesTokenCount") or 0,
+                          "reasoningTokens": usage.get("thoughtsTokenCount") or 0}, "online")
 
 
 # --- sample ---------------------------------------------------------------------------------------------
@@ -270,30 +278,6 @@ def sample(work, per_band, seed, out):
 
 # --- asking ---------------------------------------------------------------------------------------------
 
-def api_key():
-    key = os.environ.get("GEMINI_API_KEY")
-    if not key:
-        raise SystemExit("GEMINI_API_KEY is not set")
-    return key
-
-
-def http(method, url, body=None, headers=None, raw=False, timeout=300):
-    """One request with the key as a header. Returns (headers, body); raises HTTPError."""
-    data = body if isinstance(body, (bytes, type(None))) else json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"x-goog-api-key": api_key(), "Content-Type": "application/json",
-                                          **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        payload = resp.read()
-        return resp.headers, (payload if raw else json.loads(payload or b"{}"))
-
-
-def text_of(response):
-    candidates = response.get("candidates") or []
-    parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
-    return "".join(p.get("text", "") for p in parts if not p.get("thought"))
-
-
 def parse(text):
     """The answer's `known` and picks, or ValueError. A pick needs a title; year and type are kept as given."""
     found = re.search(r"\{.*\}", text or "", re.S)
@@ -313,21 +297,36 @@ def parse(text):
 
 def record(response, key, ask, mode, batch=None):
     """An answer (or an error) row from one generateContent response."""
-    usage = response.get("usageMetadata") or {}
-    cost = standard_cost(usage) * (BATCH_FACTOR if mode == "batch" else 1.0)
-    row = {"key": key, "ask": ask, "mode": mode, "modelVersion": response.get("modelVersion"),
-           "usage": {k: usage.get(k) for k in ("promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount",
-                                               "totalTokenCount")},
-           "costUSD": cost, "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+    result = providers.PROVIDERS["gemini"].read(response, {})
+    result["costUSD"] = llm.cost(CFG, result["usage"], mode)
+    return recorded(result, key, ask, mode, batch)
+
+
+def recorded(result, key, ask, mode, batch=None, cfg=CFG):
+    """An answer (or an error) row from one `lib/llm.py` answer. Gemini's rows keep its own usage names; a
+    row another model answered (the fallback) says which provider and model it was."""
+    raw = result.get("raw") or {}
+    if cfg["provider"] == "gemini":
+        usage = raw.get("usageMetadata") or {}
+        usage = {k: usage.get(k) for k in ("promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount",
+                                           "totalTokenCount")}
+    else:
+        usage = result["usage"]
+    row = {"key": key, "ask": ask, "mode": mode, "modelVersion": result["modelVersion"], "usage": usage,
+           "costUSD": result["costUSD"],
+           "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+    if (cfg["provider"], cfg["model"]) != (CFG["provider"], CFG["model"]):
+        row["provider"], row["model"] = cfg["provider"], cfg["model"]
     if batch:
         row["batch"] = batch
-    text = text_of(response)
+    text = result["text"]
     try:
         row["known"], row["picks"] = parse(text)
         row["text"] = text
         return row, None
     except (ValueError, json.JSONDecodeError) as exc:
-        finish = ((response.get("candidates") or [{}])[0]).get("finishReason")
+        candidates = raw.get("candidates") if cfg["provider"] == "gemini" else None
+        finish = ((candidates or [{}])[0]).get("finishReason") if cfg["provider"] == "gemini" else result["why"]
         row["error"] = f"{type(exc).__name__}: {exc}; finishReason={finish}"[:300]
         row["text"] = text[:2000]
         return None, row
@@ -370,49 +369,44 @@ def run_online(w, items, workers=8, log=sys.stderr):
     return ok
 
 
-def retry_delay(error, attempt, now=None):
-    """Provider-directed delay when present, else bounded exponential backoff with small jitter."""
-    value = error.headers.get("Retry-After") if error.headers else None
-    if value:
-        try:
-            seconds = float(value)
-        except ValueError:
-            try:
-                retry_at = email.utils.parsedate_to_datetime(value)
-                current = now or datetime.datetime.now(datetime.timezone.utc)
-                seconds = (retry_at - current).total_seconds()
-            except (TypeError, ValueError, OverflowError):
-                seconds = None
-        if seconds is not None and math.isfinite(seconds):
-            return min(MAX_RETRY_DELAY, max(0.0, seconds))
-    return min(MAX_RETRY_DELAY, 2 ** attempt + random.uniform(0.0, 1.0))
-
-
-def generate_online(title, key, ask=0):
-    """One retried generateContent ask: `(answer, error, accepted)`.
+def generate_online(title, key, ask=0, cfg=CFG):
+    """One retried ask through `lib/llm.py`: `(answer, error, accepted)`.
 
     `accepted` separates an HTTP/transport failure from a response received from the provider. A safety
     refusal or malformed response is still an error. A provider-accepted empty response is a durable
     asked-empty anchor; malformed non-empty output remains unasked.
     """
-    url = f"{API}/v1beta/models/{MODEL}:generateContent"
-    for attempt in range(6):
-        try:
-            _, response = http("POST", url, request_body(title), {"Accept": "application/json"}, timeout=90)
-            answer, error = record(response, key, ask, "online")
-            return answer, error, True
-        except urllib.error.HTTPError as exc:
-            if exc.code in (429, 500, 502, 503, 504) and attempt < 5:
-                time.sleep(retry_delay(exc, attempt))
-                continue
-            return None, {"key": key, "ask": ask, "mode": "online",
-                          "error": f"HTTP {exc.code} {exc.read()[:300]!r}", "costUSD": 0.0}, False
-        except (urllib.error.URLError, TimeoutError) as exc:
-            if attempt < 5:
-                time.sleep(min(MAX_RETRY_DELAY, 2 ** attempt + random.uniform(0.0, 1.0)))
-                continue
-            return None, {"key": key, "ask": ask, "mode": "online",
-                          "error": f"{type(exc).__name__}: {exc}", "costUSD": 0.0}, False
+    try:
+        result = llm.online(cfg, question(title, cfg))
+    except providers.Unavailable as exc:
+        return None, {"key": key, "ask": ask, "mode": "online", "error": str(exc), "costUSD": 0.0}, False
+    answer, error = recorded(result, key, ask, "online", cfg=cfg)
+    return answer, error, True
+
+
+def answer_title(title, key, ask=0, cfg=CFG):
+    """`generate_online`, with what #183 decided for an answer that is not one: a refused, empty or malformed
+    answer is asked once more, and then by the step's fallback model. Only a title the fallback cannot answer
+    either keeps the refusal (#170's asked-empty rule). The row's `costUSD` is every attempt's.
+
+    A fallback that cannot be reached (no key, an outage) leaves the primary's refusal standing, as it stood
+    before there was a fallback, rather than refusing the whole day."""
+    spent, last = 0.0, None
+    attempts = [cfg, cfg] + ([cfg["fallback"]] if cfg.get("fallback") else [])
+    for n, attempt in enumerate(attempts):
+        answer, error, accepted = generate_online(title, key, ask, attempt)
+        if not accepted:
+            if last is None or n < 2:
+                return answer, error, accepted
+            last[1]["fallbackError"] = error.get("error")
+            return last
+        row = answer or error
+        spent += row.get("costUSD", 0.0)
+        row["costUSD"] = spent
+        last = answer, error, accepted
+        if answer is not None:
+            return last
+    return last
 
 
 # --- batches --------------------------------------------------------------------------------------------
@@ -438,57 +432,20 @@ def reserved(w):
     return sum(b["reservedUSD"] for b in batches(w) if b["state"] == "submitted")
 
 
-def upload(path, display):
-    """The Files API's resumable upload: start, then one upload-and-finalize. Returns `files/…`."""
-    size = os.path.getsize(path)
-    headers, _ = http("POST", f"{API}/upload/v1beta/files", {"file": {"display_name": display}},
-                      {"X-Goog-Upload-Protocol": "resumable", "X-Goog-Upload-Command": "start",
-                       "X-Goog-Upload-Header-Content-Length": str(size),
-                       "X-Goog-Upload-Header-Content-Type": "application/jsonl"})
-    target = headers.get("X-Goog-Upload-URL") or headers.get("x-goog-upload-url")
-    with open(path, "rb") as fh:
-        _, done = http("POST", target, fh.read(), {"X-Goog-Upload-Offset": "0",
-                                                   "X-Goog-Upload-Command": "upload, finalize",
-                                                   "Content-Type": "application/jsonl"})
-    return done["file"]["name"]
-
-
 def submit(w, items, label, reserve):
     os.makedirs(w.path("batch-inputs"), exist_ok=True)
-    source = w.path(f"batch-inputs/{label}.jsonl")
-    with open(source, "w", encoding="utf-8") as fh:
-        for key, ask in items:
-            fh.write(json.dumps({"key": f"{key}#{ask}", "request": request_body(w.titles[key])},
-                                ensure_ascii=False) + "\n")
-    file_name = upload(source, f"fan-picks-{label}")
+    requests = {f"{key}#{ask}": question(w.titles[key]) for key, ask in items}
     try:
-        _, job = http("POST", f"{API}/v1beta/models/{MODEL}:batchGenerateContent",
-                      {"batch": {"displayName": f"fan-picks-{label}", "inputConfig": {"fileName": file_name}}})
-    except urllib.error.HTTPError as exc:
+        job = providers.PROVIDERS[CFG["provider"]].submit(CFG, requests, f"fan-picks-{label}",
+                                                          w.path(f"batch-inputs/{label}.jsonl"))
+    except providers.Unavailable as exc:
         # The API says why (an enqueued-token limit, a bad file); nothing is recorded, so a rerun resubmits.
-        raise SystemExit(f"batch {label} refused: HTTP {exc.code} {exc.read()[:500].decode(errors='replace')}")
-    entry = {"name": job["name"], "label": label, "file": file_name, "items": [list(i) for i in items],
+        raise SystemExit(f"batch {label} refused: {exc}")
+    entry = {"name": job["name"], "label": label, "file": job.get("file"), "items": [list(i) for i in items],
              "state": "submitted", "reservedUSD": reserve,
              "submittedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
     save_batches(w, batches(w) + [entry])
     return entry
-
-
-def find(value, name):
-    """The first value under `name` anywhere in a JSON tree: the operation's shape differs by API version."""
-    if isinstance(value, dict):
-        if name in value:
-            return value[name]
-        for child in value.values():
-            found = find(child, name)
-            if found is not None:
-                return found
-    elif isinstance(value, list):
-        for child in value:
-            found = find(child, name)
-            if found is not None:
-                return found
-    return None
 
 
 def collect(w, log=sys.stderr):
@@ -499,33 +456,25 @@ def collect(w, log=sys.stderr):
         if job["state"] != "submitted":
             states[job["label"]] = job["state"]
             continue
-        _, status = http("GET", f"{API}/v1beta/{job['name']}")
-        state = find(status, "state") or "unknown"
-        states[job["label"]] = state
-        if state in ("BATCH_STATE_FAILED", "BATCH_STATE_CANCELLED", "BATCH_STATE_EXPIRED", "JOB_STATE_FAILED"):
-            job["state"] = state
-            job["error"] = json.dumps(find(status, "error"))[:500]
-            continue
-        if state not in ("BATCH_STATE_SUCCEEDED", "JOB_STATE_SUCCEEDED"):
-            continue
-        responses = find(status, "responsesFile")
-        _, raw = http("GET", f"{API}/download/v1beta/{responses}:download?alt=media", raw=True, timeout=600)
         wanted = {f"{k}#{n}" for k, n in job["items"]}
+        state, out = providers.PROVIDERS[CFG["provider"]].poll(CFG, job, wanted)
+        states[job["label"]] = state
+        if state in ("failed", "expired"):
+            job["state"] = state
+            job["error"] = out.get("error") if state == "failed" else None
+            continue
+        if state != "done":
+            continue
         answers, errors = [], []
-        for line in raw.decode("utf-8").splitlines():
-            if not line.strip():
-                continue
-            item = json.loads(line)
-            label = item.get("key")
-            if label not in wanted:
-                continue
+        for label, result in out.items():
             wanted.discard(label)
             key, _, ask = label.rpartition("#")
-            if "response" in item:
-                answer, error = record(item["response"], key, int(ask), "batch", job["name"])
+            if "error" not in result:
+                result["costUSD"] = llm.cost(CFG, result["usage"], "batch")
+                answer, error = recorded(result, key, int(ask), "batch", job["name"])
             else:
                 answer, error = None, {"key": key, "ask": int(ask), "mode": "batch", "batch": job["name"],
-                                       "error": json.dumps(item.get("error") or item)[:300], "costUSD": 0.0}
+                                       "error": result["error"], "costUSD": 0.0}
             (answers if answer else errors).append(answer or error)
         errors += [{"key": label.rpartition("#")[0], "ask": int(label.rpartition("#")[2]), "mode": "batch",
                     "batch": job["name"], "error": "no response in the results file", "costUSD": 0.0}
@@ -734,13 +683,17 @@ def load_daily_checkpoint(path):
 
 
 def daily_update(corpus_path, articles_path, franchises_path, existing_path, out, keys, workers=8,
-                 generate=generate_online, follows=None, max_spend=DAILY_SPEND_CAP):
-    """Ask Gemini online for new daily titles, match with the full run's rule, and merge the durable input.
+                 generate=answer_title, follows=None, max_spend=DAILY_SPEND_CAP, backfill=None):
+    """Ask the fan-picks model online for new daily titles, match with the full run's rule, and merge the
+    durable input.
 
     Existing anchors and picks that no longer join the current corpus are removed before the store sees
     them. A provider-accepted empty answer is asked-empty, while malformed non-empty output remains unasked;
     a transport failure refuses the update so an outage can never become `fan_picks_a`. The whole request
     set must fit the invocation's projected spend cap before any request is made.
+
+    `backfill` is answers bought outside the daily job (`data/fan-picks-backfill.json`): each is matched into
+    a title the input has no picks for, so a title the primary model refused gets the fallback's picks.
     """
     rows = corpus_rows(corpus_path)
     if not os.path.exists(existing_path):
@@ -839,12 +792,15 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
         raise RuntimeError(f"daily fan picks: Gemini unreachable for {len(unavailable)} title(s); "
                            f"{first[0]}: {first[1].get('error')}")
 
-    if titles:
+    backfilled = {key: answer for key, answer in (backfill or {}).items()
+                  if key in rows and key not in titles and not anchors.get(key)}
+    if titles or backfilled:
         with open(franchises_path, encoding="utf-8") as fh:
             franchises = json.load(fh)
         names = Names(rows)
-        owned = related(rows, franchises, sequel_keys(rows, titles) if follows is None else follows)
-        for key, answer in answered.items():
+        seeds = set(titles) | set(backfilled)
+        owned = related(rows, franchises, sequel_keys(rows, seeds) if follows is None else follows)
+        for key, answer in [*answered.items(), *backfilled.items()]:
             matched = match_answer(answer, key, names, owned.get(key, set()))
             anchors[key] = merged([matched])
         for key in empty_answers:
@@ -860,10 +816,66 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     return {"asked": len(titles), "answered": len(answered), "emptyAnswers": len(empty_answers),
             "parseErrors": len(parse_errors),
             "generated": len(pending), "resumed": resumed,
-            "notInCorpus": not_in_corpus,
+            "notInCorpus": not_in_corpus, "backfilled": len(backfilled),
             "anchors": len(anchors), "picks": sum(len(v) for v in anchors.values()),
             "costUSD": round(sum(costs), 6), "projectedSpendUSD": round(projected, 6),
             "spendCapUSD": max_spend}
+
+
+#: Answers bought outside the daily job for titles the input has no picks for, merged by every daily run.
+BACKFILL = os.path.join(REPO, "data", "fan-picks-backfill.json")
+BACKFILL_SCHEMA = "fan-picks-backfill-v1"
+
+
+def load_backfill(path=BACKFILL):
+    """`{key: answer}` from the committed backfill, or nothing when there is none."""
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        value = json.load(fh)
+    if value.get("schema") != BACKFILL_SCHEMA or not isinstance(value.get("answers"), dict):
+        raise RuntimeError(f"{path}: not a {BACKFILL_SCHEMA} file")
+    return value["answers"]
+
+
+def backfill(work, keys_path, out=BACKFILL, max_spend=1.0, cfg=None, log=sys.stderr):
+    """Ask the fallback model about `keys_path`'s titles with the full run's frozen inputs, and keep each
+    answer in `out` for the daily job to match (oxyc/den-dataset#183: the titles Gemini always refused).
+
+    A key `out` already answers is not asked again; one it records as refused or malformed is. Every call is
+    logged with its cost and checked against `max_spend` before it is sent."""
+    w, cfg = Work(work), cfg or CFG["fallback"]
+    with open(keys_path, encoding="utf-8") as fh:
+        keys = [key for key in json.load(fh) if key in w.titles]
+    value = {"schema": BACKFILL_SCHEMA, "issue": "oxyc/den-dataset#183", "answers": {}, "refused": {}}
+    if os.path.exists(out):
+        with open(out, encoding="utf-8") as fh:
+            value = json.load(fh)
+    budget = llm.Budget(max_spend)
+    for key in keys:
+        if key in value["answers"]:
+            continue
+        try:
+            result = llm.online(cfg, question(w.titles[key], cfg), budget)
+        except providers.Unavailable as exc:
+            print(json.dumps({"key": key, "error": str(exc)}), file=log)
+            continue
+        answer, error = recorded(result, key, 0, "online", cfg=cfg)
+        row = answer or error
+        print(json.dumps({"key": key, "answered": answer is not None, "costUSD": round(row["costUSD"], 6),
+                          "spentUSD": round(budget.spent, 6)}), file=log)
+        keep = ("provider", "model", "modelVersion", "at", "costUSD")
+        if answer is not None:
+            value["answers"][key] = {**{k: answer.get(k) for k in keep}, "known": answer["known"],
+                                     "picks": answer["picks"]}
+            value["refused"].pop(key, None)
+        else:
+            value["refused"][key] = {**{k: row.get(k) for k in keep}, "error": row.get("error")}
+        value["answers"] = dict(sorted(value["answers"].items()))
+        value["refused"] = dict(sorted(value["refused"].items()))
+        write_json(out, value)
+    return {"out": out, "answers": len(value["answers"]), "refused": len(value["refused"]),
+            "spentUSD": round(budget.spent, 6)}
 
 
 def match(work, corpus_path, franchises_path, follows_path=None):
@@ -1020,6 +1032,13 @@ def main(argv=None):
     p = sub.add_parser("export")
     p.add_argument("--work", required=True)
     p.add_argument("--out", required=True)
+    p = sub.add_parser("backfill", help="ask the fallback model about titles the primary refused")
+    p.add_argument("--work", required=True)
+    p.add_argument("--keys", required=True)
+    p.add_argument("--out", default=BACKFILL)
+    p.add_argument("--max-spend-usd", type=float, required=True)
+    p.add_argument("--provider", help="instead of the configured fallback's, e.g. claude-cli for a local backfill")
+    p.add_argument("--model")
     args = parser.parse_args(argv)
     if args.command == "prepare":
         result = prepare(args.corpus, args.articles, args.pool, args.work, args.max_spend_usd)
@@ -1034,6 +1053,10 @@ def main(argv=None):
         result = match(args.work, args.corpus, args.franchises, args.follows)
     elif args.command == "report":
         result = report(args.work, args.keys, args.start, args.count, args.examples)
+    elif args.command == "backfill":
+        cfg = {**CFG["fallback"], **{k: v for k, v in (("provider", args.provider), ("model", args.model)) if v}}
+        llm.check(cfg)
+        result = backfill(args.work, args.keys, args.out, args.max_spend_usd, cfg)
     else:
         result = export(args.work, args.out)
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))

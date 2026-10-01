@@ -225,7 +225,8 @@ def update_fan_picks(day):
         result = fan_picks.daily_update(
             corpus_path=ctx.path(artifacts.CORPUS), articles_path=ctx.path(artifacts.ARTICLES),
             franchises_path=ctx.path(artifacts.FRANCHISES), existing_path=existing,
-            out=existing, keys=asked, max_spend=day.args.fan_picks_max_spend_usd)
+            out=existing, keys=asked, max_spend=day.args.fan_picks_max_spend_usd,
+            backfill=fan_picks.load_backfill())
     except (OSError, ValueError, RuntimeError) as error:
         raise StageError(f"fan_picks: {error}") from error
     day.ran.append("fan_picks")

@@ -1,0 +1,15 @@
+{
+ "fan_picks": {
+  "provider": "gemini",
+  "model": "gemini-3.7-flash",
+  "mode": "online",
+  "titlesPerCall": 1,
+  "thinking": "low",
+  "maxOutputTokens": 2048,
+  "fallback": {
+   "provider": "anthropic",
+   "model": "claude-sonnet-5",
+   "maxOutputTokens": 2048
+  }
+ }
+}

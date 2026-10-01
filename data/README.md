@@ -31,6 +31,8 @@ are Wikidata. Licences per file are in [`LICENSES.md`](../LICENSES.md).
 | `wikidata-item-decisions.json` | which Wikidata item answers for a title whose TMDB id several items claim, where no rule decides | by hand |
 | `implementation-lineage.json` | the superseded source and input digests a paid classify shard may still be audited on, each with the reason its rows did not move | by hand, after reading the diff |
 | `classify-queue.json` | titles whose labels were not read from the plot the corpus now holds | derived |
+| `models.json` | which provider, model, mode and fallback answers each paid text step (`lib/llm.py`) | ours; `docs/OPERATE.md`, "Switching a model" |
+| `fan-picks-backfill.json` | fan-pick answers bought by hand for titles the primary model refused, with who answered; the daily job matches them into titles with no picks | `tools/fan_picks.py backfill` |
 | `eval/golden-large.json` | 2,568 hand-labelled titles, the genres & moods quality ruler | by hand |
 | `eval/quality-floors.json` | the scores a publish is held to (`pipeline/eval_taxonomy.py`) | recorded, not rebuilt |
 | `eval/reco-cases.json` | 6,000 MovieLens co-rating cases (nPMI), the recommendation ruler | the co-rating derivation |

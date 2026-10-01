@@ -56,6 +56,23 @@ applies the placeholder and storytelling-property guards, and repairs only rows 
 floor after invalid tags are removed. Its merged strings, vectors, labels, coverage, and provenance travel
 in the corpus bundle together.
 
+## Switching a model
+
+Every paid text step asks through `lib/llm.py`, and `data/models.json` says who answers each one: provider
+(`anthropic`, `openai`, `gemini`), model, `online` or `batch`, titles per call, thinking level and a fallback
+for titles the model refuses. Switching a step's model is a one-line PR to that file; the daily job reads it.
+A model must have a price in `lib/llm.py` (`PRICES`) before it can be configured, because the spend caps
+read that table. For a one-off run, `DEN_MODELS=<file>` points at another config.
+
+The keys are `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `GEMINI_API_KEY`, read from the environment. The
+`claude-cli` and `codex-cli` providers run on the owner's monthly plans, for local backfills and bake-offs
+only; they refuse to run in GitHub Actions.
+
+Answers bought by hand go where the daily job reads them. `tools/fan_picks.py backfill --work <full-run dir>
+--keys <keys.json> --max-spend-usd <cap> [--provider claude-cli --model claude-sonnet-5]` asks the fan-picks
+fallback about titles the primary refused and writes `data/fan-picks-backfill.json`. Commit it; every daily
+run matches those answers into the titles that still have no picks, so the next publish carries them.
+
 The publish must run from the repo root: its ownership guard resolves producer paths and `git ls-files`
 against the working directory. Overrides are environment variables (below), and reach the guards either way.
 

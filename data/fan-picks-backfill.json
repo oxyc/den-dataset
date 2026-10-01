@@ -1,0 +1,5547 @@
+{
+ "answers": {
+  "movie:101": {
+   "at": "2026-10-01T11:47:53+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Nikita",
+     "type": "film",
+     "year": 1990
+    },
+    {
+     "title": "The Fifth Element",
+     "type": "film",
+     "year": 1997
+    },
+    {
+     "title": "True Romance",
+     "type": "film",
+     "year": 1993
+    },
+    {
+     "title": "Heat",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Taxi Driver",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Kill Bill: Vol. 1",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Ghost Dog: The Way of the Samurai",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "In Bruges",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "The Transporter",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Man on Fire",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Gloria",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Logan",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "The Killer",
+     "type": "film",
+     "year": 1989
+    },
+    {
+     "title": "Collateral",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Oldboy",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Hanna",
+     "type": "film",
+     "year": 2011
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:11023": {
+   "at": "2026-10-01T11:48:06+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Kids",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Welcome to the Dollhouse",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Ghost World",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "The Virgin Suicides",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Mysterious Skin",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Palo Alto",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Fish Tank",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "American Honey",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Lady Bird",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Eighth Grade",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "Spring Breakers",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "We Need to Talk About Kevin",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "The Myth of the American Sleepover",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "Smithereens",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "Lords of Dogtown",
+     "type": "film",
+     "year": 2005
+    },
+    {
+     "title": "My Own Private Idaho",
+     "type": "film",
+     "year": 1991
+    },
+    {
+     "title": "Skins",
+     "type": "series",
+     "year": 2007
+    },
+    {
+     "title": "Euphoria",
+     "type": "series",
+     "year": 2019
+    },
+    {
+     "title": "Girlhood",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Raw",
+     "type": "film",
+     "year": 2016
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:13193": {
+   "at": "2026-10-01T11:48:21+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "But I'm a Cheerleader",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Heathers",
+     "type": "film",
+     "year": 1988
+    },
+    {
+     "title": "Jawbreaker",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Easy A",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "Mean Girls",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Sugar & Spice",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Welcome to the Dollhouse",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Napoleon Dynamite",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Juno",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Ghost World",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "The Edge of Seventeen",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Election",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Chasing Amy",
+     "type": "film",
+     "year": 1997
+    },
+    {
+     "title": "Slums of Beverly Hills",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "Freaks and Geeks",
+     "type": "series",
+     "year": 1999
+    },
+    {
+     "title": "My Own Private Idaho",
+     "type": "film",
+     "year": 1991
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:150897": {
+   "at": "2026-10-01T11:48:30+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Import/Export",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Dog Days",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Paradise: Love",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Paradise: Faith",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Models",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "4 Months, 3 Weeks and 2 Days",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Fish Tank",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "The Hunt",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Palindromes",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Welcome to the Dollhouse",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Kids",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "The Class",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "L'Humanité",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "The Piano Teacher",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Dogtooth",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "The Wrestler",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "Precious",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "American Honey",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Beautiful Boy",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Mia Madre",
+     "type": "film",
+     "year": 2015
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:152846": {
+   "at": "2026-10-01T11:48:57+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Seduced and Abandoned",
+     "type": "film",
+     "year": 1964
+    },
+    {
+     "title": "Divorce Italian Style",
+     "type": "film",
+     "year": 1961
+    },
+    {
+     "title": "Marriage Italian Style",
+     "type": "film",
+     "year": 1964
+    },
+    {
+     "title": "Two Women",
+     "type": "film",
+     "year": 1960
+    },
+    {
+     "title": "Padre Padrone",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Love and Anarchy",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Swept Away",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "The Seduction of Mimi",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "A Special Day",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Christ Stopped at Eboli",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "The Leopard",
+     "type": "film",
+     "year": 1963
+    },
+    {
+     "title": "Rocco and His Brothers",
+     "type": "film",
+     "year": 1960
+    },
+    {
+     "title": "Kaos",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Bread and Chocolate",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "The Garden of the Finzi-Continis",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "My Brilliant Friend",
+     "type": "series",
+     "year": 2018
+    },
+    {
+     "title": "The Best of Youth",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Amarcord",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "The Day of the Owl",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "1900",
+     "type": "film",
+     "year": 1976
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:158884": {
+   "at": "2026-10-01T11:49:06+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Young Adult",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "The Diary of a Teenage Girl",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "May December",
+     "type": "film",
+     "year": 2023
+    },
+    {
+     "title": "Notes on a Scandal",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "The Girlfriend Experience",
+     "type": "series",
+     "year": 2016
+    },
+    {
+     "title": "Afterschool",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "Fish Tank",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "The Wrestler",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "Little Children",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "In the Bedroom",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "American Honey",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Palo Alto",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "The Assistant",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Honey Boy",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Th1rteen R3asons Why",
+     "type": "series",
+     "year": 2017
+    },
+    {
+     "title": "Blue Valentine",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "Nocturnal Animals",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "The Crown",
+     "type": "series",
+     "year": 2016
+    },
+    {
+     "title": "Rachel Getting Married",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "Shame",
+     "type": "film",
+     "year": 2011
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:1631": {
+   "at": "2026-10-01T11:49:14+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Fat Girl",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Romance",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Baise-moi",
+     "type": "film",
+     "year": 2000
+    },
+    {
+     "title": "In My Skin",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Anatomy of Hell",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "The Piano Teacher",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Trouble Every Day",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Twentynine Palms",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Love",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Irreversible",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Sombre",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "Ken Park",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "The Devils",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "In the Realm of the Senses",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Pink Flamingos",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Fat Girl",
+     "type": "film",
+     "year": 2001
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:16800": {
+   "at": "2026-10-01T11:49:24+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Chinatown",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "The Pianist",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Capturing the Friedmans",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Rosemary's Baby",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "The Ghost Writer",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "O.J.: Made in America",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "The Imposter",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Amy",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Tabloid",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "The Jinx: The Life and Deaths of Robert Durst",
+     "type": "series",
+     "year": 2015
+    },
+    {
+     "title": "Leaving Neverland",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "The Thin Blue Line",
+     "type": "film",
+     "year": 1988
+    },
+    {
+     "title": "Knife in the Water",
+     "type": "film",
+     "year": 1962
+    },
+    {
+     "title": "Repulsion",
+     "type": "film",
+     "year": 1965
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:18141": {
+   "at": "2026-10-01T11:49:32+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Kolya",
+     "type": "film",
+     "year": 1996
+    },
+    {
+     "title": "Empties",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "The Shop on Main Street",
+     "type": "film",
+     "year": 1965
+    },
+    {
+     "title": "Closely Watched Trains",
+     "type": "film",
+     "year": 1966
+    },
+    {
+     "title": "My Sweet Little Village",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Cutting It Short",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "The Firemen's Ball",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "Loves of a Blonde",
+     "type": "film",
+     "year": 1965
+    },
+    {
+     "title": "Amarcord",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Au revoir les enfants",
+     "type": "film",
+     "year": 1987
+    },
+    {
+     "title": "Divided We Fall",
+     "type": "film",
+     "year": 2000
+    },
+    {
+     "title": "The Chorus",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Forman vs. Forman",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Vratné lahve",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Pelíšky",
+     "type": "film",
+     "year": 1999
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:18734": {
+   "at": "2026-10-01T11:50:08+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Mysterious Skin",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Ken Park",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Kids",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Welcome to the Dollhouse",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Happiness",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "Boys Don't Cry",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Beach Rats",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Moonlight",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Una",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "The Virtues",
+     "type": "series",
+     "year": 2019
+    },
+    {
+     "title": "Detachment",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "12 and Holding",
+     "type": "film",
+     "year": 2005
+    },
+    {
+     "title": "Closet Monster",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "I Killed My Mother",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "My So-Called Life",
+     "type": "series",
+     "year": 1994
+    },
+    {
+     "title": "Ordinary People",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "À Nos Amours",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "The Tree of Life",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "Louder Than Bombs",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "The Chumscrubber",
+     "type": "film",
+     "year": 2005
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:18835": {
+   "at": "2026-10-01T11:50:19+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Porky's",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "The Last American Virgin",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "Fast Times at Ridgemont High",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "Zapped!",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "Hot Dog... The Movie",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Spring Break",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "My Tutor",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Losin' It",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Risky Business",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "The Wild Life",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Weird Science",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Hardbodies",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Joysticks",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Screwballs",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Porky's II: The Next Day",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "The Malibu Bikini Shop",
+     "type": "film",
+     "year": 1986
+    },
+    {
+     "title": "Hot Moves",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Private Resort",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Gimme an F",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Getting It On",
+     "type": "film",
+     "year": 1983
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:200112": {
+   "at": "2026-10-01T11:50:37+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Water Lilies",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Tomboy",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "Girlhood",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Blue Is the Warmest Colour",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Fat Girl",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "17 Girls",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "My Summer of Love",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Sister",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Keeper",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Belle Épine",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "Party Girl",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Jeune et Jolie",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Respire",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Mustang",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "The Diary of a Teenage Girl",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "My Life as a Courgette",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Playground",
+     "type": "film",
+     "year": 2021
+    },
+    {
+     "title": "Innocence",
+     "type": "film",
+     "year": 2004
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:20616": {
+   "at": "2026-10-01T11:50:46+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Fatal Attraction",
+     "type": "film",
+     "year": 1987
+    },
+    {
+     "title": "Play Misty for Me",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Cruel Intentions",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "The Crush",
+     "type": "film",
+     "year": 1993
+    },
+    {
+     "title": "Obsessed",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Wild Things",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "Disturbing Behavior",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "I Know What You Did Last Summer",
+     "type": "film",
+     "year": 1997
+    },
+    {
+     "title": "Urban Legend",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "The Roommate",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "Single White Female",
+     "type": "film",
+     "year": 1992
+    },
+    {
+     "title": "Poison Ivy",
+     "type": "film",
+     "year": 1992
+    },
+    {
+     "title": "Pretty Little Liars",
+     "type": "series",
+     "year": 2010
+    },
+    {
+     "title": "Cellular",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Scream",
+     "type": "film",
+     "year": 1996
+    },
+    {
+     "title": "The Boy Next Door",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Unfriended",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Deep Water",
+     "type": "film",
+     "year": 2022
+    },
+    {
+     "title": "You",
+     "type": "series",
+     "year": 2018
+    },
+    {
+     "title": "Cry_Wolf",
+     "type": "film",
+     "year": 2005
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:21946": {
+   "at": "2026-10-01T11:50:55+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "17 Girls",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "Mesrine: Killer Instinct",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "A Prophet",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Point Blank",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "Tell No One",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "The Beat That My Heart Skipped",
+     "type": "film",
+     "year": 2005
+    },
+    {
+     "title": "The Chameleon",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "Polisse",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "SK1",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "La Haine",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "The Returned",
+     "type": "series",
+     "year": 2012
+    },
+    {
+     "title": "Braquo",
+     "type": "series",
+     "year": 2009
+    },
+    {
+     "title": "Engrenages",
+     "type": "series",
+     "year": 2005
+    },
+    {
+     "title": "The Chameleon",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "Prisoners",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Mystic River",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "In the Name of My Daughter",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "The Clearstream Affair",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "The Chorus",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Un prophète",
+     "type": "film",
+     "year": 2009
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:2252": {
+   "at": "2026-10-01T11:51:09+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "A History of Violence",
+     "type": "film",
+     "year": 2005
+    },
+    {
+     "title": "The Departed",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "Dead Man's Shoes",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Sin Nombre",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Lilya 4-ever",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Mesrine: Killer Instinct",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "A Prophet",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Animal Kingdom",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "Dirty Pretty Things",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Gomorrah",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "Léon: The Professional",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "Tinker Tailor Soldier Spy",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "No Country for Old Men",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Road to Perdition",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Munich",
+     "type": "film",
+     "year": 2005
+    },
+    {
+     "title": "Children of Men",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "McMafia",
+     "type": "series",
+     "year": 2018
+    },
+    {
+     "title": "The Place Beyond the Pines",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Eden Lake",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "Captain Phillips",
+     "type": "film",
+     "year": 2013
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:2282": {
+   "at": "2026-10-01T11:51:20+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "L'Enfance Nue",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "La Boum",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Loulou",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Vagabond",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "37°2 le matin",
+     "type": "film",
+     "year": 1986
+    },
+    {
+     "title": "La Vie de famille",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Police",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Mouchette",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "Rosetta",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "L'Humanité",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Fat Girl",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "The 400 Blows",
+     "type": "film",
+     "year": 1959
+    },
+    {
+     "title": "Girlhood",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Water Lilies",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "L'Argent de poche",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Divine Children",
+     "type": "film",
+     "year": 1996
+    },
+    {
+     "title": "La Haine",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Un monde sans pitié",
+     "type": "film",
+     "year": 1989
+    },
+    {
+     "title": "Wild Reeds",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "Blue Is the Warmest Colour",
+     "type": "film",
+     "year": 2013
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:23943": {
+   "at": "2026-10-01T11:51:29+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Porky's",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "Fast Times at Ridgemont High",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "Private School",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "The Last American Virgin",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "Hot Dog... The Movie",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Spring Break",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Screwballs",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "My Tutor",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Weird Science",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Better Off Dead",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Night Shift",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "Joysticks",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "The Wild Life",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Hardbodies",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Can't Buy Me Love",
+     "type": "film",
+     "year": 1987
+    },
+    {
+     "title": "Up the Creek",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Revenge of the Nerds",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "The Sure Thing",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Zapped Again!",
+     "type": "film",
+     "year": 1990
+    },
+    {
+     "title": "Student Bodies",
+     "type": "film",
+     "year": 1981
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:23966": {
+   "at": "2026-10-01T11:51:40+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Nekromantik",
+     "type": "film",
+     "year": 1987
+    },
+    {
+     "title": "Grace",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "The Girl Next Door",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Hard Candy",
+     "type": "film",
+     "year": 2005
+    },
+    {
+     "title": "May",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "The Loved Ones",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Teeth",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Antichrist",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "The Woman",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "American Mary",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Excision",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Return of the Living Dead",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Jennifer's Body",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Audition",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "The Human Centipede (First Sequence)",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Splice",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Contracted",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Carrie",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Pieces",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "Society",
+     "type": "film",
+     "year": 1989
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:244784": {
+   "at": "2026-10-01T11:52:07+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "High Test Girls",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Schulmädchen-Report",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Fascination",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "The Grapes of Death",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "La Nuit des traquées",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Emmanuelle",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Story of O",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Barbed Wire Dolls",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Bilitis",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Immoral Tales",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "The Beast",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Ilsa, She Wolf of the SS",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Love Letters of a Portuguese Nun",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Women in Cellblock 9",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "Eugenie de Sade",
+     "type": "film",
+     "year": 1970
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:24943": {
+   "at": "2026-10-01T11:52:47+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Without a Stitch",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "I, a Woman",
+     "type": "film",
+     "year": 1965
+    },
+    {
+     "title": "Schoolgirl Report",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Inga",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Percy",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Zeta One",
+     "type": "film",
+     "year": 1969
+    },
+    {
+     "title": "Confessions of a Window Cleaner",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Eskimo Nell",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Emmanuelle",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Deep Throat",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Score",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Flesh Gordon",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Carry On Camping",
+     "type": "film",
+     "year": 1969
+    },
+    {
+     "title": "The Benny Hill Show",
+     "type": "series",
+     "year": 1955
+    },
+    {
+     "title": "Porky's",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "Animal House",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "Private Lessons",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "My Tutor",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "The Last American Virgin",
+     "type": "film",
+     "year": 1982
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:250124": {
+   "at": "2026-10-01T11:52:56+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Ghost World",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Edge of Seventeen",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Thirteen",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Juno",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Eighth Grade",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "Lady Bird",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Welcome to the Dollhouse",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "American Honey",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Fish Tank",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "The Virgin Suicides",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Blue Is the Warmest Colour",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "20th Century Women",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Palo Alto",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Pariah",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "Marielle Heller's Can You Ever Forgive Me?",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "Skins",
+     "type": "series",
+     "year": 2007
+    },
+    {
+     "title": "My Mad Fat Diary",
+     "type": "series",
+     "year": 2013
+    },
+    {
+     "title": "PEN15",
+     "type": "series",
+     "year": 2019
+    },
+    {
+     "title": "Dirty Girl",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "The Myth of the American Sleepover",
+     "type": "film",
+     "year": 2010
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:25482": {
+   "at": "2026-10-01T12:08:27+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Amantes",
+     "type": "film",
+     "year": 1991
+    },
+    {
+     "title": "Si te dicen que caí",
+     "type": "film",
+     "year": 1989
+    },
+    {
+     "title": "El Lute: Camina o revienta",
+     "type": "film",
+     "year": 1987
+    },
+    {
+     "title": "Jamón Jamón",
+     "type": "film",
+     "year": 1992
+    },
+    {
+     "title": "Belle de Jour",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "Live Flesh",
+     "type": "film",
+     "year": 1997
+    },
+    {
+     "title": "Talk to Her",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Matador",
+     "type": "film",
+     "year": 1986
+    },
+    {
+     "title": "Bad Education",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Volver",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "Rosario Tijeras",
+     "type": "film",
+     "year": 2005
+    },
+    {
+     "title": "Sin tetas no hay paraíso",
+     "type": "series",
+     "year": 2006
+    },
+    {
+     "title": "María Full of Grace",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Belle Époque",
+     "type": "film",
+     "year": 1992
+    },
+    {
+     "title": "Carmen",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Betty Blue",
+     "type": "film",
+     "year": 1986
+    },
+    {
+     "title": "The Skin I Live In",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "City of God",
+     "type": "film",
+     "year": 2002
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:26768": {
+   "at": "2026-10-01T11:53:29+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Our Mother's House",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "Secret Ceremony",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Girly",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Straight on Till Morning",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Deep End",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Taste the Blood of Dracula",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Blood on Satan's Claw",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Exposé",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Baby Doll",
+     "type": "film",
+     "year": 1956
+    },
+    {
+     "title": "Lolita",
+     "type": "film",
+     "year": 1962
+    },
+    {
+     "title": "The Night Digger",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "The Go-Between",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Twisted Nerve",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Entertaining Mr Sloane",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Virgin Witch",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Cruel Passion",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Berserk!",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "Poison Ivy",
+     "type": "film",
+     "year": 1992
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:26973": {
+   "at": "2026-10-01T11:53:40+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Taxi Driver",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "The Last Picture Show",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Klute",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Paper Moon",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Lolita",
+     "type": "film",
+     "year": 1997
+    },
+    {
+     "title": "Carny",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Vivre sa vie",
+     "type": "film",
+     "year": 1962
+    },
+    {
+     "title": "Irma la Douce",
+     "type": "film",
+     "year": 1963
+    },
+    {
+     "title": "The Devil's Playground",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Welcome to L.A.",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "The King of Marvin Gardens",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "A Little Romance",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "Mon oncle d'Amérique",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Atlantic City",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Lacombe, Lucien",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Murmur of the Heart",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "The Fabulous Baker Boys",
+     "type": "film",
+     "year": 1989
+    },
+    {
+     "title": "Smooth Talk",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "The Night Porter",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Chinatown",
+     "type": "film",
+     "year": 1974
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:27098": {
+   "at": "2026-10-01T12:08:51+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Elvira Madigan",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "Ådalen 31",
+     "type": "film",
+     "year": 1969
+    },
+    {
+     "title": "Fanny and Alexander",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "My Life as a Dog",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Show Me Love",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "The Best Intentions",
+     "type": "film",
+     "year": 1992
+    },
+    {
+     "title": "Hamsun",
+     "type": "film",
+     "year": 1996
+    },
+    {
+     "title": "The Emigrants",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Everlasting Moments",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "Au revoir les enfants",
+     "type": "film",
+     "year": 1987
+    },
+    {
+     "title": "Lacombe Lucien",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Murmur of the Heart",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "The Dreamers",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Call Me by Your Name",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Malèna",
+     "type": "film",
+     "year": 2000
+    },
+    {
+     "title": "The Reader",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "Betty Blue",
+     "type": "film",
+     "year": 1986
+    },
+    {
+     "title": "The Last Metro",
+     "type": "film",
+     "year": 1980
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:294368": {
+   "at": "2026-10-01T11:54:01+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Capturing the Friedmans",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "The Keepers",
+     "type": "series",
+     "year": 2017
+    },
+    {
+     "title": "Leaving Neverland",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Spotlight",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Dirty John",
+     "type": "series",
+     "year": 2018
+    },
+    {
+     "title": "The Jinx",
+     "type": "series",
+     "year": 2015
+    },
+    {
+     "title": "Going Clear: Scientology and the Prison of Belief",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Surviving R. Kelly",
+     "type": "series",
+     "year": 2019
+    },
+    {
+     "title": "The Imposter",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Three Identical Strangers",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "Athlete A",
+     "type": "film",
+     "year": 2020
+    },
+    {
+     "title": "Abducted in Plain Sight",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Deliver Us from Evil",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "Procession",
+     "type": "film",
+     "year": 2021
+    },
+    {
+     "title": "The Bleeding Edge",
+     "type": "film",
+     "year": 2018
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:33604": {
+   "at": "2026-10-01T11:54:10+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Pretty Village, Pretty Flame",
+     "type": "film",
+     "year": 1996
+    },
+    {
+     "title": "Underground",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Black Cat, White Cat",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "Tito and Me",
+     "type": "film",
+     "year": 1992
+    },
+    {
+     "title": "The Marshal Tito Striptease",
+     "type": "film",
+     "year": 2000
+    },
+    {
+     "title": "Rane",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "Three Summer Days",
+     "type": "film",
+     "year": 1997
+    },
+    {
+     "title": "Cabaret Balkan",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "The Wounds",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "Virgina",
+     "type": "film",
+     "year": 1991
+    },
+    {
+     "title": "Who's Singin' Over There?",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Dog's Life (Balkan Spirit)",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "No Man's Land",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "The Life and Death of a Porno Gang",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Loving Glances",
+     "type": "film",
+     "year": 2003
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:36885": {
+   "at": "2026-10-01T11:54:20+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Schulmädchen-Report 2. Teil: Was Eltern den Töchtern nicht erzählen",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Schulmädchen-Report 4. Teil: Was Eltern wirklich wissen sollten",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Schulmädchen-Report 5. Teil: Was Eltern wirklich wissen sollten",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Hausfrauen-Report",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Mädchen beim Frauenarzt",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Liebesgrüße aus der Lederhose",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Mädchen, die nach Deutschland kommen",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Die Nichten der Frau Oberst",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Im Zeichen der Jungfrau",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Stoßtrupp Venus bläst zum Angriff",
+     "type": "film",
+     "year": 1975
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:376228": {
+   "at": "2026-10-01T11:54:47+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "The Hunting Ground",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "The Invisible War",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Roll Red Roll",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "Athlete A",
+     "type": "film",
+     "year": 2020
+    },
+    {
+     "title": "The Keepers",
+     "type": "series",
+     "year": 2017
+    },
+    {
+     "title": "Unbelievable",
+     "type": "series",
+     "year": 2019
+    },
+    {
+     "title": "Surviving R. Kelly",
+     "type": "series",
+     "year": 2019
+    },
+    {
+     "title": "Leaving Neverland",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Promising Young Woman",
+     "type": "film",
+     "year": 2020
+    },
+    {
+     "title": "The Tale",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "Spotlight",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "At the Heart of Gold: Inside the USA Gymnastics Scandal",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Private Violence",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Mustang",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Cyberbully",
+     "type": "film",
+     "year": 2011
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:37993": {
+   "at": "2026-10-01T11:54:57+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Pixote",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "Cidade de Deus",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Central do Brasil",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "Lilya 4-ever",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Que Horas Ela Volta?",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Tropa de Elite",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "O Invasor",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Deus é Brasileiro",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Carandiru",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Vidas Secas",
+     "type": "film",
+     "year": 1963
+    },
+    {
+     "title": "O Pagador de Promessas",
+     "type": "film",
+     "year": 1962
+    },
+    {
+     "title": "Bicho de Sete Cabeças",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Amores Perros",
+     "type": "film",
+     "year": 2000
+    },
+    {
+     "title": "María Full of Grace",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "La Virgen de los Sicarios",
+     "type": "film",
+     "year": 2000
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:40339": {
+   "at": "2026-10-01T11:55:20+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Ilsa, She Wolf of the SS",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "The Beast in Heat",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "SS Experiment Camp",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Salon Kitty",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "L'ultima orgia del III Reich",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Elsa Fräulein SS",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "L'ultimo treno della notte",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Love Camp 7",
+     "type": "film",
+     "year": 1969
+    },
+    {
+     "title": "Deported Women of the SS Special Section",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Women's Camp 119",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "KZ9 - Lager di sterminio",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "The Night Porter",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Ilsa, Harem Keeper of the Oil Sheiks",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Ilsa, the Tigress of Siberia",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Women in Cell Block 9",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "Caligula",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "La bestia nello spazio",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Hell of the Living Dead",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Rats: Night of Terror",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Caged Women",
+     "type": "film",
+     "year": 1982
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:40971": {
+   "at": "2026-10-01T11:55:55+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Schulmädchen-Report",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Schulmädchen-Report 2. Teil – Was Eltern nicht für möglich halten",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Schulmädchen-Report 3. Teil – Was Eltern den Schlaf raubt",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Schulmädchen-Report 4. Teil – Was Eltern wirklich wissen sollten",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Schulmädchen-Report 5. Teil – Was Eltern oft verzweifeln läßt",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Schulmädchen-Report 7. Teil – Doch das Herz muss dabei sein",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Schulmädchen-Report 8. Teil – Was Eltern wirklich wissen sollten",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Schulmädchen-Report 9. Teil – Reifeprüfung vor dem Abitur",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Hausfrauen-Report",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Hausfrauen-Report 2",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Krankenschwestern-Report",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Stewardessen-Report",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Helga",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "Helga und Michael",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Das Wunder der Liebe",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "Deine Frau, das unbekannte Wesen",
+     "type": "film",
+     "year": 1969
+    },
+    {
+     "title": "Dein Mann, das unbekannte Wesen",
+     "type": "film",
+     "year": 1970
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:44281": {
+   "at": "2026-10-01T11:56:28+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "A Summer in La Goulette",
+     "type": "film",
+     "year": 1996
+    },
+    {
+     "title": "The Silences of the Palace",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "Satin Rouge",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Wadjda",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Caramel",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Where Do We Go Now?",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "Mustang",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Amarcord",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Cinema Paradiso",
+     "type": "film",
+     "year": 1988
+    },
+    {
+     "title": "The 400 Blows",
+     "type": "film",
+     "year": 1959
+    },
+    {
+     "title": "Persepolis",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Horses of God",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "The Yacoubian Building",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "Hideous Kinky",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "20th Century Women",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Honey Cigar",
+     "type": "film",
+     "year": 2020
+    },
+    {
+     "title": "Papicha",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Layla M.",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "The Buddha of Suburbia",
+     "type": "series",
+     "year": 1993
+    },
+    {
+     "title": "Ramy",
+     "type": "series",
+     "year": 2019
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:44945": {
+   "at": "2026-10-01T11:56:37+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Hard Candy",
+     "type": "film",
+     "year": 2005
+    },
+    {
+     "title": "An American Crime",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Mysterious Skin",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Spotlight",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Room",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "The Tale",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "Little Children",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "Doubt",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "The Hunt",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "Precious",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Short Term 12",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Unbelievable",
+     "type": "series",
+     "year": 2019
+    },
+    {
+     "title": "The Girl with the Dragon Tattoo",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "Sleepers",
+     "type": "film",
+     "year": 1996
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:465": {
+   "at": "2026-10-01T11:59:17+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "À ma soeur!",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Romance",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Baise-moi",
+     "type": "film",
+     "year": 2000
+    },
+    {
+     "title": "The Dreamers",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Fat Girl",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Water Lilies",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Blue Is the Warmest Colour",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Fish Tank",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Love",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Virgin Suicides",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Trouble Every Day",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Climax",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "Pretty Baby",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "A Real Young Girl",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Innocence",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "The Piano Teacher",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Irreversible",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Titane",
+     "type": "film",
+     "year": 2021
+    },
+    {
+     "title": "Raw",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Spring Breakers",
+     "type": "film",
+     "year": 2012
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:48266": {
+   "at": "2026-10-01T11:59:35+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Romance",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Fat Girl",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Anatomy of Hell",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "The Piano Teacher",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "In My Skin",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Irréversible",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Love",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Nymphomaniac",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Antichrist",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Elle",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Dans Paris",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "Love Songs",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "The Dreamers",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Murmur of the Heart",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "In the Realm of the Senses",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Crash",
+     "type": "film",
+     "year": 1996
+    },
+    {
+     "title": "Jeune & Jolie",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Dogtooth",
+     "type": "film",
+     "year": 2009
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:59809": {
+   "at": "2026-10-01T11:59:45+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Ms. 45",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "I Spit on Your Grave",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "The Accused",
+     "type": "film",
+     "year": 1988
+    },
+    {
+     "title": "Straw Dogs",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Looking for Mr. Goodbar",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Thelma & Louise",
+     "type": "film",
+     "year": 1991
+    },
+    {
+     "title": "Death Wish",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "The Last House on the Left",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Sudden Impact",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Hustle",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Klute",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Extremities",
+     "type": "film",
+     "year": 1986
+    },
+    {
+     "title": "Mary, Mary, Bloody Mary",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "The Entity",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "Hardcore",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "A Question of Silence",
+     "type": "film",
+     "year": 1982
+    },
+    {
+     "title": "Baby Doll",
+     "type": "film",
+     "year": 1956
+    },
+    {
+     "title": "The Stepford Wives",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Dressed to Kill",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Network",
+     "type": "film",
+     "year": 1976
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:62564": {
+   "at": "2026-10-01T11:59:56+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Fucking Åmål",
+     "type": "film",
+     "year": 1998
+    },
+    {
+     "title": "The Diary of a Teenage Girl",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Fish Tank",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Girlhood",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Mustang",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Eighth Grade",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "The Edge of Seventeen",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Welcome to the Dollhouse",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Ghost World",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "We Are the Best!",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Skam",
+     "type": "series",
+     "year": 2015
+    },
+    {
+     "title": "My Life as a Zucchini",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "The Myth of the American Sleepover",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "Palo Alto",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Blue Is the Warmest Colour",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Pariah",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "Thelma",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Charlie's Country",
+     "type": "film",
+     "year": 2013
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:64238": {
+   "at": "2026-10-01T12:00:05+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Je t'aime moi non plus",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "L'Effrontée",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "37°2 le matin (Betty Blue)",
+     "type": "film",
+     "year": 1986
+    },
+    {
+     "title": "Sweet Movie",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "La Lune dans le caniveau",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Mauvais Sang",
+     "type": "film",
+     "year": 1986
+    },
+    {
+     "title": "L'Histoire d'Adèle H.",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Pretty Baby",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "Un amour de Swann",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "La Vie de Chateau",
+     "type": "film",
+     "year": 1966
+    },
+    {
+     "title": "Beau Père",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "L'Année des méduses",
+     "type": "film",
+     "year": 1984
+    },
+    {
+     "title": "Diva",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "Subway",
+     "type": "film",
+     "year": 1985
+    },
+    {
+     "title": "Taxi Boy",
+     "type": "film",
+     "year": 1981
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:64586": {
+   "at": "2026-10-01T12:00:17+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "In My Skin",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Under the Skin",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "The Duke of Burgundy",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Martha Marcy May Marlene",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "The Piano Teacher",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Belle de Jour",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "Antichrist",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "The Beguiled",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Enemy",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "The Neon Demon",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Blue Is the Warmest Colour",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "A Girl Walks Home Alone at Night",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Climax",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "The Lobster",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "3 Women",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "The Ghost Writer",
+     "type": "film",
+     "year": 2010
+    },
+    {
+     "title": "Mysterious Skin",
+     "type": "film",
+     "year": 2004
+    },
+    {
+     "title": "Nymphomaniac",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "The Assistant",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Spring",
+     "type": "film",
+     "year": 2014
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:65296": {
+   "at": "2026-10-01T12:00:25+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "L'Humanité",
+     "type": "film",
+     "year": 1999
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:70609": {
+   "at": "2026-10-01T12:00:35+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Schulmädchen-Report",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Schulmädchen-Report 2. Teil",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Schulmädchen-Report 3. Teil",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Schulmädchen-Report 4. Teil",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Schulmädchen-Report 6. Teil",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Hausfrauen-Report",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Mädchen, die nach Deutschland wollen",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Liebesgrüße aus der Lederhose",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Josefine Mutzenbacher",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Die Nichten der Frau Oberst",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Report sulla sessualità femminile in Italia",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Emmanuelle",
+     "type": "film",
+     "year": 1974
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:70628": {
+   "at": "2026-10-01T12:00:47+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Schulmädchen-Report 2. Teil: Was Eltern nicht mal ahnen",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Schulmädchen-Report 3. Teil: Was Eltern wirklich wissen sollten",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Hausfrauen-Report",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Mädchen, die nach Deutschland reisen",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Liebesgrüße aus der Lederhose",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Hurra, die Schwedinnen sind da",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "Die Klosterschülerinnen",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Der Fenster-Gucker",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Emmanuelle",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Nathalie, rescapée de l'enfer",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "Confessions of a Window Cleaner",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "The Stewardesses",
+     "type": "film",
+     "year": 1969
+    },
+    {
+     "title": "Jungfrauen-Report",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Swedish Fly Girls",
+     "type": "film",
+     "year": 1971
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:70632": {
+   "at": "2026-10-01T12:01:15+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Schulmädchen-Report 2. Teil – Was Eltern nicht für möglich halten",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Hausfrauen-Report",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Mädchen beim Frauenarzt",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Sylvia im Reich der Wollust",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Die Nichten der Frau Oberst",
+     "type": "film",
+     "year": 1969
+    },
+    {
+     "title": "Josefine Mutzenbacher",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Liebesgrüße aus der Lederhose",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Lass jucken, Kumpel",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Die Klosterschülerinnen",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Barbed Wire Dolls",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Vanessa",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Emmanuelle",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Zärtliche Cousinen",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Mondo Cane",
+     "type": "film",
+     "year": 1962
+    },
+    {
+     "title": "Supervixens",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Ilsa, She Wolf of the SS",
+     "type": "film",
+     "year": 1975
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:70634": {
+   "at": "2026-10-01T12:01:32+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Schulmädchen-Report 2. Teil: Was Eltern nicht mal ahnen",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Schulmädchen-Report 3. Teil: Was Eltern den Töchtern nicht erzählen",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Mädchen, die nach Deutschland kommen",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Hausfrauen-Report",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Mädchen beim Frauenarzt",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Report der Nonnen",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Deutsche Sex-Report",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Mondo Cane",
+     "type": "film",
+     "year": 1962
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:70638": {
+   "at": "2026-10-01T12:01:42+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Schulmädchen-Report",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Schulmädchen-Report 2. Teil - Was Eltern nicht mal ahnen",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Schulmädchen-Report 3. Teil - Was Eltern den Töchtern oft verzeihen",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Hausfrauen-Report",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Liebesgrüße aus der Lederhose",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Mädchen beim Frauenarzt",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Emmanuelle",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Die Wirtin von der Lahn",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Josefine Mutzenbacher",
+     "type": "film",
+     "year": 1970
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:70640": {
+   "at": "2026-10-01T12:02:11+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Schulmädchen-Report. 1. Teil: Was Eltern nicht für möglich halten",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Schulmädchen-Report. 2. Teil: Was Eltern den Schlaf raubt",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Schulmädchen-Report. 3. Teil: Was Eltern wirklich wissen sollten",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Hausfrauen-Report",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Hausfrauen-Report 2",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Mädchen beim Frauenarzt",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Liebesgrüße aus der Lederhose",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Die Klosterschülerinnen",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Emmanuelle",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Eis am Stiel",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "Die Nichten der Frau Oberst",
+     "type": "film",
+     "year": 1969
+    },
+    {
+     "title": "Komm, liebe Maid, und mache",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Mädchen, die nicht betteln, sondern stehlen",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Zum Ausziehen auf Rügen",
+     "type": "film",
+     "year": 1975
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:70642": {
+   "at": "2026-10-01T12:02:26+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Schulmädchen-Report 2. Teil - Was Eltern nicht mal ahnen",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Schulmädchen-Report 3. Teil - Was Eltern den Töchtern nie erzählen",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Schulmädchen-Report 4. Teil - Was Eltern wirklich wissen sollten",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Hausfrauen-Report",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Hausfrauen-Report International",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Mädchen, die nach Deutschland kommen",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Liebesgrüße aus der Lederhose",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Liebe durch die Hintertür",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Bettwurst",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Der Graf von Monte Christo in der Hosentasche",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "Krankenschwestern-Report",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Sylvia im Reich der Wollust",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Swedish Fly Girls",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Emmanuelle",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Die Klosterschülerinnen",
+     "type": "film",
+     "year": 1972
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:71097": {
+   "at": "2026-10-01T12:02:40+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Inga",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Vibrations",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Young Playthings",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Veil of Blood",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "The Devil's Plaything",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Confessions of a Young American Housewife",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Emmanuelle",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Camille 2000",
+     "type": "film",
+     "year": 1969
+    },
+    {
+     "title": "The Image",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "The Opening of Misty Beethoven",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Score",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Immoral Tales",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "The Beast",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Story of O",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Lorna",
+     "type": "film",
+     "year": 1964
+    },
+    {
+     "title": "Vixen!",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Daughters of Darkness",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Succubus",
+     "type": "film",
+     "year": 1968
+    },
+    {
+     "title": "Vampyros Lesbos",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Blood and Roses",
+     "type": "film",
+     "year": 1960
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:769636": {
+   "at": "2026-10-01T12:03:28+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Cell 211",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "The Trial of Christine Keeler",
+     "type": "series",
+     "year": 2019
+    },
+    {
+     "title": "The Night Manager",
+     "type": "series",
+     "year": 2016
+    },
+    {
+     "title": "The Spy Gone North",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "The Operative",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Tehran",
+     "type": "series",
+     "year": 2020
+    },
+    {
+     "title": "All the Old Knives",
+     "type": "film",
+     "year": 2022
+    },
+    {
+     "title": "The Tailor of Panama",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "Une affaire d'État",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "The Patriots",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "State of Siege",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Berlin Station",
+     "type": "series",
+     "year": 2016
+    },
+    {
+     "title": "House of Cards",
+     "type": "series",
+     "year": 2013
+    },
+    {
+     "title": "The Night Agent",
+     "type": "series",
+     "year": 2023
+    },
+    {
+     "title": "The Hour",
+     "type": "series",
+     "year": 2011
+    },
+    {
+     "title": "Tinker Tailor Soldier Spy",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "A Most Wanted Man",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "The Lives of Others",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "Le Bureau des Légendes",
+     "type": "series",
+     "year": 2015
+    },
+    {
+     "title": "El Reino",
+     "type": "film",
+     "year": 2018
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:802": {
+   "at": "2026-10-01T12:03:37+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "A Clockwork Orange",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Dr. Strangelove",
+     "type": "film",
+     "year": 1964
+    },
+    {
+     "title": "The Night of the Hunter",
+     "type": "film",
+     "year": 1955
+    },
+    {
+     "title": "Sunset Boulevard",
+     "type": "film",
+     "year": 1950
+    },
+    {
+     "title": "Eyes Wide Shut",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Barry Lyndon",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "The Graduate",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "American Beauty",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Chinatown",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "What Ever Happened to Baby Jane?",
+     "type": "film",
+     "year": 1962
+    },
+    {
+     "title": "The Collector",
+     "type": "film",
+     "year": 1965
+    },
+    {
+     "title": "Vertigo",
+     "type": "film",
+     "year": 1958
+    },
+    {
+     "title": "The Talented Mr. Ripley",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "Pretty Baby",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "The Shining",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Manhattan",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "The War of the Roses",
+     "type": "film",
+     "year": 1989
+    },
+    {
+     "title": "Secretary",
+     "type": "film",
+     "year": 2002
+    },
+    {
+     "title": "Notes on a Scandal",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "The Prime of Miss Jean Brodie",
+     "type": "film",
+     "year": 1969
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:80295": {
+   "at": "2026-10-01T12:09:28+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Schulmädchen-Report",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Schulmädchen-Report 2. Teil",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Schulmädchen-Report 3. Teil",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Hausfrauen-Report",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Hausfrauen-Report 2",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Jungfrauen-Report",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Josefine Mutzenbacher",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Mädchen beim Frauenarzt",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Die Klosterschülerinnen",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Liebesgrüße aus der Lederhose",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Drei Lederhosen in St. Tropez",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Drei Schwedinnen in Oberbayern",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Vampyros Lesbos",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Mondo Cane",
+     "type": "film",
+     "year": 1962
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:85441": {
+   "at": "2026-10-01T12:03:53+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Caramel",
+     "type": "film",
+     "year": 2007
+    },
+    {
+     "title": "Wadjda",
+     "type": "film",
+     "year": 2012
+    },
+    {
+     "title": "The Battle of Algiers",
+     "type": "film",
+     "year": 1966
+    },
+    {
+     "title": "A Separation",
+     "type": "film",
+     "year": 2011
+    },
+    {
+     "title": "The Square",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Clash",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Cairo Station",
+     "type": "film",
+     "year": 1958
+    },
+    {
+     "title": "Capernaum",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "The Insult",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Beauty and the Dogs",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "In the Name of",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Theeb",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Divines",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Mustang",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Promising Young Woman",
+     "type": "film",
+     "year": 2020
+    },
+    {
+     "title": "Monster",
+     "type": "film",
+     "year": 2003
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:87380": {
+   "at": "2026-10-01T12:04:16+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Plan B",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Hawaii",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Taekwondo",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "The Blonde One",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Mariposa",
+     "type": "film",
+     "year": 2015
+    },
+    {
+     "title": "Stranger by the Lake",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Eastern Boys",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Four Moons",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "Socrates",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "God's Own Country",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Sauvage",
+     "type": "film",
+     "year": 2018
+    },
+    {
+     "title": "Tom at the Farm",
+     "type": "film",
+     "year": 2013
+    },
+    {
+     "title": "Heartstone",
+     "type": "film",
+     "year": 2016
+    },
+    {
+     "title": "Moffie",
+     "type": "film",
+     "year": 2019
+    },
+    {
+     "title": "Beautiful Thing",
+     "type": "film",
+     "year": 1996
+    },
+    {
+     "title": "Call Me by Your Name",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Summer of 85",
+     "type": "film",
+     "year": 2020
+    },
+    {
+     "title": "The Wound",
+     "type": "film",
+     "year": 2017
+    },
+    {
+     "title": "Futuro Beach",
+     "type": "film",
+     "year": 2014
+    },
+    {
+     "title": "End of the Century",
+     "type": "film",
+     "year": 2019
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:8986": {
+   "at": "2026-10-01T12:04:52+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Blank Check",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "Richie Rich",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "The Sandlot",
+     "type": "film",
+     "year": 1993
+    },
+    {
+     "title": "My Girl",
+     "type": "film",
+     "year": 1991
+    },
+    {
+     "title": "Dennis the Menace",
+     "type": "film",
+     "year": 1993
+    },
+    {
+     "title": "Mrs. Doubtfire",
+     "type": "film",
+     "year": 1993
+    },
+    {
+     "title": "Now and Then",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Pretty Woman",
+     "type": "film",
+     "year": 1990
+    },
+    {
+     "title": "Camp Nowhere",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "The Mighty Ducks",
+     "type": "film",
+     "year": 1992
+    },
+    {
+     "title": "D2: The Mighty Ducks",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "Little Giants",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "Angels in the Outfield",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "Josh and S.A.M.",
+     "type": "film",
+     "year": 1993
+    },
+    {
+     "title": "Big",
+     "type": "film",
+     "year": 1988
+    },
+    {
+     "title": "Harriet the Spy",
+     "type": "film",
+     "year": 1996
+    },
+    {
+     "title": "The Little Rascals",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "Heavyweights",
+     "type": "film",
+     "year": 1995
+    },
+    {
+     "title": "Uncle Buck",
+     "type": "film",
+     "year": 1989
+    },
+    {
+     "title": "The Wonder Years",
+     "type": "series",
+     "year": 1988
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:96243": {
+   "at": "2026-10-01T12:05:04+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Walkabout",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "The Railway Children",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Twisted Nerve",
+     "type": "film",
+     "year": 1969
+    },
+    {
+     "title": "Baxter!",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "10 Rillington Place",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Deep End",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "The Go-Between",
+     "type": "film",
+     "year": 1970
+    },
+    {
+     "title": "Our Mother's House",
+     "type": "film",
+     "year": 1967
+    },
+    {
+     "title": "Peeping Tom",
+     "type": "film",
+     "year": 1960
+    },
+    {
+     "title": "Repulsion",
+     "type": "film",
+     "year": 1965
+    },
+    {
+     "title": "Night Must Fall",
+     "type": "film",
+     "year": 1964
+    },
+    {
+     "title": "The Collector",
+     "type": "film",
+     "year": 1965
+    },
+    {
+     "title": "Theatre of Blood",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Straight on Till Morning",
+     "type": "film",
+     "year": 1972
+    },
+    {
+     "title": "Symptoms",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "The Reflecting Skin",
+     "type": "film",
+     "year": 1990
+    },
+    {
+     "title": "An Education",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "Picnic at Hanging Rock",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "The Innocents",
+     "type": "film",
+     "year": 1961
+    },
+    {
+     "title": "Experiment in Terror",
+     "type": "film",
+     "year": 1962
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:9769": {
+   "at": "2026-10-01T12:05:27+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Lolita",
+     "type": "film",
+     "year": 1962
+    },
+    {
+     "title": "A Clockwork Orange",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Death in Venice",
+     "type": "film",
+     "year": 1971
+    },
+    {
+     "title": "Despair",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "The Night Porter",
+     "type": "film",
+     "year": 1974
+    },
+    {
+     "title": "Blue Velvet",
+     "type": "film",
+     "year": 1986
+    },
+    {
+     "title": "Poison Ivy",
+     "type": "film",
+     "year": 1992
+    },
+    {
+     "title": "Léon: The Professional",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "Heavenly Creatures",
+     "type": "film",
+     "year": 1994
+    },
+    {
+     "title": "American Beauty",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "The Virgin Suicides",
+     "type": "film",
+     "year": 1999
+    },
+    {
+     "title": "The Piano Teacher",
+     "type": "film",
+     "year": 2001
+    },
+    {
+     "title": "The Dreamers",
+     "type": "film",
+     "year": 2003
+    },
+    {
+     "title": "Notes on a Scandal",
+     "type": "film",
+     "year": 2006
+    },
+    {
+     "title": "The Reader",
+     "type": "film",
+     "year": 2008
+    },
+    {
+     "title": "An Education",
+     "type": "film",
+     "year": 2009
+    },
+    {
+     "title": "You",
+     "type": "series",
+     "year": 2018
+    },
+    {
+     "title": "May December",
+     "type": "film",
+     "year": 2023
+    }
+   ],
+   "provider": "claude-cli"
+  },
+  "movie:99361": {
+   "at": "2026-10-01T12:05:46+00:00",
+   "costUSD": 0.0,
+   "known": true,
+   "model": "claude-sonnet-5",
+   "modelVersion": null,
+   "picks": [
+    {
+     "title": "Sechs Schwedinnen im Pensionat",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "Blue Rita",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Jacqueline",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "Konvikt mädchen",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "Sadomania",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "Phantasm der Lust",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Felicia",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "Lady Dracula",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "La Veuve en Rose",
+     "type": "film",
+     "year": 1973
+    },
+    {
+     "title": "Exorcisme",
+     "type": "film",
+     "year": 1975
+    },
+    {
+     "title": "Belle d'Amour, l'enfer des sens",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "La Nonne et le Diable",
+     "type": "film",
+     "year": 1978
+    },
+    {
+     "title": "Perversions sexuelles",
+     "type": "film",
+     "year": 1979
+    },
+    {
+     "title": "Barbed Wire Dolls",
+     "type": "film",
+     "year": 1976
+    },
+    {
+     "title": "Frauenstation",
+     "type": "film",
+     "year": 1977
+    },
+    {
+     "title": "Caligula et Messaline",
+     "type": "film",
+     "year": 1981
+    },
+    {
+     "title": "Beatrice",
+     "type": "film",
+     "year": 1987
+    },
+    {
+     "title": "La Clinique des phantasmes",
+     "type": "film",
+     "year": 1980
+    },
+    {
+     "title": "Helga, die sadistische Dompteuse",
+     "type": "film",
+     "year": 1983
+    },
+    {
+     "title": "Marie-Christine, chienne d'amour",
+     "type": "film",
+     "year": 1981
+    }
+   ],
+   "provider": "claude-cli"
+  }
+ },
+ "issue": "oxyc/den-dataset#183",
+ "refused": {},
+ "schema": "fan-picks-backfill-v1"
+}
