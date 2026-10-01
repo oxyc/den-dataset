@@ -139,6 +139,36 @@ class FanPicksWeekly(unittest.TestCase):
         self.assertEqual(tuesday.models["fan_picks"]["reasks"], {"due": 0, "collected": 1})
         self.assertEqual(len(self.provider.submitted), 1, "asked once for that date")
 
+    def test_an_outage_while_collecting_keeps_the_job_and_does_not_stop_the_day(self):
+        self.run_day(MONDAY)
+        self.provider.state = "done"
+
+        def down(*_):
+            raise providers.Unavailable("HTTP 503 b'busy'", 503)
+        self.provider.poll = down
+        tuesday, anchors = self.run_day(TUESDAY)
+        [pending] = tuesday.models["fan_picks"]["pending"]
+        self.assertIn("HTTP 503", pending["error"])
+        self.assertEqual(len(tuesday.paid.data["batches"]), 1)
+        self.assertNotIn("movie:1", anchors)
+
+    def test_a_backlog_past_the_cap_waits_for_next_week(self):
+        out = os.path.join(self.root, "cap")
+        os.makedirs(out)
+        corpus, articles, franchises, existing = fan_tests.Daily().fixture(out, {"movie:2": []})
+        paths = {artifacts.CORPUS: corpus, artifacts.ARTICLES: articles, artifacts.FRANCHISES: franchises,
+                 artifacts.FAN_PICKS: existing}
+        ctx = types.SimpleNamespace(path=lambda artifact: paths.get(artifact, os.path.join(out, "x")))
+        day = day_on(MONDAY, out, self.ledger, {"GEMINI_API_KEY": "g"})
+        each = model_steps.fan_picks.PILOT_COST * model_steps.fan_picks.MARGIN * llm.BATCH_FACTOR
+        day.args.fan_picks_max_spend_usd = each * 1.5
+        day.waiting = {"fan_picks": ["movie:1", "movie:8", "movie:9"]}
+        with mock.patch.object(model_steps, "finalize_ctx", return_value=ctx), \
+                mock.patch.object(model_steps.fan_picks, "sequel_keys", return_value={}):
+            model_steps.fan_picks_step(day)
+        self.assertEqual((day.models["fan_picks"]["submitted"]["titles"], day.models["fan_picks"]["deferred"]),
+                         (1, 2))
+
     def test_an_expired_job_is_finished_online(self):
         self.run_day(MONDAY)
         self.provider.state = "expired"

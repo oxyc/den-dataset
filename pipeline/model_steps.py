@@ -35,6 +35,9 @@ from tools import fan_picks
 
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 REPORT_KEYS = {"fan_picks": "fanPicks", "premise_tags": "premiseTags"}
+#: The most waiting titles one run builds a premise worklist for: ~$0.15 at gpt-5.6-luna's Batch price, well
+#: inside the step's cap, so a backlog is worked off over several runs instead of refused.
+PREMISE_LIMIT = 400
 
 
 def finalize_ctx(ctx):
@@ -204,7 +207,13 @@ def fan_picks_step(day):
         report["waiting"] = len(ask)
         report["reasks"] = {"due": len(again), "collected": len(reask_answers)}
         if report["due"]:
-            projected = (len(ask) + len(again)) * fan_picks.PILOT_COST * fan_picks.MARGIN * lib_llm.BATCH_FACTOR
+            # A backlog past the cap waits for next week rather than failing the day.
+            each = fan_picks.PILOT_COST * fan_picks.MARGIN * lib_llm.BATCH_FACTOR
+            room = max(0, int(day.args.fan_picks_max_spend_usd / each))
+            again = again[:room]
+            ask = ask[:max(0, room - len(again))]
+            report["deferred"] = report["waiting"] - len(ask)
+            projected = (len(ask) + len(again)) * each
             day.ledger.reserve("fanPicks", projected, day.args.fan_picks_max_spend_usd)
             job = submit(day, "fan_picks", cfg, task, ask + again)
             if job is not None and again:
@@ -308,6 +317,10 @@ def premise_step(day):
     work = os.path.join(day.ctx.out_dir, "premise-increment", "weekly")
     plan_path = os.path.join(work, "plan.json")
     os.makedirs(work, exist_ok=True)
+    # A backlog past what one run's cap can hold waits for the next run rather than failing this one.
+    deferred = sorted(waiting - pending)[PREMISE_LIMIT:]
+    waiting -= set(deferred)
+    report["deferred"] = len(deferred)
     with open(plan_path, "w", encoding="utf-8") as fh:
         json.dump({"baseline": changes.planned(day.ctx)["baseline"], "added": sorted(waiting | pending),
                    "changed": {}}, fh)
@@ -406,13 +419,17 @@ def collect(day, step, cfg, task, items_by_key, budget, record):
     report, spent = day.models[step], 0.0
     for job in jobs(day, step):
         items = [items_by_key[key] for key in job_keys(job) if key in items_by_key]
+        waiting = {"label": job["label"], "submittedAt": job["submittedAt"], "ageHours": age(job, day.now),
+                   "titles": len(job_keys(job))}
         try:
             outcome, _rows, calls = lib_llm.collect(cfg, job, task, items, budget, record=record)
         except (lib_llm.OverBudget, lib_llm.providers.Unavailable) as error:
-            raise StageError(f"{step}: collecting {job['label']}: {error}") from error
+            # The job stays in the ledger and is collected by a later run: an outage, or a cap reached while
+            # finishing it online, must not stop the day or lose the job.
+            report["pending"].append({**waiting, "error": str(error)[:300]})
+            continue
         if outcome == "running":
-            report["pending"].append({"label": job["label"], "submittedAt": job["submittedAt"],
-                                      "ageHours": age(job, day.now), "titles": len(job_keys(job))})
+            report["pending"].append(waiting)
             continue
         if outcome in ("expired", "failed"):
             report["expired"].append(job["label"])
