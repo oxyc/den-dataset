@@ -402,7 +402,7 @@ class Daily(unittest.TestCase):
     def test_a_refused_title_is_asked_once_more_and_then_by_the_fallback_model(self):
         asked = []
 
-        def online(title, key, ask=0, cfg=fp.CFG):
+        def online(title, key, ask=0, cfg=fp.CFG, budget=None):
             asked.append(cfg["model"])
             if cfg["model"] == fp.MODEL:
                 return None, {"key": key, "costUSD": 0.001, "usage": {}, "text": ""}, True
@@ -418,8 +418,30 @@ class Daily(unittest.TestCase):
         self.assertEqual(out["anchors"]["movie:1"], ["movie:2"])
         self.assertAlmostEqual(result["costUSD"], 0.012)
 
+    def test_the_cap_holds_every_call_fallback_included_and_what_it_leaves_waits(self):
+        """#201 review: the projection covered one Gemini call a title, not its retry and the fallback."""
+        seen = []
+
+        def online(title, key, ask=0, cfg=fp.CFG, budget=None):
+            seen.append((key, cfg["model"]))
+            try:
+                budget.admit(0.4)
+            except fp.llm.OverBudget:
+                return None, {"key": key, "error": fp.OVER_BUDGET, "costUSD": 0.0}, False
+            budget.charge(0.4, held=0.4)
+            return None, {"key": key, "costUSD": 0.4, "usage": {}, "text": ""}, True
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(fp, "generate_online", online):
+            corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1", "movie:8"],
+                                     workers=1, follows={}, max_spend=1.0)
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertLessEqual(result["costUSD"], 1.0)
+        self.assertTrue(result["overBudget"], "a title the cap left unasked waits")
+        self.assertTrue(all(key not in out["anchors"] for key in result["overBudget"]))
+
     def test_a_title_the_fallback_refuses_too_stays_asked_empty(self):
-        refused = lambda title, key, ask=0, cfg=fp.CFG: (  # noqa: E731
+        refused = lambda title, key, ask=0, cfg=fp.CFG, budget=None: (  # noqa: E731
             None, {"key": key, "costUSD": 0.001, "usage": {}, "text": ""}, True)
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(fp, "generate_online", refused):
             corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
@@ -430,7 +452,7 @@ class Daily(unittest.TestCase):
         self.assertEqual((out["anchors"]["movie:1"], result["emptyAnswers"]), ([], 1))
 
     def test_an_unreachable_fallback_leaves_the_refusal_standing_instead_of_refusing_the_day(self):
-        def online(title, key, ask=0, cfg=fp.CFG):
+        def online(title, key, ask=0, cfg=fp.CFG, budget=None):
             if cfg["model"] == fp.MODEL:
                 return None, {"key": key, "costUSD": 0.001, "usage": {}, "text": ""}, True
             return None, {"key": key, "error": "ANTHROPIC_API_KEY is not set", "costUSD": 0.0}, False

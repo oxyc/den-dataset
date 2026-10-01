@@ -41,15 +41,28 @@ the master switch. TypeSafe covers classify, critique, genres/moods, and franchi
 picks and premise tags use the models `data/models.json` names (below), on the cadence it gives each.
 
 A **weekly** step (both, on Mondays, through the Batch API at half price) submits one job for every title
-still waiting for it, and the next run collects the job; a job that expired or failed is finished online and
-never resubmitted. Due is worked out from the last submit the paid-answers ledger records, so a failed Monday
-is caught up the next day. A waiting title is published without that section, and its article is fetched
-again each day it waits. The daily report's table shows each step's cadence, whether it was due, the titles
-waiting, pending jobs with their age, what was collected and what expired. The fan-picks job also carries
-the re-asks due that week: titles the model did not know, or released within six months of their first ask,
-asked again three and six months on (`data/fan-picks-reask.json` seeds the titles asked before the ledger);
-a re-ask replaces the picks only when the model now knows the title or names more store titles. A weekly step needs
-`--paid-state`: without the ledger it could not find its job again, so it does not submit one.
+still waiting for it, and a later run collects the job; a job that expired, failed or ran past 72 hours is
+finished online and never resubmitted. Due is worked out from the last submit the paid-answers ledger records,
+so a failed Monday is caught up the next day. A waiting title is published without that section, and its
+article is fetched again each day it waits. The daily report's table shows each step's cadence, whether it
+was due, the titles waiting, pending jobs with their age, what was collected and what expired. The fan-picks
+job also carries the re-asks due that week: titles the model did not know, or released within six months of
+their first ask, asked again three and six months on (`data/fan-picks-reask.json` seeds the titles asked
+before the ledger); a re-ask replaces the picks only when the model now knows the title or names more store
+titles. A weekly step needs `--paid-state`: without the ledger it could not find its job again, so it does
+not submit one.
+
+The weekly steps are held to the same caps (`pipeline/model_steps.py`). A submit takes as many titles as the
+step's daily cap and the month have room for and leaves the rest waiting; with no room at all nothing is
+submitted and the step stays due, so the day does not fail. A submitted job's projection counts against the
+month (`pendingBatchUSD` in the report) until a run collects it and measures what it cost. Finishing a job
+online is paid from that day's allowance and can take several runs; a title already answered is never asked
+again. A run without spend still reads a finished job, and asks nothing. A job still owing titles after 14
+days is let go, its answers kept and its other titles waiting again. Each submit is recorded before it is
+sent, so a run that dies before it sees the job finds it by its label the next day instead of buying it twice.
+A premise title no model would tag is asked again three and then six months on, not every week; one the
+worklist turns away for good (not a screen work, not narrative, no story-premise section) is not asked again
+until it is classified again; one whose article changed waits to be classified again and is never settled.
 
 Each step projects the complete request set before its first call. The per-day ceilings are
 `DEN_DAILY_TYPESAFE_MAX_SPEND_USD`, `DEN_DAILY_FAN_PICKS_MAX_SPEND_USD`, and
@@ -96,14 +109,18 @@ of a credential, what was bought, and the refusal. `daily-report.json` carries t
 
 Nothing a failed run paid for is lost: the job uploads the paid-answers ledger (`pipeline/paid.py`) to the
 `paid-state` release after every run, and the next run lays its Jev shards back and reuses its fan-pick and
-premise answers before asking anything. Rerunning a failed day buys nothing it already bought.
+premise answers before asking anything. Rerunning a failed day buys nothing it already bought. The ledger is
+`paid-state-<run id>-<attempt>.json.gz`, the newest of them; each run uploads its own before deleting the
+older ones. A run that cannot read it fails rather than start without it, and a published run prunes what the
+publish carries. The release is public, so the ledger carries no TMDB title or year and no article text.
 
 To reproduce a run locally, lay out what the job started from and run the same command:
 
 ```sh
 gh release download data-latest -p dataset.meta.json -D out/published --clobber
 gh release download corpus-<datasetVersion> -D out/published --clobber
-gh release download paid-state -p paid-state.json.gz -D paid --clobber
+gh release download paid-state -p 'paid-state-*.json.gz' -D paid --clobber   # one asset: the ledger
+cp paid/paid-state-*.json.gz paid/paid-state.json.gz
 ./den daily --out-dir out --paid-state paid/paid-state.json.gz
 ./den stage publish --out-dir out --plan     # every gate again, against the same published manifest
 ```

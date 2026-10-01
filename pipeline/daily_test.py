@@ -58,6 +58,10 @@ class Recorded(unittest.TestCase):
                 os.makedirs(os.path.join(ctx.out_dir, "changes"), exist_ok=True)
                 with open(os.path.join(ctx.out_dir, "changes", "plan.json"), "w", encoding="utf-8") as fh:
                     json.dump(self.plan, fh)
+                for listed, keys in (("new", self.plan["added"]), ("keys", self.plan["added"]), ("withdrawn", []),
+                                     ("items", [])):
+                    with open(os.path.join(ctx.out_dir, "changes", f"{listed}.txt"), "w", encoding="utf-8") as fh:
+                        fh.writelines(f"{key}\n" for key in keys)
             if name == "publish" and self.check_refuses:
                 raise StageError("publish: pipeline/publish-dataset.sh exited 1")
             if name == "plot_length" and self.migration_refuses:

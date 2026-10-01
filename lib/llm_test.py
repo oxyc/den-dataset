@@ -118,9 +118,10 @@ class Generate(unittest.TestCase):
     def test_a_transport_failure_is_an_error_row_not_a_refusal(self):
         class Down(Fake):
             def online(self, cfg, request):
-                raise providers.Unavailable("HTTP 503 b'busy'", 503)
+                raise providers.Unavailable("HTTP 503 b'busy for org-1234'", 503)
         rows, calls = self.run_with(Down())
-        self.assertEqual(rows["movie:1"], {"error": "HTTP 503 b'busy'", "unavailable": True})
+        self.assertEqual(rows["movie:1"], {"error": "HTTP 503", "unavailable": True},
+                         "a code: the provider's text can carry account ids")
         self.assertEqual(calls, [])
 
     def test_each_call_is_priced_and_a_cap_stops_before_the_call_that_could_cross_it(self):
@@ -128,8 +129,9 @@ class Generate(unittest.TestCase):
         try:
             _, calls = llm.generate(cfg, Task(), ITEMS[:1])
             self.assertAlmostEqual(calls[0]["costUSD"], 1000 * 1e-6 + 100 * 2e-6)
-            with self.assertRaises(llm.OverBudget):
-                llm.generate(cfg, Task(), ITEMS[:1], budget=llm.Budget(0.0001))
+            rows, calls = llm.generate(cfg, Task(), ITEMS[:1], budget=llm.Budget(0.0001))
+            self.assertEqual((rows["movie:1"], calls), ({"error": llm.OVER_BUDGET, "unavailable": True}, []),
+                             "nothing sent, and the title waits for a later run")
         finally:
             for patch in patches:
                 patch.stop()
@@ -207,6 +209,18 @@ class Batch(unittest.TestCase):
         self.assertEqual({key: prompts.count(key) for key in ("movie:1", "movie:2", "movie:3")},
                          {"movie:1": 1, "movie:2": 1, "movie:3": 1})
         self.assertEqual(unfinished, 0)
+
+    def test_a_job_running_far_past_every_window_is_finished_online(self):
+        fake = Fake(batch_state="running")
+        cfg, patches = configured(fake, per_call=1, fallback=False)
+        try:
+            job = {"provider": "fake", "model": "primary", "chunks": {"c0": ["movie:1"]}}
+            self.assertEqual(llm.collect(cfg, job, Task(), ITEMS[:1])[0], "running")
+            state, rows, _, unfinished = llm.collect(cfg, job, Task(), ITEMS[:1], stale=True)
+        finally:
+            for patch in patches:
+                patch.stop()
+        self.assertEqual((state, rows["movie:1"]["value"], unfinished), ("expired", "primary:movie:1", 0))
 
     def test_finish_limits_the_online_finish_and_says_what_is_left(self):
         fake = Fake(batch_state="expired")

@@ -122,6 +122,27 @@ class IncrementalPremiseWorklistTest(unittest.TestCase):
         with open(os.path.join(self.directory, "two-shards", "gen", "manifest.json"), encoding="utf-8") as handle:
             self.assertNotIn("tv:990000004", json.load(handle)["ids"], "the newer row's validity counts")
 
+    def test_each_title_turned_away_says_why_and_which_article_its_classification_read(self):
+        """A verdict on the classification (not a screen work, not narrative, no story-premise section) is
+        told apart from a title that only waits (its article changed, or is not in today's dump)."""
+        with open(self.combined, encoding="utf-8") as handle:
+            rows = [json.loads(line) for line in handle]
+        by_id = {row["tmdbId"]: row for row in rows}
+        by_id[990000001]["answers"]["narrative_applicability"]["choice"] = "documentary-or-factual"
+        by_id[990000001]["articleSha256"] = "s1"
+        by_id[990000002]["articleSha256"] = "not-the-article-today"
+        by_id[990000004]["sections"][0]["role"]["value"] = "production"
+        with open(self.combined, "w", encoding="utf-8") as handle:
+            handle.writelines(json.dumps(row) + "\n" for row in rows)
+        result = self.run_script(out="turned-away")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(os.path.join(self.directory, "turned-away", "gen", "manifest.json"), encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        self.assertEqual(manifest["skippedKeys"], {
+            "movie:990000001": {"reason": "nonNarrative", "articleSha256": "s1"},
+            "movie:990000002": {"reason": "articleChanged", "articleSha256": "not-the-article-today"},
+            "tv:990000004": {"reason": "review", "articleSha256": None}})
+
 
 if __name__ == "__main__":
     unittest.main()

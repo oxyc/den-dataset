@@ -386,22 +386,28 @@ def run_online(w, items, workers=8, log=sys.stderr):
     return ok
 
 
-def generate_online(title, key, ask=0, cfg=CFG):
+#: What `generate_online` says when the run's budget would not admit the call: nothing was sent.
+OVER_BUDGET = llm.OVER_BUDGET
+
+
+def generate_online(title, key, ask=0, cfg=CFG, budget=None):
     """One retried ask through `lib/llm.py`: `(answer, error, accepted)`.
 
     `accepted` separates an HTTP/transport failure from a response received from the provider. A safety
     refusal or malformed response is still an error. A provider-accepted empty response is a durable
-    asked-empty anchor; malformed non-empty output remains unasked.
+    asked-empty anchor; malformed non-empty output remains unasked. A call `budget` will not admit is not
+    sent, and comes back unaccepted with `OVER_BUDGET` as its error.
     """
     try:
-        result = llm.online(cfg, question(title, cfg))
-    except providers.Unavailable as exc:
-        return None, {"key": key, "ask": ask, "mode": "online", "error": str(exc), "costUSD": 0.0}, False
+        result = llm.online(cfg, question(title, cfg), budget)
+    except (providers.Unavailable, llm.OverBudget) as exc:
+        # A code, not the provider's text: the error is kept in the public ledger and named in the report.
+        return None, {"key": key, "ask": ask, "mode": "online", "error": llm.error_code(exc), "costUSD": 0.0}, False
     answer, error = recorded(result, key, ask, "online", cfg=cfg)
     return answer, error, True
 
 
-def answer_title(title, key, ask=0, cfg=CFG):
+def answer_title(title, key, ask=0, cfg=CFG, budget=None):
     """`generate_online`, with what #183 decided for an answer that is not one: a refused, empty or malformed
     answer is asked once more, and then by the step's fallback model. Only a title the fallback cannot answer
     either keeps the refusal (#170's asked-empty rule). The row's `costUSD` is every attempt's.
@@ -411,7 +417,8 @@ def answer_title(title, key, ask=0, cfg=CFG):
     spent, last = 0.0, None
     attempts = [cfg, cfg] + ([cfg["fallback"]] if cfg.get("fallback") else [])
     for n, attempt in enumerate(attempts):
-        answer, error, accepted = generate_online(title, key, ask, attempt)
+        answer, error, accepted = generate_online(title, key, ask, attempt,
+                                                  **({"budget": budget} if budget is not None else {}))
         if not accepted:
             if last is None or n < 2:
                 return answer, error, accepted
@@ -742,10 +749,12 @@ class Task:
         return {titles[0]["key"]: {"known": known, "picks": picks}}
 
 
-def fingerprint(title, cfg=CFG):
-    """What an answer was bought for: who was asked, and the request on the wire. A kept answer is reused
-    only for the same fingerprint, so a new prompt or model is the one way to pay for a title again."""
-    return digest({"provider": cfg["provider"], "model": cfg["model"], "request": request_body(title, cfg)})
+def fingerprint(key, cfg=CFG):
+    """What an answer was bought for: the title, who was asked, and the prompt's version. A kept answer is
+    reused only for the same fingerprint, so a new prompt or model is the one way to pay for a title again.
+    The lead is not in it: an edit to the article between an unpublished run and the next is not a reason to
+    buy the title again."""
+    return digest({"key": key, "provider": cfg["provider"], "model": cfg["model"], "version": Task.version})
 
 
 def reusable(saved, wanted):
@@ -806,7 +815,7 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     answered, empty_answers, parse_errors, unavailable = {}, {}, {}, {}
     checkpoint_path = daily_checkpoint_path(out)
     checkpoint = load_daily_checkpoint(checkpoint_path) if kept is None else {"responses": kept}
-    fingerprints = {key: fingerprint(title) for key, title in titles.items()}
+    fingerprints = {key: fingerprint(key) for key in titles}
 
     def classify(key, result):
         answer, error, accepted = result
@@ -833,10 +842,13 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     if projected > max_spend:
         raise RuntimeError(f"daily fan picks: refusing {len(pending)} requests: their ${projected:.4f} "
                            f"projected spend crosses the ${max_spend:.2f} per-run cap")
+    # And every call, retries and the fallback included, is held to the cap as it is made.
+    budget = llm.Budget(max_spend)
+    ask = (lambda title, key, n: answer_title(title, key, n, budget=budget)) if generate is answer_title else generate
 
     def one(item):
         key, title = item
-        return key, generate(title, key, 0)
+        return key, ask(title, key, 0)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(one, item) for item in pending.items()]
         for future in concurrent.futures.as_completed(futures):
@@ -852,10 +864,14 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
                     write_json(checkpoint_path, checkpoint)
                 elif persist is not None:
                     persist()
-    if unavailable:
-        first = next(iter(unavailable.items()))
-        raise RuntimeError(f"daily fan picks: Gemini unreachable for {len(unavailable)} title(s); "
+    # A title the cap left unasked waits for a later run; an outage refuses the update.
+    over = {key for key, error in unavailable.items() if error.get("error") == OVER_BUDGET}
+    unreachable = {key: error for key, error in unavailable.items() if key not in over}
+    if unreachable:
+        first = next(iter(unreachable.items()))
+        raise RuntimeError(f"daily fan picks: Gemini unreachable for {len(unreachable)} title(s); "
                            f"{first[0]}: {first[1].get('error')}")
+    titles = {key: title for key, title in titles.items() if key not in over}
 
     backfilled = {key: answer for key, answer in (backfill or {}).items()
                   if key in rows and key not in titles and not anchors.get(key)}
@@ -890,7 +906,7 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     return {"asked": len(titles), "answered": len(answered), "emptyAnswers": len(empty_answers),
             "parseErrors": len(parse_errors),
             "generated": len(pending), "resumed": resumed,
-            "notInCorpus": not_in_corpus, "backfilled": len(backfilled),
+            "notInCorpus": not_in_corpus, "backfilled": len(backfilled), "overBudget": sorted(over),
             "reasked": len(reasked), "reaskReplaced": replaced,
             "anchors": len(anchors), "picks": sum(len(v) for v in anchors.values()),
             "costUSD": round(sum(costs), 6), "projectedSpendUSD": round(projected, 6),

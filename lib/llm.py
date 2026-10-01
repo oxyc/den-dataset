@@ -63,6 +63,19 @@ class OverBudget(RuntimeError):
     """The next call could cost more than the cap leaves. Nothing was sent."""
 
 
+#: A row's error when the cap would not admit its call (`generate`).
+OVER_BUDGET = "over budget"
+
+
+def error_code(error):
+    """A short name for a failed call, for what is published (the daily report, the paid-answers ledger, a
+    public Actions log): a provider's error text can carry account or organisation ids."""
+    if isinstance(error, OverBudget):
+        return OVER_BUDGET
+    status = getattr(error, "status", None)
+    return f"HTTP {status}" if status else "unavailable"
+
+
 # --- config ---------------------------------------------------------------------------------------------
 
 def load(path=None):
@@ -208,16 +221,19 @@ def generate(cfg, task, items, budget=None, workers=1, record=None):
     def settle(key, row):
         with lock:
             rows[key] = row
-            if record is not None:
+            # An unanswered title is not final: it is asked again later, so nothing is kept for it.
+            if record is not None and not row.get("unavailable"):
                 record(key, row)
 
     def ask(cfg_, group, mode="online"):
         """One call over `group`; returns the items to ask again (split, retried or fallen back)."""
         try:
             result = online(cfg_, task.request(group), budget)
-        except providers.Unavailable as error:
+        except (providers.Unavailable, OverBudget) as error:
+            # Not answered — an outage, or a call the cap would not admit, so nothing was sent. The titles
+            # are asked again by a later run; the ones already answered keep their rows.
             for item in group:
-                settle(task.key(item), {"error": str(error), "unavailable": True})
+                settle(task.key(item), {"error": error_code(error), "unavailable": True})
             return [], []
         with lock:
             calls.append(call_record(cfg_, mode, result, len(group)))
@@ -267,21 +283,34 @@ def generate(cfg, task, items, budget=None, workers=1, record=None):
 
 # --- Batch ----------------------------------------------------------------------------------------------
 
+def batch_record(cfg, task, items, label):
+    """What a Batch job of `items` is, before the provider has made it: who is asked, under which label, and
+    which titles each request carries. A caller can keep it before submitting, to find the job by its label
+    (`adopt`) if the submit's response is lost."""
+    groups = chunks(items, cfg["titlesPerCall"])
+    return {"step": cfg["step"], "provider": cfg["provider"], "model": cfg["model"], "mode": "batch",
+            "version": task.version, "label": label,
+            "chunks": {f"c{n:05d}": [task.key(item) for item in group] for n, group in enumerate(groups)},
+            "submittedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+
+
+def adopt(cfg, record):
+    """The job a `batch_record` was submitted as, found by its label, or None when the provider has none (or
+    cannot list its jobs: Anthropic)."""
+    find = getattr(providers.PROVIDERS[record["provider"]], "find", None)
+    job = find(job_cfg(cfg, record), record["label"]) if find else None
+    return {**job, **record} if job else None
+
+
 def submit(cfg, task, items, label, directory):
     """Submit `items` as one Batch job. Returns the job record a later run collects with `collect`."""
-    groups = chunks(items, cfg["titlesPerCall"])
-    customs = {f"c{n:05d}": group for n, group in enumerate(groups)}
+    record = batch_record(cfg, task, items, label)
+    by_key = {task.key(item): item for item in items}
     os.makedirs(directory, exist_ok=True)
-    provider = providers.PROVIDERS[cfg["provider"]]
     # A create whose response was lost may still have made the job: find it by label before making another.
-    find = getattr(provider, "find", None)
-    job = (find(cfg, label) if find else None) or provider.submit(
-        cfg, {custom: task.request(group) for custom, group in customs.items()}, label,
-        os.path.join(directory, f"{label}.jsonl"))
-    return {**job, "step": cfg["step"], "provider": cfg["provider"], "model": cfg["model"], "mode": "batch",
-            "version": task.version, "label": label,
-            "chunks": {custom: [task.key(item) for item in group] for custom, group in customs.items()},
-            "submittedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+    return adopt(cfg, record) or {**providers.PROVIDERS[cfg["provider"]].submit(
+        cfg, {custom: task.request([by_key[key] for key in keys]) for custom, keys in record["chunks"].items()},
+        label, os.path.join(directory, f"{label}.jsonl")), **record}
 
 
 def job_cfg(cfg, job):
@@ -290,7 +319,8 @@ def job_cfg(cfg, job):
     return {**cfg, "provider": job["provider"], "model": job["model"], "mode": "batch"}
 
 
-def collect(cfg, job, task, items, budget=None, workers=1, record=None, done=None, finish=None):
+def collect(cfg, job, task, items, budget=None, workers=1, record=None, done=None, finish=None, stale=False,
+            unaskable=()):
     """Poll `job`. Returns `(state, rows, calls, unfinished)`; `running` comes with nothing done.
 
     What the job answered is parsed and recorded. What it refused, could not parse or never answered — every
@@ -302,7 +332,13 @@ def collect(cfg, job, task, items, budget=None, workers=1, record=None, done=Non
     neither recorded nor asked again; `finish` is how many titles this run may finish online (None: all; 0:
     none, as on a day that may not spend). `unfinished` counts the titles still owed — finish them with a
     later `collect` of the same job. The job's Batch cost is counted the first time it is read
-    (`job["batchCounted"]`), so reading it again reports no spend twice."""
+    (`job["batchCounted"]`), so reading it again reports no spend twice.
+
+    `stale` says the job has run far past every provider's window: one still reported running is taken as
+    expired and finished online, so a state nothing here knows cannot hold its titles forever.
+
+    `unaskable` names items whose evidence is gone since the job was submitted: what the job answered for
+    them is recorded, but they are never finished online and are not owed."""
     cfg = job_cfg(cfg, job)
     done = done or (lambda key: False)
     try:
@@ -310,6 +346,8 @@ def collect(cfg, job, task, items, budget=None, workers=1, record=None, done=Non
     except providers.Unavailable as error:
         if error.status != 404:
             raise
+        state, out = "expired", {}
+    if state == "running" and stale:
         state, out = "expired", {}
     if state == "running":
         return state, {}, [], sum(len(keys) for keys in job["chunks"].values())
@@ -344,7 +382,7 @@ def collect(cfg, job, task, items, budget=None, workers=1, record=None, done=Non
             else:
                 leftover.append(item)
     job["batchCounted"] = True
-    leftover = [item for item in leftover if not done(task.key(item))]
+    leftover = [item for item in leftover if not done(task.key(item)) and task.key(item) not in unaskable]
     now = leftover if finish is None else leftover[:max(0, finish)]
     if now:
         more, more_calls = generate({**cfg, "mode": "online"}, task, now, budget, workers, record)

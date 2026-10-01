@@ -149,9 +149,11 @@ class Day:
         self.premise_corrections = None
         self.classifiable_changes = None
         prior = spend.month_to_date(getattr(args, "published_reports_dir", None), now.date())
-        self.ledger = spend.Ledger(prior, getattr(args, "max_spend_usd_month", 10.0))
         self.typesafe_before = None
         self.paid = paid.Ledger(getattr(args, "paid_state", None))
+        # A Batch job submitted on an earlier day and not collected is committed spend: it counts against the
+        # monthly cap until the day it is collected and measured.
+        self.ledger = spend.Ledger(prior, getattr(args, "max_spend_usd_month", 10.0), pending=self.paid.pending_usd())
         self.restored = 0
         self.waiting, self.models, self.reasks = {}, {}, {}
 
@@ -303,7 +305,8 @@ def run_day(day):
             day.premise_corrections = correct_premise(day)
         elif name == "store":
             day.fan_picks = model_steps.fan_picks_step(day)
-            if day.fan_picks:
+            # The weekly step charges what it collects as it goes; the daily one asks inside `daily_update`.
+            if day.fan_picks and not model_steps.weekly(fan_picks.CFG):
                 day.ledger.actual("fanPicks", day.fan_picks.get("costUSD", 0.0))
             day.stage(name)
             premise_daily.stamp_metadata(day.ctx, day.premise)

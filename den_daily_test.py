@@ -174,7 +174,7 @@ class DenDaily(fixture.DenRun):
                                                                    "premise_tags", "franchises (ask)", "fan_picks"])
         self.assertEqual(report["spend"], {
             "steps": {}, "todayUSD": 0, "monthBeforeUSD": 0.0, "monthToDateUSD": 0.0,
-            "monthlyCapUSD": 10.0, "publishedReportsThisMonth": 0, "totalUSD": 0,
+            "monthlyCapUSD": 10.0, "publishedReportsThisMonth": 0, "totalUSD": 0, "pendingBatchUSD": 0.0,
             "typesafeInputTokens": 0, "typesafeUSD": 0.0,
         })
         with open(os.path.join(self.out, "daily-report.md"), encoding="utf-8") as fh:

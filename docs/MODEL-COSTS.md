@@ -142,6 +142,7 @@ Spend on these measurements: $2.80.
 - It happened twice on 2026-09-30, ~$0.009. The failed runs of 09-27/28 ran without spend, so they cost nothing.
 - **Fix:** a paid-answers ledger outside the run, checked before every paid call. This is now a hard rule.
   - **Built** (`pipeline/paid.py`): the `paid-state` release asset keeps every Jev shard, franchise decision, fan-pick and premise answer a run bought until a publish carries it. A Jev answer that fails validation is quarantined beside its shard instead of dropped, and a malformed fan-pick answer is asked again, then by the fallback.
+  - The weekly Batch steps follow the same rule: a job that expired is finished online across as many days as the cap needs, asking only what no answer is kept for, and a submit is recorded before it is sent so a lost response is found by its label, not bought again (Gemini and OpenAI list their jobs; Anthropic cannot, and no step submits to it). A premise title no model would tag is asked again at three and six months, not every week.
   - **Not closable here:** a retry after a TypeSafe response that never arrived may be billed twice; the API takes no idempotency key. At most one state per lost response, ~$0.0004.
 
 **Combining Jev calls.**
@@ -169,7 +170,7 @@ Spend on these measurements: $2.80.
 - Format B's lower match rate is extra names that never match and are dropped, so the row doesn't lose picks. **Shipped** (#187): the prompt asks for it, and the parser still reads the keyed answers stored before it.
 - A plain-text answer made Gemini think ~15× longer and cost more.
 
-**Cadence.** Each step gets a daily or weekly setting. Weekly steps run through Batch, submitted in one run and collected in the next. atlas already copes with a title that has no fan picks or premise vector yet. **Built** (#187): fan picks and premise tags are weekly on Mondays; admission and Jev stay daily. The "N waiting" trigger was not built: at ~5 titles a day nothing calls for it.
+**Cadence.** Each step gets a daily or weekly setting. Weekly steps run through Batch, submitted in one run and collected in the next. atlas already copes with a title that has no fan picks or premise vector yet. **Built** (#187): fan picks and premise tags are weekly on Mondays; admission and Jev stay daily. The "N waiting" trigger was not built: at ~5 titles a day nothing calls for it. A submitted job counts against the monthly cap from the day it is submitted until it is collected and measured, and a submit only takes what the caps leave room for.
 
 ## Fan picks for new releases (#189)
 

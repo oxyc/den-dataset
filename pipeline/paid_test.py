@@ -45,6 +45,77 @@ class Ledger(unittest.TestCase):
                          {"rows": '{"row": 2}\n', "manifest": '{"runId": "r"}'})
         self.assertEqual(again.answers("fan_picks"), {"movie:1": {"accepted": True}})
 
+    def test_a_kept_shard_carries_no_tmdb_title_or_year_and_is_kept_again_when_resumed_in_place(self):
+        """The release is public: a row's `title` and `year` can be TMDB's. A shard laid back and then added to
+        in place has the ledger's name and new rows, so it is compared by content, not by name."""
+        with tempfile.TemporaryDirectory() as root:
+            out, path = os.path.join(root, "out"), os.path.join(root, "paid-state.json.gz")
+            os.makedirs(out)
+            ledger = paid.Ledger(path)
+            ledger.data["shards"]["combined-v1-r2-abc.jsonl"] = {
+                "rows": '{"mediaType":"movie","tmdbId":1}\n', "manifest": "{}"}
+            ledger.restore(Context(out_dir=out))
+            with open(os.path.join(out, "combined-v1-r2-abc.jsonl"), "a") as fh:
+                fh.write('{"mediaType": "movie", "tmdbId": 2, "title": "Heat", "year": 1995, "answers": {}}\n')
+            ledger.keep(Context(out_dir=out))
+            ledger.save()
+            with gzip.open(path, "rb") as fh:
+                body = fh.read()
+        rows = ledger.data["shards"]["combined-v1-r2-abc.jsonl"]["rows"].splitlines()
+        self.assertEqual([json.loads(row) for row in rows],
+                         [{"mediaType": "movie", "tmdbId": 1}, {"mediaType": "movie", "tmdbId": 2, "answers": {}}])
+        self.assertNotIn(b"Heat", body)
+        self.assertNotIn(b"1995", body)
+
+    def test_a_shard_already_in_the_out_dir_that_is_not_the_ledgers_is_never_taken_in(self):
+        with tempfile.TemporaryDirectory() as root:
+            out = os.path.join(root, "out")
+            os.makedirs(out)
+            for suffix, body in (("", '{"row": 1}\n'), (".manifest.json", "{}")):
+                with open(os.path.join(out, "combined-v1-r2-operator.jsonl" + suffix), "w") as fh:
+                    fh.write(body)
+            ledger = paid.Ledger(os.path.join(root, "paid-state.json.gz"))
+            ledger.restore(Context(out_dir=out))
+            with open(os.path.join(out, "combined-v1-r2-operator.jsonl"), "a") as fh:
+                fh.write('{"row": 2}\n')
+            ledger.keep(Context(out_dir=out))
+        self.assertEqual(ledger.data["shards"], {})
+
+    def test_a_publish_prunes_what_it_carries_and_keeps_what_still_waits(self):
+        ledger = paid.Ledger(None)
+        ledger.data["shards"] = {
+            "combined-v1-r2-a.jsonl": {"rows": '{"mediaType":"movie","tmdbId":1}\n', "manifest": "{}"},
+            "combined-v1-r2-b.jsonl": {"rows": '{"mediaType":"movie","tmdbId":2}\n', "manifest": "{}"},
+            "combined-v1-r2-c.jsonl": {"rows": '{"mediaType":"movie","tmdbId":3}\n', "manifest": "{}"},
+            "genres-moods-answers-x.jsonl": {"rows": '{"key":"movie:1"}\n', "manifest": "{}"}}
+        ledger.data["files"] = {"franchise-decisions.json": "{}"}
+        ledger.answers("fan_picks")["movie:5"] = {"accepted": True}
+        ledger.answers("premise_tags").update({
+            "movie:1": {"ask": "a", "tags": TAGS}, "movie:4": {"ask": "b", "tags": TAGS},
+            "movie:6": {"ask": "c", "untaggable": "refused"}})
+        ledger.data["steps"] = {"premise_tags": {"waiting": ["movie:1"]},
+                                "fan_picks": {"reaskAnswers": {"movie:5": {}}, "reaskPlan": {"movie:5": []}}}
+        ledger.data["batches"] = [{"chunks": {"c00000": ["movie:2"]}, "projectedUSD": 0.25}]
+        ledger.data["intents"] = [{"chunks": {"c00000": ["movie:9"]}, "projectedUSD": 0.5}]
+        dropped = ledger.prune()
+        self.assertEqual(sorted(ledger.data["shards"]), ["combined-v1-r2-a.jsonl", "combined-v1-r2-b.jsonl"],
+                         "a waiting title's and a pending job's classify rows: the bundle has no sections")
+        self.assertEqual((ledger.data["files"], ledger.answers("fan_picks")), ({}, {}))
+        self.assertEqual(sorted(ledger.answers("premise_tags")), ["movie:1", "movie:6"])
+        self.assertEqual(ledger.data["steps"]["fan_picks"], {"reaskPlan": {"movie:5": []}})
+        self.assertEqual((dropped["shards"], dropped["premise_tags"]), (2, 1))
+        self.assertEqual(ledger.pending_usd(), 0.75, "an unconfirmed submit is committed too")
+
+    def test_the_prune_command_rewrites_the_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "paid-state.json.gz")
+            ledger = paid.Ledger(path)
+            ledger.data["files"] = {"franchise-decisions.json": "{}"}
+            ledger.save()
+            with mock.patch("sys.stdout"):
+                self.assertEqual(paid.main(["prune", path]), 0)
+            self.assertEqual(paid.Ledger(path).data["files"], {})
+
     def test_without_a_file_or_a_restore_it_keeps_nothing(self):
         with tempfile.TemporaryDirectory() as out:
             with open(os.path.join(out, "combined-v1-r2.jsonl"), "w") as fh:

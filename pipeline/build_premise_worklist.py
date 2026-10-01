@@ -196,6 +196,10 @@ def increment(paths, eligible):
 
 work, review, seen = [], [], set()
 skipped = {"hasTags": 0, "badValidity": 0, "nonNarrative": 0, "noArticleText": 0}
+# Why each title that is not in the worklist was turned away, with the article its classify row read: a
+# caller can tell a verdict on that classification (badValidity, nonNarrative, review) from a title that only
+# waits (noArticleText, articleChanged).
+skipped_keys = {}
 for r in (bundle(args.combined) if eligible is None else increment(args.combined, eligible)):
     key = f"{r['mediaType']}:{r['tmdbId']}"
     if key in seen:
@@ -204,23 +208,24 @@ for r in (bundle(args.combined) if eligible is None else increment(args.combined
     if key in have:
         skipped["hasTags"] += 1
         continue
+    why = None
     answers = r.get("answers") or {}
-    if (answers.get("validity") or {}).get("choice") != "correct-screen-work":
-        skipped["badValidity"] += 1
-        continue
     applic = (answers.get("narrative_applicability") or {}).get("choice")
-    if applic in ("non-narrative-program", "documentary-or-factual"):
-        skipped["nonNarrative"] += 1
-        continue
     body = text.get(key)
-    if body is None:
-        skipped["noArticleText"] += 1
-        continue
+    if (answers.get("validity") or {}).get("choice") != "correct-screen-work":
+        why = "badValidity"
+    elif applic in ("non-narrative-program", "documentary-or-factual"):
+        why = "nonNarrative"
+    elif body is None:
+        why = "noArticleText"
     # The sections are offsets into the article the classify pass read. A title waiting since an earlier day
     # has its article fetched again (`changes/waiting.txt`), and an edited one would be cut at the wrong
     # places, so it waits until it is classified again.
-    if r.get("articleSha256") and r["articleSha256"] != hashlib.sha256(body.encode("utf-8")).hexdigest():
-        skipped["articleChanged"] = skipped.get("articleChanged", 0) + 1
+    elif r.get("articleSha256") and r["articleSha256"] != hashlib.sha256(body.encode("utf-8")).hexdigest():
+        why = "articleChanged"
+    if why:
+        skipped[why] = skipped.get(why, 0) + 1
+        skipped_keys[key] = {"reason": why, "articleSha256": r.get("articleSha256")}
         continue
 
     kept = [s for s in r.get("sections", [])
@@ -239,6 +244,8 @@ for r in (bundle(args.combined) if eligible is None else increment(args.combined
         "evidence": evidence,
     }
     (work if premise_only else review).append(row)
+    if not premise_only:
+        skipped_keys[key] = {"reason": "review", "articleSha256": r.get("articleSha256")}
 
 work.sort(key=title_key)
 review.sort(key=title_key)
@@ -305,6 +312,7 @@ manifest.update({
     "selection": "added-or-regained-only" if args.changes else "legacy-full-gap",
     "eligibleKeys": len(eligible) if eligible is not None else None,
     "eligibleMissingFromCombined": sorted(eligible - seen) if eligible is not None else [],
+    "skippedKeys": dict(sorted(skipped_keys.items())) if eligible is not None else {},
     "estimatedInputTokens": round(in_tokens),
     "estimatedOutputTokens": round(out_tokens),
     "estimatedTotalTokens": estimated_total,

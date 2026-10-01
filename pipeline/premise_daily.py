@@ -6,6 +6,7 @@ Haiku 4.5 for a title luna refuses (#183). The prompt is `data/premise-tags-v1.S
 who answered it, so a stopped run resumes without paying for it again.
 """
 import collections
+import datetime
 import hashlib
 import json
 import os
@@ -34,12 +35,6 @@ SCHEMA = {"type": "object", "additionalProperties": False, "required": ["rows"],
           "properties": {"rows": {"type": "array", "items": {
               "type": "object", "additionalProperties": False, "required": ["key", "tags"],
               "properties": {"key": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}}}}}
-
-
-class GenerationError(RuntimeError):
-    def __init__(self, message, cost_usd):
-        super().__init__(message)
-        self.cost_usd = round(cost_usd, 6)
 
 
 def config():
@@ -154,7 +149,32 @@ def asked_for(cfg, task, row):
                                      ensure_ascii=False).encode()).hexdigest()
 
 
-def generate(phase, cap, cfg=None, workers=1, kept=None, persist=None):
+#: When a title no model would tag is asked again: three, then six months after it was first asked. After
+#: that it is not asked again until the model, the spec or its evidence changes.
+RETRY_AFTER_DAYS = (91, 182)
+
+
+def untaggable(entry, ask, today):
+    """Whether a kept record says not to ask this title today: no model would tag it for this same request,
+    and its next retry has not come."""
+    if not entry or not entry.get("untaggable") or entry.get("ask") != ask:
+        return False
+    asks = entry.get("asks", 1)
+    if asks > len(RETRY_AFTER_DAYS):
+        return True
+    first = datetime.date.fromisoformat(entry["first"])
+    return today < (first + datetime.timedelta(days=RETRY_AFTER_DAYS[asks - 1])).isoformat()
+
+
+def mark_untaggable(kept, key, why, ask, by, today):
+    """Record that no model tagged `key` (`why`: refused, or short of 8 usable tags) for this request."""
+    previous = kept.get(key) or {}
+    same = previous.get("untaggable") and previous.get("ask") == ask
+    kept[key] = {"untaggable": why, "ask": ask, "by": by, "at": today,
+                 "first": previous["first"] if same else today, "asks": previous.get("asks", 0) + 1 if same else 1}
+
+
+def generate(phase, cap, cfg=None, workers=1, kept=None, persist=None, today=None):
     """Fill missing batch outputs through the configured model, title by title.
 
     A batch output holds every title answered so far, each with `by` (who answered it); a rerun asks only
@@ -163,8 +183,10 @@ def generate(phase, cap, cfg=None, workers=1, kept=None, persist=None):
 
     `kept` is the paid-answers ledger's premise section (`pipeline/paid.py`): a title it answers for the same
     model, spec and evidence is written from it and not asked, and every new answer is added to it, with
-    `persist` called after each, so a run that stops later loses nothing it paid for."""
+    `persist` called after each, so a run that stops later loses nothing it paid for. A title every model
+    refused, or answered short, is recorded there too and not asked again until `RETRY_AFTER_DAYS`."""
     cfg = cfg or config()
+    today = today or datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     manifest = _json(os.path.join(phase, "manifest.json"))
     estimate = projected(manifest, cfg)
     if not cap > 0 or estimate > cap:
@@ -172,7 +194,7 @@ def generate(phase, cap, cfg=None, workers=1, kept=None, persist=None):
     task = Task(cfg)
     out_dir = os.path.join(phase, "out")
     os.makedirs(out_dir, exist_ok=True)
-    batches, where, pending, resumed = {}, {}, [], 0
+    batches, where, pending, resumed, skipped = {}, {}, [], 0, []
     for index in range(manifest["batches"]):
         name = f"batch-{index:04d}.json"
         batch_in = _json(os.path.join(phase, "in", name))
@@ -185,9 +207,14 @@ def generate(phase, cap, cfg=None, workers=1, kept=None, persist=None):
         for row in batch_in:
             where[row["key"]] = name
             saved = (kept or {}).get(row["key"])
-            if row["key"] not in done and saved and saved.get("ask") == asked_for(cfg, task, row):
+            ask = asked_for(cfg, task, row)
+            if row["key"] not in done and saved and saved.get("tags") and saved.get("ask") == ask:
                 done[row["key"]] = {"key": row["key"], "tags": saved["tags"], "by": saved["by"]}
-            if row["key"] not in done:
+            if row["key"] in done:
+                continue
+            if untaggable(saved, ask, today):
+                skipped.append(row["key"])
+            else:
                 pending.append(row)
         batches[name] = done
         resumed += len(done)
@@ -202,14 +229,14 @@ def generate(phase, cap, cfg=None, workers=1, kept=None, persist=None):
             _write(os.path.join(out_dir, name), list(batches[name].values()))
             if kept is not None:
                 kept[key] = {"ask": asks[key], "tags": row["value"], "by": row["by"]}
-                if persist is not None:
-                    persist()
+        elif kept is not None:
+            mark_untaggable(kept, key, "refused" if row.get("refused") else "short", asks[key], row.get("by"),
+                            today)
+        if kept is not None and persist is not None:
+            persist()
 
     budget = llm.Budget(cap)
-    try:
-        rows, calls = llm.generate(cfg, task, pending, budget, workers, record)
-    except llm.OverBudget as error:
-        raise GenerationError(str(error), budget.spent) from error
+    rows, calls = llm.generate(cfg, task, pending, budget, workers, record)
     usage = {field: sum(call["usage"][field] for call in calls)
              for field in ("inputTokens", "cachedTokens", "outputTokens", "reasoningTokens")}
     answered = [row for row in rows.values() if "value" in row]
@@ -222,6 +249,7 @@ def generate(phase, cap, cfg=None, workers=1, kept=None, persist=None):
             "refused": sorted(key for key, row in rows.items() if row.get("refused")),
             "short": sorted(key for key, row in rows.items()
                             if "value" not in row and not row.get("refused") and not row.get("unavailable")),
+            "notRetriedYet": sorted(skipped),
             "calls": len(calls), **usage, "costUSD": round(sum(call["costUSD"] for call in calls), 6),
             "projectedSpendUSD": estimate, "spendCapUSD": cap}
 

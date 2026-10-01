@@ -113,15 +113,30 @@ jobs:
             gh release download daily-reports -R "$GITHUB_REPOSITORY" -p 'daily-report-*.json' \
               -D "$OUT/published-reports"
           fi
-      # What earlier runs paid for and no publish carries yet. Absent until the first run uploads it.
+      # What earlier runs paid for and no publish carries yet: the newest `paid-state-<run>-<attempt>.json.gz`.
+      # Only a release that does not exist yet is a first run. Any other failure to read it stops the day,
+      # which would otherwise buy everything the ledger holds again — and its upload replace the ledger.
       - name: The paid-answers ledger
+        id: ledger
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p paid
-          if gh release view paid-state -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release download paid-state -R "$GITHUB_REPOSITORY" -p paid-state.json.gz -D paid
+          if ! assets="$(gh release view paid-state -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>paid/error.txt)"; then
+            if grep -q "release not found" paid/error.txt; then
+              echo "read=new" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            cat paid/error.txt >&2
+            exit 1
           fi
+          newest="$(printf '%s\n' "$assets" | grep -E '^paid-state-[0-9]+-[0-9]+\.json\.gz$' | sort -t- -k3,3n -k4,4n | tail -n 1)"
+          if [ -z "$newest" ]; then
+            echo "error: the paid-state release holds no ledger; if it never held one, delete the release" >&2
+            exit 1
+          fi
+          gh release download paid-state -R "$GITHUB_REPOSITORY" -p "$newest" -O paid/paid-state.json.gz
+          echo "read=$newest" >> "$GITHUB_OUTPUT"
       - name: The day
         id: day
         env:
@@ -197,18 +212,6 @@ jobs:
             gh release create daily-reports -R "$GITHUB_REPOSITORY" --title "Daily spend reports" \
               --notes "Machine-readable reports used by the unattended monthly spend cap."
           gh release upload daily-reports -R "$GITHUB_REPOSITORY" "$report"
-      # Everything paid for so far, whether or not this run publishes: the next run reuses it instead of buying
-      # it again. Prose-free (pipeline/paid.py). Before the dataset upload, for the same reason as the report.
-      - name: Keep the paid-answers ledger
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          [ -f paid/paid-state.json.gz ] || exit 0
-          gh release view paid-state -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create paid-state -R "$GITHUB_REPOSITORY" --title "Paid answers" \
-              --notes "What the daily job has paid for and no publish carries yet (pipeline/paid.py)."
-          gh release upload paid-state -R "$GITHUB_REPOSITORY" paid/paid-state.json.gz --clobber
       # Ready to publish: the exact bytes every gate passed, and the record `--checked` holds them to.
       - name: Upload the dataset, ready to publish
         if: steps.day.outcome == 'success' && steps.report.outputs.store != ''
@@ -231,10 +234,38 @@ jobs:
       # exact bytes, reruns every gate that can be evaluated from the artifact/current release, creates and
       # verifies the OIDC bundle, uploads it beside the store, and commits the manifest last.
       - name: Publish the ready dataset
+        id: publish
         if: steps.day.outcome == 'success' && steps.report.outputs.store != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: pipeline/publish-dataset.sh "$OUT" --checked --keyless
+      # The published dataset carries what this run restored and bought; what still waits stays (pipeline/paid.py).
+      - name: Prune what the publish carries from the ledger
+        if: steps.publish.outcome == 'success'
+        run: |
+          [ -f paid/paid-state.json.gz ] || exit 0
+          python3 pipeline/paid.py prune paid/paid-state.json.gz
+      # Everything paid for so far, whether or not this run publishes: the next run reuses it instead of buying
+      # it again (pipeline/paid.py; public, so it carries nothing the repo keeps unpublished). Uploaded under a
+      # new name before the older ones are deleted, so the release never holds no ledger; skipped when the
+      # ledger could not be read, so a failed read never replaces it.
+      - name: Keep the paid-answers ledger
+        if: always() && steps.ledger.outputs.read != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f paid/paid-state.json.gz ] || exit 0
+          asset="paid-state-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json.gz"
+          cp paid/paid-state.json.gz "$asset"
+          if gh release view paid-state -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload paid-state -R "$GITHUB_REPOSITORY" "$asset" --clobber
+          else
+            gh release create paid-state -R "$GITHUB_REPOSITORY" --title "Paid answers" \
+              --notes "What the daily job has paid for and no publish carries yet (pipeline/paid.py)." "$asset"
+          fi
+          for old in $(gh release view paid-state -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
+            [ "$old" = "$asset" ] || gh release delete-asset paid-state "$old" -R "$GITHUB_REPOSITORY" --yes
+          done
       # A skipped credential or refused gate must be visible as a failed scheduled run. The always() report
       # and artifact steps above have already preserved its diagnosis before this turns the job red.
       - name: Refuse an unready run
