@@ -102,7 +102,7 @@ class Skips(Recorded):
         self.assertEqual([c[1] for c in self.calls if c[0] == "genres_moods"], [False])
 
     def test_a_new_title_without_an_article_skips_every_paid_ask_and_still_derives(self):
-        env = {"TYPESAFE_API_KEY": "j", "ANTHROPIC_API_KEY": "a", "DEN_EMBED_URL": "http://embed.invalid"}
+        env = {"TYPESAFE_API_KEY": "j", "OPENAI_API_KEY": "o", "DEN_EMBED_URL": "http://embed.invalid"}
         with mock.patch.object(daily.classify, "changed_articles", return_value=None):
             code, report = self.day(env, spend=True)
         self.assertEqual(code, 0)
@@ -117,19 +117,22 @@ class Skips(Recorded):
     def test_each_step_switch_can_disable_its_provider_under_the_master(self):
         day = daily.Day(args(self.out, spend=True, spend_typesafe=False, spend_fan_picks=False,
                              spend_premise=False),
-                        {"TYPESAFE_API_KEY": "t", "GEMINI_API_KEY": "g", "ANTHROPIC_API_KEY": "a",
+                        {"TYPESAFE_API_KEY": "t", "GEMINI_API_KEY": "g", "OPENAI_API_KEY": "o",
                          "DEN_EMBED_URL": "http://embed.invalid"}, NOW)
         self.assertFalse(day.can_buy)
         self.assertFalse(day.can_buy_fan_picks)
         self.assertFalse(day.can_buy_premise)
 
-    def test_premise_needs_master_switch_key_embedder_and_its_own_switch(self):
+    def test_premise_needs_master_switch_the_configured_providers_key_embedder_and_its_own_switch(self):
         enabled = daily.Day(args(self.out, spend=True, spend_premise=True),
-                            {"ANTHROPIC_API_KEY": "a", "DEN_EMBED_URL": "http://embed.invalid"}, NOW)
+                            {"OPENAI_API_KEY": "o", "DEN_EMBED_URL": "http://embed.invalid"}, NOW)
         self.assertTrue(enabled.can_buy_premise)
         disabled = daily.Day(args(self.out, spend=False, spend_premise=True),
-                             {"ANTHROPIC_API_KEY": "a", "DEN_EMBED_URL": "http://embed.invalid"}, NOW)
+                             {"OPENAI_API_KEY": "o", "DEN_EMBED_URL": "http://embed.invalid"}, NOW)
         self.assertFalse(disabled.can_buy_premise)
+        fallback_only = daily.Day(args(self.out, spend=True, spend_premise=True),
+                                  {"ANTHROPIC_API_KEY": "a", "DEN_EMBED_URL": "http://embed.invalid"}, NOW)
+        self.assertFalse(fallback_only.can_buy_premise, "the fallback's key alone does not buy the step")
 
     def test_the_weekly_slice_reaches_the_change_set(self):
         seen = []

@@ -12,7 +12,9 @@ name: daily
 #   secrets  TMDB_API_KEY                       the delta worklist; without it no new titles are discovered
 #            TYPESAFE_API_KEY                   the classify, critique and genres & moods answers (with spend)
 #            GEMINI_API_KEY                     new titles' fan picks (with spend)
-#            ANTHROPIC_API_KEY                  new titles' premise tags (with spend)
+#            OPENAI_API_KEY                     new titles' premise tags (with spend)
+#            ANTHROPIC_API_KEY                  the fallback for a title those models refuse
+#            (which model answers each step is data/models.json; docs/OPERATE.md, "Switching a model")
 #            WIKIMEDIA_ENTERPRISE_USERNAME/_PASSWORD   optional plot source
 #            DEN_EMBED_URL                      fallback den-embed when DEN_EMBED_IMAGE is not configured
 #   vars     DEN_DAILY_ENABLED                  `true` to run on the schedule
@@ -22,7 +24,7 @@ name: daily
 #            DEN_DAILY_SPEND_PREMISE            `false` disables premise tags while master spend is on
 #            DEN_DAILY_TYPESAFE_MAX_SPEND_USD    projected TypeSafe cap for one day; default $1.00
 #            DEN_DAILY_FAN_PICKS_MAX_SPEND_USD  projected Gemini cap for one day; default $1.00
-#            DEN_DAILY_PREMISE_MAX_SPEND_USD    projected Haiku cap for one day; default $1.00
+#            DEN_DAILY_PREMISE_MAX_SPEND_USD    projected premise-tags cap for one day; default $1.00
 #            DEN_DAILY_MAX_SPEND_USD_MONTH      all three steps, from published reports; default $10.00
 #            DEN_DAILY_RUNS_ON                  a JSON runner label list, e.g. ["self-hosted","den"]; default
 #                                               ubuntu-latest
@@ -116,6 +118,7 @@ jobs:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WIKIMEDIA_ENTERPRISE_USERNAME: ${{ secrets.WIKIMEDIA_ENTERPRISE_USERNAME }}
           WIKIMEDIA_ENTERPRISE_PASSWORD: ${{ secrets.WIKIMEDIA_ENTERPRISE_PASSWORD }}

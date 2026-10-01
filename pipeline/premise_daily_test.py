@@ -1,3 +1,6 @@
+"""`pipeline/premise_daily.py`: premise tags through `lib/llm.py`, with OpenAI and Anthropic stubbed below
+`urlopen` — a written and costed batch, a refused title answered by the fallback, a repaired space, a row
+asked again alone, a resumed run that asks nothing, and what the merge records about who answered."""
 import json
 import os
 import tempfile
@@ -8,16 +11,16 @@ from store import vector_blob
 
 from . import artifacts, premise_daily
 
-
 TAGS = ["identity-swap", "hidden-heir", "family-secret", "reluctant-alliance",
         "betrayal-revenge", "class-barrier", "secret-parentage", "race-against-time"]
+PLOTS = {"movie:7": "Two strangers exchange identities and uncover a family secret.",
+         "movie:8": "A heir hides among servants while a rival plots against the family."}
 
 
-class Response:
-    def __init__(self, rows, input_tokens=100, output_tokens=40):
-        self.payload = json.dumps({"content": [{"type": "text", "text": json.dumps(rows)}],
-                                   "usage": {"input_tokens": input_tokens,
-                                             "output_tokens": output_tokens}}).encode()
+class Reply:
+    def __init__(self, value):
+        self.value = value
+        self.headers = {}
 
     def __enter__(self):
         return self
@@ -26,48 +29,94 @@ class Response:
         return False
 
     def read(self):
-        return self.payload
+        return json.dumps(self.value).encode()
+
+
+class Wire:
+    """OpenAI's Responses API and Anthropic's Messages API. `answers` maps a key to the tags OpenAI writes
+    for it, or to None for a refusal; Anthropic answers every title with TAGS."""
+
+    def __init__(self, answers):
+        self.answers, self.sent = answers, []
+
+    def __call__(self, request, timeout=None):
+        body = json.loads(request.data)
+        self.sent.append((request.full_url, body))
+        if request.full_url.endswith("/v1/responses"):
+            rows = json.loads(body["input"][-1]["content"].split("\n", 1)[1])
+            if any(self.answers.get(row["key"]) is None for row in rows):
+                return Reply({"output": [{"type": "message", "content": [{"type": "refusal", "refusal": "no"}]}],
+                              "usage": {"input_tokens": 50, "output_tokens": 5}})
+            text = json.dumps({"rows": [{"key": row["key"], "tags": self.answers[row["key"]]} for row in rows]})
+            return Reply({"output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
+                          "usage": {"input_tokens": 1000, "output_tokens": 200,
+                                    "output_tokens_details": {"reasoning_tokens": 100}}})
+        rows = json.loads(body["messages"][0]["content"].split("\n", 1)[1])
+        return Reply({"content": [{"type": "tool_use", "name": "answer",
+                                   "input": {"rows": [{"key": row["key"], "tags": TAGS} for row in rows]}}],
+                      "stop_reason": "tool_use", "usage": {"input_tokens": 1000, "output_tokens": 200}})
 
 
 class PremiseGeneration(unittest.TestCase):
-    def phase(self):
+    def phase(self, keys=("movie:7", "movie:8")):
         root = self.enterContext(tempfile.TemporaryDirectory())
         os.makedirs(os.path.join(root, "in"))
-        row = {"key": "movie:7", "mediaType": "movie", "tmdbId": 7,
-               "plot": "Two strangers exchange identities and uncover a family secret."}
+        rows = [{"key": key, "mediaType": "movie", "tmdbId": int(key.split(":")[1]), "plot": PLOTS[key]}
+                for key in keys]
         with open(os.path.join(root, "in", "batch-0000.json"), "w", encoding="utf-8") as handle:
-            json.dump([row], handle)
+            json.dump(rows, handle)
         with open(os.path.join(root, "manifest.json"), "w", encoding="utf-8") as handle:
-            json.dump({"titles": 1, "batches": 1, "estimatedInputTokens": 100,
+            json.dump({"titles": len(rows), "batches": 1, "estimatedInputTokens": 100,
                        "estimatedOutputTokens": 100}, handle)
         return root
 
-    def test_exact_key_batch_is_written_and_costed(self):
-        phase = self.phase()
-        result = premise_daily.generate(phase, "not-logged", 1.0,
-                                        opener=lambda *_a, **_k: Response([{"key": "movie:7", "tags": TAGS}]))
-        self.assertEqual((result["generated"], result["titles"]), (1, 1))
-        self.assertAlmostEqual(result["costUSD"], .0003)
+    def run_phase(self, phase, answers):
+        wire = Wire(answers)
+        with mock.patch("urllib.request.urlopen", wire), mock.patch("time.sleep"), \
+                mock.patch.dict(os.environ, {"OPENAI_API_KEY": "o", "ANTHROPIC_API_KEY": "a"}):
+            result = premise_daily.generate(phase, 1.0)
         with open(os.path.join(phase, "out", "batch-0000.json"), encoding="utf-8") as handle:
-            self.assertEqual(json.load(handle)[0]["tags"], TAGS)
+            return result, {row["key"]: row for row in json.load(handle)}, wire
 
-    def test_foreign_key_refuses_without_a_checkpoint(self):
-        phase = self.phase()
-        with self.assertRaisesRegex(premise_daily.GenerationError, "invented keys") as caught:
-            premise_daily.generate(phase, "not-logged", 1.0,
-                                   opener=lambda *_a, **_k: Response([{"key": "movie:8", "tags": TAGS}]))
-        self.assertAlmostEqual(caught.exception.cost_usd, .0003)
-        self.assertFalse(os.path.exists(os.path.join(phase, "out", "batch-0000.json")))
+    def test_a_batch_is_tagged_in_one_call_costed_and_says_who_answered(self):
+        result, out, wire = self.run_phase(self.phase(), {"movie:7": TAGS, "movie:8": TAGS})
+        self.assertEqual([url for url, _ in wire.sent], ["https://api.openai.com/v1/responses"])
+        body = wire.sent[0][1]
+        self.assertEqual((body["model"], body["text"]["format"]["type"]), ("gpt-5.6-luna", "json_schema"))
+        self.assertEqual(out["movie:7"]["tags"], TAGS)
+        self.assertEqual((out["movie:7"]["by"]["provider"], out["movie:7"]["by"]["model"]),
+                         ("openai", "gpt-5.6-luna"))
+        self.assertEqual((result["generated"], result["byModel"]), (2, {"gpt-5.6-luna": 2}))
+        self.assertAlmostEqual(result["costUSD"], 1000 * 0.20e-6 + 200 * 1.20e-6)
 
-    def test_a_row_below_the_floor_after_drops_is_repaired_alone(self):
+    def test_a_refused_title_is_answered_by_the_fallback_and_its_batch_mate_by_luna(self):
+        result, out, wire = self.run_phase(self.phase(), {"movie:7": TAGS, "movie:8": None})
+        self.assertEqual(out["movie:7"]["by"]["model"], "gpt-5.6-luna")
+        self.assertEqual(out["movie:8"]["by"]["model"], "claude-haiku-4-5-20251001")
+        self.assertEqual(result["byModel"], {"claude-haiku-4-5-20251001": 1, "gpt-5.6-luna": 1})
+        # The two-title call, each alone, movie:8 once more, then Haiku.
+        self.assertEqual([url.rsplit("/", 1)[1] for url, _ in wire.sent],
+                         ["responses", "responses", "responses", "responses", "messages"])
+
+    def test_a_space_in_a_tag_is_repaired_and_a_short_row_is_asked_again_alone(self):
+        spaced = ["identity swap"] + TAGS[1:]
+        short = TAGS[:6] + ["comedy", "character-arc"]
+        answers = {"movie:7": spaced, "movie:8": short}
+        _result, out, wire = self.run_phase(self.phase(), answers)
+        self.assertEqual(out["movie:7"]["tags"][0], "identity-swap")
+        self.assertNotIn("movie:8", out, "a row luna keeps answering short is left for a later run")
+        self.assertEqual(len(wire.sent), 2)
+
+    def test_a_resumed_run_asks_nothing_it_already_has(self):
         phase = self.phase()
-        answers = iter((Response([{"key": "movie:7", "tags": TAGS[:6] + ["comedy", "character-arc"]}]),
-                        Response([{"key": "movie:7", "tags": TAGS}])))
-        result = premise_daily.generate(phase, "not-logged", 1.0,
-                                        opener=lambda *_a, **_k: next(answers))
-        self.assertEqual(result["repairedRows"], 1)
-        with open(os.path.join(phase, "out", "batch-0000.json"), encoding="utf-8") as handle:
-            self.assertEqual(json.load(handle)[0]["tags"], TAGS)
+        self.run_phase(phase, {"movie:7": TAGS, "movie:8": TAGS})
+        result, out, wire = self.run_phase(phase, {})
+        self.assertEqual((wire.sent, result["resumed"], result["generated"]), ([], 2, 0))
+        self.assertEqual(sorted(out), ["movie:7", "movie:8"])
+
+    def test_the_projection_must_fit_the_cap_before_any_call(self):
+        with self.assertRaisesRegex(RuntimeError, "daily cap"):
+            premise_daily.generate(self.phase(), 1e-9)
 
 
 class Ctx:

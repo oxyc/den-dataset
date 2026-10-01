@@ -202,20 +202,22 @@ def proper_nouns(tag, plot):
 
 
 def normalise(tag):
-    """The tag this one obviously meant: lowercased, accents transliterated, apostrophes dropped.
+    """The tag this one obviously meant: lowercased, accents transliterated, apostrophes dropped, spaces
+    hyphenated.
 
     Most format failures are mechanical. Across 61 batches, 21 of 38 findings were `göring-collection`,
     `ménage-à-trois-tension`, `societal-collapse-London` — correct premise tags carrying an accent or a
     capital, which is unsurprising when 79% of the source plots are not in English. Rejecting a batch of 22
     titles to fix one character spends a re-run to buy nothing, so a tag that normalises to a valid one is
-    repaired and reported rather than condemned.
+    repaired and reported rather than condemned. gpt-5.6-luna's one format habit is a space where a hyphen
+    belongs (one tag in 10 of 46 calls in #182), so a space is the same kind of typo.
 
-    A tag that does NOT survive this — a space, a slash, an empty string — is still fatal, because then the
-    generator produced something that was never a tag.
+    A tag that does NOT survive this — a slash, an empty string — is still fatal, because then the generator
+    produced something that was never a tag.
     """
     flat = unicodedata.normalize("NFD", tag)
     flat = "".join(c for c in flat if not unicodedata.combining(c))
-    return flat.lower().replace("'", "").replace("’", "")
+    return re.sub(r"\s+", "-", flat.strip()).lower().replace("'", "").replace("’", "")
 
 
 def has_non_ascii(tag):
@@ -360,8 +362,8 @@ def check(batch_in, batch_out, strict_language):
                 fatal.append(f"{key}: empty tag")
                 continue
             if not TAG.match(tag) or has_non_ascii(tag) or has_diacritic(tag):
-                # Repairable, or genuinely not a tag? A capital or an accent is a typo with an obvious
-                # correction; a space or a slash means the generator produced something else entirely.
+                # Repairable, or genuinely not a tag? A capital, an accent or a space is a typo with an
+                # obvious correction; a slash means the generator produced something else entirely.
                 fixed = normalise(tag)
                 if TAG.match(fixed) and not has_non_ascii(fixed):
                     quality.append(f"{key}: {tag!r} -> {fixed!r} (normalise)")

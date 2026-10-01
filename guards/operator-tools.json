@@ -14,6 +14,7 @@
   "pipeline/build_premise_backfill.py": "premise-tag generation: re-batches the titles a pass dropped",
   "pipeline/canonicalize_premise_tags.py": "canonicalises premise surface forms with local embeddings and bounded Jev Choices (oxyc/den-dataset#15)",
   "pipeline/llm_phase.py": "resume and coverage for any subagent LLM phase (--list-missing, --verify)",
+  "tools/bakeoff.py": "runs one paid text step through several models and writes the comparison table (oxyc/den-dataset#183)",
   "tools/rulers/movielens_pairs.py": "builds the co-rating ruler's cases (oxyc/den-dataset#18 step 9)",
   "tools/rulers/score_reco.py": "scores index arms on the co-rating ruler (oxyc/den-dataset#18 steps 9 and 12)",
   "tools/rulers/more_like_prior.py": "preregisters the fresh title-and-year control arm for the More Like This gate (oxyc/den-dataset#132)",

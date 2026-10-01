@@ -37,9 +37,9 @@ day refuses the complete new-title ask set before its first call when the projec
 `DEN_DAILY_SPEND` is the master switch. The three independent repository variables
 `DEN_DAILY_SPEND_TYPESAFE`, `DEN_DAILY_SPEND_FAN_PICKS`, and `DEN_DAILY_SPEND_PREMISE` can each be set to
 `false` to stop that purchase without stopping the other two. Unset preserves the enabled behaviour under
-the master switch. TypeSafe covers classify, critique, genres/moods, and franchise questions; fan picks use
-Gemini; premise tags use `claude-haiku-4-5-20251001` only for newly admitted or legitimately regained
-titles which do not already have tags.
+the master switch. TypeSafe covers classify, critique, genres/moods, and franchise questions; fan picks and
+premise tags use the models `data/models.json` names (below), premise tags only for newly admitted or
+legitimately regained titles which do not already have tags.
 
 Each step projects the complete request set before its first call. The per-day ceilings are
 `DEN_DAILY_TYPESAFE_MAX_SPEND_USD`, `DEN_DAILY_FAN_PICKS_MAX_SPEND_USD`, and
@@ -62,7 +62,9 @@ Every paid text step asks through `lib/llm.py`, and `data/models.json` says who 
 (`anthropic`, `openai`, `gemini`), model, `online` or `batch`, titles per call, thinking level and a fallback
 for titles the model refuses. Switching a step's model is a one-line PR to that file; the daily job reads it.
 A model must have a price in `lib/llm.py` (`PRICES`) before it can be configured, because the spend caps
-read that table. For a one-off run, `DEN_MODELS=<file>` points at another config.
+read that table. For a one-off run, `DEN_MODELS=<file>` points at another config. To compare models before
+switching, `tools/bakeoff.py <step> --models provider:model … --out <dir> --max-spend-usd <cap>` runs one
+sample through each and writes the table (`--help` lists each step's inputs).
 
 The keys are `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `GEMINI_API_KEY`, read from the environment. The
 `claude-cli` and `codex-cli` providers run on the owner's monthly plans, for local backfills and bake-offs
@@ -269,8 +271,8 @@ a failed mapping.
 ## Operator-only source work
 
 Neither the daily nor the weekly run surveys existing Wikipedia prose: new titles are automatic, and the
-weekly option revisits cheap facts and doc-facts only. So Wikipedia rewording never authorizes Haiku, Jev or
-embedding work. What follows is by hand, and never part of the job.
+weekly option revisits cheap facts and doc-facts only. So Wikipedia rewording never authorizes premise tags,
+Jev or embedding work. What follows is by hand, and never part of the job.
 
 ### The source refresh
 
@@ -334,7 +336,7 @@ not make an old manual refresh canonical merely because its files exist.
 ### Premise tags for a daily increment
 
 Premise generation is never triggered by a Wikipedia revision or rewording, and preparing or publishing a
-daily run does not authorize Haiku. Prepare it only from a change plan with a published baseline; the builder
+daily run does not authorize buying tags. Prepare it only from a change plan with a published baseline; the builder
 admits `added` and legitimately `regained` keys and rejects a first-generation plan.
 
 ```sh

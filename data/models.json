@@ -11,5 +11,18 @@
    "model": "claude-sonnet-5",
    "maxOutputTokens": 2048
   }
+ },
+ "premise_tags": {
+  "provider": "openai",
+  "model": "gpt-5.6-luna",
+  "mode": "online",
+  "titlesPerCall": 10,
+  "thinking": null,
+  "maxOutputTokens": 8192,
+  "fallback": {
+   "provider": "anthropic",
+   "model": "claude-haiku-4-5-20251001",
+   "maxOutputTokens": 2048
+  }
  }
 }

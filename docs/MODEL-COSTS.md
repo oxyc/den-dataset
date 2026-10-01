@@ -11,17 +11,16 @@ About **5 new titles a day** reach the catalogue. Release years whose admissions
 | Step | Model | $/title | $/year at 5/day | Source |
 |---|---|---:|---:|---|
 | Fan picks | Gemini 3.7 Flash, low thinking, online | ~$0.003 | ~$5.50 | measured, daily run 2026-09-30 |
-| Premise tags | Claude Haiku 4.5 | $0.0017 at 5/call, $0.0012 at 40/call | ~$2–3 | measured (#182 bake-off; #146's real batches) |
+| Premise tags | gpt-5.6-luna, 10 a call, JSON schema; Claude Haiku 4.5 for a title luna refuses | ~$0.0003 | ~$0.55 | #182 bake-off; in the daily job since #183 |
 | Genre & mood labels, facts delta | TypeSafe (Jev) | ~$0.0009 | ~$1.60 | measured, daily run 2026-09-30 |
-| **Total** | | **~$0.0056** | **~$10** | |
+| **Total** | | **~$0.0042** | **~$7.70** | |
 
-Premise tags aren't in the daily job yet (#141, #179). An early estimate of $0.009 a title was about 5× too high.
+Premise tags were Claude Haiku 4.5 until #183: $0.0017 a title at 5 a call, $0.0012 at 40 (#146's real batches). An early estimate of $0.009 a title was about 5× too high.
 
-**Decided changes** (#183, #187), not built yet:
+**Decided changes** (#187), not built yet:
 
 | Step | Change | New $/title |
 |---|---|---:|
-| Premise tags | gpt-5.6-luna, Haiku as fallback for refusals | ~$0.0003 |
 | Fan picks | compact answer format (format B) | ~$0.0017 |
 | Jev | classify and critique in one call | −13% on those two |
 
