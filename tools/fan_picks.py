@@ -15,6 +15,7 @@ other versions and its sequel links are dropped too: other rows show them.
   match    match every answer's picks to the store, and report a slice's numbers
   export   the store's input: every asked title with its matched picks, in the model's order
   backfill ask the step's fallback model about titles the primary refused, into data/fan-picks-backfill.json
+  reask-seed  the titles a full run's answers make due a re-ask, into data/fan-picks-reask.json
 
 Every answer is appended as it arrives, with its token usage, cost and `modelVersion`; a rerun asks only what
 has no answer. Spend is checked against the manifest's cap before anything is asked: a chunk is admitted only
@@ -756,7 +757,7 @@ def reusable(saved, wanted):
 
 def daily_update(corpus_path, articles_path, franchises_path, existing_path, out, keys, workers=8,
                  generate=answer_title, follows=None, max_spend=DAILY_SPEND_CAP, backfill=None,
-                 kept=None, persist=None):
+                 kept=None, persist=None, reasks=None):
     """Ask the fan-picks model online for new daily titles, match with the full run's rule, and merge the
     durable input.
 
@@ -767,6 +768,9 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
 
     `backfill` is answers bought outside the daily job (`data/fan-picks-backfill.json`): each is matched into
     a title the input has no picks for, so a title the primary model refused gets the fallback's picks.
+
+    `reasks` is answers to titles asked again on purpose (#187 item 5): each replaces a title's picks only
+    when the model now knows the title or names more store titles for it.
 
     `kept` is the paid-answers ledger's fan-picks section (`pipeline/paid.py`): every accepted response by
     title, reused while its fingerprint matches, and `persist` is called after each one is added, so a run
@@ -855,17 +859,26 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
 
     backfilled = {key: answer for key, answer in (backfill or {}).items()
                   if key in rows and key not in titles and not anchors.get(key)}
-    if titles or backfilled:
+    reasked = {key: answer for key, answer in (reasks or {}).items() if key in rows}
+    replaced = 0
+    if titles or backfilled or reasked:
         with open(franchises_path, encoding="utf-8") as fh:
             franchises = json.load(fh)
         names = Names(rows)
-        seeds = set(titles) | set(backfilled)
+        seeds = set(titles) | set(backfilled) | set(reasked)
         owned = related(rows, franchises, sequel_keys(rows, seeds) if follows is None else follows)
         for key, answer in [*answered.items(), *backfilled.items()]:
             matched = match_answer(answer, key, names, owned.get(key, set()))
             anchors[key] = merged([matched])
         for key in empty_answers:
             anchors[key] = []
+        # A re-ask (#187 item 5) replaces the picks only when the model now knows the title or names more of
+        # the store's titles for it: a model asked again may still not know a new release.
+        for key, answer in reasked.items():
+            picks = merged([match_answer(answer, key, names, owned.get(key, set()))])
+            if answer.get("known") or len(picks) > len(anchors.get(key) or []):
+                anchors[key] = picks
+                replaced += 1
 
     costs = [row.get("costUSD", 0.0)
              for row in [*answered.values(), *empty_answers.values(), *parse_errors.values()]]
@@ -878,6 +891,7 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
             "parseErrors": len(parse_errors),
             "generated": len(pending), "resumed": resumed,
             "notInCorpus": not_in_corpus, "backfilled": len(backfilled),
+            "reasked": len(reasked), "reaskReplaced": replaced,
             "anchors": len(anchors), "picks": sum(len(v) for v in anchors.values()),
             "costUSD": round(sum(costs), 6), "projectedSpendUSD": round(projected, 6),
             "spendCapUSD": max_spend}
@@ -937,6 +951,66 @@ def backfill(work, keys_path, out=BACKFILL, max_spend=1.0, cfg=None, log=sys.std
         write_json(out, value)
     return {"out": out, "answers": len(value["answers"]), "refused": len(value["refused"]),
             "spentUSD": round(budget.spent, 6)}
+
+
+#: Titles asked before the paid-answers ledger existed that are due a re-ask (#187 item 5): every title the
+#: full run's model did not know, or that was released within six months of the ask. Written by `reask-seed`.
+REASK = os.path.join(REPO, "data", "fan-picks-reask.json")
+REASK_SCHEMA = "fan-picks-reask-v1"
+REASK_AFTER_DAYS = (91, 182)
+RECENT_DAYS = 183
+
+
+def release_date(facts):
+    """A title's release or first-air date, when the store has a whole one."""
+    value = ((facts.get("released") or facts.get("started") or {}).get("date") or "")[:10]
+    try:
+        return datetime.date.fromisoformat(value).isoformat()
+    except ValueError:
+        return None
+
+
+def reask_dates(asked_at, known, released):
+    """When a title is asked again: three and six months after its release, if that was within six months of
+    the first ask, else after the ask itself — and only for a title the model did not know or that was that
+    new. A re-ask date on or before the first ask is skipped."""
+    asked = datetime.date.fromisoformat(asked_at[:10])
+    release = datetime.date.fromisoformat(released) if released else None
+    recent = release is not None and (asked - release).days <= RECENT_DAYS
+    if known and not recent:
+        return []
+    start = release if recent else asked
+    return [day.isoformat() for day in (start + datetime.timedelta(days=n) for n in REASK_AFTER_DAYS) if day > asked]
+
+
+def load_reask(path=REASK):
+    """`{key: {"askedAt", "known", "released"}}` from the committed seed, or nothing when there is none."""
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        value = json.load(fh)
+    if value.get("schema") != REASK_SCHEMA or not isinstance(value.get("titles"), dict):
+        raise RuntimeError(f"{path}: not a {REASK_SCHEMA} file")
+    return value["titles"]
+
+
+def reask_seed(work, corpus_path, out=REASK):
+    """The re-ask seed from a full run: every answered title with a re-ask date, when it was asked, whether
+    the model knew it, and its release date. No prose: keys, dates and a flag. Read from the run's answers
+    alone, since a run frozen under an older prompt is still a record of what was asked."""
+    rows, answers = corpus_rows(corpus_path), {}
+    for answer in read_jsonl(os.path.join(work, "answers.jsonl")):
+        answers.setdefault((answer["key"], answer.get("ask", 0)), answer)
+    titles = {}
+    for (key, ask), answer in sorted(answers.items()):
+        if ask or key not in rows:
+            continue
+        entry = {"askedAt": answer["at"][:10], "known": bool(answer.get("known")),
+                 "released": release_date(rows[key].get("facts") or {})}
+        if reask_dates(entry["askedAt"], entry["known"], entry["released"]):
+            titles[key] = entry
+    write_json(out, {"schema": REASK_SCHEMA, "issue": "oxyc/den-dataset#187", "titles": titles})
+    return {"out": out, "titles": len(titles), "unknown": sum(1 for t in titles.values() if not t["known"])}
 
 
 def match(work, corpus_path, franchises_path, follows_path=None):
@@ -1100,6 +1174,10 @@ def main(argv=None):
     p.add_argument("--max-spend-usd", type=float, required=True)
     p.add_argument("--provider", help="instead of the configured fallback's, e.g. claude-cli for a local backfill")
     p.add_argument("--model")
+    p = sub.add_parser("reask-seed", help="the titles a full run's answers make due a re-ask (#187)")
+    p.add_argument("--work", required=True)
+    p.add_argument("--corpus", required=True)
+    p.add_argument("--out", default=REASK)
     args = parser.parse_args(argv)
     if args.command == "prepare":
         result = prepare(args.corpus, args.articles, args.pool, args.work, args.max_spend_usd)
@@ -1118,6 +1196,8 @@ def main(argv=None):
         cfg = {**CFG["fallback"], **{k: v for k, v in (("provider", args.provider), ("model", args.model)) if v}}
         llm.check(cfg)
         result = backfill(args.work, args.keys, args.out, args.max_spend_usd, cfg)
+    elif args.command == "reask-seed":
+        result = reask_seed(args.work, args.corpus, args.out)
     else:
         result = export(args.work, args.out)
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))

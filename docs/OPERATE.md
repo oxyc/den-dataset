@@ -45,7 +45,10 @@ still waiting for it, and the next run collects the job; a job that expired or f
 never resubmitted. Due is worked out from the last submit the paid-answers ledger records, so a failed Monday
 is caught up the next day. A waiting title is published without that section, and its article is fetched
 again each day it waits. The daily report's table shows each step's cadence, whether it was due, the titles
-waiting, pending jobs with their age, what was collected and what expired. A weekly step needs
+waiting, pending jobs with their age, what was collected and what expired. The fan-picks job also carries
+the re-asks due that week: titles the model did not know, or released within six months of their first ask,
+asked again three and six months on (`data/fan-picks-reask.json` seeds the titles asked before the ledger);
+a re-ask replaces the picks only when the model now knows the title or names more store titles. A weekly step needs
 `--paid-state`: without the ledger it could not find its job again, so it does not submit one.
 
 Each step projects the complete request set before its first call. The per-day ceilings are

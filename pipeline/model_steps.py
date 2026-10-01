@@ -105,6 +105,7 @@ def write_waiting(day):
             anchored = set(json.load(fh).get("anchors") or {})
         titles = keys_of_corpus(ctx.path(artifacts.PUBLISHED_CORPUS)) | set(plan.get("added") or [])
         day.waiting["fan_picks"] = sorted(titles - anchored - set(plan.get("withdrawn") or {}))
+        day.reasks = reasks_due(day, ctx)
     if weekly(premise_cfg) and day.can_buy_premise:
         with open(premise_daily.ensure_tags(ctx), encoding="utf-8") as fh:
             tagged = set(json.load(fh).get("tags") or {})
@@ -115,10 +116,38 @@ def write_waiting(day):
                                for row in map(json.loads, filter(str.strip, shard["rows"].splitlines()))}
         settled = set(state(day, "premise_tags").get("settled") or [])
         day.waiting["premise_tags"] = sorted(classified - tagged - settled)
-    listed = set().union(*day.waiting.values(), *(pending_keys(day, step) for step in REPORT_KEYS))
+    listed = set().union(*day.waiting.values(), day.reasks, *(pending_keys(day, step) for step in REPORT_KEYS))
     caching.write_atomically(os.path.join(ctx.path(artifacts.CHANGES), "waiting.txt"),
                              "".join(f"{key}\n" for key in sorted(listed)).encode("utf-8"))
     return day.waiting
+
+
+def reasks_due(day, ctx):
+    """`{key: [dates]}` — the fan-pick re-asks due by today and not yet asked (#187 item 5).
+
+    A title the model did not know, or one released within six months of its first ask, is asked again three
+    and six months on (`fan_picks.reask_dates`) with today's prompt and a fresh lead. The schedule is fixed
+    the first time a title is seen — from `data/fan-picks-reask.json` for titles asked before the ledger,
+    else from its kept answer — so asking it again never moves it. Each date is asked once."""
+    st = state(day, "fan_picks")
+    schedule, done = st.setdefault("reaskPlan", {}), st.setdefault("reasked", {})
+    for key, seed in fan_picks.load_reask().items():
+        schedule.setdefault(key, fan_picks.reask_dates(seed["askedAt"], seed["known"], seed["released"]))
+    unseen = {key: entry["answer"] for key, entry in day.paid.answers("fan_picks").items()
+              if key not in schedule and (entry.get("answer") or {}).get("at")}
+    if unseen:
+        released = {}
+        path = ctx.path(artifacts.PUBLISHED_CORPUS)
+        if os.path.exists(path):
+            with gzip.open(path, "rt", encoding="utf-8") as fh:
+                for row in map(json.loads, filter(str.strip, fh)):
+                    if row["key"] in unseen:
+                        released[row["key"]] = fan_picks.release_date(row.get("facts") or {})
+        for key, answer in unseen.items():
+            schedule[key] = fan_picks.reask_dates(answer["at"], answer.get("known"), released.get(key))
+    today = day.now.date().isoformat()
+    due_now = {key: [d for d in dates if d <= today and d not in done.get(key, [])] for key, dates in schedule.items()}
+    return {key: dates for key, dates in due_now.items() if dates}
 
 
 # --- fan picks ---------------------------------------------------------------------------------------------
@@ -136,7 +165,7 @@ def fan_picks_step(day):
         day.skip("fan_picks", "there is no existing fan-picks input to carry")
         return None
     kept = day.paid.answers("fan_picks")
-    asked = []
+    asked, reask_answers = [], {}
     if not day.paid.path:
         day.skip("fan_picks", "a weekly Batch step needs the paid-answers ledger (--paid-state) to find its job "
                               "again; the existing input is carried")
@@ -145,18 +174,23 @@ def fan_picks_step(day):
     else:
         rows = fan_picks.corpus_rows(ctx.path(artifacts.CORPUS))
         waiting = [key for key in day.waiting.get("fan_picks", []) if key in rows]
+        reasks = {key: dates for key, dates in getattr(day, "reasks", {}).items() if key in rows}
         pending = pending_keys(day, "fan_picks")
-        titles = fan_picks.titles_for(sorted(set(waiting) | {key for key in pending if key in rows}), rows,
-                                      ctx.path(artifacts.ARTICLES))
+        reasked_in = {key for job in jobs(day, "fan_picks") for key in job.get("reasks") or ()}
+        titles = fan_picks.titles_for(sorted(set(waiting) | set(reasks) | {k for k in pending if k in rows}),
+                                      rows, ctx.path(artifacts.ARTICLES))
         task, budget = fan_picks.Task(cfg), lib_llm.Budget(day.args.fan_picks_max_spend_usd)
 
         def record(key, row):
             if "value" in row:
                 answer = {**row["value"], "key": key, "costUSD": 0.0, "mode": row["by"]["mode"],
-                          "provider": row["by"]["provider"], "model": row["by"]["model"]}
+                          "provider": row["by"]["provider"], "model": row["by"]["model"],
+                          "at": day.now.isoformat(timespec="seconds")}
                 kept[key] = {"requestSha256": fan_picks.fingerprint(titles[key]), "accepted": True,
                              "answer": answer, "error": None}
-            elif row.get("refused"):
+                if key in reasked_in:
+                    reask_answers[key] = answer
+            elif row.get("refused") and key not in reasked_in:
                 kept[key] = {"requestSha256": fan_picks.fingerprint(titles[key]), "accepted": True,
                              "answer": None, "error": {"key": key, "usage": {}, "text": "", "refused": True,
                                                        "costUSD": 0.0}}
@@ -164,12 +198,21 @@ def fan_picks_step(day):
         spent = collect(day, "fan_picks", cfg, task, titles, budget, record)
         report["due"] = due(cfg, day.now.date(), state(day, "fan_picks").get("lastSubmit"))
         ready = [key for key in titles if fan_picks.reusable(kept.get(key), fan_picks.fingerprint(titles[key]))]
-        ask = [titles[key] for key in waiting if key not in ready and key not in pending_keys(day, "fan_picks")]
+        pending = pending_keys(day, "fan_picks")
+        ask = [titles[key] for key in waiting if key not in ready and key not in pending]
+        again = [titles[key] for key in sorted(reasks) if key not in pending]
         report["waiting"] = len(ask)
+        report["reasks"] = {"due": len(again), "collected": len(reask_answers)}
         if report["due"]:
-            projected = len(ask) * fan_picks.PILOT_COST * fan_picks.MARGIN * lib_llm.BATCH_FACTOR
+            projected = (len(ask) + len(again)) * fan_picks.PILOT_COST * fan_picks.MARGIN * lib_llm.BATCH_FACTOR
             day.ledger.reserve("fanPicks", projected, day.args.fan_picks_max_spend_usd)
-            submit(day, "fan_picks", cfg, task, ask)
+            job = submit(day, "fan_picks", cfg, task, ask + again)
+            if job is not None and again:
+                job["reasks"] = [title["key"] for title in again]
+                done = state(day, "fan_picks").setdefault("reasked", {})
+                for title in again:
+                    done.setdefault(title["key"], []).extend(reasks[title["key"]])
+                day.paid.save()
         day.ledger.actual("fanPicks", spent)
         report["costUSD"] = round(spent, 6)
         asked = ready
@@ -178,7 +221,7 @@ def fan_picks_step(day):
             corpus_path=ctx.path(artifacts.CORPUS), articles_path=ctx.path(artifacts.ARTICLES),
             franchises_path=ctx.path(artifacts.FRANCHISES), existing_path=existing, out=existing, keys=asked,
             max_spend=day.args.fan_picks_max_spend_usd, backfill=fan_picks.load_backfill(), kept=kept,
-            persist=day.paid.save)
+            persist=day.paid.save, reasks=reask_answers)
     except (OSError, ValueError, RuntimeError) as error:
         raise StageError(f"fan_picks: {error}") from error
     day.ran.append("fan_picks")
@@ -397,3 +440,4 @@ def submit(day, step, cfg, task, items):
                                             "titles": len(items)})
     st["lastSubmit"] = today
     day.paid.save()
+    return job if items else None

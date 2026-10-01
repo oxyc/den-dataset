@@ -84,15 +84,17 @@ class FanPicksWeekly(unittest.TestCase):
                       contextlib.redirect_stderr(io.StringIO())):
             self.enterContext(patch)
 
-    def run_day(self, now):
+    def run_day(self, now, waiting=("movie:1",), anchors=None):
         out = os.path.join(self.root, now.date().isoformat())
         os.makedirs(out)
-        corpus, articles, franchises, existing = fan_tests.Daily().fixture(out, {"movie:2": []})
+        corpus, articles, franchises, existing = fan_tests.Daily().fixture(out, anchors or {"movie:2": []})
         paths = {artifacts.CORPUS: corpus, artifacts.ARTICLES: articles, artifacts.FRANCHISES: franchises,
                  artifacts.FAN_PICKS: existing}
         ctx = types.SimpleNamespace(path=lambda artifact: paths.get(artifact, os.path.join(out, "x")))
         day = day_on(now, out, self.ledger, {"GEMINI_API_KEY": "g"})
-        day.waiting = {"fan_picks": ["movie:1"]}
+        day.waiting = {"fan_picks": list(waiting)}
+        with mock.patch.object(model_steps.fan_picks, "load_reask", return_value={}):
+            day.reasks = model_steps.reasks_due(day, ctx)
         with mock.patch.object(model_steps, "finalize_ctx", return_value=ctx), \
                 mock.patch.object(model_steps.fan_picks, "sequel_keys", return_value={}):
             model_steps.fan_picks_step(day)
@@ -120,6 +122,22 @@ class FanPicksWeekly(unittest.TestCase):
         self.assertEqual((pending["titles"], pending["ageHours"]), (1, 24.0))
         self.assertEqual(len(self.provider.submitted), 1, "never submitted twice")
         self.assertNotIn("movie:1", anchors)
+
+    def test_a_title_due_a_reask_is_asked_again_and_a_known_answer_replaces_its_picks(self):
+        """#187 item 5: asked on 2026-06-01 and not known, so asked again from 2026-08-31 — once."""
+        ledger = daily.paid.Ledger(self.ledger)
+        ledger.answers("fan_picks")["movie:1"] = {"accepted": True, "requestSha256": "old", "error": None,
+                                                 "answer": {"known": False, "picks": [], "at": "2026-06-01"}}
+        ledger.save()
+        anchors = {"movie:1": [], "movie:2": []}
+        monday, before = self.run_day(MONDAY, waiting=(), anchors=anchors)
+        self.assertEqual((before["movie:1"], monday.models["fan_picks"]["reasks"]["due"]), ([], 1))
+        self.assertEqual(monday.paid.data["steps"]["fan_picks"]["reasked"], {"movie:1": ["2026-08-31"]})
+        self.provider.state = "done"
+        tuesday, after = self.run_day(TUESDAY, waiting=(), anchors=anchors)
+        self.assertEqual(after["movie:1"], ["movie:2"])
+        self.assertEqual(tuesday.models["fan_picks"]["reasks"], {"due": 0, "collected": 1})
+        self.assertEqual(len(self.provider.submitted), 1, "asked once for that date")
 
     def test_an_expired_job_is_finished_online(self):
         self.run_day(MONDAY)
@@ -206,11 +224,15 @@ class Waiting(unittest.TestCase):
                          {"GEMINI_API_KEY": "g", "OPENAI_API_KEY": "o", "DEN_EMBED_URL": "http://embed.invalid"})
             day.paid.data["shards"]["combined-v1-r2-abc.jsonl"] = {
                 "rows": '{"mediaType": "movie", "tmdbId": 4}\n{"mediaType": "tv", "tmdbId": 6}\n', "manifest": "{}"}
-            waiting = model_steps.write_waiting(day)
+            with mock.patch.object(model_steps.fan_picks, "load_reask",
+                                   return_value={"movie:1": {"askedAt": "2026-06-01", "known": False,
+                                                             "released": None}}):
+                waiting = model_steps.write_waiting(day)
             with open(os.path.join(out, "changes", "waiting.txt")) as fh:
                 listed = fh.read().split()
         self.assertEqual(waiting, {"fan_picks": ["movie:2", "movie:5"], "premise_tags": ["tv:6"]})
-        self.assertEqual(listed, ["movie:2", "movie:5", "tv:6"])
+        self.assertEqual(day.reasks, {"movie:1": ["2026-08-31"]})
+        self.assertEqual(listed, ["movie:1", "movie:2", "movie:5", "tv:6"], "a re-ask needs its lead fetched too")
 
 
 if __name__ == "__main__":

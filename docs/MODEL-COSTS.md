@@ -205,6 +205,7 @@ Web-search test, 50 unknown 2025–26 titles, blind judgment 0–2:
 - No method differs from today's prompt (every p ≥ 0.68). A list made for a different title scores 0.07.
 - Critic comparisons fix some titles (*Sorry, Baby* 1 → 7 hits) and hurt others (*Stick*: golf films).
 - **Decision:** new titles keep today's prompt (#189). Test cost $0.76 API; the searching and reading ran on the Claude plan.
+- **Re-asked later instead** (#187, built): a title the model did not know, or released within six months of its first ask, is asked again in the weekly Batch three and six months on, with today's prompt and a fresh lead. The new answer replaces the old only if the model now knows the title or names more store titles. The 286 titles from the full run that qualify (198 unknown, 88 recent) are in `data/fan-picks-reask.json`; their re-asks fall between October 2026 and March 2027, ~80 a month at ~$0.0009 each at Batch price.
 
 ## Notes
 

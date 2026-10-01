@@ -1,0 +1,1436 @@
+{
+ "issue": "oxyc/den-dataset#187",
+ "schema": "fan-picks-reask-v1",
+ "titles": {
+  "movie:1000881": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-03-19"
+  },
+  "movie:1007757": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-01"
+  },
+  "movie:1035459": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-07-16"
+  },
+  "movie:1049471": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-04-10"
+  },
+  "movie:1057265": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-06-04"
+  },
+  "movie:1058424": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-17"
+  },
+  "movie:1061798": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-18"
+  },
+  "movie:1074074": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-16"
+  },
+  "movie:1081003": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-22"
+  },
+  "movie:1083381": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-07"
+  },
+  "movie:1084244": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-06-09"
+  },
+  "movie:1084577": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-15"
+  },
+  "movie:1088548": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-03-20"
+  },
+  "movie:1092936": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-08-30"
+  },
+  "movie:1096638": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-06-04"
+  },
+  "movie:1100800": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:1101383": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-08-09"
+  },
+  "movie:1101412": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-09-02"
+  },
+  "movie:1102883": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-17"
+  },
+  "movie:1107166": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-02-20"
+  },
+  "movie:1108427": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-08"
+  },
+  "movie:1119377": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-09-19"
+  },
+  "movie:1119550": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-23"
+  },
+  "movie:1122030": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-03"
+  },
+  "movie:1122573": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-14"
+  },
+  "movie:1127384": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-10"
+  },
+  "movie:1137844": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-09-04"
+  },
+  "movie:1140521": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-30"
+  },
+  "movie:1157869": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-05-14"
+  },
+  "movie:1158616": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-06-04"
+  },
+  "movie:1176962": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-02-15"
+  },
+  "movie:1178602": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-05-17"
+  },
+  "movie:1185806": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-24"
+  },
+  "movie:1197122": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-08-27"
+  },
+  "movie:1202033": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-01"
+  },
+  "movie:1204680": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-25"
+  },
+  "movie:1205515": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-01-27"
+  },
+  "movie:1212763": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-09"
+  },
+  "movie:1213243": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-26"
+  },
+  "movie:1226863": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-01"
+  },
+  "movie:1228710": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-14"
+  },
+  "movie:1232546": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-04-23"
+  },
+  "movie:1232569": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-11"
+  },
+  "movie:1235746": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-08-08"
+  },
+  "movie:1240889": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-13"
+  },
+  "movie:1241634": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-07-18"
+  },
+  "movie:1242015": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-05-23"
+  },
+  "movie:1257406": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-05-14"
+  },
+  "movie:1261616": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-05-07"
+  },
+  "movie:1265609": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-02-12"
+  },
+  "movie:1266127": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-03-13"
+  },
+  "movie:1266800": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-04-08"
+  },
+  "movie:1273221": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-06-04"
+  },
+  "movie:1275779": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-06-10"
+  },
+  "movie:1283320": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-05-17"
+  },
+  "movie:1284041": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-07"
+  },
+  "movie:1284465": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-06-18"
+  },
+  "movie:1288445": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-08-21"
+  },
+  "movie:1290159": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-09-02"
+  },
+  "movie:1290190": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-08-28"
+  },
+  "movie:1290417": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-10"
+  },
+  "movie:1290821": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-01-29"
+  },
+  "movie:1291595": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-18"
+  },
+  "movie:1292415": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-10"
+  },
+  "movie:1301421": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-07"
+  },
+  "movie:1302904": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-26"
+  },
+  "movie:1303356": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-08-13"
+  },
+  "movie:1304313": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-09"
+  },
+  "movie:1307373": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-09-06"
+  },
+  "movie:1308767": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-03"
+  },
+  "movie:1309410": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-03-26"
+  },
+  "movie:1313229": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-05-18"
+  },
+  "movie:1314481": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-20"
+  },
+  "movie:1315772": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-06-24"
+  },
+  "movie:1317149": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-09-07"
+  },
+  "movie:1317448": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-08"
+  },
+  "movie:1318413": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-28"
+  },
+  "movie:1318447": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-24"
+  },
+  "movie:1325958": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:1329016": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-14"
+  },
+  "movie:1330021": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-08"
+  },
+  "movie:1339588": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-22"
+  },
+  "movie:1358005": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-05"
+  },
+  "movie:1361774": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-24"
+  },
+  "movie:1363387": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1368314": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-21"
+  },
+  "movie:1368337": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-06"
+  },
+  "movie:1368881": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-22"
+  },
+  "movie:1369286": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-09-30"
+  },
+  "movie:1375646": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-15"
+  },
+  "movie:1376439": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-04-02"
+  },
+  "movie:1377237": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-09-10"
+  },
+  "movie:1380291": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-20"
+  },
+  "movie:1380316": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-15"
+  },
+  "movie:1382832": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-03"
+  },
+  "movie:1384216": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-26"
+  },
+  "movie:1386315": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-09-02"
+  },
+  "movie:1392469": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1393326": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-30"
+  },
+  "movie:1397055": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-07-30"
+  },
+  "movie:1397385": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-06-26"
+  },
+  "movie:1400382": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1400776": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-01-25"
+  },
+  "movie:1400780": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-01-25"
+  },
+  "movie:1401281": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-09-01"
+  },
+  "movie:1404684": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-15"
+  },
+  "movie:1408162": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-14"
+  },
+  "movie:1412598": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-01-16"
+  },
+  "movie:1413976": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-06-19"
+  },
+  "movie:1414048": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-03-24"
+  },
+  "movie:1419229": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-10-02"
+  },
+  "movie:1419406": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-08-08"
+  },
+  "movie:1421309": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1423191": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-09-15"
+  },
+  "movie:1423253": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1428862": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1429744": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-07-09"
+  },
+  "movie:1430077": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-03-14"
+  },
+  "movie:1430820": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-08-29"
+  },
+  "movie:1433367": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-07"
+  },
+  "movie:1435092": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-12-12"
+  },
+  "movie:1437237": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-03-13"
+  },
+  "movie:1439930": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-12"
+  },
+  "movie:1440050": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-27"
+  },
+  "movie:1440098": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-09-09"
+  },
+  "movie:1442669": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-12"
+  },
+  "movie:1443894": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:1450527": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-03-16"
+  },
+  "movie:1451344": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-06-19"
+  },
+  "movie:1455079": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-10"
+  },
+  "movie:1456349": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-05-20"
+  },
+  "movie:1462322": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-05-21"
+  },
+  "movie:1466123": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:1468683": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-17"
+  },
+  "movie:1469354": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:1471168": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1472638": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-12-25"
+  },
+  "movie:1477317": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-17"
+  },
+  "movie:1480387": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-07-27"
+  },
+  "movie:1480574": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-28"
+  },
+  "movie:1481343": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-29"
+  },
+  "movie:1484453": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:1487320": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:1487604": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1493400": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1493859": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-03-13"
+  },
+  "movie:1496491": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1504358": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-14"
+  },
+  "movie:1510325": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-08-11"
+  },
+  "movie:1511057": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-17"
+  },
+  "movie:1514026": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-01-22"
+  },
+  "movie:1514682": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-29"
+  },
+  "movie:1516698": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-26"
+  },
+  "movie:1516724": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-05-06"
+  },
+  "movie:1517123": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-09-04"
+  },
+  "movie:1522923": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1530510": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "movie:1548113": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-02-04"
+  },
+  "movie:1550706": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-10-18"
+  },
+  "movie:1560520": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-25"
+  },
+  "movie:1564614": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-01-23"
+  },
+  "movie:1582770": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-03-19"
+  },
+  "movie:1584215": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-01-13"
+  },
+  "movie:1588838": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-02-06"
+  },
+  "movie:1594914": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-06-26"
+  },
+  "movie:1595852": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-10"
+  },
+  "movie:1596335": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-01-27"
+  },
+  "movie:1612018": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-06-26"
+  },
+  "movie:1620551": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-03"
+  },
+  "movie:1620996": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:1621552": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-21"
+  },
+  "movie:1631807": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-08-28"
+  },
+  "movie:1641319": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-07"
+  },
+  "movie:1642859": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-07"
+  },
+  "movie:1645368": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-05-13"
+  },
+  "movie:1656220": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:1659155": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-24"
+  },
+  "movie:1662414": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-15"
+  },
+  "movie:1678844": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-05-13"
+  },
+  "movie:1688804": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-14"
+  },
+  "movie:1729723": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-26"
+  },
+  "movie:1744462": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-27"
+  },
+  "movie:297278": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:368489": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:454639": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-18"
+  },
+  "movie:614945": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-06-19"
+  },
+  "movie:69530": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "movie:755898": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-07-30"
+  },
+  "movie:812583": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-09-06"
+  },
+  "movie:813418": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-24"
+  },
+  "movie:829487": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-15"
+  },
+  "movie:855435": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-10"
+  },
+  "movie:860508": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-08-28"
+  },
+  "movie:931285": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-27"
+  },
+  "movie:949838": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-20"
+  },
+  "movie:969681": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-29"
+  },
+  "movie:975225": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-09-12"
+  },
+  "movie:975335": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-05-18"
+  },
+  "movie:991494": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-12-19"
+  },
+  "tv:108181": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-03-18"
+  },
+  "tv:220102": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-25"
+  },
+  "tv:223386": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-30"
+  },
+  "tv:224263": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-23"
+  },
+  "tv:224941": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-21"
+  },
+  "tv:225171": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-11-07"
+  },
+  "tv:229544": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-05"
+  },
+  "tv:241882": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-15"
+  },
+  "tv:245318": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-15"
+  },
+  "tv:248830": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-06-04"
+  },
+  "tv:253960": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-07-02"
+  },
+  "tv:254420": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-01"
+  },
+  "tv:254528": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-07-16"
+  },
+  "tv:254953": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-03-08"
+  },
+  "tv:255570": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-03-23"
+  },
+  "tv:256317": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-06-25"
+  },
+  "tv:256695": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-11"
+  },
+  "tv:257994": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-23"
+  },
+  "tv:258230": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-09-09"
+  },
+  "tv:259702": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-29"
+  },
+  "tv:259837": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-15"
+  },
+  "tv:260592": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-10"
+  },
+  "tv:262280": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-07"
+  },
+  "tv:262388": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-07"
+  },
+  "tv:262848": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-04-21"
+  },
+  "tv:269161": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-04-09"
+  },
+  "tv:270476": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-29"
+  },
+  "tv:273240": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-13"
+  },
+  "tv:273977": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-02-13"
+  },
+  "tv:274776": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-02-05"
+  },
+  "tv:276161": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-05"
+  },
+  "tv:277439": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-05"
+  },
+  "tv:277702": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-08-15"
+  },
+  "tv:278178": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-18"
+  },
+  "tv:278573": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-10"
+  },
+  "tv:278624": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-15"
+  },
+  "tv:279323": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-17"
+  },
+  "tv:279471": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-10"
+  },
+  "tv:280511": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-06-04"
+  },
+  "tv:280948": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-01-05"
+  },
+  "tv:281013": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-11-12"
+  },
+  "tv:281016": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-03-06"
+  },
+  "tv:281281": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-07-22"
+  },
+  "tv:282440": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "tv:283297": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-05"
+  },
+  "tv:283304": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-09"
+  },
+  "tv:284725": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "tv:284838": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-10-09"
+  },
+  "tv:285404": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-20"
+  },
+  "tv:285807": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-14"
+  },
+  "tv:285838": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-24"
+  },
+  "tv:286617": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-05-31"
+  },
+  "tv:287011": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-04-22"
+  },
+  "tv:287231": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "tv:287238": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-07-27"
+  },
+  "tv:287527": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-04-08"
+  },
+  "tv:287620": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-23"
+  },
+  "tv:287740": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "tv:288055": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2025-05-04"
+  },
+  "tv:289219": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-04-06"
+  },
+  "tv:289424": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-04-18"
+  },
+  "tv:289763": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-06-22"
+  },
+  "tv:291084": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-01-04"
+  },
+  "tv:291496": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-08-07"
+  },
+  "tv:294095": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-31"
+  },
+  "tv:296206": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-06-26"
+  },
+  "tv:296285": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-06-19"
+  },
+  "tv:298168": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-08-05"
+  },
+  "tv:298610": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-07-18"
+  },
+  "tv:299167": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-15"
+  },
+  "tv:300480": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-08-07"
+  },
+  "tv:300507": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": null
+  },
+  "tv:302723": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-11-05"
+  },
+  "tv:302919": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2025-12-12"
+  },
+  "tv:303143": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-05-08"
+  },
+  "tv:303351": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-08-20"
+  },
+  "tv:308014": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-05-15"
+  },
+  "tv:312949": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-07-03"
+  },
+  "tv:313721": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-04-01"
+  },
+  "tv:314478": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-09-08"
+  },
+  "tv:314939": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-09-12"
+  },
+  "tv:315610": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": "2026-03-25"
+  },
+  "tv:318262": {
+   "askedAt": "2026-09-29",
+   "known": false,
+   "released": null
+  },
+  "tv:322430": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-06-12"
+  },
+  "tv:324434": {
+   "askedAt": "2026-09-29",
+   "known": true,
+   "released": "2026-07-24"
+  },
+  "tv:331033": {
+   "askedAt": "2026-09-28",
+   "known": false,
+   "released": "2026-09-07"
+  },
+  "tv:95350": {
+   "askedAt": "2026-09-28",
+   "known": true,
+   "released": "2026-08-16"
+  }
+ }
+}

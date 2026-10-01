@@ -153,7 +153,7 @@ class Day:
         self.typesafe_before = None
         self.paid = paid.Ledger(getattr(args, "paid_state", None))
         self.restored = 0
-        self.waiting, self.models = {}, {}
+        self.waiting, self.models, self.reasks = {}, {}, {}
 
     def persist(self):
         """Take what was bought so far into the paid-answers ledger and write it, so a run that stops after

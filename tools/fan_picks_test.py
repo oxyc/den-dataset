@@ -453,6 +453,22 @@ class Daily(unittest.TestCase):
         self.assertEqual(out["anchors"], {"movie:1": ["movie:2"], "movie:2": ["movie:8"]})
         self.assertEqual((result["backfilled"], result["asked"], result["costUSD"]), (1, 0, 0))
 
+    def test_a_reask_replaces_the_picks_only_when_it_knows_the_title_or_matches_more(self):
+        heat = {"title": "Heat", "year": 1995, "type": "film"}
+        samurai = {"title": "Seven Samurai", "year": 1954, "type": "film"}
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, articles, franchises, existing = self.fixture(
+                directory, {"movie:1": ["movie:8"], "movie:2": ["movie:8"], "movie:9": ["movie:2", "movie:8"]})
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, [], follows={}, reasks={
+                "movie:1": {"known": True, "picks": [samurai]},             # known now: replaced
+                "movie:2": {"known": False, "picks": [heat, {"title": "Amélie", "year": 2001, "type": "film"}]},
+                "movie:9": {"known": False, "picks": [samurai]}})           # fewer, still unknown: kept
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)["anchors"]
+        self.assertEqual(out, {"movie:1": ["movie:2"], "movie:2": ["movie:8", "movie:1"],
+                               "movie:9": ["movie:2", "movie:8"]})
+        self.assertEqual((result["reasked"], result["reaskReplaced"]), (3, 2))
+
     def test_withdrawn_anchors_and_picks_are_removed_before_the_store_build(self):
         with tempfile.TemporaryDirectory() as directory:
             corpus, articles, franchises, existing = self.fixture(
@@ -462,6 +478,27 @@ class Daily(unittest.TestCase):
                 out = json.load(fh)
         self.assertEqual(out["anchors"], {"movie:2": ["movie:8"]})
         self.assertEqual((result["asked"], result["anchors"], result["picks"]), (0, 1, 1))
+
+
+class Reask(unittest.TestCase):
+    def test_a_title_the_model_did_not_know_is_asked_again_three_and_six_months_after_the_ask(self):
+        self.assertEqual(fp.reask_dates("2026-09-25T10:00:00+00:00", False, "1999-05-01"),
+                         ["2026-12-25", "2027-03-26"])
+
+    def test_a_new_release_is_asked_again_three_and_six_months_after_it_came_out(self):
+        self.assertEqual(fp.reask_dates("2026-09-25", True, "2026-08-01"), ["2026-10-31", "2027-01-30"])
+        self.assertEqual(fp.reask_dates("2026-09-25", True, "2026-05-01"), ["2026-10-30"],
+                         "a date before the first ask is not asked")
+        self.assertEqual(fp.reask_dates("2026-09-25", True, "2026-12-01"), ["2027-03-02", "2027-06-01"],
+                         "not released yet when asked")
+
+    def test_a_known_older_title_is_not_asked_again(self):
+        self.assertEqual(fp.reask_dates("2026-09-25", True, "2020-01-01"), [])
+        self.assertEqual(fp.reask_dates("2026-09-25", True, None), [])
+
+    def test_the_committed_seed_is_readable_and_every_entry_has_a_date(self):
+        for key, entry in fp.load_reask().items():
+            self.assertTrue(fp.reask_dates(entry["askedAt"], entry["known"], entry["released"]), key)
 
 
 class Frozen(fp.datetime.datetime):
