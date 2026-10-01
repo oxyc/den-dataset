@@ -155,16 +155,18 @@ class Batch(unittest.TestCase):
             self.assertEqual(job["chunks"], {"c00000": ["movie:1", "movie:2"], "c00001": ["movie:3", "movie:4"],
                                              "c00002": ["movie:5"]})
             fake.batch_state = "running"
-            self.assertEqual(llm.collect(cfg, job, Task(), ITEMS), ("running", {}, []))
+            self.assertEqual(llm.collect(cfg, job, Task(), ITEMS), ("running", {}, [], 5))
             fake.batch_state = "done"
-            state, rows, calls = llm.collect(cfg, job, Task(), ITEMS)
+            state, rows, calls, unfinished = llm.collect(cfg, job, Task(), ITEMS)
+            _, _, again, _ = llm.collect(cfg, job, Task(), ITEMS)
         finally:
             for patch in patches:
                 patch.stop()
-        self.assertEqual(state, "done")
+        self.assertEqual((state, unfinished), ("done", 0))
         self.assertEqual(rows["movie:5"]["value"], "batch:movie:5")
         self.assertEqual(rows["movie:5"]["by"]["mode"], "batch")
         self.assertAlmostEqual(calls[0]["costUSD"], (1000 * 1e-6 + 100 * 2e-6) / 2)
+        self.assertEqual(again, [], "a job read twice reports its Batch cost once")
 
     def test_an_expired_job_is_finished_online_and_never_resubmitted(self):
         fake = Fake(batch_state="expired")
@@ -173,13 +175,131 @@ class Batch(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 job = llm.submit(cfg, Task(), ITEMS, "test-1", directory)
             fake.submitted = None
-            state, rows, _ = llm.collect(cfg, job, Task(), ITEMS)
+            state, rows, _, unfinished = llm.collect(cfg, job, Task(), ITEMS)
         finally:
             for patch in patches:
                 patch.stop()
-        self.assertEqual(state, "expired")
+        self.assertEqual((state, unfinished), ("expired", 0))
         self.assertEqual(sorted(r["value"] for r in rows.values()), [f"primary:movie:{n}" for n in range(1, 6)])
         self.assertIsNone(fake.submitted)
+
+    def test_an_online_finish_cut_short_by_the_cap_resumes_without_paying_twice(self):
+        """The reviewer's probe (#201): an expired three-title job, a budget that holds one call, collected on
+        two runs. Each title is paid for once, and the job finishes on the run its titles fit."""
+        fake = Fake(batch_state="expired")
+        cfg, patches = configured(fake, per_call=1, fallback=False)
+        kept = {}
+        try:
+            job = {"provider": "fake", "model": "primary", "chunks": {"c0": ["movie:1"], "c1": ["movie:2"],
+                                                                      "c2": ["movie:3"]}}
+            one_call = llm.ceiling(cfg, Task().request(ITEMS[:1])) * providers.GENERATION_SENDS
+            for _ in range(3):
+                try:
+                    llm.collect(cfg, job, Task(), ITEMS[:3], llm.Budget(one_call * 1.5),
+                                record=lambda key, row: kept.setdefault(key, row), done=kept.__contains__)
+                except llm.OverBudget:
+                    pass
+            _, _, _, unfinished = llm.collect(cfg, job, Task(), ITEMS[:3], done=kept.__contains__)
+        finally:
+            for patch in patches:
+                patch.stop()
+        prompts = [prompt for _, prompt in fake.prompts]
+        self.assertEqual({key: prompts.count(key) for key in ("movie:1", "movie:2", "movie:3")},
+                         {"movie:1": 1, "movie:2": 1, "movie:3": 1})
+        self.assertEqual(unfinished, 0)
+
+    def test_finish_limits_the_online_finish_and_says_what_is_left(self):
+        fake = Fake(batch_state="expired")
+        cfg, patches = configured(fake, per_call=1, fallback=False)
+        try:
+            job = {"provider": "fake", "model": "primary", "chunks": {f"c{n}": [i["key"]] for n, i in enumerate(ITEMS)}}
+            _, rows, _, unfinished = llm.collect(cfg, job, Task(), ITEMS, finish=2)
+            _, none, _, still = llm.collect(cfg, job, Task(), ITEMS, finish=0)
+        finally:
+            for patch in patches:
+                patch.stop()
+        self.assertEqual((len(rows), unfinished, none, still), (2, 3, {}, 5))
+
+    def test_a_job_is_collected_with_its_own_model_and_a_404_reads_as_expired(self):
+        fake = Fake(batch_state="done")
+        cfg, patches = configured(fake, per_call=5)
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                job = llm.submit(cfg, Task(), ITEMS, "test-1", directory)
+            switched = {**cfg, "model": "backup"}
+            _, rows, calls, _ = llm.collect(switched, job, Task(), ITEMS)
+
+            def gone(*_):
+                raise providers.Unavailable("HTTP 404 b''", 404)
+            fake.poll = gone
+            job.pop("batchCounted")
+            state, rows_after, _, _ = llm.collect(switched, job, Task(), ITEMS)
+        finally:
+            for patch in patches:
+                patch.stop()
+        self.assertEqual((rows["movie:1"]["by"]["model"], calls[0]["model"]), ("primary", "primary"))
+        self.assertAlmostEqual(calls[0]["costUSD"], (1000 * 1e-6 + 100 * 2e-6) / 2, msg="the job's own price")
+        self.assertEqual(state, "expired")
+        self.assertEqual(rows_after["movie:1"]["value"], "primary:movie:1", "finished online with the job's model")
+
+    def test_a_lost_create_is_found_by_its_label_instead_of_made_again(self):
+        fake = Fake()
+        fake.find = lambda cfg, label: {"name": "batches/made-before"} if label == "test-1" else None
+        cfg, patches = configured(fake, per_call=5)
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                job = llm.submit(cfg, Task(), ITEMS, "test-1", directory)
+        finally:
+            for patch in patches:
+                patch.stop()
+        self.assertEqual(job["name"], "batches/made-before")
+        self.assertFalse(hasattr(fake, "submitted"))
+
+
+class Spend(unittest.TestCase):
+    def test_calls_in_flight_count_against_the_cap(self):
+        budget = llm.Budget(1.0)
+        budget.admit(0.6)
+        with self.assertRaises(llm.OverBudget):
+            budget.admit(0.6)
+        budget.charge(0.1, held=0.6)
+        budget.admit(0.6)
+
+    def test_a_request_whose_response_was_lost_is_sent_twice_at_most_and_paid_for_each_send(self):
+        sent = []
+        ok = json.dumps({"output": [{"type": "message", "content": [{"type": "output_text", "text": "{}"}]}],
+                         "usage": {"input_tokens": 1000, "output_tokens": 100}}).encode()
+
+        class Reply(io.BytesIO):
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+        def urlopen(request, timeout=None):
+            sent.append(1)
+            if len(sent) == 1:
+                raise TimeoutError("read timed out")
+            return Reply(ok)
+        cfg = {**llm.STEP_DEFAULTS, "step": "x", "provider": "openai", "model": "gpt-5.6-luna"}
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "k"}), mock.patch("urllib.request.urlopen", urlopen), \
+                mock.patch.object(providers.time, "sleep"):
+            budget = llm.Budget(1.0)
+            result = llm.online(cfg, llm.request("p", 10), budget)
+            self.assertEqual(len(sent), 2)
+            self.assertAlmostEqual(result["costUSD"], 2 * llm.cost(cfg, result["usage"], "online"))
+            self.assertAlmostEqual(budget.spent, result["costUSD"])
+            sent.clear()
+
+            def lost(request, timeout=None):
+                sent.append(1)
+                raise TimeoutError("read timed out")
+            with mock.patch("urllib.request.urlopen", lost), self.assertRaises(providers.Unavailable):
+                llm.online(cfg, llm.request("p", 10), budget)
+        self.assertEqual(len(sent), providers.GENERATION_SENDS, "a billed request is not sent six times")
 
 
 class Prices(unittest.TestCase):

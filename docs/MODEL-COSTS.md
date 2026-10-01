@@ -220,5 +220,6 @@ Web-search test, 50 unknown 2025–26 titles, blind judgment 0–2:
 - **Thinking is the hidden cost.** Default thinking on Gemini Flash was 2.5× the price of low with no clear gain; on Pro it roughly tripled the price.
 - **Monthly plans.** Claude and ChatGPT plans run models through their CLIs at no extra $, limited by plan caps. They suit local backfills and bake-offs, never the daily job.
 - **Refusals** must not sink a batch: retry one title per call, then ask the step's fallback model (#183).
+- **A lost response may be billed.** A generation request whose answer never arrived is sent at most twice, and each send counts as spent against the caps (`lib/llm_providers.py`, `GENERATION_SENDS`). A Batch create whose response is lost is found again by its label before another is made (Gemini, OpenAI; Anthropic batches carry no label, and no step submits there).
 - **Never pay twice.** A paid answer is kept outside the run and reused by every later run; only a deliberate re-ask (new model or spec) pays again (#187).
 - **Price changes.** Update this file when a price changes or a run is measured, and cite the issue.

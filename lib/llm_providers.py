@@ -24,6 +24,7 @@ import os
 import random
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -77,8 +78,24 @@ def http(method, url, body=None, headers=None, raw=False, timeout=300):
         return response.headers, (payload if raw else json.loads(payload or b"{}"))
 
 
-def send(method, url, body=None, headers=None, raw=False, timeout=300, attempts=ATTEMPTS):
-    """`http`, retried on 408/429/5xx and transport failures. Raises `Unavailable` with no key in it."""
+#: How many times a generation request is sent at most when its response never arrives. A send whose answer
+#: was lost may still be billed — the provider may have done the work — so it is tried once more, not six
+#: times, and `sends()` lets the caller count every such send as spent.
+GENERATION_SENDS = 2
+_local = threading.local()
+
+
+def sends():
+    """How many times this thread's last `send` sent its request: its unanswered sends, plus one."""
+    return getattr(_local, "sends", 1)
+
+
+def send(method, url, body=None, headers=None, raw=False, timeout=300, attempts=ATTEMPTS, generation=False):
+    """`http`, retried on 408/429/5xx and transport failures. Raises `Unavailable` with no key in it.
+
+    `generation` marks a request the provider bills when it runs: after a lost response it is sent at most
+    `GENERATION_SENDS` times in all."""
+    _local.sends = 1
     for attempt in range(attempts):
         last = attempt == attempts - 1
         try:
@@ -89,7 +106,9 @@ def send(method, url, body=None, headers=None, raw=False, timeout=300, attempts=
                 continue
             raise Unavailable(f"HTTP {error.code} {error.read()[:300]!r}", error.code) from None
         except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
-            if not last:
+            if generation:
+                _local.sends += 1
+            if not last and not (generation and _local.sends > GENERATION_SENDS):
                 time.sleep(min(MAX_RETRY_DELAY, 2 ** attempt + random.uniform(0.0, 1.0)))
                 continue
             raise Unavailable(f"{type(error).__name__}: {error}") from None
@@ -165,8 +184,16 @@ class Gemini:
     def online(self, cfg, request):
         url = f"{self.API}/v1beta/models/{cfg['model']}:generateContent"
         _, response = send("POST", url, self.body(cfg, request), self.headers({"Accept": "application/json"}),
-                           timeout=90)
+                           timeout=90, generation=True)
         return self.read(response, request)
+
+    def find(self, cfg, label):
+        """The Batch job a lost create may still have made under `label`, or None."""
+        _, listing = send("GET", f"{self.API}/v1beta/batches?pageSize=100", headers=self.headers())
+        for entry in listing.get("operations") or listing.get("batches") or []:
+            if isinstance(entry, dict) and find(entry, "displayName") == label and entry.get("name"):
+                return {"name": entry["name"], "file": find(entry, "fileName")}
+        return None
 
     def upload(self, path, display):
         """The Files API's resumable upload: start, then one upload-and-finalize. Returns `files/…`."""
@@ -266,8 +293,17 @@ class OpenAI:
                       refusal or reason or response.get("status"), response)
 
     def online(self, cfg, request):
-        _, response = send("POST", f"{self.API}/v1/responses", self.body(cfg, request), self.headers())
+        _, response = send("POST", f"{self.API}/v1/responses", self.body(cfg, request), self.headers(),
+                           generation=True)
         return self.read(response, request)
+
+    def find(self, cfg, label):
+        """The Batch job a lost create may still have made under `label`, or None."""
+        _, listing = send("GET", f"{self.API}/v1/batches?limit=100", headers=self.headers())
+        for entry in listing.get("data") or []:
+            if (entry.get("metadata") or {}).get("label") == label[:500]:
+                return {"name": entry["id"], "file": entry.get("input_file_id")}
+        return None
 
     def submit(self, cfg, requests, label, source):
         with open(source, "w", encoding="utf-8") as fh:
@@ -289,9 +325,11 @@ class OpenAI:
     def poll(self, cfg, job, requests):
         _, status = send("GET", f"{self.API}/v1/batches/{job['name']}", headers=self.headers())
         state = status.get("status")
-        if state in ("failed", "cancelled", "cancelling"):
+        if state == "failed":
             return "failed", {"error": json.dumps(status.get("errors"))[:500]}
-        if state not in ("completed", "expired"):
+        # `cancelling` still runs and bills some requests, so it is read only once it has stopped; a cancelled
+        # or expired job's output file holds what it did finish.
+        if state not in ("completed", "expired", "cancelled"):
             return "running", {}
         out = {}
         if status.get("output_file_id"):
@@ -356,8 +394,15 @@ class Anthropic:
         return answer(text, value, self.usage(response), response.get("model"), stop == "refusal", stop, response)
 
     def online(self, cfg, request):
-        _, response = send("POST", f"{self.API}/v1/messages", self.body(cfg, request), self.headers())
+        _, response = send("POST", f"{self.API}/v1/messages", self.body(cfg, request), self.headers(),
+                           generation=True)
         return self.read(response, request)
+
+    def find(self, cfg, label):
+        """None: a Message Batch carries no label to find it by. No step submits to Anthropic in Batch mode
+        (it is the fallback, asked online); configuring one accepts that a create whose response is lost can
+        be made twice."""
+        return None
 
     def submit(self, cfg, requests, label, source):
         # A custom id is `[a-zA-Z0-9_-]{1,64}`, which a title key (`movie:1`) is not, so they are numbered.

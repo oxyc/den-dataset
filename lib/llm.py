@@ -134,21 +134,25 @@ def ceiling(cfg, request):
 
 
 class Budget:
-    """A dollar cap over a run's calls, checked against each call's ceiling before it is sent."""
+    """A dollar cap over a run's calls, checked against each call's ceiling before it is sent. What an
+    admitted call may cost is held until it is charged, so calls in flight on other threads count too."""
 
     def __init__(self, cap, spent=0.0):
-        self.cap, self.spent = cap, spent
+        self.cap, self.spent, self.held = cap, spent, 0.0
         self._lock = threading.Lock()
 
     def admit(self, amount):
         with self._lock:
-            if self.spent + amount > self.cap:
-                raise OverBudget(f"a call can cost up to ${amount:.4f}; ${self.spent:.4f} is spent, crossing the "
-                                 f"${self.cap:.2f} cap before the call")
+            if self.spent + self.held + amount > self.cap:
+                raise OverBudget(f"a call can cost up to ${amount:.4f}; ${self.spent + self.held:.4f} is spent or "
+                                 f"in flight, crossing the ${self.cap:.2f} cap before the call")
+            self.held += amount
 
-    def charge(self, amount):
+    def charge(self, amount, held=0.0):
+        """Record `amount` spent and release `held` (what `admit` held for the call)."""
         with self._lock:
             self.spent += amount
+            self.held -= held
 
 
 # --- asking ---------------------------------------------------------------------------------------------
@@ -159,13 +163,22 @@ def request(prompt, max_tokens, system=None, schema=None, json_out=True, name=No
 
 
 def online(cfg, req, budget=None):
-    """One call. The answer, with `costUSD` and `by`; raises `providers.Unavailable` or `OverBudget`."""
+    """One call. The answer, with `costUSD` and `by`; raises `providers.Unavailable` or `OverBudget`.
+
+    A request sent again after its response was lost may have been billed both times, so its cost counts
+    once for every send (`providers.sends`); the transport tries such a request at most twice."""
+    hold = ceiling(cfg, req) * providers.GENERATION_SENDS
     if budget is not None:
-        budget.admit(ceiling(cfg, req))
-    result = providers.PROVIDERS[cfg["provider"]].online(cfg, req)
-    result["costUSD"] = cost(cfg, result["usage"], "online")
+        budget.admit(hold)
+    try:
+        result = providers.PROVIDERS[cfg["provider"]].online(cfg, req)
+    except providers.Unavailable:
+        if budget is not None:
+            budget.charge(ceiling(cfg, req) * (providers.sends() - 1), held=hold)
+        raise
+    result["costUSD"] = cost(cfg, result["usage"], "online") * providers.sends()
     if budget is not None:
-        budget.charge(result["costUSD"])
+        budget.charge(result["costUSD"], held=hold)
     return result
 
 
@@ -255,7 +268,10 @@ def submit(cfg, task, items, label, directory):
     groups = chunks(items, cfg["titlesPerCall"])
     customs = {f"c{n:05d}": group for n, group in enumerate(groups)}
     os.makedirs(directory, exist_ok=True)
-    job = providers.PROVIDERS[cfg["provider"]].submit(
+    provider = providers.PROVIDERS[cfg["provider"]]
+    # A create whose response was lost may still have made the job: find it by label before making another.
+    find = getattr(provider, "find", None)
+    job = (find(cfg, label) if find else None) or provider.submit(
         cfg, {custom: task.request(group) for custom, group in customs.items()}, label,
         os.path.join(directory, f"{label}.jsonl"))
     return {**job, "step": cfg["step"], "provider": cfg["provider"], "model": cfg["model"], "mode": "batch",
@@ -264,19 +280,41 @@ def submit(cfg, task, items, label, directory):
             "submittedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
 
 
-def collect(cfg, job, task, items, budget=None, workers=1, record=None):
-    """Poll `job`. Returns `(state, rows, calls)`: `running` with nothing, else every title's row.
+def job_cfg(cfg, job):
+    """The config `job` was submitted under: its own provider and model, so its answers are priced and
+    credited to the model that gave them even after the step's model is switched. The fallback is today's."""
+    return {**cfg, "provider": job["provider"], "model": job["model"], "mode": "batch"}
 
-    What the job answered is parsed; what it refused, could not parse, or never answered — every title of an
-    expired or failed job — is finished online through `generate`, with its fallback. A job is never
-    resubmitted: a title already paid for in a batch is not paid for in another."""
-    state, out = providers.PROVIDERS[job["provider"]].poll(cfg, job, job["chunks"])
+
+def collect(cfg, job, task, items, budget=None, workers=1, record=None, done=None, finish=None):
+    """Poll `job`. Returns `(state, rows, calls, unfinished)`; `running` comes with nothing done.
+
+    What the job answered is parsed and recorded. What it refused, could not parse or never answered — every
+    title of an expired or failed job, or of one the provider no longer knows (404) — is finished online
+    through `generate`, with its fallback. A job is never resubmitted: a title already paid for in a batch is
+    not paid for in another.
+
+    The online finish can span several runs. `done(key)` says a title is already settled and kept, so it is
+    neither recorded nor asked again; `finish` is how many titles this run may finish online (None: all; 0:
+    none, as on a day that may not spend). `unfinished` counts the titles still owed — finish them with a
+    later `collect` of the same job. The job's Batch cost is counted the first time it is read
+    (`job["batchCounted"]`), so reading it again reports no spend twice."""
+    cfg = job_cfg(cfg, job)
+    done = done or (lambda key: False)
+    try:
+        state, out = providers.PROVIDERS[job["provider"]].poll(cfg, job, job["chunks"])
+    except providers.Unavailable as error:
+        if error.status != 404:
+            raise
+        state, out = "expired", {}
     if state == "running":
-        return state, {}, []
+        return state, {}, [], sum(len(keys) for keys in job["chunks"].values())
     by_key = {task.key(item): item for item in items}
-    rows, calls, leftover = {}, [], []
+    rows, calls, leftover, missing = {}, [], [], 0
+    first = not job.get("batchCounted")
     for custom, keys in job["chunks"].items():
         group = [by_key[key] for key in keys if key in by_key]
+        missing += sum(1 for key in keys if key not in by_key and not done(key))
         result = out.get(custom) if isinstance(out, dict) else None
         if not group:
             continue
@@ -284,7 +322,8 @@ def collect(cfg, job, task, items, budget=None, workers=1, record=None):
             leftover += group
             continue
         result["costUSD"] = cost(cfg, result["usage"], "batch")
-        calls.append(call_record(cfg, "batch", result, len(group)))
+        if first:
+            calls.append(call_record(cfg, "batch", result, len(group)))
         parsed = {}
         if not result["refused"]:
             try:
@@ -294,13 +333,18 @@ def collect(cfg, job, task, items, budget=None, workers=1, record=None):
         for item in group:
             key = task.key(item)
             if key in parsed:
-                rows[key] = {"value": parsed[key], "by": provenance(cfg, task, "batch")}
-                if record is not None:
-                    record(key, rows[key])
+                if not done(key):
+                    rows[key] = {"value": parsed[key], "by": provenance(cfg, task, "batch")}
+                    if record is not None:
+                        record(key, rows[key])
             else:
                 leftover.append(item)
-    if leftover:
-        more, more_calls = generate({**cfg, "mode": "online"}, task, leftover, budget, workers, record)
+    job["batchCounted"] = True
+    leftover = [item for item in leftover if not done(task.key(item))]
+    now = leftover if finish is None else leftover[:max(0, finish)]
+    if now:
+        more, more_calls = generate({**cfg, "mode": "online"}, task, now, budget, workers, record)
         rows.update(more)
         calls += more_calls
-    return state, rows, calls
+    unanswered = sum(1 for item in now if rows.get(task.key(item), {}).get("unavailable"))
+    return state, rows, calls, len(leftover) - len(now) + unanswered + missing
