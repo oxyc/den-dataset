@@ -226,6 +226,87 @@ def has_diacritic(tag):
     return any(unicodedata.combining(c) for c in unicodedata.normalize("NFD", tag))
 
 
+#: Words that say nothing about WHICH plot a tag set came from, so they never count as a match.
+SHIFT_STOP = {"the", "and", "for", "with", "from", "into", "over", "under", "out", "off", "of", "to", "in",
+              "on", "at", "by", "an", "a", "as", "is", "its", "his", "her", "their", "our", "who", "whom",
+              "one", "two", "own", "new", "old", "than", "that", "this", "vs", "via", "after", "before",
+              "during", "between", "against", "about"}
+#: How much better a neighbour's plot must explain a row's tags than the row's own plot, and how well at all.
+SHIFT_MARGIN, SHIFT_FLOOR = 0.10, 0.20
+#: Consecutive rows pointing the same way that make a batch shifted rather than unlucky.
+SHIFT_RUN = 2
+
+
+def _stem(word):
+    for suffix, replacement in (("ies", "y"), ("ing", ""), ("ed", ""), ("es", ""), ("s", "")):
+        if len(word) > len(suffix) + 3 and word.endswith(suffix):
+            return word[:-len(suffix)] + replacement
+    return word
+
+
+def _tag_words(tags):
+    return {_stem(word) for tag in tags if isinstance(tag, str)
+            for word in normalise(tag).split("-") if len(word) > 2 and word not in SHIFT_STOP}
+
+
+def _plot_words(plot):
+    return {_stem(word) for word in re.findall(r"[a-z0-9]+", normalise(plot or ""))}
+
+
+def shifted(batch_in, batch_out):
+    """Rows whose tags describe the plot one place along in the input, or [] — the positional slip.
+
+    A model answering a batch can keep every key and still write each row's tags from the NEXT item's plot:
+    the key set is exact, so nothing above sees it. That is how *Vertical Limit* shipped *Land of the Dead*'s
+    zombie siege (oxyc/den-dataset#184): in four batches of the July run, 60 titles each carried a neighbour's
+    tags, three runs one place forward and one pair swapped.
+
+    So each row's tags are scored against its own plot and its two input neighbours' — the share of its tag
+    words that the plot contains — and a row POINTS at a neighbour that explains it by `SHIFT_MARGIN` more
+    and by at least `SHIFT_FLOOR`. One pointing row is chance (a sequel, a shared setting); `SHIFT_RUN`
+    consecutive rows pointing the same way is a shift, and two rows pointing at each other is a swap. Measured over every premise batch still on disk —
+    2,363 batches and 99,260 rows across the July, v2 and #146 runs, smoke and repair phases included — it
+    rejects the four shifted batches, one v2 batch whose series tags were written from memory of other
+    series, and nothing else.
+
+    Lexical rather than embedded, so it needs no embedder and runs wherever the validator does. Its blind
+    spot is a non-English plot, which shares few words with English tags whichever row it is: such rows
+    rarely point at all, so a shift through a run of them is missed rather than invented.
+    """
+    order = [row.get("key") for row in batch_in]
+    plots = [_plot_words(row.get("plot", "")) for row in batch_in]
+    tags = {row.get("key"): row.get("tags") for row in batch_out if isinstance(row, dict)}
+    pointing = {1: set(), -1: set()}
+    for i, key in enumerate(order):
+        words = _tag_words(tags.get(key) or [])
+        if not words:
+            continue
+        own = len(words & plots[i]) / len(words)
+        for step in pointing:
+            j = i + step
+            if 0 <= j < len(order):
+                other = len(words & plots[j]) / len(words)
+                if other >= SHIFT_FLOOR and other > own + SHIFT_MARGIN:
+                    pointing[step].add(i)
+    problems = []
+    for step, rows in pointing.items():
+        run = []
+        for i in range(len(order) + 1):
+            if i in rows:
+                run.append(i)
+                continue
+            if len(run) >= SHIFT_RUN:
+                where = "next" if step == 1 else "previous"
+                problems.append(f"{order[run[0]]} .. {order[run[-1]]}: {len(run)} consecutive rows carry the "
+                                f"{where} row's premise — the batch slipped a position")
+            run = []
+    # Two rows that point at each other exchanged their tags: no run, and just as wrong.
+    for i in sorted(pointing[1] & {j - 1 for j in pointing[-1]}):
+        if not any(order[i] in p or order[i + 1] in p for p in problems):
+            problems.append(f"{order[i]} and {order[i + 1]} carry each other's premise — the batch swapped them")
+    return problems
+
+
 def check(batch_in, batch_out, strict_language):
     """Returns (fatal, quality). Fatal rejects the batch; quality names tags to drop and keep going.
 
@@ -301,6 +382,7 @@ def check(batch_in, batch_out, strict_language):
                                    f"— drop the tag")
                 if names := proper_nouns(tag, plots.get(key, "")):
                     quality.append(f"{key}: {tag!r} carries proper noun(s) {names} — drop the tag")
+    fatal.extend(shifted(batch_in, batch_out))
     return fatal, quality
 
 

@@ -37,6 +37,7 @@ Together that's about **$0.0029 a title, ~$5 a year** at 5 titles a day. Weekly 
 |---|---:|---|---:|---:|---|
 | Genre & mood classification, first generation | 47,529 | TypeSafe (Jev) | ~$20 | ~$0.0004 | bought by hand, never by a timer (`OPERATE.md`) |
 | Premise tags gap fill (#146) | 5,806 | Claude Haiku 4.5, 40 per call | $7.04 accepted, $8.86 with retries (API list; run on the Claude plan through the CLI) | $0.0012 | 147 accepted calls of 193 attempts; plots averaged 1,509 characters |
+| Premise tags re-tag of misattributed rows (#184) | 392 | Claude Haiku 4.5, 20 per call | $1.18 with one retry (API list; run on the Claude plan through the CLI) | $0.0030 | 21 calls for 20 batches; plots averaged ~3,900 characters, over twice #146's |
 | Fan picks, every title (oxyc/den-atlas#121) | 52,985 | Gemini 3.7 Flash, low thinking | $82.45 ($1.53 sample, $80.92 full run) | $0.0016 | mostly Batch; ~3,400 titles the Batch service refused (unbilled) were re-asked at standard price |
 
 ## Fan picks: why Gemini 3.7 Flash (oxyc/den-atlas#121, 2026-09)
