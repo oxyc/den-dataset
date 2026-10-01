@@ -10,20 +10,12 @@ About **5 new titles a day** reach the catalogue. Release years whose admissions
 
 | Step | Model | $/title | $/year at 5/day | Source |
 |---|---|---:|---:|---|
-| Fan picks | Gemini 3.7 Flash, low thinking, online | ~$0.003 | ~$5.50 | measured, daily run 2026-09-30 |
-| Premise tags | gpt-5.6-luna, 10 a call, JSON schema; Claude Haiku 4.5 for a title luna refuses | ~$0.0003 | ~$0.55 | #182 bake-off; in the daily job since #183 |
+| Fan picks | Gemini 3.7 Flash, low thinking, online; compact answer (format B) since #187 | ~$0.0017 | ~$3.10 | the 300-title format test (#187) |
+| Premise tags | gpt-5.6-luna, 10 a call, JSON schema; Claude Haiku 4.5 for a title luna refuses | ~$0.0003–0.0004 | ~$0.65 | #182 bake-off; a live 2-title smoke (#183) measured $0.0004, ~150 of its tokens reasoning |
 | Genre & mood labels, facts delta | TypeSafe (Jev); classify and critique in one call since #187 | ~$0.0008 | ~$1.45 | measured, daily run 2026-09-30, less the measured 13% on those two |
-| **Total** | | **~$0.0041** | **~$7.50** | |
+| **Total** | | **~$0.0029** | **~$5.20** | |
 
-Premise tags were Claude Haiku 4.5 until #183: $0.0017 a title at 5 a call, $0.0012 at 40 (#146's real batches). An early estimate of $0.009 a title was about 5× too high.
-
-**Decided changes** (#187), not built yet:
-
-| Step | Change | New $/title |
-|---|---|---:|
-| Fan picks | compact answer format (format B) | ~$0.0017 |
-
-Together that's about **$0.0029 a title, ~$5 a year** at 5 titles a day. Weekly Batch runs for premise tags and fan picks would halve their part again.
+Fan picks were ~$0.003 a title in the keyed format (daily run 2026-09-30). Premise tags were Claude Haiku 4.5 until #183: $0.0017 a title at 5 a call, $0.0012 at 40 (#146's real batches). An early estimate of $0.009 a title was about 5× too high. Weekly Batch runs for premise tags and fan picks would halve their part again.
 
 **Caching doesn't help here.** Prompt caching only pays when the same prefix repeats within minutes, and the daily job makes about one call per step a day. Haiku 4.5's premise prompt (~2k tokens) is also below its minimum cacheable prefix.
 
@@ -174,7 +166,7 @@ Spend on these measurements: $2.80.
 | Titles with ≥10 picks | 99.3% | 99.3% |
 | Blind judgment of kept picks, 50 tail titles (0–2) | 2.00 | 1.98 (7 vs 6 preferred, 37 same, p=1.0) |
 
-- Format B's lower match rate is extra names that never match and are dropped, so the row doesn't lose picks. **Ship format B.**
+- Format B's lower match rate is extra names that never match and are dropped, so the row doesn't lose picks. **Shipped** (#187): the prompt asks for it, and the parser still reads the keyed answers stored before it.
 - A plain-text answer made Gemini think ~15× longer and cost more.
 
 **Cadence.** Each step gets a daily, weekly or "N waiting" setting. Weekly steps run through Batch, submitted in one run and collected in the next. atlas already copes with a title that has no fan picks or premise vector yet.

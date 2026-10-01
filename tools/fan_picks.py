@@ -135,10 +135,12 @@ def prompt(title):
     lead = title.get("lead") or ""
     if lead and not lead.endswith("."):
         lead += "."
+    # The compact answer (#187, format B): short keys and one array per pick, 43% cheaper than keyed objects
+    # for the same picks kept (300 titles, blind-judged equal). `parse` still reads the keyed shape.
     return (f"A friend loved {title['title']} ({when}). {lead} ".replace("  ", " ")
             + "Name up to 20 films or series they would also love — any genre, era or country; taste, not "
               "similarity. If you don't know this title well, say so and name only picks you're confident in. "
-              'Return only JSON: {"known": bool, "picks":[{"title":str, "year":int, "type":"film"|"series"}]}')
+              'Return only JSON: {"k":bool,"p":[["Title",1999,"f"|"s"]]}')
 
 
 def question(title, cfg=CFG):
@@ -278,11 +280,25 @@ def sample(work, per_band, seed, out):
 
 # --- asking ---------------------------------------------------------------------------------------------
 
+#: Format B's one-letter types, and the words a model sometimes writes there instead.
+SHORT_TYPES = {"f": "film", "s": "series", "film": "film", "series": "series"}
+
+
 def parse(text):
-    """The answer's `known` and picks, or ValueError. A pick needs a title; year and type are kept as given."""
+    """The answer's `known` and picks, or ValueError. A pick needs a title; year and type are kept as given.
+
+    Both answer shapes are read: the compact `{"k", "p": [[title, year, "f"|"s"]]}` the prompt asks for now,
+    and the keyed `{"known", "picks": [{"title", "year", "type"}]}` every answer before it is stored in."""
     found = re.search(r"\{.*\}", text or "", re.S)
     value = json.loads(found.group(0) if found else text)
-    picks = value.get("picks")
+    if "p" in value:
+        picks = [{"title": pick[0], "year": pick[1] if len(pick) > 1 else None,
+                  "type": SHORT_TYPES.get(pick[2]) if len(pick) > 2 and isinstance(pick[2], str) else None}
+                 for pick in value["p"] if isinstance(pick, list) and pick] \
+            if isinstance(value["p"], list) else None
+        known = value.get("k")
+    else:
+        picks, known = value.get("picks"), value.get("known")
     if not isinstance(picks, list):
         raise ValueError("no picks list")
     kept = []
@@ -292,7 +308,7 @@ def parse(text):
             kept.append({"title": pick["title"].strip(),
                          "year": year if isinstance(year, int) and not isinstance(year, bool) else None,
                          "type": pick.get("type") if pick.get("type") in ("film", "series") else None})
-    return bool(value.get("known")), kept
+    return bool(known), kept
 
 
 def record(response, key, ask, mode, batch=None):
