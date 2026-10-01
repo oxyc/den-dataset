@@ -255,7 +255,13 @@ def _embed(url, texts):
             time.sleep(2 ** attempt)
 
 
-def extend_vectors(ctx, url):
+def extend_vectors(ctx, url, changed=(), add_missing=True):
+    """Embed tag sets the premise blob lacks, and re-embed `changed` ones in place.
+
+    A key in `changed` that already has a row gets a new vector in that same row, so the blob's key order and
+    `labels-premise.json` stand. One without a row is appended like a missing key. `add_missing=False` embeds
+    `changed` alone, so a run that only corrects rows touches nothing else.
+    """
     tags = _json(ctx.path(artifacts.PREMISE_TAGS))["tags"]
     path = ctx.path(artifacts.PREMISE_VECTORS)
     try:
@@ -264,16 +270,19 @@ def extend_vectors(ctx, url):
         raise StageError(f"premise tags: {error}") from error
     if keys is None:
         raise StageError("premise tags: the live premise blob does not name its rows")
-    missing = sorted(set(tags) - set(keys))
-    if not missing:
-        return {"before": count, "embedded": 0, "after": count}
+    position = {key: row for row, key in enumerate(keys)}
+    restated = sorted(key for key in set(changed) if key in position)
+    missing = sorted((set(tags) - set(keys)) if add_missing else (set(changed) - set(keys)))
+    if not missing and not restated:
+        return {"before": count, "embedded": 0, "reembedded": 0, "after": count}
     unknown = sorted(set(keys) - set(tags))
     if unknown:
         raise StageError(f"premise tags: {len(unknown)} vector rows have no tag strings")
     embed_canary.gate(url)
     rows = bytearray(blob[base:])
-    for start in range(0, len(missing), 48):
-        block = missing[start:start + 48]
+    order = restated + missing
+    for start in range(0, len(order), 48):
+        block = order[start:start + 48]
         vectors = _embed(url, [" ".join(tags[key]) for key in block])
         valid = (isinstance(vectors, list) and len(vectors) == len(block)
                  and all(isinstance(row, list) and len(row) == dims
@@ -282,21 +291,62 @@ def extend_vectors(ctx, url):
                          for row in vectors))
         if not valid:
             raise StageError("premise tags: embedder returned the wrong premise-vector shape")
-        for row in vectors:
-            rows.extend(bytes((value + 256) % 256 for value in row))
+        for key, row in zip(block, vectors):
+            packed = bytes((value + 256) % 256 for value in row)
+            if key in position:
+                rows[position[key] * dims:(position[key] + 1) * dims] = packed
+            else:
+                rows.extend(packed)
     all_keys = list(keys) + missing
     try:
         vector_blob.write(path, all_keys, bytes(rows), dims)
     except SystemExit as error:
         raise StageError(f"premise tags: {error}") from error
-    ids = os.path.join(ctx.out_dir, "premise-increment", "premise-ids.json")
-    _write(ids, all_keys)
-    command = [sys.executable, os.path.join(REPO, "pipeline", "build_premise_labels.py"),
-               "--ids", ids, "--labels", ctx.path(artifacts.VECTOR_LABELS), "--blob", path,
-               "--out", ctx.path(artifacts.PREMISE_LABELS)]
-    if subprocess.run(command).returncode:
-        raise StageError("premise tags: premise-label rebuild failed")
-    return {"before": count, "embedded": len(missing), "after": len(all_keys)}
+    if missing:
+        ids = os.path.join(ctx.out_dir, "premise-increment", "premise-ids.json")
+        _write(ids, all_keys)
+        command = [sys.executable, os.path.join(REPO, "pipeline", "build_premise_labels.py"),
+                   "--ids", ids, "--labels", ctx.path(artifacts.VECTOR_LABELS), "--blob", path,
+                   "--out", ctx.path(artifacts.PREMISE_LABELS)]
+        if subprocess.run(command).returncode:
+            raise StageError("premise tags: premise-label rebuild failed")
+    return {"before": count, "embedded": len(missing), "reembedded": len(restated), "after": len(all_keys)}
+
+
+def committed_corrections(ctx):
+    """Keys both files hold whose tags in `data/premise-tags-v2.json` differ from the run's copy, sorted.
+
+    The rule: for a key both hold, the committed row wins. A run seeded from the published bundle carries the
+    bundle's copy, which the store reads ahead of `data/`, so a fix committed there (#184) would otherwise
+    never ship. It is safe because nothing else rewrites a key the committed file holds: a daily increment
+    only adds titles neither file has (`build_premise_worklist.load_have`), and the merge refuses an existing
+    key without `--overwrite`. So a difference on a shared key can only be a committed correction.
+
+    Keys on one side only are left alone. One only the run holds is a daily title. One only the committed
+    file holds is not a correction but a new title, and adding titles is the premise step's job, which checks
+    them against the corpus first. No copy in the run means the store reads `data/` directly: nothing to do.
+    """
+    target = ctx.path(artifacts.PREMISE_TAGS)
+    if not os.path.exists(target):
+        return []
+    committed = _json(os.path.join(REPO, "data", artifacts.PREMISE_TAGS.filename))["tags"]
+    run = _json(target)["tags"]
+    return sorted(key for key, values in committed.items() if key in run and run[key] != values)
+
+
+def apply_corrections(ctx, url, keys):
+    """Write the committed rows for `keys` into the run's tag copy and re-embed exactly those vectors."""
+    target = ctx.path(artifacts.PREMISE_TAGS)
+    committed = _json(os.path.join(REPO, "data", artifacts.PREMISE_TAGS.filename))["tags"]
+    value = _json(target)
+    tags = dict(value["tags"])
+    tags.update({key: committed[key] for key in keys})
+    value.update(tags=tags, count=len(tags))
+    _write(target, value)
+    vectors = (extend_vectors(ctx, url, changed=keys, add_missing=False)
+               if os.path.exists(ctx.path(artifacts.PREMISE_VECTORS)) else None)
+    return {"corrected": len(keys), "reembedded": vectors["reembedded"] if vectors else 0,
+            "appended": vectors["embedded"] if vectors else 0, "keys": keys}
 
 
 def stamp_metadata(ctx, result):

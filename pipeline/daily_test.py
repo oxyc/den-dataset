@@ -202,6 +202,40 @@ class Refusals(Recorded):
             self.assertIn("**Migration boundary**", handle.read())
 
 
+class PremiseCorrections(unittest.TestCase):
+    """Committed premise corrections reach the run only with their vectors re-embedded (#184)."""
+
+    def day(self, environ):
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        return daily.Day(args(directory), environ, NOW)
+
+    def test_without_an_embedder_the_corrections_wait_and_nothing_is_written(self):
+        day = self.day({})
+        with mock.patch.object(daily.premise_daily, "committed_corrections", return_value=["movie:103"]), \
+             mock.patch.object(daily.premise_daily, "apply_corrections") as apply, \
+             contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(daily.correct_premise(day), {"corrected": 0, "pending": 1})
+        apply.assert_not_called()
+        self.assertEqual(day.skipped[0]["stage"], "premise_corrections")
+
+    def test_with_an_embedder_the_corrections_apply_and_are_reported(self):
+        day = self.day({"DEN_EMBED_URL": "http://embed.invalid"})
+        result = {"corrected": 2, "reembedded": 2, "appended": 0, "keys": ["movie:103", "movie:114"]}
+        with mock.patch.object(daily.premise_daily, "committed_corrections",
+                               return_value=["movie:103", "movie:114"]), \
+             mock.patch.object(daily.premise_daily, "apply_corrections", return_value=result) as apply, \
+             contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(daily.correct_premise(day), result)
+        apply.assert_called_once_with(day.ctx, "http://embed.invalid", ["movie:103", "movie:114"])
+        self.assertEqual(day.ran, ["premise_corrections"])
+
+    def test_nothing_to_correct_is_silent(self):
+        day = self.day({"DEN_EMBED_URL": "http://embed.invalid"})
+        with mock.patch.object(daily.premise_daily, "committed_corrections", return_value=[]):
+            self.assertIsNone(daily.correct_premise(day))
+        self.assertEqual((day.ran, day.skipped), ([], []))
+
+
 class FanPicks(unittest.TestCase):
     def day(self, spend=True, key="g"):
         directory = self.enterContext(tempfile.TemporaryDirectory())
