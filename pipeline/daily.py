@@ -145,6 +145,7 @@ class Day:
                                     environ.get("ANTHROPIC_API_KEY") and environ.get("DEN_EMBED_URL"))
         self.fan_picks = None
         self.premise = None
+        self.premise_corrections = None
         self.classifiable_changes = None
         prior = spend.month_to_date(getattr(args, "published_reports_dir", None), now.date())
         self.ledger = spend.Ledger(prior, getattr(args, "max_spend_usd_month", 10.0))
@@ -352,6 +353,7 @@ def run_day(day):
             day.stage(name)
             if day.premise and day.premise["titles"]:
                 day.premise["vectors"] = premise_daily.extend_vectors(day.ctx, env["DEN_EMBED_URL"])
+            day.premise_corrections = correct_premise(day)
         elif name == "store":
             day.fan_picks = update_fan_picks(day)
             if day.fan_picks:
@@ -367,6 +369,27 @@ def run_day(day):
         else:
             day.stage(name)
     return False, "the pipeline has no publish stage to check with"
+
+
+def correct_premise(day):
+    """Carry committed premise-tag corrections into the run's copy, with their vectors re-embedded.
+
+    Tags and vectors move together or not at all: without an embedder the corrections wait for a run that
+    has one, rather than shipping new strings beside vectors embedded from the old ones.
+    """
+    keys = premise_daily.committed_corrections(day.ctx)
+    if not keys:
+        return None
+    url = day.environ.get("DEN_EMBED_URL")
+    if not url:
+        day.skip("premise_corrections", f"{len(keys)} committed premise correction(s) wait for DEN_EMBED_URL, "
+                                        "which re-embeds them; the published rows stand until then")
+        return {"corrected": 0, "pending": len(keys)}
+    result = premise_daily.apply_corrections(day.ctx, url, keys)
+    day.ran.append("premise_corrections")
+    print(f"==> premise_corrections: {result['corrected']} corrected, {result['reembedded']} re-embedded",
+          file=sys.stderr)
+    return result
 
 
 def finalize_ctx(ctx):
@@ -420,7 +443,7 @@ def report(day, ready, why, tokens):
         "withdrawn": plan.get("withdrawn", {}), "revisit": plan.get("revisit"),
         "seeded": getattr(day, "seeded", None), "ran": day.ran, "skipped": day.skipped,
         "migrationBoundary": boundary,
-        "fanPicks": day.fan_picks, "premiseTags": day.premise,
+        "fanPicks": day.fan_picks, "premiseTags": day.premise, "premiseCorrections": day.premise_corrections,
         "spend": {**day.ledger.report(), "typesafeInputTokens": tokens,
                   "typesafeUSD": round(tokens * rate, 6)},
     }
@@ -442,6 +465,11 @@ def report(day, ready, why, tokens):
         lines += [f"- premise tags: {out['premiseTags']['titles']} title(s), "
                   f"{out['premiseTags']['repairedRows']} repaired; "
                   f"${out['premiseTags']['costUSD']:.4f}", ""]
+    if out["premiseCorrections"]:
+        fixes = out["premiseCorrections"]
+        lines += [f"- premise corrections: {fixes['corrected']} row(s) corrected, "
+                  f"{fixes.get('reembedded', 0)} vector(s) re-embedded"
+                  + (f", {fixes['pending']} waiting for an embedder" if fixes.get("pending") else ""), ""]
     counts = out["counts"] or {}
     lines += [f"| added | changed | withdrawn | revised | revisited |", "|---|---|---|---|---|",
               f"| {counts.get('added', 0)} | {counts.get('changed', 0)} | {counts.get('withdrawn', 0)} | "

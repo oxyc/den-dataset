@@ -330,6 +330,13 @@ This makes no model call and records `generationAuthorized: false`. When a gener
 validate every response batch with `pipeline/validate_premise_batch.py` before `merge_premise_tags.py` can
 append anything.
 
+### Correcting shipped premise tags
+
+Re-tag the rows and merge them into `data/premise-tags-v2.json` with `merge_premise_tags.py --overwrite`.
+The next daily run with `DEN_EMBED_URL` carries every committed row that differs from the published copy
+into its out-dir and re-embeds exactly those vectors; the report's `premiseCorrections` counts them. Without
+an embedder it carries none of them and says so, so strings and vectors never part.
+
 ### A first generation
 
 The daily job refuses `--spend` without a live baseline: a first generation is the whole corpus (~$20 of
