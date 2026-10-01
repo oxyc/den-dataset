@@ -254,6 +254,8 @@ class FanPicks(unittest.TestCase):
             self.assertEqual(daily.update_fan_picks(day), result)
         self.assertEqual(update.call_args.kwargs["keys"], ["movie:7", "tv:8"])
         self.assertEqual(update.call_args.kwargs["max_spend"], 1.0)
+        self.assertEqual(update.call_args.kwargs["backfill"], daily.fan_picks.load_backfill(),
+                         "answers bought outside the job are merged every day")
         self.assertEqual(day.ran, ["fan_picks"])
 
     def test_no_key_carries_the_input_without_asking(self):

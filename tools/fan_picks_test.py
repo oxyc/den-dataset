@@ -97,14 +97,15 @@ class Retry(unittest.TestCase):
 
     def test_retry_after_accepts_seconds_and_http_dates_and_is_bounded(self):
         now = fp.datetime.datetime(2026, 9, 30, 12, 0, tzinfo=fp.datetime.timezone.utc)
-        self.assertEqual(fp.retry_delay(self.error("17"), 0, now), 17)
-        self.assertEqual(fp.retry_delay(self.error("Wed, 30 Sep 2026 12:01:00 GMT"), 0, now), 60)
-        self.assertEqual(fp.retry_delay(self.error("999"), 0, now), fp.MAX_RETRY_DELAY)
+        self.assertEqual(fp.providers.retry_delay(self.error("17"), 0, now), 17)
+        self.assertEqual(fp.providers.retry_delay(self.error("Wed, 30 Sep 2026 12:01:00 GMT"), 0, now), 60)
+        self.assertEqual(fp.providers.retry_delay(self.error("999"), 0, now), fp.providers.MAX_RETRY_DELAY)
 
     def test_generate_online_sleeps_for_the_provider_delay_before_retrying(self):
         response = {"candidates": [{"content": {"parts": [{"text": '{"known":true,"picks":[]}'}]}}]}
-        with mock.patch.object(fp, "http", side_effect=[self.error("23"), ({}, response)]), \
-             mock.patch.object(fp.time, "sleep") as sleep:
+        with mock.patch.object(fp.providers, "http", side_effect=[self.error("23"), ({}, response)]), \
+             mock.patch.object(fp.providers.time, "sleep") as sleep, \
+             mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
             answer, error, accepted = fp.generate_online({"key": "movie:1", "title": "One"}, "movie:1")
         sleep.assert_called_once_with(23)
         self.assertTrue(accepted)
@@ -381,6 +382,60 @@ class Daily(unittest.TestCase):
         self.assertEqual((result["generated"], result["resumed"]), (1, 1))
         self.assertEqual(out["anchors"], {"movie:1": [], "movie:2": [], "movie:8": []})
         self.assertFalse(os.path.exists(checkpoint))
+
+    def test_a_refused_title_is_asked_once_more_and_then_by_the_fallback_model(self):
+        asked = []
+
+        def online(title, key, ask=0, cfg=fp.CFG):
+            asked.append(cfg["model"])
+            if cfg["model"] == fp.MODEL:
+                return None, {"key": key, "costUSD": 0.001, "usage": {}, "text": ""}, True
+            return {"key": key, "picks": [{"title": "Seven Samurai", "year": 1954, "type": "film"}],
+                    "costUSD": 0.01, "provider": cfg["provider"], "model": cfg["model"]}, None, True
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(fp, "generate_online", online):
+            corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1"],
+                                     workers=1, follows={})
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertEqual(asked, [fp.MODEL, fp.MODEL, fp.CFG["fallback"]["model"]])
+        self.assertEqual(out["anchors"]["movie:1"], ["movie:2"])
+        self.assertAlmostEqual(result["costUSD"], 0.012)
+
+    def test_a_title_the_fallback_refuses_too_stays_asked_empty(self):
+        refused = lambda title, key, ask=0, cfg=fp.CFG: (  # noqa: E731
+            None, {"key": key, "costUSD": 0.001, "usage": {}, "text": ""}, True)
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(fp, "generate_online", refused):
+            corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1"],
+                                     workers=1, follows={})
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertEqual((out["anchors"]["movie:1"], result["emptyAnswers"]), ([], 1))
+
+    def test_an_unreachable_fallback_leaves_the_refusal_standing_instead_of_refusing_the_day(self):
+        def online(title, key, ask=0, cfg=fp.CFG):
+            if cfg["model"] == fp.MODEL:
+                return None, {"key": key, "costUSD": 0.001, "usage": {}, "text": ""}, True
+            return None, {"key": key, "error": "ANTHROPIC_API_KEY is not set", "costUSD": 0.0}, False
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(fp, "generate_online", online):
+            corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": []})
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, ["movie:1"],
+                                     workers=1, follows={})
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertEqual((out["anchors"]["movie:1"], result["emptyAnswers"]), ([], 1))
+
+    def test_a_backfilled_answer_fills_a_title_with_no_picks_and_nothing_else(self):
+        picks = {"picks": [{"title": "Heat", "year": 1995, "type": "film"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            corpus, articles, franchises, existing = self.fixture(directory, {"movie:2": [], "movie:1": ["movie:2"]})
+            result = fp.daily_update(corpus, articles, franchises, existing, existing, [], follows={},
+                                     backfill={"movie:2": picks, "movie:1": picks, "movie:99": picks})
+            with open(existing, encoding="utf-8") as fh:
+                out = json.load(fh)
+        self.assertEqual(out["anchors"], {"movie:1": ["movie:2"], "movie:2": ["movie:8"]})
+        self.assertEqual((result["backfilled"], result["asked"], result["costUSD"]), (1, 0, 0))
 
     def test_withdrawn_anchors_and_picks_are_removed_before_the_store_build(self):
         with tempfile.TemporaryDirectory() as directory:
