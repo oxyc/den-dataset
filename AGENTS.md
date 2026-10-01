@@ -13,6 +13,8 @@ prose somewhere that can go stale without anything failing.
 | Why was a publish refused? | `pipeline/publish-dataset.sh` and the `pipeline/check_*.py` guards it runs beside it. `pipeline/publish.py` runs it and adds no guard of its own; `./den stage publish --plan` runs every gate and signs and uploads nothing. |
 | What does a daily run redo? | `pipeline/changes.py` — the change set since the live dataset, which the stages after it read. |
 | Which titles are one franchise, and why? | `pipeline/franchises.py` (the stage), `pipeline/franchise_groups.py` (what Wikidata decides alone), `data/franchise-golden.json` (the gate). |
+| Which model answers a paid text step, and how often? | `data/models.json`; `lib/llm.py` asks it, `pipeline/model_steps.py` runs the weekly steps. |
+| What has the daily job already paid for? | `pipeline/paid.py` — the paid-answers ledger on the `paid-state` release. |
 | Where does a daily run start, with nothing kept? | `pipeline/published.py` — the bundle a publish puts on `corpus-<ver>`, and the out-dir seeded from it. |
 | How do I run it? | `./den daily` is the scheduled job (`pipeline/daily.py`). `./den run` runs every stage; it skips the paid classify and critique passes without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. `docs/OPERATE.md` is publishing a ready run and recovering one that is not. |
 

@@ -10,16 +10,16 @@ About **5 new titles a day** reach the catalogue. Release years whose admissions
 
 | Step | Model | $/title | $/year at 5/day | Source |
 |---|---|---:|---:|---|
-| Fan picks | Gemini 3.7 Flash, low thinking, online; compact answer (format B) since #187 | ~$0.0017 | ~$3.10 | the 300-title format test (#187) |
-| Premise tags | gpt-5.6-luna, 10 a call, JSON schema; Claude Haiku 4.5 for a title luna refuses | ~$0.0003–0.0004 | ~$0.65 | #182 bake-off; a live 2-title smoke (#183) measured $0.0004, ~150 of its tokens reasoning |
+| Fan picks | Gemini 3.7 Flash, low thinking; compact answer (format B); weekly through Batch since #187 | ~$0.0009 | ~$1.55 | the 300-title format test (#187), at Batch price |
+| Premise tags | gpt-5.6-luna, 10 a call, JSON schema, weekly through Batch; Claude Haiku 4.5 for a title luna refuses | ~$0.0002 | ~$0.35 | #182 bake-off; a live 2-title smoke (#183) measured $0.0004 online, ~150 of its tokens reasoning |
 | Genre & mood labels, facts delta | TypeSafe (Jev); classify and critique in one call since #187 | ~$0.0008 | ~$1.45 | measured, daily run 2026-09-30, less the measured 13% on those two |
-| **Total** | | **~$0.0029** | **~$5.20** | |
+| **Total** | | **~$0.0019** | **~$3.35** | |
 
-Fan picks were ~$0.003 a title in the keyed format (daily run 2026-09-30). Premise tags were Claude Haiku 4.5 until #183: $0.0017 a title at 5 a call, $0.0012 at 40 (#146's real batches). An early estimate of $0.009 a title was about 5× too high. Weekly Batch runs for premise tags and fan picks would halve their part again.
+Fan picks were ~$0.003 a title in the keyed format, online (daily run 2026-09-30). Premise tags were Claude Haiku 4.5 until #183: $0.0017 a title at 5 a call, $0.0012 at 40 (#146's real batches). An early estimate of $0.009 a title was about 5× too high. Fallback calls (a refused title asked again online, then by Claude) and a job finished online after it expired cost standard price on top.
 
 **Caching doesn't help here.** Prompt caching only pays when the same prefix repeats within minutes, and the daily job makes about one call per step a day. Haiku 4.5's premise prompt (~2k tokens) is also below its minimum cacheable prefix.
 
-**Batch halves the bill but costs a day of latency.** Batch jobs waited 5 minutes to 13 hours in #121, so the job would submit one day and collect the next. At today's volume that saves ~$4 a year.
+**Batch halves the bill but costs a day of latency.** Batch jobs waited 5 minutes to 13 hours in #121, so the weekly steps submit on Monday and a later run collects (`pipeline/model_steps.py`); a title waits up to a week for its fan picks and premise tags.
 
 ## Whole-corpus runs
 
@@ -169,7 +169,7 @@ Spend on these measurements: $2.80.
 - Format B's lower match rate is extra names that never match and are dropped, so the row doesn't lose picks. **Shipped** (#187): the prompt asks for it, and the parser still reads the keyed answers stored before it.
 - A plain-text answer made Gemini think ~15× longer and cost more.
 
-**Cadence.** Each step gets a daily, weekly or "N waiting" setting. Weekly steps run through Batch, submitted in one run and collected in the next. atlas already copes with a title that has no fan picks or premise vector yet.
+**Cadence.** Each step gets a daily or weekly setting. Weekly steps run through Batch, submitted in one run and collected in the next. atlas already copes with a title that has no fan picks or premise vector yet. **Built** (#187): fan picks and premise tags are weekly on Mondays; admission and Jev stay daily. The "N waiting" trigger was not built: at ~5 titles a day nothing calls for it.
 
 ## Fan picks for new releases (#189)
 

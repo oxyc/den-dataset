@@ -216,6 +216,12 @@ for r in (bundle(args.combined) if eligible is None else increment(args.combined
     if body is None:
         skipped["noArticleText"] += 1
         continue
+    # The sections are offsets into the article the classify pass read. A title waiting since an earlier day
+    # has its article fetched again (`changes/waiting.txt`), and an edited one would be cut at the wrong
+    # places, so it waits until it is classified again.
+    if r.get("articleSha256") and r["articleSha256"] != hashlib.sha256(body.encode("utf-8")).hexdigest():
+        skipped["articleChanged"] = skipped.get("articleChanged", 0) + 1
+        continue
 
     kept = [s for s in r.get("sections", [])
             if ((s.get("role") or {}).get("value") in ROLE_KEEP)]

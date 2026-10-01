@@ -29,24 +29,6 @@ from pipeline import premise_daily  # noqa: E402
 import fan_picks  # noqa: E402
 
 
-class FanPicksTask:
-    name, version = "fan_picks", "fan-picks-prompt@" + fan_picks.digest(
-        fan_picks.prompt({"key": "movie:0", "title": "X", "year": 2000, "lead": "L"}))[:12]
-
-    @staticmethod
-    def key(title):
-        return title["key"]
-
-    @staticmethod
-    def request(titles):
-        return fan_picks.question(titles[0])
-
-    @staticmethod
-    def parse(titles, answer):
-        known, picks = fan_picks.parse(answer["text"])
-        return {titles[0]["key"]: {"known": known, "picks": picks}}
-
-
 def premise_items(args):
     manifest = premise_daily._json(os.path.join(args.phase, "manifest.json"))
     return [row for index in range(manifest["batches"])
@@ -100,7 +82,7 @@ def run(args, log=sys.stderr):
     if args.step == "premise_tags":
         items, task_of, quality = premise_items(args), premise_daily.Task, premise_quality
     else:
-        items, task_of, quality = fan_pick_items(args), (lambda cfg: FanPicksTask()), \
+        items, task_of, quality = fan_pick_items(args), fan_picks.Task, \
             (lambda rows: fan_pick_quality(rows, args))
     os.makedirs(args.out, exist_ok=True)
     budget = llm.Budget(args.max_spend_usd)

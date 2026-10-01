@@ -2,7 +2,9 @@
  "fan_picks": {
   "provider": "gemini",
   "model": "gemini-3.7-flash",
-  "mode": "online",
+  "mode": "batch",
+  "cadence": "weekly",
+  "day": "mon",
   "titlesPerCall": 1,
   "thinking": "low",
   "maxOutputTokens": 2048,
@@ -15,7 +17,9 @@
  "premise_tags": {
   "provider": "openai",
   "model": "gpt-5.6-luna",
-  "mode": "online",
+  "mode": "batch",
+  "cadence": "weekly",
+  "day": "mon",
   "titlesPerCall": 10,
   "thinking": null,
   "maxOutputTokens": 8192,

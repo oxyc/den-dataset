@@ -698,6 +698,49 @@ def load_daily_checkpoint(path):
     return value
 
 
+def titles_for(keys, rows, articles_path):
+    """`{key: title}` — what the prompt is built from — for corpus `keys`: the store's display title, its
+    year and the lead of its article in `articles_path` (empty when the dump does not hold it)."""
+    wanted, leads = set(keys), {}
+    if os.path.exists(articles_path):
+        with open(articles_path, encoding="utf-8") as fh:
+            for line in fh:
+                article = json.loads(line)
+                key = f"{article['mediaType']}:{article['tmdbId']}"
+                if key in wanted:
+                    leads[key] = lead_of(article.get("text"))
+    titles = {}
+    for key in keys:
+        facts = rows[key].get("facts") or {}
+        title = display_title(facts.get("titles"))
+        if not title:
+            raise RuntimeError(f"fan picks: {key} has no store title to ask about")
+        titles[key] = {"key": key, "title": title, "year": card_year(facts), "lead": leads.get(key, "")}
+    return titles
+
+
+class Task:
+    """One title's fan picks as `lib/llm.py` asks them, for the weekly Batch and the bake-off: `parse` gives
+    `{key: {"known", "picks"}}`."""
+    name = "fan_picks"
+    version = "fan-picks-prompt@" + digest(prompt({"key": "movie:0", "title": "X", "year": 2000, "lead": "L"}))[:12]
+
+    def __init__(self, cfg=CFG):
+        self.cfg = cfg
+
+    @staticmethod
+    def key(title):
+        return title["key"]
+
+    def request(self, titles):
+        return question(titles[0], self.cfg)
+
+    @staticmethod
+    def parse(titles, answer):
+        known, picks = parse(answer["text"])
+        return {titles[0]["key"]: {"known": known, "picks": picks}}
+
+
 def fingerprint(title, cfg=CFG):
     """What an answer was bought for: who was asked, and the request on the wire. A kept answer is reused
     only for the same fingerprint, so a new prompt or model is the one way to pay for a title again."""
@@ -752,33 +795,9 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
     # attach `fan_picks_a` for such a key, so report it and ask only titles the store will actually carry.
     keys = list(dict.fromkeys(keys))
     not_in_corpus = [key for key in keys if key not in rows]
-    corpus_keys = [key for key in keys if key in rows]
-    wanted = set(corpus_keys)
-    leads = {}
-    if os.path.exists(articles_path):
-        with open(articles_path, encoding="utf-8") as fh:
-            for line in fh:
-                article = json.loads(line)
-                key = f"{article['mediaType']}:{article['tmdbId']}"
-                if key in wanted:
-                    leads[key] = lead_of(article.get("text"))
-    titles = {}
-    for key in corpus_keys:
-        if key in anchors:
-            continue
-        row = rows[key]
-        facts = row.get("facts") or {}
-        title = display_title(facts.get("titles"))
-        if not title:
-            raise RuntimeError(f"daily fan picks: {key} has no store title to ask Gemini about")
-        titles[key] = {"key": key, "title": title, "year": card_year(facts), "lead": leads.get(key, "")}
-
+    titles = titles_for([key for key in keys if key in rows and key not in anchors], rows, articles_path)
     if not math.isfinite(max_spend) or max_spend <= 0:
         raise ValueError("daily fan picks: max spend must be a positive finite dollar amount")
-    projected = len(titles) * PILOT_COST * MARGIN
-    if projected > max_spend:
-        raise RuntimeError(f"daily fan picks: refusing {len(titles)} requests: their ${projected:.4f} "
-                           f"projected spend crosses the ${max_spend:.2f} per-run cap")
 
     answered, empty_answers, parse_errors, unavailable = {}, {}, {}, {}
     checkpoint_path = daily_checkpoint_path(out)
@@ -805,6 +824,11 @@ def daily_update(corpus_path, articles_path, franchises_path, existing_path, out
             resumed += 1
         else:
             pending[key] = title
+    # Only what will be asked is projected: an answer already paid for costs nothing again.
+    projected = len(pending) * PILOT_COST * MARGIN
+    if projected > max_spend:
+        raise RuntimeError(f"daily fan picks: refusing {len(pending)} requests: their ${projected:.4f} "
+                           f"projected spend crosses the ${max_spend:.2f} per-run cap")
 
     def one(item):
         key, title = item

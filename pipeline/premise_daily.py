@@ -226,18 +226,34 @@ def generate(phase, cap, cfg=None, workers=1, kept=None, persist=None):
             "projectedSpendUSD": estimate, "spendCapUSD": cap}
 
 
-def prepare(ctx, tags_path, token_ceiling):
-    work = os.path.join(ctx.out_dir, "premise-increment")
+def prepare(ctx, tags_path, token_ceiling, plan=None, work=None):
+    """The worklist for the change set's new titles, or for `plan`'s (a plan file naming other titles, such
+    as the ones a weekly step still owes)."""
+    work = work or os.path.join(ctx.out_dir, "premise-increment")
     command = [sys.executable, os.path.join(REPO, "pipeline", "build_premise_worklist.py")]
     for path in ctx.paths(artifacts.COMBINED):
         command += ["--combined", path]
     command += ["--articles", ctx.path(artifacts.ARTICLES), "--changes",
-                os.path.join(ctx.path(artifacts.CHANGES), "plan.json"), "--token-ceiling", str(token_ceiling),
+                plan or os.path.join(ctx.path(artifacts.CHANGES), "plan.json"), "--token-ceiling", str(token_ceiling),
                 "--existing-tags", tags_path, "--out-dir", work]
     result = subprocess.run(command)
     if result.returncode:
         raise StageError(f"premise tags: worklist exited {result.returncode}")
     return work, _json(os.path.join(work, "gen", "manifest.json"))
+
+
+def rows_of(phase):
+    """Every worklist row of a prepared phase, by key."""
+    manifest = _json(os.path.join(phase, "manifest.json"))
+    return {row["key"]: row for index in range(manifest["batches"])
+            for row in _json(os.path.join(phase, "in", f"batch-{index:04d}.json"))}
+
+
+def write_collected(phase, answered):
+    """A phase's output from answers bought elsewhere (a collected Batch job): one batch, for `merge`."""
+    os.makedirs(os.path.join(phase, "out"), exist_ok=True)
+    _write(os.path.join(phase, "out", "batch-0000.json"),
+           [{"key": key, "tags": row["tags"], "by": row["by"]} for key, row in sorted(answered.items())])
 
 
 def ensure_tags(ctx):

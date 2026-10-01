@@ -290,8 +290,10 @@ def run(ctx, cache=None):
             f"when it grounds a title — build the batches with: {fetch_stage.HOW}")
     # With a live baseline, only what the classify pass will buy for: a run rebuilt from the published
     # release has no dump of the titles it already holds, and needs none (`pipeline/changes.py`, new.txt).
+    # And what a weekly model step still owes (`changes/waiting.txt`): a title admitted on an earlier day needs
+    # its article again to build its prompt, and no out-dir keeps one between runs.
     if changes.planned(ctx) is not None:
-        new = changes.listed(ctx, "new")
+        new = changes.listed(ctx, "new", "waiting")
         todo = [record for record in todo if key(record) in new]
     # Applied after the refusal above, so `--limit 0` asks for nothing rather than reading as an empty
     # enrichment — and 0 means zero here, as it does to `enrich` and the embed stage.

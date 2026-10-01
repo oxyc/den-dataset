@@ -42,7 +42,7 @@ class Recorded(unittest.TestCase):
         changed = mock.patch.object(daily.classify, "changed_articles", return_value=("articles", "digest"))
         changed.start()
         self.addCleanup(changed.stop)
-        fan = mock.patch.object(daily, "update_fan_picks", lambda day: {
+        fan = mock.patch.object(daily.model_steps, "fan_picks_step", lambda day: {
             "asked": 0, "answered": 0, "emptyAnswers": 0, "anchors": 1, "picks": 1, "costUSD": 0.0})
         fan.start()
         self.addCleanup(fan.stop)
@@ -299,10 +299,10 @@ class FanPicks(unittest.TestCase):
                                                                       artifact.filename.replace("{version}", "v")))
         result = {"asked": 2, "answered": 2, "emptyAnswers": 0,
                   "anchors": 10, "picks": 40, "costUSD": 0.01}
-        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+        with mock.patch.object(daily.model_steps, "finalize_ctx", return_value=ctx), \
              mock.patch.object(daily.changes, "planned", return_value={"added": ["movie:7", "tv:8"]}), \
              mock.patch.object(daily.fan_picks, "daily_update", return_value=result) as update:
-            self.assertEqual(daily.update_fan_picks(day), result)
+            self.assertEqual(daily.model_steps.update_fan_picks(day), result)
         self.assertEqual(update.call_args.kwargs["keys"], ["movie:7", "tv:8"])
         self.assertEqual(update.call_args.kwargs["max_spend"], 1.0)
         self.assertEqual(update.call_args.kwargs["backfill"], daily.fan_picks.load_backfill(),
@@ -317,11 +317,11 @@ class FanPicks(unittest.TestCase):
             handle.write('{"anchors":{"movie:1":[]}}')
         result = {"asked": 0, "answered": 0, "emptyAnswers": 0,
                   "anchors": 8, "picks": 30, "costUSD": 0.0}
-        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+        with mock.patch.object(daily.model_steps, "finalize_ctx", return_value=ctx), \
              mock.patch.object(daily.changes, "planned", return_value={"added": ["movie:7"]}), \
              mock.patch.object(daily.fan_picks, "daily_update", return_value=result) as update, \
              contextlib.redirect_stderr(io.StringIO()):
-            daily.update_fan_picks(day)
+            daily.model_steps.update_fan_picks(day)
         self.assertEqual(update.call_args.kwargs["keys"], [])
         self.assertEqual(day.skipped[0]["stage"], "fan_picks")
 
@@ -329,11 +329,11 @@ class FanPicks(unittest.TestCase):
         day = self.day(key="")
         ctx = types.SimpleNamespace(path=lambda artifact: os.path.join(day.ctx.out_dir,
                                                                       artifact.filename.replace("{version}", "v")))
-        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+        with mock.patch.object(daily.model_steps, "finalize_ctx", return_value=ctx), \
              mock.patch.object(daily.changes, "planned", return_value={"added": []}), \
              mock.patch.object(daily.fan_picks, "daily_update") as update, \
              contextlib.redirect_stderr(io.StringIO()):
-            self.assertIsNone(daily.update_fan_picks(day))
+            self.assertIsNone(daily.model_steps.update_fan_picks(day))
         update.assert_not_called()
         self.assertEqual(day.skipped[0]["stage"], "fan_picks")
 
@@ -344,10 +344,10 @@ class FanPicks(unittest.TestCase):
         os.makedirs(os.path.dirname(day.ctx.path(artifacts.PUBLISHED_META)), exist_ok=True)
         with open(day.ctx.path(artifacts.PUBLISHED_META), "w", encoding="utf-8") as handle:
             json.dump({"storeInputs": [{"arg": "fan_picks"}]}, handle)
-        with mock.patch.object(daily, "finalize_ctx", return_value=ctx), \
+        with mock.patch.object(daily.model_steps, "finalize_ctx", return_value=ctx), \
              mock.patch.object(daily.changes, "planned", return_value={"added": []}):
             with self.assertRaisesRegex(StageError, "refusing to build a store that drops"):
-                daily.update_fan_picks(day)
+                daily.model_steps.update_fan_picks(day)
 
 
 class DeltaIds(unittest.TestCase):

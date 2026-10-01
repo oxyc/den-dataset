@@ -37,9 +37,16 @@ day refuses the complete new-title ask set before its first call when the projec
 `DEN_DAILY_SPEND` is the master switch. The three independent repository variables
 `DEN_DAILY_SPEND_TYPESAFE`, `DEN_DAILY_SPEND_FAN_PICKS`, and `DEN_DAILY_SPEND_PREMISE` can each be set to
 `false` to stop that purchase without stopping the other two. Unset preserves the enabled behaviour under
-the master switch. TypeSafe covers classify, critique, genres/moods, and franchise questions; fan picks and
-premise tags use the models `data/models.json` names (below), premise tags only for newly admitted or
-legitimately regained titles which do not already have tags.
+the master switch. TypeSafe covers classify, critique, genres/moods, and franchise questions, every day; fan
+picks and premise tags use the models `data/models.json` names (below), on the cadence it gives each.
+
+A **weekly** step (both, on Mondays, through the Batch API at half price) submits one job for every title
+still waiting for it, and the next run collects the job; a job that expired or failed is finished online and
+never resubmitted. Due is worked out from the last submit the paid-answers ledger records, so a failed Monday
+is caught up the next day. A waiting title is published without that section, and its article is fetched
+again each day it waits. The daily report's table shows each step's cadence, whether it was due, the titles
+waiting, pending jobs with their age, what was collected and what expired. A weekly step needs
+`--paid-state`: without the ledger it could not find its job again, so it does not submit one.
 
 Each step projects the complete request set before its first call. The per-day ceilings are
 `DEN_DAILY_TYPESAFE_MAX_SPEND_USD`, `DEN_DAILY_FAN_PICKS_MAX_SPEND_USD`, and
@@ -59,8 +66,8 @@ in the corpus bundle together.
 ## Switching a model
 
 Every paid text step asks through `lib/llm.py`, and `data/models.json` says who answers each one: provider
-(`anthropic`, `openai`, `gemini`), model, `online` or `batch`, titles per call, thinking level and a fallback
-for titles the model refuses. Switching a step's model is a one-line PR to that file; the daily job reads it.
+(`anthropic`, `openai`, `gemini`), model, `online` or `batch`, `cadence` (`daily`, or `weekly` with a `day`),
+titles per call, thinking level and a fallback for titles the model refuses. Switching a step's model is a one-line PR to that file; the daily job reads it.
 A model must have a price in `lib/llm.py` (`PRICES`) before it can be configured, because the spend caps
 read that table. For a one-off run, `DEN_MODELS=<file>` points at another config. To compare models before
 switching, `tools/bakeoff.py <step> --models provider:model … --out <dir> --max-spend-usd <cap>` runs one

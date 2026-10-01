@@ -325,6 +325,13 @@ class Config(unittest.TestCase):
         cfg = llm.step("fan_picks", {"provider": "openai", "model": "gpt-5.6-luna", "thinking": "low"})
         self.assertEqual((cfg["provider"], cfg["model"]), ("openai", "gpt-5.6-luna"))
 
+    def test_a_weekly_step_names_its_day(self):
+        base = {**llm.STEP_DEFAULTS, "step": "x", "provider": "openai", "model": "gpt-5.6-luna"}
+        llm.check({**base, "cadence": "weekly", "day": "mon"})
+        for bad in ({"cadence": "weekly"}, {"cadence": "daily", "day": "mon"}, {"cadence": "hourly"}):
+            with self.assertRaisesRegex(ValueError, "cadence"):
+                llm.check({**base, **bad})
+
     def test_a_cli_provider_has_no_batch_and_never_runs_in_actions(self):
         with self.assertRaisesRegex(ValueError, "no Batch"):
             llm.check({**llm.STEP_DEFAULTS, "step": "x", "provider": "codex-cli", "model": "m", "mode": "batch"})

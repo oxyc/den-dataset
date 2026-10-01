@@ -51,9 +51,9 @@ import os
 import sys
 
 from lib import cache as caching
-from lib import llm as lib_llm
 
-from . import artifacts, changes, classify, finalize, load, paid, plot_length, premise_daily, published, spend
+from . import (artifacts, changes, classify, finalize, load, model_steps, paid, plot_length, premise_daily,
+               published, spend)
 from .contract import Context, StageError
 from . import STAGES
 from tools import fan_picks
@@ -153,6 +153,7 @@ class Day:
         self.typesafe_before = None
         self.paid = paid.Ledger(getattr(args, "paid_state", None))
         self.restored = 0
+        self.waiting, self.models = {}, {}
 
     def persist(self):
         """Take what was bought so far into the paid-answers ledger and write it, so a run that stops after
@@ -202,49 +203,6 @@ def seed_if_empty(ctx):
     return seeded
 
 
-def update_fan_picks(day):
-    """Merge fan picks for the plan's added titles before the store reads its input."""
-    ctx = finalize_ctx(day.ctx)
-    plan = changes.planned(day.ctx) or {}
-    added = plan.get("added") or []
-    asked = added if day.can_buy_fan_picks else []
-    if added and not day.can_buy_fan_picks:
-        why = ("not given --spend with GEMINI_API_KEY, so no new-title fan picks were bought; "
-               "the existing fan-picks input is still carried forward")
-        day.skip("fan_picks", why)
-    existing = ctx.path(artifacts.FAN_PICKS)
-    live = day.ctx.path(artifacts.PUBLISHED_META)
-    if not os.path.exists(existing) and os.path.exists(live):
-        try:
-            with open(live, encoding="utf-8") as handle:
-                store_inputs = json.load(handle).get("storeInputs") or []
-        except (OSError, ValueError) as error:
-            raise StageError(f"fan_picks: could not read the live manifest: {error}") from error
-        if not isinstance(store_inputs, list):
-            raise StageError("fan_picks: the live manifest's storeInputs is not a list")
-        if any(entry.get("arg") == "fan_picks" for entry in store_inputs if isinstance(entry, dict)):
-            raise StageError(f"fan_picks: the live store was built with fan picks but {existing} is missing; "
-                             "refusing to build a store that drops its fan_picks sections. Republish the live "
-                             "generation's corpus bundle with fan-picks.json before enabling the daily job")
-    if not asked and not os.path.exists(existing):
-        if not added:
-            day.skip("fan_picks", "no titles were added and there is no existing fan-picks input to carry")
-        return None
-    day.fan_picks_kept_before = set(day.paid.answers("fan_picks"))
-    try:
-        result = fan_picks.daily_update(
-            corpus_path=ctx.path(artifacts.CORPUS), articles_path=ctx.path(artifacts.ARTICLES),
-            franchises_path=ctx.path(artifacts.FRANCHISES), existing_path=existing,
-            out=existing, keys=asked, max_spend=day.args.fan_picks_max_spend_usd,
-            backfill=fan_picks.load_backfill(), kept=day.paid.answers("fan_picks") if day.paid.path else None,
-            persist=day.paid.save)
-    except (OSError, ValueError, RuntimeError) as error:
-        raise StageError(f"fan_picks: {error}") from error
-    day.ran.append("fan_picks")
-    print(f"==> fan_picks: {json.dumps(result, sort_keys=True)}", file=sys.stderr)
-    return result
-
-
 def planned_title_count(plan):
     keys = set(plan.get("added") or []) | set((plan.get("changed") or {}).keys())
     revisit = plan.get("revisit") or []
@@ -262,49 +220,10 @@ def reserve_known_spend(day):
         day.ledger.reserve("typesafe", planned_title_count(plan) * TYPESAFE_PROJECTED_PER_TITLE,
                            getattr(day.args, "typesafe_max_spend_usd", 1.0))
         day.typesafe_before = paid_tokens(day.ctx)
-    if day.can_buy_fan_picks:
+    # A weekly fan-picks step reserves when it submits (`pipeline/model_steps.py`).
+    if day.can_buy_fan_picks and not model_steps.weekly(fan_picks.CFG):
         projected = len(plan.get("added") or []) * fan_picks.PILOT_COST * fan_picks.MARGIN
         day.ledger.reserve("fanPicks", projected, day.args.fan_picks_max_spend_usd)
-
-
-def update_premise(day):
-    """Build the exact new/regained worklist, reserve it, generate it, and merge its strings."""
-    cfg = premise_daily.config()
-    if not day.can_buy_premise:
-        why = (f"not given --spend with the premise switch, the {cfg['provider']} key and DEN_EMBED_URL; "
-               "new titles keep no premise tags until a spending run")
-        day.skip("premise_tags", why)
-        return None
-    if day.classifiable_changes is False:
-        day.skip("premise_tags", "no newly admitted or regained title has an article to classify")
-        return None
-    tags_path = premise_daily.ensure_tags(day.ctx)
-    premise_cap = getattr(day.args, "premise_max_spend_usd", 1.0)
-    ceiling = max(1, int(premise_cap / lib_llm.price(cfg["model"])[1]))
-    work, manifest = premise_daily.prepare(day.ctx, tags_path, ceiling)
-    projected = premise_daily.projected(manifest, cfg)
-    day.ledger.reserve("premiseTags", projected, premise_cap)
-    if not manifest["titles"]:
-        result = {"provider": cfg["provider"], "model": cfg["model"], "titles": 0, "generated": 0,
-                  "resumed": 0, "byModel": {}, "untagged": [], "refused": [], "short": [],
-                  "inputTokens": 0, "outputTokens": 0,
-                  "reasoningTokens": 0, "costUSD": 0.0, "projectedSpendUSD": 0.0, "spendCapUSD": premise_cap}
-    else:
-        try:
-            result = premise_daily.generate(os.path.join(work, "gen"), premise_cap, cfg,
-                                            kept=day.paid.answers("premise_tags") if day.paid.path else None,
-                                            persist=day.paid.save)
-            premise_daily.merge(day.ctx, os.path.join(work, "gen"), result, day.now)
-        except premise_daily.GenerationError as error:
-            day.ledger.actual("premiseTags", error.cost_usd)
-            raise StageError(f"premise_tags: {error}") from error
-        except (OSError, ValueError, RuntimeError) as error:
-            raise StageError(f"premise_tags: {error}") from error
-    day.ledger.actual("premiseTags", result["costUSD"])
-    day.premise = result
-    day.ran.append("premise_tags")
-    print(f"==> premise_tags: {json.dumps(result, sort_keys=True)}", file=sys.stderr)
-    return result
 
 
 def prepare(day):
@@ -341,6 +260,7 @@ def run_day(day):
                                  "corpus; that is bought by hand (docs/OPERATE.md, \"A first generation\"), not by "
                                  "the daily job.")
             reserve_known_spend(day)
+            model_steps.write_waiting(day)
         elif name in PAID:
             if not day.can_buy:
                 day.skip(name, "not given --spend with a TYPESAFE_API_KEY, so nothing was bought: a changed "
@@ -361,7 +281,7 @@ def run_day(day):
             day.stage(name, spend=day.can_buy and day.classifiable_changes is not False)
             day.persist()
             if name == "genres_moods":
-                update_premise(day)
+                model_steps.premise_step(day)
             if name == "franchises":
                 if day.can_buy and day.typesafe_before is not None:
                     used = paid_tokens(day.ctx) - day.typesafe_before
@@ -382,7 +302,7 @@ def run_day(day):
                 day.premise["vectors"] = premise_daily.extend_vectors(day.ctx, env["DEN_EMBED_URL"])
             day.premise_corrections = correct_premise(day)
         elif name == "store":
-            day.fan_picks = update_fan_picks(day)
+            day.fan_picks = model_steps.fan_picks_step(day)
             if day.fan_picks:
                 day.ledger.actual("fanPicks", day.fan_picks.get("costUSD", 0.0))
             day.stage(name)
@@ -474,6 +394,9 @@ def report(day, ready, why, tokens):
         "seeded": getattr(day, "seeded", None), "ran": day.ran, "skipped": day.skipped,
         "migrationBoundary": boundary,
         "fanPicks": day.fan_picks, "premiseTags": day.premise, "premiseCorrections": day.premise_corrections,
+        "modelSteps": day.models,
+        "paidAnswers": {"restoredShards": day.restored, "keptShards": len(day.paid.data["shards"]),
+                        "pendingBatches": len(day.paid.data["batches"])} if day.paid.path else None,
         "spend": {**day.ledger.report(), "typesafeInputTokens": tokens,
                   "typesafeUSD": round(tokens * rate, 6)},
     }
@@ -501,6 +424,17 @@ def report(day, ready, why, tokens):
         lines += [f"- premise corrections: {fixes['corrected']} row(s) corrected, "
                   f"{fixes.get('reembedded', 0)} vector(s) re-embedded"
                   + (f", {fixes['pending']} waiting for an embedder" if fixes.get("pending") else ""), ""]
+    if day.models:
+        lines += ["| step | cadence | due | waiting | pending batches | collected | expired | submitted | $ |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+        for step, s in sorted(day.models.items()):
+            cadence = f"{s['cadence']} {s['day']}" if s["day"] else s["cadence"]
+            pending = ", ".join(f"{p['label']} ({p['titles']}, {p['ageHours']} h)" for p in s["pending"]) or "–"
+            submitted = f"{s['submitted']['label']} ({s['submitted']['titles']})" if s["submitted"] else "–"
+            lines.append(f"| {step} | {cadence}, {s['mode']} | {'yes' if s['due'] else 'no'} | {s['waiting']} | "
+                         f"{pending} | {s['collected']} | {', '.join(s['expired']) or '–'} | {submitted} | "
+                         f"{s['costUSD']:.4f} |")
+        lines.append("")
     counts = out["counts"] or {}
     lines += [f"| added | changed | withdrawn | revised | revisited |", "|---|---|---|---|---|",
               f"| {counts.get('added', 0)} | {counts.get('changed', 0)} | {counts.get('withdrawn', 0)} | "

@@ -36,7 +36,8 @@ CONFIG = os.path.join(REPO, "data", "models.json")
 BATCH_FACTOR = 0.5
 CLI_PROVIDERS = ("claude-cli", "codex-cli")
 STEP_DEFAULTS = {"mode": "online", "titlesPerCall": 1, "thinking": None, "maxOutputTokens": 4096,
-                 "fallback": None}
+                 "fallback": None, "cadence": "daily", "day": None}
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 #: List prices per token: model -> [(from date, input, output, cached input)], oldest first. Cached input is
 #: listed at the full input price where the provider's discount is not one we rely on, so a cache hit can
@@ -96,6 +97,9 @@ def check(cfg):
         price(cfg["model"])
     if not isinstance(cfg["titlesPerCall"], int) or cfg["titlesPerCall"] < 1:
         raise ValueError(f"{cfg['step']}: titlesPerCall must be a positive integer")
+    cadence, day = cfg.get("cadence", "daily"), cfg.get("day")
+    if cadence not in ("daily", "weekly") or (cadence == "weekly") != (day in WEEKDAYS):
+        raise ValueError(f"{cfg['step']}: cadence is daily, or weekly with a day ({', '.join(WEEKDAYS)})")
 
 
 def provenance(cfg, task, mode=None):
