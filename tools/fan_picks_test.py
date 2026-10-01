@@ -1,10 +1,13 @@
 """`tools/fan_picks.py`: the prompt, what an answer parses to, how a written name finds a store title, what is
 dropped, what the store is handed, and the spend check — offline, with no model and no network."""
 import gzip
+import io
 import json
 import os
+import re
 import sys
 import tempfile
+import types
 import unittest
 import urllib.error
 from unittest import mock
@@ -388,6 +391,175 @@ class Daily(unittest.TestCase):
                 out = json.load(fh)
         self.assertEqual(out["anchors"], {"movie:2": ["movie:8"]})
         self.assertEqual((result["asked"], result["anchors"], result["picks"]), (0, 1, 1))
+
+
+class Frozen(fp.datetime.datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return fp.datetime.datetime(2026, 10, 1, 12, 0, tzinfo=fp.datetime.timezone.utc)
+
+
+FROZEN = types.SimpleNamespace(datetime=Frozen, timezone=fp.datetime.timezone, date=fp.datetime.date,
+                               timedelta=fp.datetime.timedelta)
+
+
+def gemini(text, prompt=351, out=600, thoughts=40, finish="STOP"):
+    return {"candidates": [{"content": {"parts": [{"text": text}]}, "finishReason": finish}],
+            "usageMetadata": {"promptTokenCount": prompt, "candidatesTokenCount": out,
+                              "thoughtsTokenCount": thoughts, "totalTokenCount": prompt + out + thoughts},
+            "modelVersion": "gemini-3.7-flash-001"}
+
+
+class Wire:
+    """Gemini over a stubbed `urlopen`: canned answers by the title in the prompt, a Files API and a Batch
+    API, and a record of every request body sent. Below every layer the tool talks through, so the same
+    scenario runs against any implementation of the asking."""
+
+    ANSWERS = {
+        "Amélie": [gemini('{"known": true, "picks": [{"title": "Seven Samurai", "year": 1954, "type": "film"},'
+                       ' {"title": "Heat", "year": 1995, "type": "film"}, {"title": "Nope", "year": 1, '
+                       '"type": "film"}]}')],
+        "Seven Samurai": [503, gemini('{"known": false, "picks": [{"title": "Amélie", "year": 2001, '
+                                      '"type": "film"}]}', thoughts=0)],
+        "Heat": [gemini("", out=0)],
+        "L.A. Takedown": [gemini("{not json", finish="MAX_TOKENS")],
+    }
+
+    def __init__(self):
+        self.sent = []
+        self.queues = {title: list(answers) for title, answers in self.ANSWERS.items()}
+        self.uploads = {}
+        self.jobs = {}
+
+    def answer(self, body, batch=False):
+        text = body["contents"][0]["parts"][0]["text"]
+        title = re.match(r"A friend loved (.+?) \(", text).group(1)
+        reply = self.queues[title].pop(0)
+        while batch and isinstance(reply, int):
+            reply = self.queues[title].pop(0)
+        return reply
+
+    def __call__(self, request, timeout=None):
+        url, data = request.full_url, request.data
+        self.sent.append((request.get_method(), url, data))
+        headers = {}
+        if url.endswith(":generateContent"):
+            reply = self.answer(json.loads(data))
+            if isinstance(reply, int):
+                raise urllib.error.HTTPError(url, reply, "busy", {}, io.BytesIO(b"busy"))
+        elif url.endswith("/upload/v1beta/files"):
+            headers, reply = {"X-Goog-Upload-URL": "https://upload.test/1"}, {}
+        elif url == "https://upload.test/1":
+            self.uploads["files/1"] = data
+            reply = {"file": {"name": "files/1"}}
+        elif url.endswith(":batchGenerateContent"):
+            name = f"batches/{len(self.jobs) + 1}"
+            self.jobs[name] = json.loads(data)["batch"]["inputConfig"]["fileName"]
+            reply = {"name": name}
+        elif "/download/" in url:
+            lines = [json.loads(line) for line in self.uploads["files/1"].decode().splitlines()]
+            reply = "".join(json.dumps({"key": line["key"], "response": self.answer(line["request"], True)})
+                            + "\n" for line in lines).encode()
+        elif "/v1beta/batches/" in url:
+            reply = {"metadata": {"state": "BATCH_STATE_SUCCEEDED", "output": {"responsesFile": "files/out"}}}
+        else:
+            raise AssertionError(url)
+        return Reply(reply, headers)
+
+
+class Reply:
+    def __init__(self, value, headers):
+        self.value, self.headers = value, headers
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self):
+        return self.value if isinstance(self.value, bytes) else json.dumps(self.value).encode()
+
+
+def digest_of(path):
+    with open(path, "rb") as fh:
+        return fp.hashlib.sha256(fh.read()).hexdigest()
+
+
+class Port(unittest.TestCase):
+    """What the tool sends and writes, pinned byte for byte (oxyc/den-dataset#183, step 2).
+
+    The digests below were taken from `tools/fan_picks.py` before it asked through `lib/llm.py`; the port
+    must reproduce them: the same request bodies on the wire and the same `fan-picks.json`, through the
+    daily path, the full run online and the full run's Batch API."""
+
+    def wired(self):
+        wire = Wire()
+        for patch in (mock.patch("urllib.request.urlopen", wire), mock.patch("time.sleep"),
+                      mock.patch.object(fp, "datetime", FROZEN),
+                      mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"})):
+            patch.start()
+            self.addCleanup(patch.stop)
+        for name in ("lib.llm", "lib.llm_providers"):
+            module = sys.modules.get(name)
+            if module is not None and hasattr(module, "datetime"):
+                patch = mock.patch.object(module, "datetime", FROZEN)
+                patch.start()
+                self.addCleanup(patch.stop)
+        return wire
+
+    def sent_digest(self, wire):
+        return fp.hashlib.sha256(json.dumps(
+            [(method, url, (data or b"").decode()) for method, url, data in wire.sent]).encode()).hexdigest()
+
+    def test_the_daily_path(self):
+        wire = self.wired()
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        corpus, articles, franchises, existing = Daily().fixture(directory, {"movie:99": []})
+        result = fp.daily_update(corpus, articles, franchises, existing, existing,
+                                 ["movie:1", "movie:2", "movie:8", "movie:9"], workers=1, follows={},
+                                 generate=fp.generate_online)
+        self.assertEqual((result["answered"], result["emptyAnswers"], result["parseErrors"]), (2, 1, 1))
+        self.assertEqual((digest_of(existing), self.sent_digest(wire)), DAILY_DIGESTS)
+
+    def full_run(self, online):
+        wire = self.wired()
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        corpus, articles, franchises, _existing = Daily().fixture(directory)
+        work, pool = os.path.join(directory, "work"), os.path.join(directory, "pool.json.gz")
+        with gzip.open(corpus, "rb") as fh:
+            rows = fh.read()
+        # The manifest pins the input files' digests, so their gzip headers must not carry a time.
+        for path, body in ((corpus, rows), (pool, b'{"popularity": {}}')):
+            with open(path, "wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as fh:
+                fh.write(body)
+        follows = os.path.join(directory, "follows.json")
+        with open(follows, "w") as fh:
+            json.dump({}, fh)
+        fp.prepare(corpus, articles, pool, work, 1.0)
+        log = io.StringIO()
+        fp.run(work, online=online, workers=1, label="all", log=log)
+        if not online:
+            fp.collect(fp.Work(work), log=log)
+        fp.match(work, corpus, franchises, follows)
+        out = os.path.join(work, "fan-picks.json")
+        fp.export(work, out)
+        return digest_of(out), self.sent_digest(wire)
+
+    def test_the_full_run_online(self):
+        self.assertEqual(self.full_run(online=True), ONLINE_DIGESTS)
+
+    def test_the_full_run_through_the_batch_api(self):
+        self.assertEqual(self.full_run(online=False), BATCH_DIGESTS)
+
+
+#: `(fan-picks.json, every request on the wire)`, from origin/main at 2af7781 before the port.
+DAILY_DIGESTS = ("b6db409b24ecf74d8ecf046abaf464743b1e86809c2de920c678ffac48718eb3",
+                 "b8dd4932068d4d7586fa2b769250ff30c5e9b93beb2d4246e4238060e6197d43")
+ONLINE_DIGESTS = ("839afe2ffe4b09922100c949cb2e006e5bc66011a2ea8af3654e8955e4bec856",
+                  "b8dd4932068d4d7586fa2b769250ff30c5e9b93beb2d4246e4238060e6197d43")
+BATCH_DIGESTS = ("b24e5097d9c702eb551e4f1fdb42ef71d17746b08962264d410d84fabb636fbb",
+                 "78fef618acece82c99d9cbdfd66058cbad4551a662f5cb073af6e0e09d28d3fb")
 
 
 if __name__ == "__main__":
