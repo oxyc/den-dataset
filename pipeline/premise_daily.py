@@ -339,12 +339,22 @@ def _embed(url, texts):
             time.sleep(2 ** attempt)
 
 
+def _labelled(ctx):
+    """Keys with a record in the run's `labels-t02.json`: the only titles `labels-premise.json` can describe."""
+    return {f"{r['mediaType']}:{r['tmdbId']}" for r in _json(ctx.path(artifacts.VECTOR_LABELS))["records"]}
+
+
 def extend_vectors(ctx, url, changed=(), add_missing=True):
     """Embed tag sets the premise blob lacks, and re-embed `changed` ones in place.
 
     A key in `changed` that already has a row gets a new vector in that same row, so the blob's key order and
     `labels-premise.json` stand. One without a row is appended like a missing key. `add_missing=False` embeds
     `changed` alone, so a run that only corrects rows touches nothing else.
+
+    Appending rebuilds `labels-premise.json`, which needs a `labels-t02.json` record for every row. The tag file
+    can hold a title that has none today (a corpus title whose plot and labels are gone, tagged before they
+    went), so such a key is not appended, and a row whose title has lost its record is dropped with its key.
+    Its tags stay in the tag file, and it is embedded again on the first run it has a record.
     """
     tags = _json(ctx.path(artifacts.PREMISE_TAGS))["tags"]
     path = ctx.path(artifacts.PREMISE_VECTORS)
@@ -354,15 +364,23 @@ def extend_vectors(ctx, url, changed=(), add_missing=True):
         raise StageError(f"premise tags: {error}") from error
     if keys is None:
         raise StageError("premise tags: the live premise blob does not name its rows")
-    position = {key: row for row, key in enumerate(keys)}
-    restated = sorted(key for key in set(changed) if key in position)
     missing = sorted((set(tags) - set(keys)) if add_missing else (set(changed) - set(keys)))
-    if not missing and not restated:
-        return {"before": count, "embedded": 0, "reembedded": 0, "after": count}
+    unlabelled, dropped = [], []
+    if missing:
+        labelled = _labelled(ctx)
+        unlabelled = [key for key in missing if key not in labelled]
+        missing = [key for key in missing if key in labelled]
+        dropped = [key for key in keys if key not in labelled]
+    position = {key: row for row, key in enumerate(keys)}
+    restated = sorted(key for key in set(changed) if key in position and key not in dropped)
+    if not missing and not restated and not dropped:
+        return {"before": count, "embedded": 0, "reembedded": 0, "after": count, "unlabelled": unlabelled,
+                "dropped": []}
     unknown = sorted(set(keys) - set(tags))
     if unknown:
         raise StageError(f"premise tags: {len(unknown)} vector rows have no tag strings")
-    embed_canary.gate(url)
+    if missing or restated:
+        embed_canary.gate(url)
     rows = bytearray(blob[base:])
     order = restated + missing
     for start in range(0, len(order), 48):
@@ -381,12 +399,16 @@ def extend_vectors(ctx, url, changed=(), add_missing=True):
                 rows[position[key] * dims:(position[key] + 1) * dims] = packed
             else:
                 rows.extend(packed)
-    all_keys = list(keys) + missing
+    if dropped:
+        gone = set(dropped)
+        rows = b"".join(bytes(rows[row * dims:(row + 1) * dims])
+                        for row in range(len(rows) // dims) if row >= len(keys) or keys[row] not in gone)
+    all_keys = [key for key in keys if key not in dropped] + missing
     try:
         vector_blob.write(path, all_keys, bytes(rows), dims)
     except SystemExit as error:
         raise StageError(f"premise tags: {error}") from error
-    if missing:
+    if missing or dropped:
         ids = os.path.join(ctx.out_dir, "premise-increment", "premise-ids.json")
         _write(ids, all_keys)
         command = [sys.executable, os.path.join(REPO, "pipeline", "build_premise_labels.py"),
@@ -394,7 +416,8 @@ def extend_vectors(ctx, url, changed=(), add_missing=True):
                    "--out", ctx.path(artifacts.PREMISE_LABELS)]
         if subprocess.run(command).returncode:
             raise StageError("premise tags: premise-label rebuild failed")
-    return {"before": count, "embedded": len(missing), "reembedded": len(restated), "after": len(all_keys)}
+    return {"before": count, "embedded": len(missing), "reembedded": len(restated), "after": len(all_keys),
+            "unlabelled": unlabelled, "dropped": dropped}
 
 
 def committed_corrections(ctx):

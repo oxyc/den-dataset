@@ -247,5 +247,70 @@ class CommittedCorrections(unittest.TestCase):
         self.assertEqual(self.blob()[0], ["movie:1", "movie:2"])
 
 
+class UnlabelledTitles(unittest.TestCase):
+    """The tag file can hold titles `labels-t02.json` has no record for; the premise labels are still rebuilt."""
+
+    DIMS = 4
+
+    def setUp(self):
+        self.ctx = Ctx(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(mock.patch.object(premise_daily.embed_canary, "gate", lambda _url: None))
+        self.embedded = []
+
+        def embed(_url, texts):
+            self.embedded.extend(texts)
+            return [[len(text) % 100] * self.DIMS for text in texts]
+        self.enterContext(mock.patch.object(premise_daily, "_embed", embed))
+
+    def write(self, tags, blob_keys, labelled):
+        with open(self.ctx.path(artifacts.PREMISE_TAGS), "w", encoding="utf-8") as fh:
+            json.dump({"count": len(tags), "tags": tags}, fh)
+        with open(self.ctx.path(artifacts.VECTOR_LABELS), "w", encoding="utf-8") as fh:
+            json.dump({"taxonomyVersion": "t", "records": [
+                {"mediaType": key.split(":")[0], "tmdbId": int(key.split(":")[1]), "tag": key} for key in labelled]}, fh)
+        rows = b"".join(bytes([row + 1] * self.DIMS) for row in range(len(blob_keys)))
+        vector_blob.write(self.ctx.path(artifacts.PREMISE_VECTORS), blob_keys, rows, self.DIMS)
+
+    def blob(self):
+        _count, _dims, keys, blob, base = vector_blob.read(self.ctx.path(artifacts.PREMISE_VECTORS))
+        return keys, [blob[base + row * self.DIMS:base + (row + 1) * self.DIMS] for row in range(len(keys))]
+
+    def premise_labels(self):
+        with open(self.ctx.path(artifacts.PREMISE_LABELS), encoding="utf-8") as fh:
+            return [record["tag"] for record in json.load(fh)["records"]]
+
+    def test_a_tagged_title_without_a_record_is_not_appended(self):
+        # The 2026-10-01 daily: three tagged corpus titles had no labels record, and the rebuild refused the day.
+        tags = {"movie:1": ["a"], "movie:2": ["b"], "movie:5": ["new-title"], "movie:7": ["no-record"]}
+        self.write(tags, ["movie:1", "movie:2"], ["movie:1", "movie:2", "movie:5"])
+        result = premise_daily.extend_vectors(self.ctx, "http://embed.invalid")
+
+        self.assertEqual((result["embedded"], result["unlabelled"], result["dropped"]), (1, ["movie:7"], []))
+        self.assertEqual(self.embedded, ["new-title"])
+        self.assertEqual(self.blob()[0], ["movie:1", "movie:2", "movie:5"])
+        self.assertEqual(self.premise_labels(), ["movie:1", "movie:2", "movie:5"], "row i describes row i")
+        with open(self.ctx.path(artifacts.PREMISE_TAGS), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["tags"], tags, "the unlabelled title keeps its tags")
+
+    def test_a_row_whose_title_lost_its_record_leaves_with_its_key(self):
+        self.write({"movie:1": ["a"], "movie:2": ["b"], "movie:3": ["c"], "movie:5": ["new"]},
+                   ["movie:1", "movie:2", "movie:3"], ["movie:1", "movie:3", "movie:5"])
+        _keys, before = self.blob()
+        result = premise_daily.extend_vectors(self.ctx, "http://embed.invalid")
+
+        self.assertEqual(result["dropped"], ["movie:2"])
+        keys, after = self.blob()
+        self.assertEqual(keys, ["movie:1", "movie:3", "movie:5"])
+        self.assertEqual(after[:2], [before[0], before[2]], "the rows that stay keep their own vectors")
+        self.assertEqual(self.premise_labels(), keys)
+
+    def test_only_unlabelled_titles_missing_changes_nothing(self):
+        self.write({"movie:1": ["a"], "movie:7": ["no-record"]}, ["movie:1"], ["movie:1"])
+        result = premise_daily.extend_vectors(self.ctx, "http://embed.invalid")
+        self.assertEqual((result["embedded"], result["unlabelled"]), (0, ["movie:7"]))
+        self.assertEqual(self.embedded, [])
+        self.assertFalse(os.path.exists(self.ctx.path(artifacts.PREMISE_LABELS)))
+
+
 if __name__ == "__main__":
     unittest.main()
