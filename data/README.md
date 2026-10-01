@@ -50,7 +50,7 @@ half, below).
 - **A premise vector blob aligns to the `labels-premise.json` built beside it**, never to a tags file. The
   live one has 44,531 rows.
 - Keys are `mediaType:tmdbId`, never a bare id: movie 95 is *Armageddon*, tv 95 is *Buffy*.
-- **Concepts are a separate discrete view.** `premise-concepts-v1.json` preserves all 344,920 raw forms as
+- **Concepts are a separate discrete view.** `premise-concepts-v1.json` preserves all 346,129 raw forms as
   keys, maps the singleton tail to itself, and merges only reusable forms that cleared both bounded Jev
   passes. `conceptOccurrences` counts tag uses; `conceptTitles` de-duplicates forms that collapse inside one
   title. Raw tags remain the embedding input. Rebuild with the five CLI phases shown by
