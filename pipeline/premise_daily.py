@@ -1,8 +1,13 @@
-"""Paid, resumable Haiku premise tags for a daily run's newly admitted titles."""
-import datetime
+"""Paid, resumable premise tags for a daily run's newly admitted titles, asked through `lib/llm.py`.
+
+The `premise_tags` step in `data/models.json` says who answers: gpt-5.6-luna with a JSON schema, and Claude
+Haiku 4.5 for a title luna refuses (#183). The prompt is `data/premise-tags-v1.SPEC.md`, the validator
+`validate_premise_batch.py`, and each answered title is written to its batch's output as it arrives, with
+who answered it, so a stopped run resumes without paying for it again.
+"""
+import collections
 import hashlib
 import json
-import math
 import os
 import re
 import subprocess
@@ -11,24 +16,42 @@ import time
 import urllib.error
 import urllib.request
 
+from lib import llm
+from lib import llm_providers as providers
+
 from . import artifacts, embed_canary
 from .contract import REPO, StageError
 from . import validate_premise_batch as validate
 from store import vector_blob
 
-MODEL = "claude-haiku-4-5-20251001"
-API = "https://api.anthropic.com/v1/messages"
-PRICE_IN = 1.0e-6
-PRICE_OUT = 5.0e-6
+STEP = "premise_tags"
+SPEC = os.path.join(REPO, "data", "premise-tags-v1.SPEC.md")
 MARGIN = 1.35
 MAX_RETRIES = 4
+#: What the provider is held to: one row per title, its key echoed and its tags as strings. The validator
+#: still checks the keys and every tag; a schema only stops the answer being something other than rows.
+SCHEMA = {"type": "object", "additionalProperties": False, "required": ["rows"],
+          "properties": {"rows": {"type": "array", "items": {
+              "type": "object", "additionalProperties": False, "required": ["key", "tags"],
+              "properties": {"key": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}}}}}
 
 
 class GenerationError(RuntimeError):
-    def __init__(self, message, usage):
+    def __init__(self, message, cost_usd):
         super().__init__(message)
-        self.usage = dict(usage)
-        self.cost_usd = round(cost(self.usage), 6)
+        self.cost_usd = round(cost_usd, 6)
+
+
+def config():
+    return llm.step(STEP)
+
+
+def can_buy(environ, cfg=None):
+    """Whether the configured provider's key is in `environ`. The fallback's is optional: without it a
+    refused title waits for a later run."""
+    cfg = cfg or config()
+    name = getattr(providers.PROVIDERS[cfg["provider"]], "KEY", None)
+    return bool(name and environ.get(name))
 
 
 def _json(path):
@@ -56,52 +79,13 @@ def _extract(text):
     return value
 
 
-def _request(api_key, system, rows, max_tokens, opener=urllib.request.urlopen):
-    body = {"model": MODEL, "max_tokens": max_tokens, "temperature": 0,
-            "system": system,
-            "messages": [{"role": "user", "content":
-                          "Return only the JSON answer array for these rows:\n" +
-                          json.dumps(rows, ensure_ascii=False, separators=(",", ":"))}]}
-    request = urllib.request.Request(API, data=json.dumps(body).encode(), method="POST",
-                                     headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
-                                              "content-type": "application/json"})
-    for attempt in range(MAX_RETRIES):
-        try:
-            with opener(request, timeout=300) as response:
-                payload = json.load(response)
-            text = "".join(block.get("text", "") for block in payload.get("content") or []
-                           if block.get("type") == "text")
-            usage = payload.get("usage") or {}
-            return _extract(text), {"inputTokens": usage.get("input_tokens") or 0,
-                                    "outputTokens": usage.get("output_tokens") or 0}
-        except urllib.error.HTTPError as error:
-            if error.code not in (408, 409, 429) and error.code < 500:
-                raise RuntimeError(f"Anthropic request refused with HTTP {error.code}") from None
-            if attempt == MAX_RETRIES - 1:
-                raise RuntimeError(f"Anthropic request failed after {MAX_RETRIES} attempts: HTTP {error.code}") \
-                    from None
-            delay = error.headers.get("retry-after") if error.headers else None
-            time.sleep(float(delay) if delay and delay.isdigit() else 2 ** attempt)
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
-            if attempt == MAX_RETRIES - 1:
-                raise RuntimeError(f"Anthropic request failed after {MAX_RETRIES} attempts: "
-                                   f"{type(error).__name__}") from None
-            time.sleep(2 ** attempt)
-
-
-def cost(usage):
-    return usage["inputTokens"] * PRICE_IN + usage["outputTokens"] * PRICE_OUT
-
-
-def projected(manifest):
-    return round((manifest.get("estimatedInputTokens", 0) * PRICE_IN +
-                  manifest.get("estimatedOutputTokens", 0) * PRICE_OUT) * MARGIN, 6)
-
-
-def call_ceiling(system, rows, max_tokens):
-    """Conservative dollar bound checked before a request; output cannot exceed ``max_tokens``."""
-    chars = len(system) + len(json.dumps(rows, ensure_ascii=False)) + 300
-    return math.ceil(chars / 3) * PRICE_IN + max_tokens * PRICE_OUT
+def projected(manifest, cfg=None):
+    """The worklist's estimated tokens at the configured model's price, with a margin."""
+    cfg = cfg or config()
+    rate_in, rate_out, _ = llm.price(cfg["model"])
+    factor = llm.BATCH_FACTOR if cfg["mode"] == "batch" else 1.0
+    return round((manifest.get("estimatedInputTokens", 0) * rate_in +
+                  manifest.get("estimatedOutputTokens", 0) * rate_out) * MARGIN * factor, 6)
 
 
 def _clean(row, source):
@@ -126,73 +110,99 @@ def _checked(batch_in, batch_out):
     return [_clean(row, sources[row["key"]]) for row in batch_out]
 
 
-def generate(phase, api_key, cap, opener=urllib.request.urlopen):
-    """Fill missing batch outputs, validating exact keys and repairing only short cleaned rows."""
+class Task:
+    """Premise tags for a list of worklist rows, as `lib/llm.py` asks them."""
+    name = STEP
+
+    def __init__(self, cfg):
+        with open(SPEC, encoding="utf-8") as handle:
+            self.spec = handle.read()
+        self.version = f"premise-tags-v1.SPEC.md@{hashlib.sha256(self.spec.encode()).hexdigest()[:12]}"
+        self.max_tokens = cfg["maxOutputTokens"]
+
+    @staticmethod
+    def key(row):
+        return row["key"]
+
+    def request(self, rows):
+        return llm.request("Return only the JSON answer array for these rows:\n"
+                           + json.dumps(rows, ensure_ascii=False, separators=(",", ":")),
+                           self.max_tokens, system=self.spec, schema=SCHEMA, name=STEP)
+
+    def parse(self, rows, answer):
+        """The rows' cleaned tags. A row left under the floor once its invalid tags are dropped is not
+        returned, so `lib/llm.py` asks that title again on its own — the repair, by another name.
+
+        An answer that left a title out is read for the titles it has: only the missing ones are asked
+        again, not the whole call. A key it invented, a duplicate or a shifted batch still condemns it."""
+        value = answer["value"] if answer["value"] is not None else _extract(answer["text"])
+        if isinstance(value, dict):
+            value = value.get("rows")
+        if not isinstance(value, list):
+            raise ValueError("the answer has no rows")
+        answered = {row.get("key") for row in value if isinstance(row, dict)}
+        try:
+            cleaned = _checked([row for row in rows if row["key"] in answered] or rows, value)
+        except RuntimeError as error:
+            raise ValueError(str(error)) from None
+        return {row["key"]: row["tags"] for row in cleaned if len(row["tags"]) >= validate.MIN_TAGS}
+
+
+def generate(phase, cap, cfg=None, workers=1):
+    """Fill missing batch outputs through the configured model, title by title.
+
+    A batch output holds every title answered so far, each with `by` (who answered it); a rerun asks only
+    the titles no output holds. A title no model could tag is left out and reported, and waits for a later
+    run: it does not stop the day."""
+    cfg = cfg or config()
     manifest = _json(os.path.join(phase, "manifest.json"))
-    estimate = projected(manifest)
-    if not math.isfinite(cap) or cap <= 0 or estimate > cap:
+    estimate = projected(manifest, cfg)
+    if not cap > 0 or estimate > cap:
         raise RuntimeError(f"premise tags project ${estimate:.4f}, crossing the ${cap:.2f} daily cap")
-    with open(os.path.join(REPO, "data", "premise-tags-v1.SPEC.md"), encoding="utf-8") as handle:
-        spec = handle.read()
+    task = Task(cfg)
     out_dir = os.path.join(phase, "out")
     os.makedirs(out_dir, exist_ok=True)
-    totals = {"inputTokens": 0, "outputTokens": 0}
-    generated = repaired = resumed = 0
+    batches, where, pending, resumed = {}, {}, [], 0
     for index in range(manifest["batches"]):
         name = f"batch-{index:04d}.json"
         batch_in = _json(os.path.join(phase, "in", name))
         path = os.path.join(out_dir, name)
+        done = {}
         if os.path.exists(path):
-            try:
-                cleaned = _checked(batch_in, _json(path))
-                if all(len(row["tags"]) >= validate.MIN_TAGS for row in cleaned):
-                    resumed += len(cleaned)
-                    continue
-            except (OSError, ValueError, RuntimeError):
-                pass
-        max_tokens = min(8192, max(1024, len(batch_in) * 500))
-        ceiling = call_ceiling(spec, batch_in, max_tokens)
-        if cost(totals) + ceiling > cap:
-            raise GenerationError(f"batch {index} can cost up to ${ceiling:.4f}; ${cost(totals):.4f} is already "
-                                  f"spent, crossing the ${cap:.2f} daily cap before the call", totals)
-        answer, usage = _request(api_key, spec, batch_in, max_tokens, opener)
-        for key in totals:
-            totals[key] += usage[key]
-        try:
-            cleaned = _checked(batch_in, answer)
-        except RuntimeError as error:
-            raise GenerationError(str(error), totals) from error
-        by_key = {row["key"]: row for row in batch_in}
-        for pos, row in enumerate(cleaned):
-            if len(row["tags"]) >= validate.MIN_TAGS:
-                continue
-            source = by_key[row["key"]]
-            repair_system = (spec + "\nThis is a repair of one row whose invalid tags were removed. "
-                             "Return one JSON array row with the same key and 8-12 distinct valid tags.")
-            ceiling = call_ceiling(repair_system, [source], 1024)
-            if cost(totals) + ceiling > cap:
-                raise GenerationError(f"{row['key']}: repair can cost up to ${ceiling:.4f}; the ${cap:.2f} "
-                                      "daily cap leaves too little room before the call", totals)
-            fixed, repair_usage = _request(api_key, repair_system, [source], 1024, opener)
-            for key in totals:
-                totals[key] += repair_usage[key]
-            try:
-                checked = _checked([source], fixed)
-            except RuntimeError as error:
-                raise GenerationError(str(error), totals) from error
-            if len(checked) != 1 or len(checked[0]["tags"]) < validate.MIN_TAGS:
-                raise GenerationError(f"{row['key']}: repair still has fewer than {validate.MIN_TAGS} usable tags",
-                                      totals)
-            cleaned[pos] = checked[0]
-            repaired += 1
-        _write(path, cleaned)
-        generated += len(cleaned)
-        if cost(totals) > cap:
-            raise GenerationError(f"premise tags reached ${cost(totals):.4f}, over the ${cap:.2f} daily cap",
-                                  totals)
-    return {"model": MODEL, "titles": manifest["titles"], "generated": generated, "resumed": resumed,
-            "repairedRows": repaired, "inputTokens": totals["inputTokens"],
-            "outputTokens": totals["outputTokens"], "costUSD": round(cost(totals), 6),
+            wanted = {row["key"] for row in batch_in}
+            done = {row["key"]: row for row in _json(path)
+                    if row.get("key") in wanted and len(row.get("tags") or []) >= validate.MIN_TAGS}
+        batches[name] = done
+        resumed += len(done)
+        for row in batch_in:
+            where[row["key"]] = name
+            if row["key"] not in done:
+                pending.append(row)
+
+    def record(key, row):
+        if "value" in row:
+            name = where[key]
+            batches[name][key] = {"key": key, "tags": row["value"], "by": row["by"]}
+            _write(os.path.join(out_dir, name), list(batches[name].values()))
+
+    budget = llm.Budget(cap)
+    try:
+        rows, calls = llm.generate(cfg, task, pending, budget, workers, record)
+    except llm.OverBudget as error:
+        raise GenerationError(str(error), budget.spent) from error
+    usage = {field: sum(call["usage"][field] for call in calls)
+             for field in ("inputTokens", "cachedTokens", "outputTokens", "reasoningTokens")}
+    answered = [row for row in rows.values() if "value" in row]
+    return {"provider": cfg["provider"], "model": cfg["model"], "mode": "online",
+            "titles": manifest["titles"], "generated": len(answered), "resumed": resumed,
+            "byModel": dict(sorted(collections.Counter(row["by"]["model"] for row in answered).items())),
+            "untagged": sorted(key for key, row in rows.items() if "value" not in row),
+            # Why: refused by every model, or answered without 8 usable tags. A title the provider could not
+            # be reached for is untagged and in neither: it is asked again on the next run.
+            "refused": sorted(key for key, row in rows.items() if row.get("refused")),
+            "short": sorted(key for key, row in rows.items()
+                            if "value" not in row and not row.get("refused") and not row.get("unavailable")),
+            "calls": len(calls), **usage, "costUSD": round(sum(call["costUSD"] for call in calls), 6),
             "projectedSpendUSD": estimate, "spendCapUSD": cap}
 
 
@@ -224,17 +234,27 @@ def ensure_tags(ctx):
 
 def merge(ctx, phase, result, now):
     tags_path = ensure_tags(ctx)
+    models = ", ".join(result["byModel"]) or result["model"]
     command = [sys.executable, os.path.join(REPO, "pipeline", "merge_premise_tags.py"),
                "--into", tags_path, "--phase", phase, "--note",
-               f"daily new-title generation {now.date().isoformat()} with {MODEL}"]
+               f"daily new-title generation {now.date().isoformat()} with {models}"]
     completed = subprocess.run(command)
     if completed.returncode:
         raise StageError(f"premise tags: merge exited {completed.returncode}")
     value = _json(tags_path)
+    # Who answered each title, so a mixed index can be found and re-run (#183).
+    generated_by = dict(value.get("generatedBy") or {})
+    out_dir = os.path.join(phase, "out")
+    for name in sorted(os.listdir(out_dir)) if os.path.isdir(out_dir) else ():
+        for row in _json(os.path.join(out_dir, name)):
+            if row.get("by"):
+                generated_by[row["key"]] = row["by"]
+    value["generatedBy"] = dict(sorted(generated_by.items()))
     increments = list(value.get("dailyIncrements") or [])
-    increments.append({"date": now.date().isoformat(), "model": MODEL, "titles": result["titles"],
+    increments.append({"date": now.date().isoformat(), "model": models, "titles": result["titles"],
+                       "generated": result["generated"], "untagged": len(result["untagged"]),
                        "inputTokens": result["inputTokens"], "outputTokens": result["outputTokens"],
-                       "costUSD": result["costUSD"]})
+                       "reasoningTokens": result["reasoningTokens"], "costUSD": result["costUSD"]})
     value["dailyIncrements"] = increments
     _write(tags_path, value)
     return tags_path
@@ -356,7 +376,8 @@ def stamp_metadata(ctx, result):
     value = _json(path)
     tags = _json(ctx.path(artifacts.PREMISE_TAGS))
     value["premiseTags"] = {"coverage": tags.get("count", len(tags.get("tags") or {})),
-                            "model": result["model"], "selection": "added-or-regained-only",
+                            "model": result["model"], "byModel": result.get("byModel"),
+                            "selection": "added-or-regained-only",
                             "generatedThisRun": result["titles"],
                             "source": "Jev-classified story-premise/theme-subject sections"}
     _write(path, value)

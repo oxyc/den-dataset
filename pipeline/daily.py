@@ -51,6 +51,7 @@ import os
 import sys
 
 from lib import cache as caching
+from lib import llm as lib_llm
 
 from . import artifacts, changes, classify, finalize, load, plot_length, premise_daily, published, spend
 from .contract import Context, StageError
@@ -142,7 +143,7 @@ class Day:
         self.can_buy_fan_picks = bool(enabled(getattr(args, "spend_fan_picks", None)) and
                                       environ.get("GEMINI_API_KEY"))
         self.can_buy_premise = bool(enabled(getattr(args, "spend_premise", False)) and
-                                    environ.get("ANTHROPIC_API_KEY") and environ.get("DEN_EMBED_URL"))
+                                    premise_daily.can_buy(environ) and environ.get("DEN_EMBED_URL"))
         self.fan_picks = None
         self.premise = None
         self.premise_corrections = None
@@ -258,8 +259,9 @@ def reserve_known_spend(day):
 
 def update_premise(day):
     """Build the exact new/regained worklist, reserve it, generate it, and merge its strings."""
+    cfg = premise_daily.config()
     if not day.can_buy_premise:
-        why = ("not given --spend with the premise switch, ANTHROPIC_API_KEY and DEN_EMBED_URL; "
+        why = (f"not given --spend with the premise switch, the {cfg['provider']} key and DEN_EMBED_URL; "
                "new titles keep no premise tags until a spending run")
         day.skip("premise_tags", why)
         return None
@@ -268,18 +270,18 @@ def update_premise(day):
         return None
     tags_path = premise_daily.ensure_tags(day.ctx)
     premise_cap = getattr(day.args, "premise_max_spend_usd", 1.0)
-    ceiling = max(1, int(premise_cap / premise_daily.PRICE_OUT))
+    ceiling = max(1, int(premise_cap / lib_llm.price(cfg["model"])[1]))
     work, manifest = premise_daily.prepare(day.ctx, tags_path, ceiling)
-    projected = premise_daily.projected(manifest)
+    projected = premise_daily.projected(manifest, cfg)
     day.ledger.reserve("premiseTags", projected, premise_cap)
     if not manifest["titles"]:
-        result = {"model": premise_daily.MODEL, "titles": 0, "generated": 0, "resumed": 0,
-                  "repairedRows": 0, "inputTokens": 0, "outputTokens": 0, "costUSD": 0.0,
-                  "projectedSpendUSD": 0.0, "spendCapUSD": premise_cap}
+        result = {"provider": cfg["provider"], "model": cfg["model"], "titles": 0, "generated": 0,
+                  "resumed": 0, "byModel": {}, "untagged": [], "refused": [], "short": [],
+                  "inputTokens": 0, "outputTokens": 0,
+                  "reasoningTokens": 0, "costUSD": 0.0, "projectedSpendUSD": 0.0, "spendCapUSD": premise_cap}
     else:
         try:
-            result = premise_daily.generate(os.path.join(work, "gen"), day.environ["ANTHROPIC_API_KEY"],
-                                            premise_cap)
+            result = premise_daily.generate(os.path.join(work, "gen"), premise_cap, cfg)
             premise_daily.merge(day.ctx, os.path.join(work, "gen"), result, day.now)
         except premise_daily.GenerationError as error:
             day.ledger.actual("premiseTags", error.cost_usd)
@@ -463,9 +465,10 @@ def report(day, ready, why, tokens):
                   f"{len(out['fanPicks'].get('notInCorpus') or [])} plan-only/not in corpus; "
                   f"${out['fanPicks']['costUSD']:.4f}", ""]
     if out["premiseTags"]:
-        lines += [f"- premise tags: {out['premiseTags']['titles']} title(s), "
-                  f"{out['premiseTags']['repairedRows']} repaired; "
-                  f"${out['premiseTags']['costUSD']:.4f}", ""]
+        premise = out["premiseTags"]
+        lines += [f"- premise tags: {premise['titles']} title(s), {premise['generated']} tagged "
+                  f"({', '.join(f'{m} {n}' for m, n in premise['byModel'].items()) or 'none'}), "
+                  f"{len(premise['untagged'])} left for a later run; ${premise['costUSD']:.4f}", ""]
     if out["premiseCorrections"]:
         fixes = out["premiseCorrections"]
         lines += [f"- premise corrections: {fixes['corrected']} row(s) corrected, "
