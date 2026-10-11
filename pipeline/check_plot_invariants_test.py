@@ -479,5 +479,61 @@ class PlotVectorGate(unittest.TestCase):
         self.assertEqual(code, 3)
 
 
+class HeldTitles(unittest.TestCase):
+    """A title nothing has classified is held at its published corpus row (`consolidate_corpus.py`), so a day
+    that cannot buy classification ships no plot over a vector it cannot make (the 33 titles of daily run
+    38148218199). `--corpus` lets the gate see that — and only that: it never excuses a row that says it
+    has a plot."""
+
+    def gate(self, rows_by_batch, vectors, corpus_rows):
+        import gzip
+        with tempfile.TemporaryDirectory() as dir:
+            e, labels = write_case(dir, rows_by_batch)
+            store = write_store(dir, vectors)
+            corpus = os.path.join(dir, "corpus-abc.jsonl.gz")
+            with gzip.open(corpus, "wt", encoding="utf-8") as fh:
+                for row in corpus_rows:
+                    fh.write(json.dumps(row) + "\n")
+            return run(["--enriched-dir", e, "--labels", labels, "--store", store, "--corpus", corpus])
+
+    def test_a_title_held_without_a_plot_needs_no_vector(self):
+        code, out, err = self.gate({1: [enriched(1, plotArticle="A"), enriched(2, plotArticle="B")]},
+                                   {"movie:1": False, "movie:2": True},
+                                   [{"key": "movie:1", "source": {"hasWikiPlot": False}},
+                                    {"key": "movie:2", "source": {"hasWikiPlot": True}}])
+        self.assertEqual(code, 0, err)
+        self.assertIn("1 titles have a plot in the enriched tree and none in the corpus row", out)
+        self.assertIn("plot-vector gate: all 1 titles", out)
+
+    def test_a_row_that_says_it_has_a_plot_is_still_refused(self):
+        code, _, err = self.gate({1: [enriched(1)]}, {"movie:1": False},
+                                 [{"key": "movie:1", "source": {"hasWikiPlot": True}}])
+        self.assertEqual(code, 3)
+        self.assertIn("movie:1", err)
+
+    def test_a_row_with_no_recorded_source_is_judged_on_the_enriched_tree(self):
+        code, _, err = self.gate({1: [enriched(1)]}, {"movie:1": False}, [{"key": "movie:1"}])
+        self.assertEqual(code, 3)
+        self.assertIn("movie:1", err)
+
+    def test_a_title_the_corpus_does_not_hold_is_judged_on_the_enriched_tree(self):
+        code, _, _ = self.gate({1: [enriched(1)]}, {"movie:1": False}, [])
+        self.assertEqual(code, 3)
+
+    def test_an_enriched_tree_with_no_plot_is_not_made_to_have_one_by_the_corpus(self):
+        code, _, _ = self.gate({1: [enriched(1, hasWikiPlot=False)]}, {"movie:1": False},
+                               [{"key": "movie:1", "source": {"hasWikiPlot": True}}])
+        self.assertEqual(code, 0)
+
+    def test_an_unreadable_corpus_is_refused(self):
+        with tempfile.TemporaryDirectory() as dir:
+            e, labels = write_case(dir, {1: [enriched(1)]})
+            store = write_store(dir, {"movie:1": True})
+            code, _, err = run(["--enriched-dir", e, "--labels", labels, "--store", store,
+                                "--corpus", os.path.join(dir, "missing.jsonl.gz")])
+        self.assertEqual(code, 3)
+        self.assertIn("cannot be read", err)
+
+
 if __name__ == "__main__":
     unittest.main()

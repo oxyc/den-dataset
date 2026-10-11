@@ -81,6 +81,17 @@ the grounding census reads, so a run that starts from the published corpus knows
 was built from without the batches. Identifiers and a digest only — never the plot. A title with no
 enriched record keeps its base row's `source`.
 
+**A title nothing has classified keeps its base row's `source` whatever the enriched batches say.** The
+spine carries titles that have facts and nothing else (the library titles `fit.rs` judges, 119 of them in
+b66e38e333af), and a catalogue pass can ground one of them in a Wikipedia plot on a day that buys no
+classification. A plot is taken in together with its genres & moods and the vector built from them, never
+before: the row would say "has a plot" over a store that has no plot vector for it, which the publish's
+plot-vector gate refuses (oxyc/den-dataset#10). So the row stays as published until a run classifies the
+title; one the base never recorded a source for is written with `hasWikiPlot: false` and no plot fields
+(`held_source`), because the gate reads an absent source as "nothing said" and falls back to the enriched
+tree. The next day's change set is read from this `source`, so that title is then `gainedPlot` or `added`
+and the run that can buy picks it up, where a source carrying the plot would have filed it as already seen.
+
 ## What is deliberately NOT here
 
 TMDB overviews and Wikipedia article or section text. The derived judgements about that prose are ours to
@@ -377,6 +388,23 @@ def sources(directory):
     return out
 
 
+#: The `source` fields that say a title has a plot, and where it came from.
+PLOT_FIELDS = ("hasWikiPlot", "plotArticle", "plotLanguage", "plotRevId", "plotArticleRole",
+               "plotArticleRedirected", "plotSha256")
+
+
+def held_source(published, enriched):
+    """The `source` of a title nothing has classified: the published one, or — when the base never recorded
+    one — the newest enriched record's identifiers with the plot taken out and `hasWikiPlot` false, said
+    outright. An absent source would read as "nothing recorded" and leave the plot-vector gate to the
+    enriched tree alone; this row has to SAY it ships no plot."""
+    if published:
+        return published
+    if not enriched:
+        return None
+    return {**{k: v for k, v in enriched.items() if k not in PLOT_FIELDS}, "hasWikiPlot": False}
+
+
 def base_rows(path):
     """The published corpus, `key -> row`."""
     out = {}
@@ -461,7 +489,7 @@ def main():
         sys.exit(f"{len(left)} titles the published corpus holds would leave it — they are in no facts file "
                  f"and no shard, e.g. {left[:4]}. The facts' delta pass keeps every published title.")
     spine = sorted(answered | set(facts) | set(base))
-    from_base = 0
+    from_base = held = 0
     try:
         for key in spine:
             record = combined_rows.get(key)
@@ -501,7 +529,15 @@ def main():
                     for name in BASE_COMBINED + BASE_DELTA + BASE_STRUCTURAL
                 })
                 from_base += 1
-            found = source.get(key) or (base.get(key) or {}).get("source")
+            # Nothing has classified this title: no shard this run, no genres & moods, no published judgement.
+            unclassified = (key not in combined_rows and not row["labels"]
+                            and not any((base.get(key) or {}).get(name) for name in BASE_COMBINED))
+            if unclassified:
+                found = held_source((base.get(key) or {}).get("source"), source.get(key))
+                held += 1 if (source.get(key) or {}).get("hasWikiPlot") and not (found or {}).get("hasWikiPlot") \
+                    else 0
+            else:
+                found = source.get(key) or (base.get(key) or {}).get("source")
             if found:
                 row["source"] = found
             line = json.dumps(row, ensure_ascii=False, sort_keys=True)
@@ -543,7 +579,7 @@ def main():
 
     print(json.dumps({"titles": written, "withFacts": with_facts, "withLabels": with_labels,
                       "withDelta": with_delta, "withStructural": with_structural,
-                      "withPass": len(combined_rows), "fromBase": from_base,
+                      "withPass": len(combined_rows), "fromBase": from_base, "heldAtPublishedSource": held,
                       "factsOnly": written - len(answered) - from_base,
                       "entities": len(entities), "out": out_path, "entitiesOut": ents_path,
                       "tombstones": len(withdrawals), "combined": combined_report, "delta": delta_report,

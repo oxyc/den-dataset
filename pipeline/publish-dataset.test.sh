@@ -255,6 +255,8 @@ write_bundle_inputs() {
            facts-entities.json; do
     printf '{}' > "$DIR/$f"
   done
+  # The plot-vector gate reads the corpus rows, so this one has to be a gzip of rows (here, none).
+  printf '' | gzip -n > "$DIR/corpus-$version.jsonl.gz"
 }
 
 # The manifest as it is "already published", so the drop/shrink guards have a baseline.
@@ -881,6 +883,27 @@ else
   [ ! -s "$UPLOADS" ] \
     && ok "and nothing reached the release" \
     || bad "a refused publish still uploaded $(tr '\n' ' ' < "$UPLOADS")"
+fi
+teardown
+
+# The same store and tree, but the corpus row for movie:2 says it has no plot: a title nothing has classified
+# is held at its published source (`consolidate_corpus.py`), so a day that cannot buy classification ships no
+# plot over a vector it cannot make. The row has to say so; the enriched tree alone never excuses it.
+setup
+NO_PLOT_VEC=2 write_meta
+write_enriched 2
+python3 - "$DIR/corpus-aaaaaaaaaaaa.jsonl.gz" <<'PY'
+import gzip, json, sys
+with gzip.open(sys.argv[1], "wt") as fh:
+    fh.write(json.dumps({"key": "movie:2", "source": {"hasWikiPlot": False}}) + "\n")
+PY
+publish_baseline
+if run_publish; then
+  grep -q "held until classified" "$WORK/out.log" \
+    && ok "a title held at a published row with no plot publishes, and the gate says it held it" \
+    || bad "it published without saying it held a title: $(tail -5 "$WORK/out.log")"
+else
+  bad "a title held without a plot was refused: $(tail -3 "$WORK/err.log")"
 fi
 teardown
 
