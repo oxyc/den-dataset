@@ -885,14 +885,28 @@ def _splittable(failure):
             or (failure.status == 429 and b"timed out" in (failure.body or b"")))
 
 
-def _asked_batch(ids, build, namespace, parse, cache, extra=None, qlever=True):
-    """`_asked` for a batch of ids whose answer is a dict keyed by id. A batch that fails for want of time
-    is asked again as two halves, merged — the answers are keyed per id, so they do not overlap — down to
-    `SPLIT_FLOOR` ids. The whole batch's query text stays the cache key when it answers; a halved batch is
-    kept as its halves, each under its own text. The first half to fail ends the attempt.
+#: Most TMDB ids one per-title query is given. `language_query` on the 200 most-linked films runs past WDQS's
+#: 60 s every time and answers in 0.4-0.8 s at 175 and below (a cliff, not a slope: the plan flips); the daily
+#: job's catalogue pass hands `enrich` 500 of them at once (`pipeline/fetch.BATCH`). 150 is `enrich.LIMIT`,
+#: the size every cached body was asked at, so a batch of that size or less keeps its query text and key.
+TMDB_CHUNK = 150
+
+
+def _asked_batch(ids, build, namespace, parse, cache, extra=None, qlever=True, chunk=TMDB_CHUNK):
+    """`_asked` for a batch of ids whose answer is a dict keyed by id. More than `chunk` ids are asked in
+    sorted chunks of that size and merged. A batch that fails for want of time is asked again as two
+    halves, merged — the answers are keyed per id, so they do not overlap — down to `SPLIT_FLOOR` ids. The
+    whole batch's query text stays the cache key when it answers; a halved batch is kept as its halves,
+    each under its own text. The first half to fail ends the attempt.
 
     `qlever` is off for the queries QLever was measured to time out on at every batch size (its server limit
     is 30 s): asking it only adds two minutes of retries before the failure."""
+    if chunk and len(set(ids)) > chunk:
+        ordered, out = sorted(set(ids)), {}
+        for start in range(0, len(ordered), chunk):
+            out.update(_asked_batch(ordered[start:start + chunk], build, namespace, parse, cache, extra, qlever,
+                                    chunk))
+        return out
     try:
         return _asked(build(ids), namespace, parse, cache, extra, qlever)
     except http.HTTPError as failure:
@@ -902,8 +916,8 @@ def _asked_batch(ids, build, namespace, parse, cache, extra=None, qlever=True):
         middle = len(ordered) // 2
         print(f"wikidata: {len(ordered)} ids failed ({failure}); asking {middle} and {len(ordered) - middle}",
               file=sys.stderr)
-    out = _asked_batch(ordered[:middle], build, namespace, parse, cache, extra, qlever)
-    out.update(_asked_batch(ordered[middle:], build, namespace, parse, cache, extra, qlever))
+    out = _asked_batch(ordered[:middle], build, namespace, parse, cache, extra, qlever, chunk)
+    out.update(_asked_batch(ordered[middle:], build, namespace, parse, cache, extra, qlever, chunk))
     return out
 
 
@@ -913,7 +927,7 @@ def claimants(ids, media, cache=None):
     out = {}
     for answer in in_parallel(
             lambda batch: _asked_batch(batch, lambda part: claimant_query(part, media), "sparql-claimant",
-                                       parse_claimants, cache),
+                                       parse_claimants, cache, chunk=None),
             [ordered[start:start + CLAIM_BATCH] for start in range(0, len(ordered), CLAIM_BATCH)]):
         out.update(answer)
     return out
@@ -925,7 +939,7 @@ def item_evidence(qids, media, cache=None):
     out = {}
     for answer in in_parallel(
             lambda batch: _asked_batch(batch, lambda part: evidence_query(part, media), "sparql-evidence",
-                                       parse_evidence, cache),
+                                       parse_evidence, cache, chunk=None),
             [ordered[start:start + EVIDENCE_BATCH] for start in range(0, len(ordered), EVIDENCE_BATCH)]):
         out.update(answer)
     return out

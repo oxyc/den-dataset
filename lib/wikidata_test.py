@@ -927,6 +927,28 @@ class Endpoints(unittest.TestCase):
             wikidata.mapping(list(range(1, 41)), "movie", LANGUAGES)
         self.assertEqual(self.hosts(), [wikidata.HOST, QLEVER])
 
+    def test_the_catalogue_passs_500_ids_are_asked_in_chunks_of_150(self):
+        """`fetch` hands `enrich` 500 ids; WDQS answers the language query for 175 of the most-linked films in
+        under a second and for 200 not at all inside 60 s. The ids go out at the size the cache holds."""
+        ids = list(range(1, 501))
+        self.script = {wikidata.HOST: answers_up_to(175), QLEVER: answers_up_to(175)}
+        found = wikidata.mapping(ids, "movie", LANGUAGES, self.cache)
+        self.assertEqual(sorted(found), ids)
+        self.assertEqual([len(asked_ids(text)) for _, text, _ in self.sent], [150, 150, 150, 50])
+        self.assertEqual(wikidata.TMDB_CHUNK, 150)
+        self.sent = []
+        wikidata.mapping(ids[:150], "movie", LANGUAGES, self.cache)
+        self.assertEqual(self.sent, [], "a chunk is the query a 150-id batch always was: served from disk")
+
+    def test_the_other_per_title_lookups_chunk_too(self):
+        self.script = {wikidata.HOST: lambda ids: rows(), QLEVER: rows()}
+        for call in (lambda i: wikidata.languages(i, "movie"), lambda i: wikidata.sources(i, "movie"),
+                     lambda i: wikidata.kinds(i, "movie"), lambda i: wikidata.origins(i, "movie"),
+                     lambda i: wikidata.targets(i, "movie"), lambda i: wikidata.wikipedias(i, "movie", "d")):
+            self.sent = []
+            call(list(range(1, 501)))
+            self.assertEqual([len(asked_ids(text)) for _, text, _ in self.sent], [150, 150, 150, 50])
+
     def test_a_throttle_is_not_halved(self):
         self.script = {wikidata.HOST: 429, QLEVER: 429}
         with self.assertRaises(wikidata.http.HTTPError):
