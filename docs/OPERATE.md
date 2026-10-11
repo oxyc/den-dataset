@@ -180,9 +180,13 @@ between vectors from different ones, and nothing about the result looks wrong wh
 oxyc/den-dataset#21 was a corpus half-embedded by two den-embed builds, measured at 6.3/10 top-10 overlap,
 found by hand months later.
 
-**1. The same image, anywhere x86_64** — the digest the box serves (`DEN_EMBED_IMAGE`), at
-`MAX_TOKENS=1024`. The box's Intel AVX2 and a GitHub-hosted runner's AMD AVX-512 return byte-identical
-vectors (24/24, #27), so the daily job embeds in its own container. The published image cannot run on an
+**1. The same image, on an AVX2 host** — the digest the box serves (`DEN_EMBED_IMAGE`), at
+`MAX_TOKENS=1024`. ONNX Runtime picks its kernels from the CPU's flags, so the host's instruction set is part
+of the space. The box's Intel CPU and a hosted runner's AMD EPYC 7763 (both AVX2 only) return
+byte-identical vectors (24/24, #27). An AMD EPYC 9V74 or 9V45 runner (AVX-512, VNNI) moves every vector,
+cosine 0.979 — measured 2026-10-11 after four dailies the canary refused. Hosted runners come in both kinds,
+so the daily job checks its host first and hands the day to a new run on anything with `avx512f`,
+`avx_vnni`, `avx_vnni_int8` or `amx_int8`, then embeds in its own container. The published image cannot run on an
 Apple Silicon Mac at all: ONNX Runtime needs AVX2, which emulation lacks, so `/health` answers and the first
 embed dies with an illegal instruction ("connection refused" from the client). Whatever the host, the canary
 (2.) is what decides.
