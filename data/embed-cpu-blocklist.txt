@@ -1,0 +1,6 @@
+# CPUs whose den-embed vectors are outside the box's space: the daily job hands the day to another runner
+# when it lands on one, before anything runs (.github/workflows/daily.yml). One /proc/cpuinfo "model name"
+# per line, exactly. Any CPU not listed is tried: the canary decides, and a CPU that fails it names itself in
+# the run's notice so it can be added here. docs/OPERATE.md, "The alignment rule", has the measurements.
+AMD EPYC 9V74 80-Core Processor
+AMD EPYC 9V45 96-Core Processor
