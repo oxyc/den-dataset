@@ -207,6 +207,96 @@ class Skips(Recorded):
         self.day(mode=None, revisit_weeks=8)
         self.assertNotIn(("refresh",), self.calls)
 
+    def test_a_ready_run_that_held_titles_has_not_carried_the_week(self):
+        """The catalogue pass is what finds a held title again, so the day after stays one."""
+        reports = self.published("monday.json", ready=True, heldForSpend=3461,
+                                 revisit={"weeks": 8, "slice": 3, "date": "2026-09-21"})
+        seen, _report = self.weeks_asked(published_reports_dir=reports)
+        self.assertEqual(seen, [8])
+
+
+class Fits(Recorded):
+    """A day whose TypeSafe backlog projects over its cap labels what the cap buys and holds the rest, instead
+    of refusing the whole day (daily run 38174158772: 5.13 projected against a 1.00 cap, nothing bought, and
+    the backlog could never drain)."""
+
+    ENV = {"TYPESAFE_API_KEY": "j", "DEN_EMBED_URL": "http://embed.invalid"}
+
+    def backlog(self, titles, plotless=0):
+        keys = [f"movie:{n}" for n in range(1, titles + 1)]
+        self.plan.update(added=keys, addedPlotless=keys[:plotless],
+                         counts={"added": titles, "addedPlotless": plotless, "addedPlotted": titles - plotless,
+                                 "keys": titles})
+        return keys
+
+    def listed(self, name):
+        with open(os.path.join(self.out, "changes", f"{name}.txt"), encoding="utf-8") as fh:
+            return fh.read().split()
+
+    def spent(self, usd):
+        directory = os.path.join(self.out, "published-reports")
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, "earlier.json"), "w", encoding="utf-8") as fh:
+            json.dump({"date": "2026-09-21", "spend": {"totalUSD": usd}}, fh)
+        return directory
+
+    def test_a_backlog_over_the_daily_cap_labels_a_prefix_and_holds_the_rest(self):
+        keys = self.backlog(3000)
+        code, report = self.day(self.ENV, spend=True)
+        self.assertEqual(code, 0, report["verdict"])
+        self.assertTrue(report["ready"])
+        # $1.00 at $0.0004 a title is 2,500, in the store's row order.
+        self.assertEqual(self.listed("new"), keys[:2500])
+        self.assertEqual(self.listed("keys"), keys[:2500])
+        self.assertEqual(report["heldForSpend"], 500)
+        self.assertEqual(report["added"], keys[:2500])
+        self.assertEqual(report["counts"]["heldForSpend"], 500)
+        self.assertAlmostEqual(report["spend"]["steps"]["typesafe"]["projectedUSD"], 1.0)
+        self.assertIn("classify", self.ran(), "the paid stages still run, over the prefix")
+
+    def test_a_parked_title_is_not_billed_and_a_backlog_that_fits_holds_nothing(self):
+        self.backlog(5000, plotless=2600)
+        code, report = self.day(self.ENV, spend=True)
+        self.assertEqual(code, 0, report["verdict"])
+        self.assertEqual(report["heldForSpend"], 0)
+        self.assertEqual(len(self.listed("new")), 5000, "the parked ones stay listed, as they always were")
+        self.assertAlmostEqual(report["spend"]["steps"]["typesafe"]["projectedUSD"], 0.96)
+
+    def test_the_month_can_cut_the_day_shorter_than_the_cap(self):
+        self.backlog(3000)
+        reports = self.spent(9.96)
+        code, report = self.day(self.ENV, spend=True, published_reports_dir=reports)
+        self.assertEqual(code, 0, report["verdict"])
+        self.assertEqual(len(self.listed("new")), 100, "$0.04 left in the month")
+        self.assertAlmostEqual(report["spend"]["steps"]["typesafe"]["projectedUSD"], 0.04)
+
+    def test_a_month_with_no_room_for_the_day_still_refuses(self):
+        self.backlog(100)
+        reports = self.spent(9.9998)
+        code, report = self.day(self.ENV, spend=True, published_reports_dir=reports)
+        self.assertEqual(code, 1)
+        self.assertIn("monthly cap", report["verdict"])
+        self.assertEqual(report["heldForSpend"], 0)
+
+    def test_a_cap_below_one_titles_cost_still_refuses(self):
+        self.backlog(3000)
+        code, report = self.day(self.ENV, spend=True, typesafe_max_spend_usd=0.0003)
+        self.assertEqual(code, 1)
+        self.assertIn("crossing its $0.00 daily cap", report["verdict"])
+
+    def test_a_malformed_cap_still_refuses(self):
+        self.backlog(3000)
+        code, report = self.day(self.ENV, spend=True, typesafe_max_spend_usd=float("nan"))
+        self.assertEqual(code, 1)
+        self.assertIn("must be a positive finite", report["verdict"])
+
+    def test_a_title_an_earlier_run_of_the_day_already_bought_stays_and_costs_nothing(self):
+        keys = self.backlog(6000)
+        with mock.patch.object(daily.classify, "answered", return_value={key: "sha" for key in keys[:2500]}):
+            _code, report = self.day(self.ENV, spend=True)
+        self.assertEqual(self.listed("new"), keys[:5000], "the 2,500 bought, then 2,500 more fit")
+        self.assertEqual(report["heldForSpend"], 1000)
+
 
 class Refusals(Recorded):
     def test_an_out_dir_with_batches_and_no_live_manifest_runs_nothing(self):

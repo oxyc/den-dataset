@@ -124,7 +124,8 @@ def slice_published(directory, today, weeks):
     The slice is chosen by the week (`changes.week`), so every day of a week picks the same titles. The
     workflow asks for it every day and this drops it once a ready run has carried it — a ready run publishes —
     so a day that missed it (no host that embeds in the box's space, a refusal) leaves it to the next day
-    rather than to the next week."""
+    rather than to the next week. A ready run that held titles for want of TypeSafe budget has not carried
+    it."""
     if not directory or not os.path.isdir(directory):
         return None
     this_week = changes.week(today)
@@ -138,6 +139,10 @@ def slice_published(directory, today, weeks):
             raise StageError(f"daily: published report {name} is unreadable: {error}") from error
         revisit = report.get("revisit") if isinstance(report, dict) else None
         if not (report.get("ready") is True and isinstance(revisit, dict) and revisit.get("weeks") == weeks):
+            continue
+        if report.get("heldForSpend"):
+            # The catalogue pass is the only one that finds a held title again, so the day after one stays a
+            # catalogue day until nothing is held.
             continue
         try:
             carried = datetime.date.fromisoformat(revisit.get("date"))
@@ -248,21 +253,35 @@ def seed_if_empty(ctx):
     return seeded
 
 
-def planned_title_count(plan):
-    keys = set(plan.get("added") or []) | set((plan.get("changed") or {}).keys())
-    revisit = plan.get("revisit") or []
-    if isinstance(revisit, dict):
-        keys |= set(revisit)
-    elif isinstance(revisit, list):
-        keys |= set(revisit)
-    return len(keys)
+def typesafe_titles(ctx):
+    """The titles the TypeSafe stages are asked about, in the store's row order (movies, then series, each by
+    id): the change set's `new` list, less the parked ones, which have no article to classify. A changed or
+    revisited title is not asked about."""
+    parked = set((changes.planned(ctx) or {}).get("addedPlotless") or [])
+    return sorted(changes.listed(ctx, "new") - parked, key=changes.order)
 
 
 def reserve_typesafe(day, extra=0):
-    """Reserve the day's TypeSafe titles: the change plan's, and `extra` classified again."""
-    count = planned_title_count(changes.planned(day.ctx) or {}) + extra
-    day.ledger.reserve("typesafe", count * TYPESAFE_PROJECTED_PER_TITLE,
-                       getattr(day.args, "typesafe_max_spend_usd", 1.0))
+    """Reserve the day's TypeSafe titles — the change set's, and `extra` classified again — and, when the day
+    cannot pay for all of them, hold the rest for a later day.
+
+    The titles to buy are cut to the largest prefix of `typesafe_titles` that fits `Ledger.allowance`: the
+    daily cap, or what the month has left, whichever is less. The rest leave the change set (`changes.hold`),
+    so no stage classifies one, and the corpus join holds each at its published source until a day that can
+    afford it. A title whose classification an earlier run of the day already bought costs nothing and always
+    stays. A cut that would leave not even one title (a month with no room, a cap below one title's cost) is
+    not a backlog, it is a budget that cannot buy anything: it reserves the whole day and refuses."""
+    cap = getattr(day.args, "typesafe_max_spend_usd", 1.0)
+    done = classify.answered(day.ctx)
+    asked = [key for key in typesafe_titles(day.ctx) if key not in done]
+    room = day.ledger.allowance("typesafe", cap)
+    fits = int(room / TYPESAFE_PROJECTED_PER_TITLE + 1e-9) - extra
+    if len(asked) > fits >= 1:
+        changes.hold(day.ctx, asked[fits:])
+        print(f"typesafe: labelling {fits} of {len(asked)} titles within ${fits * TYPESAFE_PROJECTED_PER_TITLE:.4f} "
+              f"(cap ${cap:.2f}); {len(asked) - fits} held for a later day", file=sys.stderr)
+        asked = asked[:fits]
+    day.ledger.reserve("typesafe", (len(asked) + extra) * TYPESAFE_PROJECTED_PER_TITLE, cap)
 
 
 def reserve_known_spend(day):
@@ -454,6 +473,7 @@ def report(day, ready, why, tokens):
         "store": {key: meta.get(key) for key in ("storeFile", "storeSha256", "storeBytes", "storeRecords")},
         "counts": plan.get("counts"), "added": plan.get("added", []),
         "addedPlotless": plan.get("addedPlotless", []), "changed": plan.get("changed", {}),
+        "heldForSpend": len(plan.get("heldForSpend") or []),
         "withdrawn": plan.get("withdrawn", {}), "revisit": plan.get("revisit"),
         "seeded": getattr(day, "seeded", None), "ran": day.ran, "skipped": day.skipped,
         "migrationBoundary": boundary,
@@ -472,6 +492,9 @@ def report(day, ready, why, tokens):
              f"- built: {out['datasetVersion']} ({out['store'].get('storeRecords')} rows)",
              f"- spend today: ${out['spend']['totalUSD']:.4f}; month to date: "
              f"${out['spend']['monthToDateUSD']:.4f} / ${out['spend']['monthlyCapUSD']:.2f}", ""]
+    if out["heldForSpend"]:
+        lines += [f"- genres & moods: {out['heldForSpend']} new title(s) held for a later day, past what the "
+                  f"TypeSafe budget buys in one", ""]
     if out["fanPicks"]:
         lines += [f"- fan picks: {out['fanPicks']['asked']} asked, {out['fanPicks']['answered']} answered, "
                   f"{out['fanPicks']['emptyAnswers']} empty, "

@@ -73,6 +73,15 @@ later gate refuses, publishes its measured
 public reports, sums `spend.totalUSD` for the UTC calendar month, and refuses a step whose projection would
 cross either ceiling. An unreadable report is fatal rather than counted as zero.
 
+The daily TypeSafe step is the exception to refusing: a day with more new titles to classify than its cap
+or the month has room for (`Ledger.allowance`, at $0.0004 a title) classifies the first that fit, in the
+store's row order (movies, then series, by id), and holds the rest (`changes.hold`, `heldForSpend` in the
+report). A held title is out of the change set, so no later stage touches it, and the corpus join keeps it at
+its published source (`held_source`) so a plot never ships without its vector. The corpus marks such a source
+`heldForLabels`, so the next day's seed does not count the title seen, and a ready run that held titles has
+not carried the week's slice, so the next day is a catalogue day that finds them again. A budget that fits not
+even one title (a month with no room, a cap below one title's cost) still refuses the day.
+
 The report records projection, cap, measured cost, provider token counts, today's total, and the
 month-to-date total per step. Premise generation is batch-resumable, audits exact media-type-qualified keys,
 applies the placeholder and storytelling-property guards, and repairs only rows that fall below the 8-tag

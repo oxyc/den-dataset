@@ -38,7 +38,7 @@ if not __package__:
     sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from lib import cache as caching  # noqa: E402
-from pipeline import artifacts, enrich, jsonbytes  # noqa: E402
+from pipeline import artifacts, consolidate_corpus, enrich, jsonbytes  # noqa: E402
 from pipeline.contract import StageError  # noqa: E402
 from store import vector_blob  # noqa: E402
 
@@ -149,13 +149,16 @@ def bundle(out_dir, dest):
 
 
 def records(corpus_path):
-    """The seeded batch: every title the corpus records a `source` for, as the record that source came from."""
+    """The seeded batch: every title the corpus records a `source` for, as the record that source came from.
+
+    Not a title held unclassified (`consolidate_corpus.HELD_MARK`): it was fetched but never taken in, so the
+    next run treats it as unseen, fetches it again and lists it."""
     out = []
     with caching_open(corpus_path) as fh:
         for line in fh:
             if line.strip():
                 row = json.loads(line)
-                if row.get("source"):
+                if row.get("source") and not row["source"].get(consolidate_corpus.HELD_MARK):
                     out.append({"tmdbId": row["tmdbId"], "mediaType": row["mediaType"], **row["source"]})
     return out
 

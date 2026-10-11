@@ -94,6 +94,21 @@ class Rules(unittest.TestCase):
         self.assertEqual((plan["counts"]["added"], plan["counts"]["addedPlotted"], plan["counts"]["addedPlotless"]),
                          (3, 1, 2))
 
+    def test_a_held_title_leaves_every_list_a_stage_reads(self):
+        out = Batches(self)
+        out.publish(out.add(row(1)))
+        out.add(row(2), row(3), row(4, plot=None))
+        out.plan()
+        context = Context(out_dir=out.out)
+        changes.hold(context, ["movie:3"])
+        changes.hold(context, ["movie:2"])
+        plan = out.read("plan.json")
+        self.assertEqual((plan["added"], plan["heldForSpend"]), (["movie:4"], ["movie:2", "movie:3"]))
+        self.assertEqual((plan["counts"]["added"], plan["counts"]["addedPlotted"], plan["counts"]["keys"],
+                          plan["counts"]["heldForSpend"]), (1, 0, 1, 2))
+        self.assertEqual((out.read("new.txt"), out.read("keys.txt")), (["movie:4"], ["movie:4"]))
+        self.assertEqual(changes.listed(context, "new"), {"movie:4"})
+
     def test_the_absolute_snapshot_identity_does_not_chain_the_live_version(self):
         out = Batches(self)
         through = out.add(row(1), row(2))

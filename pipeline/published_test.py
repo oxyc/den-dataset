@@ -122,6 +122,17 @@ class Published(unittest.TestCase):
         state = json.loads(self.read(os.path.basename(enrich.checkpoint_path(self.fresh))))
         self.assertEqual((state["nextBatch"], state["processed"]), (5, [enrich.key("movie", 1)]))
 
+    def test_a_title_held_for_labels_is_not_seeded_as_seen(self):
+        """It was fetched and never taken in; seeded as processed, no catalogue pass would fetch it again."""
+        path = os.path.join(self.tmp, "held.jsonl")
+        held = {"hasWikiPlot": False, "wikidataItem": "Q9", "heldForLabels": True}
+        write(path, "".join(json.dumps(r) + "\n" for r in (
+            {"key": "movie:1", "tmdbId": 1, "mediaType": "movie", "source": SOURCE},
+            {"key": "movie:3", "tmdbId": 3, "mediaType": "movie", "source": held},
+            {"key": "movie:4", "tmdbId": 4, "mediaType": "movie", "source": {"hasWikiPlot": False}})))
+        self.assertEqual([r["tmdbId"] for r in published.records(path)], [1, 4],
+                         "a title that really has no plot is still seen")
+
     def test_the_embed_stores_are_the_blob_in_its_order(self):
         published.seed(self.fresh)
         labels = [json.loads(line) for line in self.read(artifacts.EMBED_LABELS.filename).splitlines()]
