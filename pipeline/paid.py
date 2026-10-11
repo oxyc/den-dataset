@@ -16,6 +16,9 @@ before a run and uploads it after, whether or not the run publishes, as an asset
   * `files` — the franchise decisions, restored as the union of the ledger's and the out-dir's;
   * `answers` — per step, a title's answer with what it was bought for, for the fan picks and the premise
     tags, which ask through `lib/llm.py`. A new model or spec is the one way to pay for a title again;
+  * `judged` — the enrich checkpoint's below-floor verdicts, seeded back into it (`restore_judged`) so the weekly
+    catalogue pass judges only what is new or changed (`enrich.standing`). A TMDB vote count is not kept, only
+    which TMDB floors it met; a publish does not carry a verdict, so `prune` leaves them;
   * `batches`, `intents` and `steps` — Batch jobs submitted and not yet collected, a submit whose response
     has not been seen, and each model step's state (`pipeline/model_steps.py`).
 
@@ -42,7 +45,7 @@ if not __package__:
 
 from lib import cache as caching  # noqa: E402
 
-from pipeline import artifacts  # noqa: E402
+from pipeline import artifacts, enrich  # noqa: E402
 from pipeline.franchise_decisions import totals  # noqa: E402
 
 SCHEMA = "paid-answers-v1"
@@ -56,7 +59,7 @@ STRIPPED = ("title", "year")
 
 def empty():
     return {"schema": SCHEMA, "shards": {}, "files": {}, "answers": {}, "batches": [], "intents": [],
-            "steps": {}}
+            "steps": {}, "judged": {}}
 
 
 def stripped(rows):
@@ -118,7 +121,32 @@ class Ledger:
         for name, kept in self.data["files"].items():
             path = os.path.join(ctx.out_dir, name)
             caching.write_atomically(path, merged_decisions(path, kept).encode("utf-8"))
+        self.restore_judged(ctx)
         return len(self.data["shards"])
+
+    # --- below-floor verdicts ----------------------------------------------------------------------
+
+    def restore_judged(self, ctx):
+        """Seed the enrich checkpoint's `judgedBelow` with the ledger's verdicts, the checkpoint's own winning.
+        The seed (`pipeline/published.py`) writes it empty, so without this every run judges the whole
+        catalogue's below-floor titles again. Nothing without a checkpoint: that is a first run's to create."""
+        path = enrich.checkpoint_path(ctx.out_dir)
+        if not self.data["judged"] or not os.path.exists(path):
+            return
+        state = enrich.read_checkpoint(path)
+        judged = {label: verdict for label, verdict in {**self.data["judged"], **state["judgedBelow"]}.items()
+                  if label not in state["processed"]}
+        write_checkpoint(path, state, judged)
+
+    def keep_judged(self, ctx):
+        """Take the checkpoint's below-floor verdicts into the ledger, whole: what enrich dropped (expired,
+        or the title was admitted) leaves with it. Nothing before `restore`, or without a checkpoint to read."""
+        path = enrich.checkpoint_path(ctx.out_dir)
+        if not self.path or self.foreign is None or not os.path.exists(path):
+            return
+        state = enrich.read_checkpoint(path)
+        self.data["judged"] = {label: carried(verdict) for label, verdict in state["judgedBelow"].items()
+                               if label not in state["processed"]}
 
     def keep(self, ctx):
         """Take every shard this run bought or added to, stripped, and the franchise decisions, into the
@@ -141,6 +169,7 @@ class Ledger:
             if os.path.exists(path):
                 with open(path, encoding="utf-8") as fh:
                     self.data["files"][artifact.filename] = fh.read()
+        self.keep_judged(ctx)
 
     def prune(self):
         """Drop what a publish of the run that used this ledger now carries. Returns what was dropped.
@@ -167,6 +196,21 @@ class Ledger:
         for st in self.data["steps"].values():
             st.pop("reaskAnswers", None)
         return dropped
+
+
+def carried(verdict):
+    """A below-floor verdict as the ledger keeps it: the day, the floors, and which TMDB floors the count met —
+    not the count, which is TMDB's. A verdict already in that form is kept as it is."""
+    if "side" in verdict:
+        return verdict
+    return {"on": verdict.get("on"), "floors": verdict.get("floors"),
+            "side": enrich.tmdb_side(verdict.get("votes"), verdict.get("floors") or [])}
+
+
+def write_checkpoint(path, state, judged):
+    body = {"nextBatch": state["nextBatch"], "processed": sorted(state["processed"]), "judgedBelow": judged,
+            "totals": state["totals"]}
+    caching.write_atomically(path, enrich.compact(body).encode("utf-8"))
 
 
 def shard_names(ctx):

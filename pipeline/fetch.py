@@ -67,6 +67,12 @@ BATCH = 500
 ABORTS = 6
 STALLS = 6
 
+#: How long the weekly catalogue pass drains one media before it stops and leaves the rest. Its worklist is
+#: every title at the lowest vote floor not yet published, ~43,000 on the first pass, of which the verdicts
+#: it keeps (`pipeline/paid.py`) spare every later pass most. A pass that cannot finish saves what it judged
+#: and the next one resumes, instead of running into the job's time limit and keeping nothing.
+CATALOGUE_SECONDS = 90 * 60
+
 #: The credential bootstrap, over `lib/den-env.sh`: the only credential a batch uses is a 24h
 #: Wikimedia Enterprise bearer, minted by `enterprise_login` from the Enterprise username and password. A
 #: batch asks TMDB nothing (oxyc/den-dataset#53), so no TMDB key is needed here. The Enterprise credentials
@@ -146,11 +152,14 @@ def batch(ctx, media):
     token = credentials()
     floors = floor_rules.given(ctx.vote_floor, ctx.regional_vote_floor, ctx.wikipedia_floor,
                                ctx.regional_wikipedia_floor)
+    # Only the weekly catalogue pass trusts a verdict from an earlier day: a new release gains Wikipedia
+    # articles in its first weeks, and the daily delta must ask again.
+    carry_days = enrich.CARRY_DAYS if ctx.mode == "catalogue" else 0
     return enrich.run(ctx.require(bind(UNIVERSES[media]).artifact), ctx.out_dir, floors=floors,
-                      limit=BATCH, token=token)
+                      limit=BATCH, token=token, carry_days=carry_days)
 
 
-def drain(ctx, media):
+def drain(ctx, media, after_batch=None):
     """Run batches until the worklist has nothing left. Returns the number of batches that ran.
 
     Two stopping rules, both `enrich-all.sh`'s, both bought by a run:
@@ -171,6 +180,7 @@ def drain(ctx, media):
     aborts = stalls = batches = 0
     previous = None
     served = dict.fromkeys(SERVED, 0)
+    deadline = time.monotonic() + CATALOGUE_SECONDS if ctx.mode == "catalogue" else None
     while True:
         try:
             report = batch(ctx, media)
@@ -189,9 +199,17 @@ def drain(ctx, media):
         for name in SERVED:
             served[name] += report.get(name, 0)
         served["enterpriseOff"] = report.get("enterpriseOff") or served.get("enterpriseOff")
+        if after_batch:
+            after_batch()
         remaining = report.get("remaining")
         if remaining == 0:
             announce_prose_source(media, served)
+            return batches
+        if deadline is not None and time.monotonic() >= deadline:
+            announce_prose_source(media, served)
+            print(f"==> {NAME}: {media} catalogue pass stopped after {CATALOGUE_SECONDS // 60} minutes with "
+                  f"{remaining} title(s) not yet judged; the next pass resumes from the verdicts it kept",
+                  file=sys.stderr)
             return batches
         if remaining == previous:
             stalls += 1
@@ -221,8 +239,11 @@ def check_outputs(ctx):
                              f"from their checkpoint.")
 
 
-def run(ctx):
+def run(ctx, after_batch=None):
     """Drain the worklists into the enriched batches. Returns the batch directory's path.
+
+    `after_batch` is called after every batch: the daily job saves what the checkpoint holds there, so a
+    pass that is killed keeps the verdicts it reached.
 
     Resumable: a re-run against the same out-dir takes only ids the checkpoint does not hold, and one that
     finds everything enriched runs a single batch, fetches nothing and exits clean.
@@ -234,7 +255,7 @@ def run(ctx):
     if ctx.refresh and ctx.plan:
         report = refresh.run(ctx)
         return f"planned only — {report['toFetch']} of {report['grounded']} grounded titles would be re-fetched"
-    ran = {media: drain(ctx, media) for media in media_types(ctx)}
+    ran = {media: drain(ctx, media, after_batch) for media in media_types(ctx)}
     refreshed = refresh.run(ctx) if ctx.refresh else None
     check_outputs(ctx)
     batches = ", ".join(f"{count} {media} batch(es)" for media, count in ran.items())

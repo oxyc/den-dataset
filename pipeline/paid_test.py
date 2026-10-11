@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from . import artifacts, classify, paid, premise_daily
+from . import artifacts, classify, enrich, paid, premise_daily
 from . import premise_daily_test as premise_tests
 from .contract import Context
 from .critique_test import change_set, in_process
@@ -70,6 +70,54 @@ class Ledger(unittest.TestCase):
                          [{"mediaType": "movie", "tmdbId": 1}, {"mediaType": "movie", "tmdbId": 2, "answers": {}}])
         self.assertNotIn(b"Heat", body)
         self.assertNotIn(b"1995", body)
+
+    def test_below_floor_verdicts_are_kept_without_the_tmdb_count_seeded_back_and_not_pruned(self):
+        """The release is public and a vote count is TMDB's. The seed writes the checkpoint with no verdicts;
+        the ledger's go in beside the out-dir's own, which win. A publish carries no verdict, so prune keeps them."""
+        with tempfile.TemporaryDirectory() as root:
+            out, path = os.path.join(root, "out"), os.path.join(root, "paid-state.json.gz")
+            os.makedirs(out)
+            checkpoint = enrich.checkpoint_path(out)
+            floors = [50, 15, 10, 3]
+            state = {"nextBatch": 3, "processed": ["movie:9", "movie:5"], "totals": {"belowFloor": 2},
+                     "judgedBelow": {"movie:1": {"on": "2026-10-04", "votes": 12, "floors": floors},
+                                     "movie:5": {"on": "2026-10-04", "votes": 3, "floors": floors}}}
+            with open(checkpoint, "w") as fh:
+                fh.write(enrich.compact(state))
+            ledger = paid.Ledger(path)
+            ledger.restore(Context(out_dir=out))
+            ledger.keep(Context(out_dir=out))
+            ledger.save()
+            with gzip.open(path, "rb") as fh:
+                body = fh.read()
+            self.assertNotIn(b"votes", body)
+            self.assertEqual(paid.Ledger(path).data["judged"],
+                             {"movie:1": {"on": "2026-10-04", "floors": floors, "side": 0}},
+                             "movie:5 was admitted since, so it leaves with the checkpoint's own processed")
+            ledger.prune()
+            self.assertEqual(list(ledger.data["judged"]), ["movie:1"])
+
+            seeded = os.path.join(root, "seeded")
+            os.makedirs(seeded)
+            with open(enrich.checkpoint_path(seeded), "w") as fh:
+                fh.write(enrich.compact({"nextBatch": 7, "processed": ["movie:9"], "totals": {}, "judgedBelow": {
+                    "movie:2": {"on": "2026-10-11", "votes": 4, "floors": floors}}}))
+            ledger.restore(Context(out_dir=seeded))
+            restored = enrich.read_checkpoint(enrich.checkpoint_path(seeded))
+        self.assertEqual(sorted(restored["judgedBelow"]), ["movie:1", "movie:2"])
+        self.assertEqual((restored["nextBatch"], restored["processed"]), (7, {"movie:9"}))
+
+    def test_without_a_checkpoint_nothing_is_seeded_or_kept(self):
+        """A checkpoint that is not there is a first run's to create, and one it never wrote has no verdicts."""
+        with tempfile.TemporaryDirectory() as root:
+            out, path = os.path.join(root, "out"), os.path.join(root, "paid-state.json.gz")
+            os.makedirs(out)
+            ledger = paid.Ledger(path)
+            ledger.data["judged"] = {"movie:1": {"on": "2026-10-04", "floors": [50, 15, 10, 3], "side": 1}}
+            ledger.restore(Context(out_dir=out))
+            ledger.keep(Context(out_dir=out))
+            self.assertFalse(os.path.exists(enrich.checkpoint_path(out)))
+        self.assertEqual(list(ledger.data["judged"]), ["movie:1"], "a failed run before the seed loses nothing")
 
     def test_a_shard_already_in_the_out_dir_that_is_not_the_ledgers_is_never_taken_in(self):
         with tempfile.TemporaryDirectory() as root:

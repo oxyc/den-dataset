@@ -201,15 +201,20 @@ class Day:
         self.paid.keep(self.ctx)
         self.paid.save()
 
+    def persist_judged(self):
+        """Save the below-floor verdicts reached so far: a drain this long can be killed before it ends."""
+        self.paid.keep_judged(self.ctx)
+        self.paid.save()
+
     def skip(self, stage, why):
         self.skipped.append({"stage": stage, "why": why})
         print(f"==> {stage}: SKIPPED — {why}", file=sys.stderr)
 
-    def stage(self, name, **changed):
+    def stage(self, name, hooks=None, **changed):
         module = load(name)
         ctx = dataclasses.replace(self.ctx, **changed)
         print(f"==> {name}", file=sys.stderr)
-        made = module.run(finalize.versioned(module, ctx))
+        made = module.run(finalize.versioned(module, ctx), **(hooks or {}))
         print(f"==> {name}: {made}", file=sys.stderr)
         self.ran.append(name)
         return made
@@ -296,7 +301,7 @@ def run_day(day):
         elif name == "fetch":
             universes = [ctx.path(artifacts.UNIVERSE_MOVIE), ctx.path(artifacts.UNIVERSE_TV)]
             if all(os.path.exists(path) for path in universes):
-                day.stage(name)
+                day.stage(name, hooks={"after_batch": day.persist_judged})
             else:
                 day.skip(name, "no worklist to drain; existing Wikipedia sources are operator-only")
         elif name == "changes":

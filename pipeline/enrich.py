@@ -37,6 +37,7 @@ import os
 import re
 import sys
 import threading
+import zlib
 
 from lib import cache as caching
 from lib import enterprise, http, plot, wikidata, wikipedia
@@ -203,7 +204,34 @@ def below_floor(votes, floors, today):
     return {"on": today, "votes": votes, "floors": floor_values(floors)}
 
 
-def standing(judged, today, floors, worklist_votes):
+#: How long the weekly catalogue pass trusts a below-floor verdict (`standing`'s `carry_days`): the 8-week
+#: revisit cycle. Verdicts older than twice this are dropped from the checkpoint.
+CARRY_DAYS = 56
+
+
+def tmdb_side(votes, floors):
+    """How many of the two TMDB floors (`floor_values`' first two) a count meets; None for no count.
+
+    Admission by TMDB's count is exactly this: a title clears at its tier's floor or it does not, so a count
+    that moved without changing this has not changed that half of the verdict."""
+    return None if votes is None else sum(votes >= floor for floor in floors[:2])
+
+
+def verdict_age(held, today):
+    """Days from a verdict's day to `today`; None when either is not a date."""
+    try:
+        return (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(held.get("on"))).days
+    except (TypeError, ValueError):
+        return None
+
+
+def lifetime(label, carry_days):
+    """Days a verdict about `label` holds beyond its day. Spread by a stable hash of the key over
+    `carry_days` more, so verdicts made in one pass do not all expire in the same one."""
+    return carry_days + zlib.crc32(label.encode("utf-8")) % carry_days if carry_days else 0
+
+
+def standing(judged, today, floors, worklist_votes, carry_days=0):
     """The keys whose below-floor verdict still holds for this batch, and so are not asked about again.
 
     A below-floor verdict is about one day's counts. A vote count only climbs, so it must be judged again
@@ -217,10 +245,25 @@ def standing(judged, today, floors, worklist_votes):
     floors today), and on the TMDB count the worklist row still states (a row that states none — an export
     row — was judged on its Wikipedia count, which the date covers). Any of those changing re-asks the
     title, and a title that now clears a floor is admitted like any other.
+
+    The weekly pass sets `carry_days`: a verdict then also holds on a later day, for `lifetime` days, so a
+    pass asks only about what is new, what changed, and what has gone stale. A verdict kept between runs
+    (`pipeline/paid.py`) states which TMDB floors the count met (`side`) rather than the count itself, which
+    is TMDB's and the ledger is public; it holds while the count still meets the same ones.
     """
+    def same_count(label, held):
+        if label not in worklist_votes:
+            return True
+        if "side" in held:
+            return tmdb_side(worklist_votes[label], floor_values(floors)) == held["side"]
+        return worklist_votes[label] == held.get("votes")
+
+    def fresh(label, held):
+        age = verdict_age(held, today)
+        return age is not None and 0 <= age <= lifetime(label, carry_days)
+
     return {label for label, held in judged.items()
-            if held.get("on") == today and held.get("floors") == floor_values(floors)
-            and (label not in worklist_votes or worklist_votes[label] == held.get("votes"))}
+            if held.get("floors") == floor_values(floors) and fresh(label, held) and same_count(label, held)}
 
 
 def is_anime(labels):
@@ -585,12 +628,12 @@ def candidates(titles, cache, excluded):
 
 
 def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude_anime=False, cache=None,
-        token=None, today=None):
+        token=None, today=None, carry_days=0):
     """One batch. Returns the report the drain reads by key.
 
     `cache` is the `wiki` cache, from the environment when not given; `token` the Enterprise bearer, None
     for the free action API. `today` is the UTC date a below-floor verdict is recorded under (see
-    `standing`), today's when not given.
+    `standing`), today's when not given; `carry_days` how long a verdict holds on a later day.
 
     A batch that admits no title writes no batch file and takes no batch number: an empty `batch-N.json`
     holds nothing any reader wants, and each one moved the numbering on.
@@ -625,7 +668,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
         processed |= unrecorded(out_dir, checkpoint["nextBatch"])
     today = today or datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     judged = checkpoint["judgedBelow"]
-    held = standing(judged, today, floors, worklist_votes)
+    held = standing(judged, today, floors, worklist_votes, carry_days)
     settled = processed | held
     pending = [entry for entry in worklist if key(*entry) not in settled][:limit]
     if not pending:
@@ -732,10 +775,12 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     # Every pending id EXCEPT those still owed another look: transient failures, and below-floor titles,
     # which are recorded as today's verdicts instead.
     processed.update(key(*entry) for entry in pending if key(*entry) not in deferred | below)
-    # Only today's verdicts are kept: an older one no longer holds (`standing`), so dropping it re-asks
-    # nothing that would not be re-asked anyway, and the map stays one day's size.
+    # A verdict older than any run lets it hold (`2 * CARRY_DAYS`) is dropped: it re-asks nothing that would
+    # not be re-asked anyway. A younger one stays even when this run does not trust it (a delta run holds
+    # only today's), because the ledger carries the map to the weekly pass.
+    ages = {label: verdict_age(kept, today) for label, kept in judged.items()}
     judged = {label: kept for label, kept in judged.items()
-              if kept.get("on") == today and label not in processed}
+              if ages[label] is not None and 0 <= ages[label] <= 2 * CARRY_DAYS and label not in processed}
     totals = {name: checkpoint["totals"].get(name, 0) + counts[name] for name in TOTALS}
     state = {"nextBatch": batch_id + 1 if survivors else batch_id, "processed": sorted(processed),
              "judgedBelow": judged, "totals": totals}
