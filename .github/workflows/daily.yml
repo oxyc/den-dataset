@@ -53,6 +53,10 @@ on:
         description: "Buy the day's classify, critique and genres & moods answers"
         type: boolean
         default: false
+      host_attempt:
+        description: "Set by a run that handed the day on from a host whose kernels differ from the box's"
+        required: false
+        default: "1"
 
 concurrency:
   group: daily
@@ -61,6 +65,7 @@ concurrency:
 permissions:
   contents: write
   id-token: write
+  actions: write   # a run on the wrong kind of host hands the day to a new one
 
 jobs:
   daily:
@@ -74,6 +79,35 @@ jobs:
       OUT: out
       DEN_CACHE_DIR: .cache
     steps:
+      # ONNX Runtime picks its kernels from the CPU's flags, and only the plain AVX2 ones give the box's vectors:
+      # on an AVX-512 or VNNI host every vector moves (cosine ~0.979, 2026-10-11) and the canary refuses the day
+      # once it has run. Hosted runners come in both kinds and take no CPU request, so a day that lands on the
+      # other kind hands itself to a new run before it starts anything. After six tries it runs where it is and
+      # the canary decides.
+      - name: A host that embeds in the box's space
+        if: vars.DEN_EMBED_IMAGE != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTEMPT: ${{ inputs.host_attempt || '1' }}
+          WEEKS: ${{ github.event_name == 'workflow_dispatch' && inputs.revisit_weeks || (github.event.schedule == '47 4 * * 1' && (vars.DEN_REVISIT_WEEKS || '8') || '') }}
+          SPEND: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.spend) || format('{0}', vars.DEN_DAILY_SPEND == 'true') }}
+        run: |
+          cpu="$(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
+          other="$(grep -m1 '^flags' /proc/cpuinfo | tr ' ' '\n' | grep -xE 'avx512f|avx_vnni|avx_vnni_int8|amx_int8' | xargs)"
+          if [ -z "$other" ]; then
+            echo "$cpu: AVX2 kernels, the box's space"
+            exit 0
+          fi
+          if [ "$ATTEMPT" -ge 6 ]; then
+            echo "::warning::$cpu has $other on try $ATTEMPT; running here, the canary decides"
+            exit 0
+          fi
+          echo "::notice::$cpu has $other, which embeds outside the box's space; handing the day to try $((ATTEMPT + 1))"
+          gh workflow run daily.yml -R "$GITHUB_REPOSITORY" --ref main \
+            -f spend="$SPEND" -f revisit_weeks="$WEEKS" -f host_attempt="$((ATTEMPT + 1))"
+          gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
+          sleep 300
+          exit 1
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
@@ -91,7 +125,7 @@ jobs:
                      "$OUT/published/dataset.meta.json")"
           gh release download "corpus-$version" -R "$GITHUB_REPOSITORY" -D "$OUT/published" \
             || { echo "error: no corpus-$version release: the live dataset was published without its bundle" >&2; exit 1; }
-      # The same image at the same token cap gives the box's vectors byte for byte on a hosted runner (#27);
+      # The same image at the same token cap, on an AVX2 host, gives the box's vectors byte for byte (#27);
       # the embed stage's canary refuses before writing one if it does not.
       - name: den-embed
         if: vars.DEN_EMBED_IMAGE != ''
