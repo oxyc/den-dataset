@@ -296,6 +296,9 @@ def run(ctx, now=None):
         revisit = [key for key in sorted(current, key=order)
                    if key not in listed and in_slice(key, ctx.revisit_weeks, week(today))]
 
+    # `added` is every title new to the batches; one with no Wikipedia plot is parked (admitted, never shipped:
+    # "no Wikipedia plot, no title"), so it is not missing anything a later stage will supply.
+    plotless = [key for key in added if not current[key]["plot"]]
     model_keys = {key for key, why in changed.items() if why[0] in (GAINED, REGAINED)}
     keys = sorted(set(added) | model_keys, key=order)
     plan = {
@@ -305,13 +308,15 @@ def run(ctx, now=None):
         # still changes the corpus/store, so the publisher correctly refused the different store under the
         # old version. This absolute digest is stable after publication and moves for every corpus-row change.
         "snapshotSha256": snapshot_sha256(current),
-        "counts": {"titles": len(current), "added": len(added), "changed": len(changed),
+        "counts": {"titles": len(current), "added": len(added), "addedPlotless": len(plotless),
+                   "addedPlotted": len(added) - len(plotless), "changed": len(changed),
                    "withdrawn": len(withdrawn), "tombstoned": len(tombstoned), "withdrawnBefore": len(again),
                    "revised": revised, "unchanged": unchanged,
                    "keys": len(keys), "revisit": len(revisit)},
         "revisit": ({"weeks": ctx.revisit_weeks, "slice": week(today) % ctx.revisit_weeks,
                      "date": today.isoformat()} if ctx.revisit_weeks else None),
         "added": added,
+        "addedPlotless": plotless,
         "changed": changed,
         "withdrawn": withdrawn,
     }
@@ -328,7 +333,8 @@ def run(ctx, now=None):
     caching.write_atomically(os.path.join(directory, "plan.json"),
                              (json.dumps(plan, indent=1) + "\n").encode("utf-8"))
     print(json.dumps(dict(plan["counts"], baseline=plan["baseline"]), sort_keys=True), flush=True)
-    return (f"{directory} ({len(keys)} to run: {len(added)} added, {len(changed)} changed; "
+    return (f"{directory} ({len(keys)} to run: {len(added)} added ({len(plotless)} without a plot), "
+            f"{len(changed)} changed; "
             f"{len(withdrawn)} withdrawn; {len(revisit)} to revisit"
             f"{'; no live manifest, so every title is new' if not live else ''})")
 

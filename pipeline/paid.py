@@ -18,7 +18,8 @@ before a run and uploads it after, whether or not the run publishes, as an asset
     tags, which ask through `lib/llm.py`. A new model or spec is the one way to pay for a title again;
   * `judged` — the enrich checkpoint's below-floor verdicts, seeded back into it (`restore_judged`) so the weekly
     catalogue pass judges only what is new or changed (`enrich.standing`). A TMDB vote count is not kept, only
-    which TMDB floors it met; a publish does not carry a verdict, so `prune` leaves them;
+    which TMDB floors it met; a publish does not carry a verdict, so `prune` leaves them. The same map holds the
+    plotless verdicts: an admitted title no article gave a plot, with the day and the reason (`noPlot`);
   * `batches`, `intents` and `steps` — Batch jobs submitted and not yet collected, a submit whose response
     has not been seen, and each model step's state (`pipeline/model_steps.py`).
 
@@ -146,7 +147,7 @@ class Ledger:
             return
         state = enrich.read_checkpoint(path)
         self.data["judged"] = {label: carried(verdict) for label, verdict in state["judgedBelow"].items()
-                               if label not in state["processed"]}
+                               if label not in state["processed"] or enrich.is_no_plot(verdict)}
 
     def keep(self, ctx):
         """Take every shard this run bought or added to, stripped, and the franchise decisions, into the
@@ -201,7 +202,7 @@ class Ledger:
 def carried(verdict):
     """A below-floor verdict as the ledger keeps it: the day, the floors, and which TMDB floors the count met —
     not the count, which is TMDB's. A verdict already in that form is kept as it is."""
-    if "side" in verdict:
+    if "side" in verdict or enrich.is_no_plot(verdict):
         return verdict
     return {"on": verdict.get("on"), "floors": verdict.get("floors"),
             "side": enrich.tmdb_side(verdict.get("votes"), verdict.get("floors") or [])}

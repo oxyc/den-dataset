@@ -84,6 +84,16 @@ class Rules(unittest.TestCase):
         self.assertEqual(len(plan["snapshotSha256"]), 64)
         self.assertEqual(out.read("keys.txt"), ["movie:1", "movie:2", "tv:1"])
 
+    def test_additions_without_a_plot_are_counted_apart_from_those_with_one(self):
+        out = Batches(self)
+        out.publish(out.add(row(1)))
+        out.add(row(2), row(3, plot=None), row(4, media="tv", plot=None))
+        plan = out.plan()
+        self.assertEqual(plan["added"], ["movie:2", "movie:3", "tv:4"], "`added` is still every new title")
+        self.assertEqual(plan["addedPlotless"], ["movie:3", "tv:4"])
+        self.assertEqual((plan["counts"]["added"], plan["counts"]["addedPlotted"], plan["counts"]["addedPlotless"]),
+                         (3, 1, 2))
+
     def test_the_absolute_snapshot_identity_does_not_chain_the_live_version(self):
         out = Batches(self)
         through = out.add(row(1), row(2))

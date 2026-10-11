@@ -14,6 +14,7 @@ reader of a batch â€” `articles`, `embed`, the provenance backfill, the census â
 import datetime
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -862,6 +863,101 @@ class Batch(unittest.TestCase):
         self.assertEqual(asked, ["movie:2", "movie:4"], "the new title, and the one that crossed the floor")
         self.assertEqual((report["admittedByTmdb"], report["belowFloor"]), (1, 1))
         self.assertEqual(sorted(self.checkpoint()["judgedBelow"]), ["movie:1", "movie:3", "movie:4"])
+
+    # -- plotless verdicts: admitted, no Wikipedia plot, so never shipped -----------------------------------
+
+    def weekly(self, entries, today):
+        """One weekly-pass batch over titles that clear the TMDB floor; returns the keys it asked Wikidata about."""
+        before = len(self.claimant_calls)
+        report = self.run_batch(entries, today=today, carry_days=enrich.CARRY_DAYS)
+        return report, [f"{media}:{i}" for media, ids in self.claimant_calls[before:] for i in ids]
+
+    def through_the_ledger(self):
+        """What the daily job does between two runs: keep the checkpoint's verdicts in the ledger, and seed a
+        fresh out-dir the way `pipeline/published.py` does, then lay the ledger back."""
+        ctx = Context(out_dir=self.out)
+        path = os.path.join(self.out, "paid-state.json.gz")
+        ledger = paid.Ledger(path)
+        ledger.restore(ctx)
+        ledger.keep(ctx)
+        ledger.save()
+        fresh = tempfile.TemporaryDirectory()
+        self.addCleanup(fresh.cleanup)
+        self.out = fresh.name
+        put(enrich.checkpoint_path(self.out), enrich.compact(
+            {"nextBatch": 2, "processed": ["movie:9"], "totals": {}, "judgedBelow": {}}))
+        paid.Ledger(path).restore(Context(out_dir=self.out))
+        return paid.Ledger(path)
+
+    def test_a_second_weekly_run_does_not_enrich_a_plotless_title_again(self):
+        self.mapping[("movie", 2)] = {"article": "Two"}
+        self.plots[("Two", "en")] = found("t" * 300)
+        report, asked = self.weekly([("movie", 1), ("movie", 2)], self.DAY)
+        self.assertEqual((asked, report["wikiPlot"], report["tagsOnly"]), (["movie:1", "movie:2"], 1, 1))
+        parked = {"on": self.DAY, "noPlot": "noArticle", "rules": enrich.PLOT_RULES}
+        self.assertEqual(self.checkpoint()["judgedBelow"]["movie:1"], parked)
+        self.assertNotIn("movie:2", self.checkpoint()["judgedBelow"], "a title with a plot is shipped, not parked")
+
+        ledger = self.through_the_ledger()
+        self.assertEqual(ledger.data["judged"], {"movie:1": parked})
+        self.assertEqual(list(self.checkpoint()["judgedBelow"]), ["movie:1"], "laid back into the new out-dir")
+
+        report, asked = self.weekly([("movie", 1), ("movie", 3)], self.later(7))
+        self.assertEqual(asked, ["movie:3"], "the new title only")
+        self.assertEqual(sorted(self.checkpoint()["judgedBelow"]), ["movie:1", "movie:3"])
+
+    def test_the_ledger_keeps_no_vote_count_for_a_plotless_title(self):
+        self.weekly([("movie", 1)], self.DAY)
+        ledger = self.through_the_ledger()
+        self.assertNotIn("votes", json.dumps(ledger.data["judged"]))
+
+    def test_an_expired_plotless_verdict_is_asked_again(self):
+        self.weekly([("movie", 1)], self.DAY)
+        self.through_the_ledger()
+        lasts = enrich.lifetime("movie:1", enrich.CARRY_DAYS)
+        _report, asked = self.weekly([("movie", 1)], self.later(lasts))
+        self.assertEqual(asked, [], "the last day it holds")
+        self.mapping[("movie", 1)] = {"article": "One"}
+        self.plots[("One", "en")] = found("o" * 300)
+        report, asked = self.weekly([("movie", 1)], self.later(lasts + 1))
+        self.assertEqual((asked, report["wikiPlot"]), (["movie:1"], 1), "it gained an article")
+        self.assertNotIn("movie:1", self.checkpoint()["judgedBelow"], "and is no longer parked")
+
+    def test_a_plotless_verdict_holds_whatever_the_floors_and_the_count_do(self):
+        self.weekly([("movie", 1)], self.DAY)
+        self.through_the_ledger()
+        before = len(self.claimant_calls)
+        self.run_batch([("movie", 1)], votes={("movie", 1): 5000}, today=self.later(7), carry_days=enrich.CARRY_DAYS,
+                       floors=enrich.floor_rules.given(tmdb=5))
+        self.assertEqual(self.claimant_calls[before:], [])
+
+    def test_a_daily_delta_neither_trusts_nor_keeps_a_plotless_verdict(self):
+        """A delta asks about releases that are still gaining articles; only the weekly pass parks a title."""
+        self.run_batch([("movie", 1)], today=self.DAY)
+        self.assertEqual(self.checkpoint()["judgedBelow"], {})
+        shutil.rmtree(os.path.join(self.out, "enriched"))   # a later run's out-dir holds none of it
+        put(enrich.checkpoint_path(self.out), json.dumps(
+            {"processed": [], "judgedBelow": {
+                "movie:1": {"on": self.DAY, "noPlot": "noArticle", "rules": enrich.PLOT_RULES}}}))
+        before = len(self.claimant_calls)
+        self.run_batch([("movie", 1)], today=self.later(1))
+        self.assertEqual(self.claimant_calls[before:], [("movie", [1])])
+
+    def test_a_verdict_from_other_plot_rules_is_asked_again(self):
+        """A change to item choice, headings, fallbacks or the length floor bumps `PLOT_RULES`; a verdict
+        reached under the old ones says nothing about what the new ones would find. An unstamped one is old."""
+        self.weekly([("movie", 1)], self.DAY)
+        self.through_the_ledger()
+        _report, asked = self.weekly([("movie", 1)], self.later(7))
+        self.assertEqual(asked, [], "held under the rules it was made under")
+        with mock.patch.object(enrich, "PLOT_RULES", enrich.PLOT_RULES + 1):
+            _report, asked = self.weekly([("movie", 1)], self.later(14))
+        self.assertEqual(asked, ["movie:1"])
+        shutil.rmtree(os.path.join(self.out, "enriched"))
+        put(enrich.checkpoint_path(self.out), json.dumps(
+            {"processed": [], "judgedBelow": {"movie:1": {"on": self.DAY, "noPlot": "noArticle"}}}))
+        _report, asked = self.weekly([("movie", 1)], self.later(15))
+        self.assertEqual(asked, ["movie:1"], "no stamp, no trust")
 
     def test_a_batch_that_admits_nothing_writes_no_batch_and_keeps_its_number(self):
         """Each refused attempt wrote a `batch-N.json` holding `[]` and moved the numbering on."""
