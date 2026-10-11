@@ -291,6 +291,18 @@ source kinds stay on WDQS. The pass's closing JSON (`answeredBy`) counts which e
 Wikidata fails is dropped whole and the merge refuses a pass that skipped one; `pipeline/facts-run.sh out`
 loops until nothing is skipped.
 
+The enrich stage's lookups (`lib/wikidata.py`: the mapping, languages, genre/type labels, origin countries
+and the claimant lookups) use the same fallback. QLever has no `SERVICE wikibase:label`, so it is sent the
+labels as `rdfs:label` patterns (`en`, then `mul`, bound to the same variable); the answer is kept under the
+WDQS query text, so the cache keys are unchanged. Three lookups stay on WDQS because QLever's 30 s limit
+(answered as a 429 `Operation timed out`) was measured to cut them off at every batch size: the source-work
+class walk, the target labels, and the Wikipedia count. So does the doc-facts scrape, whose names QLever
+orders differently. The ids of a batch go out in chunks of 150 (`TMDB_CHUNK`), whatever `fetch` hands
+`enrich`: the language query for the 200 most-linked films runs past WDQS's 60 s every time and takes under a
+second at 175. A batch that times out on every endpoint it is asked of is asked again as two halves,
+down to ten ids, and the answers are merged (the log says `wikidata: N ids failed … asking A and B`); a
+refusal of the query (a 4xx other than QLever's timeout) is not split, and neither is a 429 throttle.
+
 **The delta pass.** The facts are two passes merged: the titles in `labels-t02.json` (stamped `hasVector`)
 and `out/facts-delta-ids.txt` (not stamped, so den-atlas's `/recommend` never lets a vectorless record into
 an ANN path). `./den daily` writes the list — every title the live facts carry that the new labels do not,

@@ -340,10 +340,12 @@ class Fallback(unittest.TestCase):
         self.cache = caching.ResponseCache("wiki", self.directory.name, 3600)
         self.sent, self.script = [], {}
         for patch in (mock.patch.object(wd.http, "request", self.answer),
-                      mock.patch.dict(wd.os.environ, {}, clear=False),
-                      mock.patch.object(wd, "ANSWERED", wd.collections.Counter())):
+                      mock.patch.dict(wd.os.environ, {}, clear=False)):
             patch.start()
             self.addCleanup(patch.stop)
+        # The counter lives in `lib/wikidata`, which `_sparql` runs from; emptied rather than replaced.
+        wd.ANSWERED.clear()
+        self.addCleanup(wd.ANSWERED.clear)
         wd.os.environ.pop(wd.PREFER_VAR, None)
 
     def answer(self, host, path, params=None, body=None, attempts=wd.http.ATTEMPTS, **kwargs):
@@ -387,16 +389,19 @@ class Fallback(unittest.TestCase):
                           (wd.HOST, wd.http.ATTEMPTS)])
         self.assertEqual(dict(wd.ANSWERED), {"qlever": 1, "wdqs": 1})
 
-    def test_the_label_service_and_the_entity_steps_stay_on_wdqs(self):
-        """QLever has no `SERVICE wikibase:label`; the entity and source steps never fall back."""
+    def test_the_entity_steps_stay_on_wdqs_and_a_label_query_goes_to_qlever_with_its_labels_resolved(self):
+        """QLever has no `SERVICE wikibase:label`, so a query using it is sent with the labels asked for
+        in patterns; the entity and source steps never fall back."""
         env = {wd.PREFER_VAR: "qlever"}
         self.script = {wd.HOST: body(), wd.QLEVER_HOST: body()}
-        wd._sparql('SELECT ?item ?itemLabel WHERE { SERVICE wikibase:label { bd:serviceParam '
-                   'wikibase:language "en". } }', fallback=True, env=env)
+        wd._sparql('SELECT ?item ?itemLabel WHERE { ?x wdt:P1 ?item . SERVICE wikibase:label { '
+                   'bd:serviceParam wikibase:language "en". } }', fallback=True, env=env)
         wd.os.environ[wd.PREFER_VAR] = "qlever"
         wd.series(["Q1"])
         self.assertEqual([(host, attempts) for host, _, attempts in self.sent],
-                         [(wd.HOST, wd.http.ATTEMPTS)] * 2)
+                         [(wd.QLEVER_HOST, wd.http.ATTEMPTS), (wd.HOST, wd.http.ATTEMPTS)])
+        self.assertNotIn("SERVICE", self.sent[0][1])
+        self.assertIn("AS ?itemLabel", self.sent[0][1])
 
     def test_the_prefix_block_declares_every_prefix_a_per_batch_query_uses(self):
         """WDQS predeclares them and QLever does not, so one missing here fails every batch on QLever."""
