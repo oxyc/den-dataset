@@ -21,8 +21,8 @@ from unittest import mock
 from lib import cache as caching
 from lib import http
 
-from . import enrich
-from .contract import StageError
+from . import enrich, paid
+from .contract import Context, StageError
 
 #: `JSONEncoder([.prettyPrinted, .sortedKeys])`'s bytes for one row, captured from Swift 6 on macOS 26:
 #: ` : `, two-space indent, `\/`, an empty list as `[` + blank line + bracket at the parent's indent, the
@@ -791,6 +791,77 @@ class Batch(unittest.TestCase):
             "movie:1": {"on": self.DAY, "votes": 10, "floors": [50, 15, 2000, 500], "imdb": True}}}))
         report, asked = self.below(wikis=12)
         self.assertEqual((asked, report["admittedByWikipedias"]), (["movie:1"], 1))
+
+    # -- the weekly pass: verdicts that outlive the day, and the ledger that carries them between runs ----------
+
+    def later(self, days):
+        return (datetime.date.fromisoformat(self.DAY) + datetime.timedelta(days=days)).isoformat()
+
+    def test_a_weekly_pass_trusts_an_earlier_days_verdict_until_it_goes_stale(self):
+        """Without `carry_days` a verdict is about its own day, so a pass a week later asked about every
+        below-floor title again. With it, the verdict holds for `lifetime` days and then is asked again."""
+        self.below()
+        lasts = enrich.lifetime("movie:1", enrich.CARRY_DAYS)
+        report, asked = self.below(today=self.later(7), carry_days=enrich.CARRY_DAYS)
+        self.assertEqual((report, asked), ({"remaining": 0, "count": 0}, []))
+        report, asked = self.below(today=self.later(lasts), carry_days=enrich.CARRY_DAYS)
+        self.assertEqual(asked, [], "the last day it holds")
+        report, asked = self.below(today=self.later(lasts + 1), carry_days=enrich.CARRY_DAYS)
+        self.assertEqual(asked, ["movie:1"])
+        self.assertEqual(self.checkpoint()["judgedBelow"]["movie:1"]["on"], self.later(lasts + 1))
+
+    def test_a_verdict_expires_at_a_day_spread_over_the_carry_window(self):
+        """Verdicts made in one pass must not all go stale in the same later one."""
+        spans = {enrich.lifetime(f"movie:{i}", enrich.CARRY_DAYS) for i in range(1, 200)}
+        self.assertEqual((min(spans), max(spans)), (enrich.CARRY_DAYS, 2 * enrich.CARRY_DAYS - 1))
+        self.assertEqual(enrich.lifetime("movie:1", 0), 0, "a day-only verdict has no spread")
+
+    def test_a_carried_verdict_is_asked_again_when_the_count_crosses_a_floor_and_not_when_it_does_not(self):
+        """The ledger keeps which TMDB floors the count met, not the count. 10 -> 40 meets the same ones
+        (the regional 15 it does not, the 50 it does not); 10 -> 60 meets the worldwide 50."""
+        self.below(votes=10)
+        carried = {label: paid.carried(verdict) for label, verdict in self.checkpoint()["judgedBelow"].items()}
+        self.assertNotIn("votes", carried["movie:1"])
+        put(enrich.checkpoint_path(self.out), json.dumps({"processed": [], "judgedBelow": carried}))
+        report, asked = self.below(votes=11, today=self.later(7), carry_days=enrich.CARRY_DAYS)
+        self.assertEqual(asked, [], "moved, but still short of the same floors")
+        report, asked = self.below(votes=60, today=self.later(7), carry_days=enrich.CARRY_DAYS)
+        self.assertEqual((asked, report["admittedByTmdb"]), (["movie:1"], 1))
+
+    def test_a_second_weekly_run_from_the_ledger_judges_only_what_is_new_or_changed(self):
+        """A run keeps nothing between runs but the ledger, and the seed writes `judgedBelow` empty. The next
+        weekly run, in a fresh out-dir, must not judge the first one's titles again."""
+        for tmdb_id in (1, 2, 3):
+            self.wikis[("movie", tmdb_id)] = 1
+        ctx = Context(out_dir=self.out)
+        path = os.path.join(self.out, "paid-state.json.gz")
+        self.run_batch([("movie", 1), ("movie", 2), ("movie", 3)], votes={("movie", i): 10 for i in (1, 2, 3)},
+                       today=self.DAY, carry_days=enrich.CARRY_DAYS)
+        self.assertEqual(sorted(self.checkpoint()["judgedBelow"]), ["movie:1", "movie:2", "movie:3"])
+        first = paid.Ledger(path)
+        first.restore(ctx)
+        first.keep(ctx)
+        first.save()
+
+        fresh = tempfile.TemporaryDirectory()
+        self.addCleanup(fresh.cleanup)
+        self.out = fresh.name
+        # What `pipeline/published.py` seeds a fresh out-dir with: the published titles, no verdicts.
+        put(enrich.checkpoint_path(self.out), enrich.compact(
+            {"nextBatch": 2, "processed": ["movie:9"], "totals": {}, "judgedBelow": {}}))
+        second = paid.Ledger(path)
+        second.restore(Context(out_dir=self.out))
+        self.wikis[("movie", 4)] = 1
+        self.mapping[("movie", 2)] = {"article": "Two"}
+        self.plots[("Two", "en")] = found("t" * 300)
+        before = len(self.claimant_calls)
+        report = self.run_batch([("movie", i) for i in (1, 2, 3, 4)],
+                                votes={("movie", 1): 10, ("movie", 2): 60, ("movie", 3): 12, ("movie", 4): 10},
+                                today=self.later(7), carry_days=enrich.CARRY_DAYS)
+        asked = [f"movie:{i}" for _media, ids in self.claimant_calls[before:] for i in ids]
+        self.assertEqual(asked, ["movie:2", "movie:4"], "the new title, and the one that crossed the floor")
+        self.assertEqual((report["admittedByTmdb"], report["belowFloor"]), (1, 1))
+        self.assertEqual(sorted(self.checkpoint()["judgedBelow"]), ["movie:1", "movie:3", "movie:4"])
 
     def test_a_batch_that_admits_nothing_writes_no_batch_and_keeps_its_number(self):
         """Each refused attempt wrote a `batch-N.json` holding `[]` and moved the numbering on."""

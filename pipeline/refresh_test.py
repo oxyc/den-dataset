@@ -305,7 +305,7 @@ class Stage(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.out = directory.name
         self.drained = []
-        for name, stub in (("drain", lambda ctx, media: self.drained.append(media) or 1),
+        for name, stub in (("drain", lambda ctx, media, after_batch=None: self.drained.append(media) or 1),
                            ("check_outputs", lambda ctx: None)):
             patch = mock.patch.object(fetch, name, stub)
             patch.start()

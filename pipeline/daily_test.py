@@ -16,7 +16,7 @@ import types
 import unittest
 from unittest import mock
 
-from . import STAGES, artifacts, daily
+from . import STAGES, artifacts, daily, enrich
 from .contract import Context, StageError
 
 NOW = datetime.datetime(2026, 9, 24, 3, 23, tzinfo=datetime.timezone.utc)
@@ -326,6 +326,22 @@ class PaidLedger(Recorded):
         self.store_fails = False
         self.day(env, spend=True, paid_state=ledger)
         self.assertTrue(self.saw_restored, "the shard was laid back before the classify stage ran")
+
+
+class JudgedBelow(unittest.TestCase):
+    def test_the_verdicts_a_drain_reached_are_saved_between_batches_not_only_at_the_end(self):
+        """A weekly drain can be cancelled by the job's time limit, which runs no `finally`."""
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        ledger = os.path.join(directory, "paid", "paid-state.json.gz")
+        day = daily.Day(args(directory, paid_state=ledger), {}, NOW)
+        floors = [50, 15, 10, 3]
+        with open(enrich.checkpoint_path(directory), "w") as fh:
+            fh.write(enrich.compact({"nextBatch": 2, "processed": [], "totals": {}, "judgedBelow": {
+                "movie:1": {"on": "2026-10-11", "votes": 4, "floors": floors}}}))
+        day.paid.restore(day.ctx)
+        day.persist_judged()
+        self.assertEqual(daily.paid.Ledger(ledger).data["judged"],
+                         {"movie:1": {"on": "2026-10-11", "floors": floors, "side": 0}})
 
 
 class FanPicks(unittest.TestCase):

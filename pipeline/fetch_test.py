@@ -25,6 +25,8 @@ import pipeline
 from . import artifacts, embed, enrich, fetch, floors, worklist
 from .contract import Context, StageError, bind
 
+#: The real `fetch.batch`, which `Staged` replaces with a scripted one.
+REAL_BATCH = fetch.batch
 VERSION = "testver"
 WORKLIST = {"movie": [{"tmdbId": 550, "mediaType": "movie"}],
             "tv": [{"tmdbId": 1396, "mediaType": "tv"}]}
@@ -206,6 +208,38 @@ class Loop(Staged):
                     {"remaining": 200, "count": 500}, {"remaining": 0, "count": 200})
         self.assertEqual(fetch.drain(context(self.out), "movie"), 4)
         self.assertEqual(self.slept, [60])
+
+
+class Catalogue(Staged):
+    """The weekly pass: it trusts an earlier day's verdicts, saves as it goes, and stops after a time box."""
+
+    def test_only_the_catalogue_pass_trusts_a_verdict_from_an_earlier_day(self):
+        for mode, carry in (("catalogue", enrich.CARRY_DAYS), ("delta", 0), ("", 0)):
+            with mock.patch.object(enrich, "run", return_value={"remaining": 0}) as ran, \
+                    mock.patch.object(fetch, "credentials", return_value=None):
+                REAL_BATCH(context(self.out, mode=mode), "movie")
+            self.assertEqual(ran.call_args.kwargs["carry_days"], carry, mode)
+
+    def test_the_hook_is_called_after_every_batch(self):
+        self.script({"remaining": 900, "count": 500}, {"remaining": 400, "count": 500},
+                    {"remaining": 0, "count": 400})
+        saved = []
+        fetch.drain(context(self.out), "movie", after_batch=lambda: saved.append(len(self.calls)))
+        self.assertEqual(saved, [1, 2, 3])
+
+    def test_a_pass_that_outlasts_its_time_box_stops_with_the_rest_left_for_the_next(self):
+        self.script({"remaining": 900, "count": 500}, {"remaining": 400, "count": 500},
+                    {"remaining": 0, "count": 400})
+        clock = iter([0, 10, fetch.CATALOGUE_SECONDS + 1, 10 ** 9])
+        with mock.patch.object(fetch.time, "monotonic", lambda: next(clock)), \
+                mock.patch("sys.stderr", io.StringIO()) as err, mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(fetch.drain(context(self.out, mode="catalogue"), "movie"), 2)
+        self.assertIn("400 title(s) not yet judged", err.getvalue())
+
+    def test_a_daily_delta_has_no_time_box(self):
+        self.script({"remaining": 900, "count": 500}, {"remaining": 0, "count": 400})
+        with mock.patch.object(fetch.time, "monotonic", side_effect=AssertionError("no clock")):
+            self.assertEqual(fetch.drain(context(self.out, mode="delta"), "movie"), 2)
 
 
 class Served(Staged):

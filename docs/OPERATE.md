@@ -114,6 +114,19 @@ premise answers before asking anything. Rerunning a failed day buys nothing it a
 older ones. A run that cannot read it fails rather than start without it, and a published run prunes what the
 publish carries. The release is public, so the ledger carries no TMDB title or year and no article text.
 
+The ledger also carries the below-floor verdicts (`judged`): which titles the weekly catalogue pass
+(`--revisit-weeks`) already judged short of every admission floor, so the next pass asks only about what is
+new, what changed and what has gone stale. The out-dir is seeded with none (`pipeline/published.py`), so
+without them each weekly run judged all ~43,000 unpublished titles at the lowest vote floor again, and none
+finished. A verdict is kept as the day it was made, the floors, and which of the two TMDB floors the count
+met (not the count, which is TMDB's); it holds for 56 to 111 days (`enrich.CARRY_DAYS`, spread by title so one
+pass's verdicts do not all expire in the same later one) and is asked again sooner when the floors change or
+the count moves across a TMDB floor. A publish does not carry a verdict, so `prune` leaves them. The daily
+delta trusts only today's verdicts. The catalogue pass drains each media for at most 90 minutes
+(`fetch.CATALOGUE_SECONDS`) and saves its verdicts after every batch, so the first pass, or one after the
+ledger was lost, makes progress over several weeks instead of running into the job's time limit and keeping
+nothing; the stage log says how many titles it left.
+
 A publish made by hand — anything but the workflow's own publish step — leaves the ledger unpruned, so its
 old shards would be laid back beside the published rows. Prune it the same way afterwards, uploading it under
 the newest asset's name with its attempt number raised, so it sorts newest, before deleting the old one:
