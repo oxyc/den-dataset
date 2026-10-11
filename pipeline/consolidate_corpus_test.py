@@ -619,9 +619,11 @@ class Held(unittest.TestCase):
 
     def test_a_title_nothing_has_classified_ships_no_plot(self):
         rows = self.rows()
-        self.assertEqual(rows["movie:3"]["source"], {"hasWikiPlot": False, "wikidataItem": "Q9"},
-                         "no published source to keep: the identifiers stay and the row says outright it has no plot")
-        self.assertEqual(rows["movie:6"]["source"], {"hasWikiPlot": False, "wikidataItem": "Q9"})
+        held = {"hasWikiPlot": False, "wikidataItem": "Q9", "heldForLabels": True}
+        self.assertEqual(rows["movie:3"]["source"], held,
+                         "no published source to keep: the identifiers stay and the row says outright it has no plot, "
+                         "and that it waits for classification, so the next seed does not count it seen")
+        self.assertEqual(rows["movie:6"]["source"], held)
         self.assertEqual(rows["movie:4"]["source"], {"hasWikiPlot": False, "wikidataItem": "Q4"},
                          "the published row stands, not the batch's")
         with open(self.out, encoding="utf-8") as fh:

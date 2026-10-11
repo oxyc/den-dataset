@@ -393,16 +393,25 @@ PLOT_FIELDS = ("hasWikiPlot", "plotArticle", "plotLanguage", "plotRevId", "plotA
                "plotArticleRedirected", "plotSha256")
 
 
+#: The `source` field of a title held unclassified with no published source.
+HELD_MARK = "heldForLabels"
+
+
 def held_source(published, enriched):
     """The `source` of a title nothing has classified: the published one, or — when the base never recorded
     one — the newest enriched record's identifiers with the plot taken out and `hasWikiPlot` false, said
     outright. An absent source would read as "nothing recorded" and leave the plot-vector gate to the
-    enriched tree alone; this row has to SAY it ships no plot."""
+    enriched tree alone; this row has to SAY it ships no plot.
+
+    A source built here also says `heldForLabels`: the title was fetched and is waiting to be classified, so
+    the next day's seed (`pipeline/published.py`) must not count it processed, or nothing would fetch it
+    again and it would wait for its revisit slice."""
     if published:
         return published
     if not enriched:
         return None
-    return {**{k: v for k, v in enriched.items() if k not in PLOT_FIELDS}, "hasWikiPlot": False}
+    return {**{k: v for k, v in enriched.items() if k not in PLOT_FIELDS}, "hasWikiPlot": False,
+            HELD_MARK: True}
 
 
 def base_rows(path):

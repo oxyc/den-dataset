@@ -353,6 +353,38 @@ def planned(ctx):
     return plan if plan.get("baseline") else None
 
 
+def hold(ctx, held):
+    """Take `held` out of this out-dir's change set, in place: out of `keys.txt` and `new.txt`, out of the
+    plan's `added`, with the counts following and `heldForSpend` naming them.
+
+    The daily job calls it for the titles the day's TypeSafe budget cannot reach. Every later stage then reads
+    a change set that simply does not have them yet, so none is classified, embedded or asked about, and the
+    corpus join holds each at its published source (`consolidate_corpus.held_source`) until a day that can pay
+    for it. Calling it again adds to what was held."""
+    held = set(held)
+    directory = ctx.path(artifacts.CHANGES)
+    plan_path = os.path.join(directory, "plan.json")
+    with open(plan_path, encoding="utf-8") as handle:
+        plan = json.load(handle)
+    counts = plan.setdefault("counts", {})
+    for name in ("keys", "new"):
+        path = os.path.join(directory, f"{name}.txt")
+        with open(path, encoding="utf-8") as handle:
+            kept = [line for line in handle if line.strip() not in held]
+        caching.write_atomically(path, "".join(kept).encode("utf-8"))
+        if name == "keys":
+            counts["keys"] = len(kept)
+    gone = held & set(plan["added"])
+    plotless = set(plan.get("addedPlotless") or [])
+    plan["added"] = [key for key in plan["added"] if key not in gone]
+    plan["heldForSpend"] = sorted(set(plan.get("heldForSpend") or []) | held, key=order)
+    counts["added"] = len(plan["added"])
+    if "addedPlotted" in counts:
+        counts["addedPlotted"] -= len(gone - plotless)
+    counts["heldForSpend"] = len(plan["heldForSpend"])
+    caching.write_atomically(plan_path, (json.dumps(plan, indent=1) + "\n").encode("utf-8"))
+
+
 #: The lists a later stage can ask for, by the file each is written to. `waiting` and `reclassify` are not this
 #: stage's: the daily job writes them after this stage (`pipeline/model_steps.py`). `waiting` is the titles a
 #: weekly model step still owes, whose articles the articles stage dumps so their prompts can be built;
