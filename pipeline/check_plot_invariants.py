@@ -17,6 +17,13 @@ With `--store`, every title the store carries whose newest enriched row says `ha
 are only the embed's worklist, and `build_store.py` holding the blob to them is one more link a reader would
 have to trust. A store with no such section cannot answer the question, and refuses the same way.
 
+`--corpus` makes "ships with a plot" mean what the corpus row says, as well as what the enriched tree says. A
+title nothing has classified is held at its published `source` (`pipeline/consolidate_corpus.py`), so a day
+that cannot buy classification does not ship a plot over a vector it cannot make. The two must AGREE for a
+title to be refused, never either one alone: a labelled title without a vector is still refused, because its
+row takes the plot in. Without `--corpus`, or for a row the corpus records no source for, the enriched tree
+decides alone.
+
 The usual cause is a title that was never classified — the embed covers exactly the labelled titles — and the
 fix is to classify and embed it, not to publish around it. A batch enriched AFTER the embed pass is the
 other way in (four of the original six arrived 4-7 h after it), and it is refused too: the title really does
@@ -135,6 +142,7 @@ shared-article count REGRESSED against `--shared-plot-baseline` · 3 a title the
 no plot vector, or the store cannot say. 3 wins over 2, so `DEN_ALLOW_SHARED_PLOTS` cannot wave it through.
 """
 import argparse
+import gzip
 import json
 import os
 import struct
@@ -197,10 +205,33 @@ def store_plot_vectors(path):
     return {unpack_key(k): bool(h) for k, h in zip(keys, has)}
 
 
-def plot_without_vector(has_plot, shipped):
+def corpus_plot_claims(path):
+    """`key -> bool` for every corpus row that records a source: whether that row says it has a Wikipedia plot.
+
+    The corpus is what the store is built from, and its `source` is what the next day's change set reads, so
+    it is the shipped row's own claim. A row with no `source` is absent here, not False: nothing was recorded
+    and the caller keeps what the enriched tree says."""
+    claims = {}
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                row = json.loads(line)
+                if isinstance(row.get("source"), dict):
+                    claims[row["key"]] = bool(row["source"].get("hasWikiPlot"))
+    return claims
+
+
+def plot_without_vector(has_plot, shipped, claims=None):
     """The titles the store ships whose newest enriched row has a plot and whose store row has no plot
-    vector. A title the store does not carry is not one: it is absent, which is an admission question."""
-    return sorted(k for k, vec in shipped.items() if not vec and has_plot.get(k))
+    vector. A title the store does not carry is not one: it is absent, which is an admission question.
+
+    With `claims` (`corpus_plot_claims`), a title also has to be shipped AS having a plot: one whose corpus row
+    still says it has none is held at its published state until it is classified (`consolidate_corpus.py`,
+    "A title nothing has classified"), and ships nothing a vector could be missing from. A row the corpus
+    records no source for is judged on the enriched tree alone, as it is with no `claims` at all."""
+    return sorted(k for k, vec in shipped.items()
+                  if not vec and has_plot.get(k) and (claims is None or claims.get(k, True)))
 
 
 ROLES = ("own", "own-other-language", "source-work")
@@ -377,6 +408,9 @@ def main():
     ap.add_argument("--store",
                     help="the den-<version>.store to publish; exit 3 if a title it ships has a plot and no "
                          "plot vector")
+    ap.add_argument("--corpus",
+                    help="the corpus the store was built from (corpus-<version>.jsonl.gz): with --store, a "
+                         "title whose corpus row says it has no plot is not shipped with one")
     args = ap.parse_args()
 
     # Last occurrence wins, matching `finalize`'s own de-dup.
@@ -453,8 +487,20 @@ def main():
             print(f"\nerror: plot-vector gate: {err}. Nothing can say whether every title with a plot "
                   f"has a vector.", file=sys.stderr)
             return 3
-        missing = plot_without_vector(has_plot, shipped)
-        with_plot = sum(1 for k in shipped if has_plot.get(k))
+        claims = None
+        if args.corpus:
+            try:
+                claims = corpus_plot_claims(args.corpus)
+            except (OSError, ValueError, KeyError) as err:
+                print(f"\nerror: plot-vector gate: {args.corpus} cannot be read ({err}). Nothing can say "
+                      f"which titles the store ships with a plot.", file=sys.stderr)
+                return 3
+        missing = plot_without_vector(has_plot, shipped, claims)
+        held = sorted(set(plot_without_vector(has_plot, shipped)) - set(missing))
+        if held:
+            print(f"plot-vector gate: {len(held)} titles have a plot in the enriched tree and none in the "
+                  f"corpus row the store ships (held until classified), e.g. {held[:3]}")
+        with_plot = sum(1 for k in shipped if has_plot.get(k) and (claims is None or claims.get(k, True)))
         if missing:
             print(f"\nerror: {len(missing)} of the {with_plot} titles the store ships with a Wikipedia plot "
                   f"have NO plot vector (oxyc/den-dataset#10):", file=sys.stderr)

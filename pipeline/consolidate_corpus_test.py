@@ -578,6 +578,68 @@ class Base(unittest.TestCase):
         self.assertNotIn("TMDB", text)
 
 
+class Held(unittest.TestCase):
+    """A title nothing has classified keeps its published `source`, so a plot is never shipped over a vector
+    that cannot be made: daily run 38148218199 (spend off, a catalogue pass) grounded 33 library titles that
+    had facts and nothing else, and the plot-vector gate refused the store."""
+
+    GROUNDED = {"hasWikiPlot": True, "overview": "A plot.", "plotArticle": "A", "plotLanguage": "en",
+                "plotRevId": 7, "wikidataItem": "Q9"}
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.facts = os.path.join(self.dir, "facts.json")
+        self.labels = os.path.join(self.dir, "genres-moods.json")
+        self.base = os.path.join(self.dir, "base.jsonl")
+        self.out = os.path.join(self.dir, "corpus.jsonl")
+        self.enriched = os.path.join(self.dir, "enriched")
+        os.makedirs(self.enriched)
+        keys = [f"movie:{n}" for n in range(1, 7)]
+        facts_file(self.facts, keys)
+        genres_moods_file(self.labels, ["movie:1", "movie:2"])
+        judged = {"facets": {"tone": {"choice": "old"}}}
+        # 1: classified and labelled. 2: classified, labelled, and answered by a shard this run.
+        # 3: a facts-only row, never enriched. 4: a facts-only row enriched without a plot.
+        # 5: judged by a past pass but with no genres & moods. 6: new since the base, no row there.
+        write(self.base, [{"key": "movie:1", **judged, "source": {"hasWikiPlot": True, "plotArticle": "Old 1"}},
+                          {"key": "movie:2", **judged}, {"key": "movie:3"},
+                          {"key": "movie:4", "source": {"hasWikiPlot": False, "wikidataItem": "Q4"}},
+                          {"key": "movie:5", **judged}])
+        with open(os.path.join(self.enriched, "batch-1.json"), "w", encoding="utf-8") as fh:
+            json.dump([dict(self.GROUNDED, tmdbId=n, mediaType="movie") for n in range(1, 7)], fh)
+        self.shard = os.path.join(self.dir, "combined-v1-r2-new.jsonl")
+        write(self.shard, [combined(2)])
+
+    def rows(self):
+        code, err = run(self.dir, [self.shard], [], self.facts, self.labels, self.out,
+                        ["--base", self.base, "--enriched", self.enriched])
+        self.assertEqual(code, 0, err)
+        return {r["key"]: r for r in read(self.out)}
+
+    def test_a_title_nothing_has_classified_ships_no_plot(self):
+        rows = self.rows()
+        self.assertNotIn("source", rows["movie:3"], "never enriched when published, so no source to keep")
+        self.assertNotIn("source", rows["movie:6"])
+        self.assertEqual(rows["movie:4"]["source"], {"hasWikiPlot": False, "wikidataItem": "Q4"},
+                         "the published row stands, not the batch's")
+
+    def test_a_classified_title_takes_the_plot_in(self):
+        rows = self.rows()
+        self.assertEqual(rows["movie:2"]["source"]["plotArticle"], "A", "answered by a shard this run")
+        self.assertEqual(rows["movie:1"]["source"]["plotArticle"], "A", "labelled, with published judgements")
+        self.assertTrue(rows["movie:5"]["source"]["hasWikiPlot"],
+                        "judged but unlabelled is not held: that is the gate's to refuse, not the join's to hide")
+
+    def test_the_report_counts_the_titles_it_held(self):
+        done = subprocess.run(
+            [sys.executable, SCRIPT, "--combined", self.shard, "--facts", self.facts, "--labels", self.labels,
+             "--out", self.out, "--base", self.base, "--enriched", self.enriched],
+            capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout)["heldAtPublishedSource"], 3, "movie:3, movie:4 and movie:6")
+
+
 class Prose(unittest.TestCase):
     def test_source_prose_is_refused_rather_than_published(self):
         """The repo's one hard rule: derived judgements are ours to publish, the prose they were read

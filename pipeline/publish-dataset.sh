@@ -518,6 +518,13 @@ import json, sys
 print(json.load(open(sys.argv[1])).get("maxBatchId", ""))
 ' "$meta")"
     [ -n "$max_batch" ] && plot_args+=(--max-batch-id "$max_batch")
+    # What the store ships is built from the corpus, so "ships with a plot" is read off its rows too: a title
+    # nothing has classified is held at its published source and has no plot there to lack a vector for.
+    corpus_file="$DIR/corpus-$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1])).get("datasetVersion") or "")
+' "$meta").jsonl.gz"
+    [ -f "$corpus_file" ] && plot_args+=(--corpus "$corpus_file")
     [ -n "$baseline" ] && plot_args+=(--shared-plot-baseline "$baseline")
     python3 "$(dirname "$0")/check_plot_invariants.py" "${plot_args[@]}" || plot_guard=$?
     # 3 is a title with a plot and no vector; 2 is the regression; 1 is the pre-existing plot/labels
