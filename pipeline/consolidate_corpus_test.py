@@ -619,10 +619,17 @@ class Held(unittest.TestCase):
 
     def test_a_title_nothing_has_classified_ships_no_plot(self):
         rows = self.rows()
-        self.assertNotIn("source", rows["movie:3"], "never enriched when published, so no source to keep")
-        self.assertNotIn("source", rows["movie:6"])
+        self.assertEqual(rows["movie:3"]["source"], {"hasWikiPlot": False, "wikidataItem": "Q9"},
+                         "no published source to keep: the identifiers stay and the row says outright it has no plot")
+        self.assertEqual(rows["movie:6"]["source"], {"hasWikiPlot": False, "wikidataItem": "Q9"})
         self.assertEqual(rows["movie:4"]["source"], {"hasWikiPlot": False, "wikidataItem": "Q4"},
                          "the published row stands, not the batch's")
+        with open(self.out, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertNotIn("plotSha256", "".join(
+            json.dumps(rows[key]) for key in ("movie:3", "movie:4", "movie:6")),
+            "a held row carries no digest of a plot it does not ship")
+        self.assertNotIn("A plot.", text)
 
     def test_a_classified_title_takes_the_plot_in(self):
         rows = self.rows()

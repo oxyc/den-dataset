@@ -87,7 +87,9 @@ b66e38e333af), and a catalogue pass can ground one of them in a Wikipedia plot o
 classification. A plot is taken in together with its genres & moods and the vector built from them, never
 before: the row would say "has a plot" over a store that has no plot vector for it, which the publish's
 plot-vector gate refuses (oxyc/den-dataset#10). So the row stays as published until a run classifies the
-title — and because the next day's change set is read from this `source`, that title is then `added` again
+title; one the base never recorded a source for is written with `hasWikiPlot: false` and no plot fields
+(`held_source`), because the gate reads an absent source as "nothing said" and falls back to the enriched
+tree. The next day's change set is read from this `source`, so that title is then `gainedPlot` or `added`
 and the run that can buy picks it up, where a source carrying the plot would have filed it as already seen.
 
 ## What is deliberately NOT here
@@ -386,6 +388,23 @@ def sources(directory):
     return out
 
 
+#: The `source` fields that say a title has a plot, and where it came from.
+PLOT_FIELDS = ("hasWikiPlot", "plotArticle", "plotLanguage", "plotRevId", "plotArticleRole",
+               "plotArticleRedirected", "plotSha256")
+
+
+def held_source(published, enriched):
+    """The `source` of a title nothing has classified: the published one, or — when the base never recorded
+    one — the newest enriched record's identifiers with the plot taken out and `hasWikiPlot` false, said
+    outright. An absent source would read as "nothing recorded" and leave the plot-vector gate to the
+    enriched tree alone; this row has to SAY it ships no plot."""
+    if published:
+        return published
+    if not enriched:
+        return None
+    return {**{k: v for k, v in enriched.items() if k not in PLOT_FIELDS}, "hasWikiPlot": False}
+
+
 def base_rows(path):
     """The published corpus, `key -> row`."""
     out = {}
@@ -514,8 +533,9 @@ def main():
             unclassified = (key not in combined_rows and not row["labels"]
                             and not any((base.get(key) or {}).get(name) for name in BASE_COMBINED))
             if unclassified:
-                found = (base.get(key) or {}).get("source")
-                held += 1 if source.get(key) != found else 0
+                found = held_source((base.get(key) or {}).get("source"), source.get(key))
+                held += 1 if (source.get(key) or {}).get("hasWikiPlot") and not (found or {}).get("hasWikiPlot") \
+                    else 0
             else:
                 found = source.get(key) or (base.get(key) or {}).get("source")
             if found:
