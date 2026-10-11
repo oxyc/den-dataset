@@ -54,6 +54,7 @@ from lib import cache as caching
 
 from . import (artifacts, changes, classify, finalize, load, model_steps, paid, plot_length, premise_daily,
                published, spend)
+from . import names as wikidata_names
 from .contract import Context, StageError
 from . import STAGES
 from tools import fan_picks
@@ -356,6 +357,12 @@ def run_day(day):
             # The weekly step charges what it collects as it goes; the daily one asks inside `daily_update`.
             if day.fan_picks and not model_steps.weekly(fan_picks.CFG):
                 day.ledger.actual("fanPicks", day.fan_picks.get("costUSD", 0.0))
+            new_generation = finalize.manifest_version(ctx) != live_version(ctx)
+            what, why = wikidata_names.refresh(ctx.path(artifacts.NAMES), new_generation)
+            if what == "failed":
+                day.skip("names", why)
+            else:
+                print(f"==> names: {what} — {why}", file=sys.stderr)
             day.stage(name)
             premise_daily.stamp_metadata(day.ctx, day.premise)
         elif name == "publish":

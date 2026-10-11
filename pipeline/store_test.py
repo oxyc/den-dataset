@@ -51,6 +51,7 @@ FIXTURE_FILES = {
     "premise_tags": "premise-tags.json",
     "jev_more_like": "jev-more-like.json",
     "fan_picks": "fan-picks.json",
+    "names": "names.json",
 }
 
 

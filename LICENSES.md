@@ -59,6 +59,12 @@ Wikidata"`:
 | `votes` | TMDB `vote_count` | gone; a reader that orders by popularity asks TMDB at run time and never stores it |
 | `card_poster` | a TMDB poster path | gone; posters are not fetched from TMDB at all |
 
+The optional `wd_name_*` sections name about 284,000 films and series the store has no row for. Each row
+gives the title's name, original title and year, keyed by its TMDB id. They come from Wikidata alone,
+which is CC0, read in bulk from QLever's index of the Wikidata dump (`pipeline/names.py`). The manifest
+records the endpoint, the dump that index holds, and the date it was read, as `wikidataNames.source`. No
+TMDB title, overview or year reaches them.
+
 `build_store.py` is where that is enforced rather than asserted: `PROVENANCE` names the source of every
 section, `VENDOR_ALLOWED` — the TMDB-sourced sections a build may still emit — is **empty**, and a build
 whose sections are not exactly the declared set refuses to write.

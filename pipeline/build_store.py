@@ -187,6 +187,10 @@ PROVENANCE = {
     # The titles a model named that a fan of each title would also love (oxyc/den-atlas#121), matched to rows by
     # the store's own Wikidata names, and which titles were asked.
     "fan_picks_v": "llm", "fan_picks_o": "llm", "fan_picks_a": "ours",
+    # The name, original title and year of every film and series Wikidata gives a TMDB id that the store has
+    # no row for (`pipeline/names.py`), keyed by that TMDB id.
+    "wd_name_key": "identifier",
+    "wd_name_title": "wikidata", "wd_name_orig": "wikidata", "wd_name_year": "wikidata",
     # Embeddings of the article's plot text, and of the premise tags a model wrote from it.
     "vec_plot": "wikipedia",
     "vec_premise": "llm",
@@ -201,8 +205,9 @@ CURATED_FRANCHISE_SECTIONS = frozenset({
 PREMISE_TAG_SECTIONS = frozenset({"premise_tag_v", "premise_tag_o"})
 JEV_MORE_LIKE_SECTIONS = frozenset({"jev_like_v", "jev_like_o", "jev_like_p"})
 FAN_PICK_SECTIONS = frozenset({"fan_picks_v", "fan_picks_o", "fan_picks_a"})
+WIKIDATA_NAME_SECTIONS = frozenset({"wd_name_key", "wd_name_title", "wd_name_orig", "wd_name_year"})
 OPTIONAL_PROVENANCE_GROUPS = (CURATED_FRANCHISE_SECTIONS, PREMISE_TAG_SECTIONS, JEV_MORE_LIKE_SECTIONS,
-                              FAN_PICK_SECTIONS)
+                              FAN_PICK_SECTIONS, WIKIDATA_NAME_SECTIONS)
 
 #: The sources that are a vendor's CONTENT. `identifier` is deliberately not one: an id is a join key,
 #: which is the one thing both catalogue licences leave us.
@@ -322,6 +327,10 @@ def build_parser():
     ap.add_argument("--fan-picks",
                     help="fan-picks.json from tools/fan_picks.py export — each asked title's fan picks "
                          "(oxyc/den-atlas#121); absent writes no fan_picks sections.")
+    ap.add_argument("--names",
+                    help="names.json from pipeline/names.py — Wikidata's name and year for every film and "
+                         "series with a TMDB id; the store keeps those it has no row for. Absent writes no "
+                         "wd_name sections.")
     ap.add_argument("--dataset-version", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--stamp-meta",

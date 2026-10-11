@@ -35,6 +35,10 @@ PREMISE_TAGS = {"movie:1": ["one-last-job", "heist-gone-wrong"]}
 JEV_MORE_LIKE = {"movie:1": [["movie:2", 0.57]]}
 #: `StoreFixture`'s default fan picks: movie:1 asked with movie:2 picked; movie:2 never asked.
 FAN_PICKS = {"movie:1": ["movie:2"]}
+#: `StoreFixture`'s default Wikidata names table: movie:1 is a store row and is left out; movie:7 and tv:3 are
+#: not, listed out of order, with a disambiguator, an original equal to the name, and one over the length bound.
+NAMES = [["tv", 3, "Gamma", None, "Gamma"], ["movie", 1, "Alpha", 1999, None],
+         ["movie", 7, "Delta (2001 film)", 2001, "Délta"], ["tv", 4, "Epsilon", 1950, "E" * 300]]
 
 
 def spec_dir():
@@ -219,7 +223,7 @@ class StoreFixture:
     def build(self, out_dir, titles=None, plot_keys=("movie:1",), premise_keys=("movie:2",),
               plot_labels=None, premise_labels=None, write_plot_vectors=None, stamp=None,
               build_store=BUILD_STORE, entities=None, franchises=True, premise_tags=PREMISE_TAGS,
-              facts_keys=None, jev_more_like=JEV_MORE_LIKE, fan_picks=FAN_PICKS):
+              facts_keys=None, jev_more_like=JEV_MORE_LIKE, fan_picks=FAN_PICKS, names=NAMES):
         """`*_keys` are the blob's OWN key column; `*_labels` the labels artifact's records, which
         default to the same thing. Passing them apart is how the key-set assert is exercised;
         `write_plot_vectors` swaps in a writer of another format. `stamp` asks the writer to record
@@ -228,7 +232,8 @@ class StoreFixture:
         `entities` replaces or adds entity-table entries. `premise_tags` is the tags file's `tags`
         object, or None to leave `--premise-tags` off. `facts_keys` are the facts file's records, which
         default to the corpus titles'. `jev_more_like` is the Jev export's `anchors`, or None to leave
-        `--jev-more-like` off; `fan_picks` likewise for `--fan-picks`."""
+        `--jev-more-like` off; `fan_picks` likewise for `--fan-picks`, and `names` (the table's rows) for
+        `--names`."""
         titles = self.TITLES if titles is None else titles
         plot_keys, premise_keys = list(plot_keys), list(premise_keys)
         plot_labels = plot_keys if plot_labels is None else list(plot_labels)
@@ -296,6 +301,8 @@ class StoreFixture:
                if jev_more_like is not None else []),
              *(["--fan-picks", dump("fan-picks.json", {"anchors": fan_picks})]
                if fan_picks is not None else []),
+             *(["--names", dump("names.json", {"schema": 1, "source": {"name": "wikidata"}, "rows": names})]
+               if names is not None else []),
              "--dataset-version", "test", "--out", store,
              *(["--stamp-meta", stamp] if stamp else [])],
             capture_output=True, text=True)
@@ -1520,6 +1527,52 @@ class FanPicksShip(StoreFixture, unittest.TestCase):
             with self.subTest(anchors=anchors), tempfile.TemporaryDirectory() as out, \
                     self.assertRaises(AssertionError) as caught:
                 self.build(out, fan_picks=anchors)
+            self.assertIn(complaint, str(caught.exception))
+
+
+class WikidataNamesShip(StoreFixture, unittest.TestCase):
+    """The names of titles the store has no row for, by packed key; a store row is named by its own card."""
+
+    def names(self, store):
+        keys = [f"{'movie' if k >> 32 == 0 else 'tv'}:{k & 0xFFFFFFFF}"
+                for k in store.ints("wd_name_key", "Q", 8)]
+        titles, originals = store.ints("wd_name_title"), store.ints("wd_name_orig")
+        years = store.ints("wd_name_year", "h", 2)
+        return {key: (store.text(titles[i]), store.text(originals[i]), None if years[i] == -0x8000 else years[i])
+                for i, key in enumerate(keys)}
+
+    def test_titles_outside_the_store_are_named_in_key_order(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, stderr = self.build(out)
+        names = self.names(store)
+        self.assertEqual(list(names), ["movie:7", "tv:3", "tv:4"], "sorted by packed key, store rows left out")
+        self.assertEqual(names["movie:7"], ("Delta", "Délta", 2001), "the disambiguator is stripped")
+        self.assertEqual(names["tv:3"], ("Gamma", None, None), "an original equal to the name is not kept")
+        self.assertEqual(names["tv:4"], ("Epsilon", None, 1950),
+                         "an original over the dictionary's bound is left off, the name kept")
+        self.assertIn("3 of 4 kept — 1 are store rows, 0 names and 1 original titles over the length bound",
+                      stderr)
+
+    def test_the_names_never_become_aliases(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out)
+        aliases = {store.text(i) for i in store.ints("alias_titles_v")}
+        self.assertFalse(aliases & {"Delta", "Délta", "Gamma", "Epsilon"})
+
+    def test_without_the_input_the_sections_are_absent(self):
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, names=None)
+        for name in ("wd_name_key", "wd_name_title", "wd_name_orig", "wd_name_year"):
+            self.assertNotIn(name, store.table)
+
+    def test_a_malformed_table_is_fatal(self):
+        for rows, complaint in (
+                ([["film", 5, "X", None, None]], "malformed row"),
+                ([["movie", 5, "", None, None]], "malformed row"),
+                ([["movie", 5, "X", None, None], ["movie", 5, "Y", None, None]], "movie:5 is listed twice")):
+            with self.subTest(rows=rows), tempfile.TemporaryDirectory() as out, \
+                    self.assertRaises(AssertionError) as caught:
+                self.build(out, names=rows)
             self.assertIn(complaint, str(caught.exception))
 
 
