@@ -103,6 +103,23 @@ against the working directory. Overrides are environment variables (below), and 
 
 ## When a run is not ready
 
+**A failed day reports itself.** The daily workflow's last step (`pipeline/daily_issue.py`, workflow permission
+`issues: write`) keeps one open issue labelled `daily-failing` for "the daily run is failing":
+
+| The run ended | What the step does |
+|---|---|
+| Not ready (a stage or gate refused, a step failed, cancelled or timed out) | Opens the issue, or edits its count and comments on it: date, run link, the `daily: NOT ready — …` verdict line, consecutive failed runs. |
+| Handed the day to another attempt (blocklisted or canary-failed CPU) | Nothing; the new run reports. |
+| Handed on six times (the last attempt also on a bad CPU) | A failure like any other, and the run ends red, not cancelled: no run did the day's work. |
+| Ready | Closes the issue with a comment linking the run. |
+
+Only the verdict, the link, the count and a CPU model name are posted (the repo is public), with URL queries
+and `key=` values scrubbed from the verdict; the logs stay in the run. A CPU that fails the canary without
+being on `data/embed-cpu-blocklist.txt` also gets an `embed-cpu-blocklist` issue, "Add `<model>` to the embed
+CPU blocklist", with the exact line to add; open the PR that adds it and close the issue with it. Nothing is
+committed automatically. The step does not see a run that never started (the schedule off, the job's `if`),
+a runner that died, or a cancelled run whose cleanup steps did not run.
+
 Start with the run's summary, which is `out/daily-report.md`: what moved, which stage was skipped for want
 of a credential, what was bought, and the refusal. `daily-report.json` carries the same, and
 `changes/plan.json` is the change set; all three are in the `daily-report-<run id>` artifact.
@@ -200,7 +217,7 @@ byte-identical vectors (24/24, #27). An AMD EPYC 9V74 or 9V45 runner (AVX-512, V
 cosine 0.979 — measured 2026-10-11 after four dailies the canary refused. Hosted runners come in several
 kinds and take no CPU request, so the daily job hands the day to a new run (up to six tries, then the day is
 skipped) on a CPU listed in `data/embed-cpu-blocklist.txt`, and on any other CPU runs the canary before
-anything is bought. A CPU that fails it names itself in the run's notice; add it to the blocklist. Then it
+anything is bought. A CPU that fails it names itself in the run's notice and in an `embed-cpu-blocklist` issue; add it to the blocklist. Then it
 embeds in its own container. The published image cannot run on an
 Apple Silicon Mac at all: ONNX Runtime needs AVX2, which emulation lacks, so `/health` answers and the first
 embed dies with an illegal instruction ("connection refused" from the client). Whatever the host, the canary
