@@ -293,6 +293,22 @@ class PremiseCorrections(unittest.TestCase):
         self.assertIn("premise corrections: 1 row(s) corrected", summary)
 
 
+class AddedSplit(Recorded):
+    def test_the_report_separates_plotted_additions_from_parked_plotless_ones(self):
+        """`added` stays every new title (the stages read it); the report says how many of them can ship."""
+        self.plan.update(counts={"added": 3, "addedPlotted": 1, "addedPlotless": 2},
+                         added=["movie:1", "movie:2", "tv:3"], addedPlotless=["movie:2", "tv:3"])
+        _code, report = self.day()
+        self.assertEqual(report["added"], ["movie:1", "movie:2", "tv:3"])
+        self.assertEqual(report["addedPlotless"], ["movie:2", "tv:3"])
+        with open(os.path.join(self.out, daily.SUMMARY), encoding="utf-8") as fh:
+            summary = fh.read()
+        self.assertIn("| added with a plot | added without a plot |", summary)
+        self.assertIn("| 1 | 2 |", summary)
+        self.assertIn("**Added with a plot** (1): movie:1", summary)
+        self.assertIn("**Added without a plot (parked)** (2): movie:2, tv:3", summary)
+
+
 class PaidLedger(Recorded):
     """#187 item 1: what a day bought survives a day that fails, and the next day starts with it."""
 

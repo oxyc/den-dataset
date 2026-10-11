@@ -452,7 +452,8 @@ def report(day, ready, why, tokens):
         "date": day.now.date().isoformat(), "ready": ready, "verdict": why,
         "baseline": plan.get("baseline"), "datasetVersion": meta.get("datasetVersion"),
         "store": {key: meta.get(key) for key in ("storeFile", "storeSha256", "storeBytes", "storeRecords")},
-        "counts": plan.get("counts"), "added": plan.get("added", []), "changed": plan.get("changed", {}),
+        "counts": plan.get("counts"), "added": plan.get("added", []),
+        "addedPlotless": plan.get("addedPlotless", []), "changed": plan.get("changed", {}),
         "withdrawn": plan.get("withdrawn", {}), "revisit": plan.get("revisit"),
         "seeded": getattr(day, "seeded", None), "ran": day.ran, "skipped": day.skipped,
         "migrationBoundary": boundary,
@@ -499,10 +500,16 @@ def report(day, ready, why, tokens):
                          f"{s['costUSD']:.4f} |")
         lines.append("")
     counts = out["counts"] or {}
-    lines += [f"| added | changed | withdrawn | revised | revisited |", "|---|---|---|---|---|",
-              f"| {counts.get('added', 0)} | {counts.get('changed', 0)} | {counts.get('withdrawn', 0)} | "
+    # `added` stays every new title; the plotless ones are parked (admitted, never shipped), so the table and
+    # the list say which of the two a reader is looking at.
+    lines += [f"| added with a plot | added without a plot | changed | withdrawn | revised | revisited |",
+              "|---|---|---|---|---|---|",
+              f"| {counts.get('addedPlotted', counts.get('added', 0))} | {counts.get('addedPlotless', 0)} | "
+              f"{counts.get('changed', 0)} | {counts.get('withdrawn', 0)} | "
               f"{counts.get('revised', 0)} | {counts.get('revisit', 0)} |", ""]
-    for title, keys in (("Added", out["added"]), ("Changed", [f"{k} ({', '.join(v)})" for k, v in out["changed"].items()]),
+    parked = set(out["addedPlotless"])
+    for title, keys in (("Added with a plot", [k for k in out["added"] if k not in parked]),
+                        ("Added without a plot (parked)", out["addedPlotless"]), ("Changed", [f"{k} ({', '.join(v)})" for k, v in out["changed"].items()]),
                         ("Withdrawn", list(out["withdrawn"]))):
         if keys:
             lines += [f"**{title}** ({len(keys)}): " + ", ".join(keys[:50]) + (" …" if len(keys) > 50 else ""), ""]

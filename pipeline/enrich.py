@@ -209,6 +209,17 @@ def below_floor(votes, floors, today):
 CARRY_DAYS = 56
 
 
+def no_plot(reason, today):
+    """One plotless verdict as the checkpoint keeps it: the UTC day, and why the title has no Wikipedia plot
+    (`reground`'s `noPlotReason`). An admitted title with no plot never ships ("no Wikipedia plot, no title"),
+    and nothing about its votes or the floors changes that, so the verdict states neither."""
+    return {"on": today, "noPlot": reason}
+
+
+def is_no_plot(held):
+    return bool(held.get("noPlot"))
+
+
 def tmdb_side(votes, floors):
     """How many of the two TMDB floors (`floor_values`' first two) a count meets; None for no count.
 
@@ -250,6 +261,10 @@ def standing(judged, today, floors, worklist_votes, carry_days=0):
     pass asks only about what is new, what changed, and what has gone stale. A verdict kept between runs
     (`pipeline/paid.py`) states which TMDB floors the count met (`side`) rather than the count itself, which
     is TMDB's and the ledger is public; it holds while the count still meets the same ones.
+
+    A plotless verdict (`no_plot`) is the other kind in the same map: the title cleared the gate and no
+    article gave it a plot. It holds for the same `lifetime`, whatever the floors and the count do, so a
+    title that gains an article is asked again when it expires.
     """
     def same_count(label, held):
         if label not in worklist_votes:
@@ -262,8 +277,12 @@ def standing(judged, today, floors, worklist_votes, carry_days=0):
         age = verdict_age(held, today)
         return age is not None and 0 <= age <= lifetime(label, carry_days)
 
-    return {label for label, held in judged.items()
-            if held.get("floors") == floor_values(floors) and fresh(label, held) and same_count(label, held)}
+    def holds(label, held):
+        if is_no_plot(held):
+            return True
+        return held.get("floors") == floor_values(floors) and same_count(label, held)
+
+    return {label for label, held in judged.items() if fresh(label, held) and holds(label, held)}
 
 
 def is_anime(labels):
@@ -743,6 +762,12 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
                 continue
             if verdict == "missed":
                 log(out_dir, f"plot-miss id={label} ({detail})")
+            if verdict == "noPlot" and carry_days:
+                # Only the weekly pass keeps it: a delta asks about releases still gaining articles, and a
+                # verdict it made would hold the title back from the pass that is meant to ask again.
+                judged[label] = no_plot(found["noPlotReason"], today)
+            elif verdict == "grounded":
+                judged.pop(label, None)
             with_plot += verdict == "grounded"
             from_enterprise += verdict == "grounded" and detail == plot.ENTERPRISE
             survivors.append(written(found))
@@ -779,8 +804,10 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     # not be re-asked anyway. A younger one stays even when this run does not trust it (a delta run holds
     # only today's), because the ledger carries the map to the weekly pass.
     ages = {label: verdict_age(kept, today) for label, kept in judged.items()}
+    # A plotless verdict is about a title this run PROCESSED (its record is written), so it stays regardless.
     judged = {label: kept for label, kept in judged.items()
-              if ages[label] is not None and 0 <= ages[label] <= 2 * CARRY_DAYS and label not in processed}
+              if ages[label] is not None and 0 <= ages[label] <= 2 * CARRY_DAYS
+              and (label not in processed or is_no_plot(kept))}
     totals = {name: checkpoint["totals"].get(name, 0) + counts[name] for name in TOTALS}
     state = {"nextBatch": batch_id + 1 if survivors else batch_id, "processed": sorted(processed),
              "judgedBelow": judged, "totals": totals}

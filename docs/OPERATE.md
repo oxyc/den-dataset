@@ -127,6 +127,19 @@ delta trusts only today's verdicts. The catalogue pass drains each media for at 
 ledger was lost, makes progress over several weeks instead of running into the job's time limit and keeping
 nothing; the stage log says how many titles it left.
 
+`judged` holds a second kind of verdict, in the same map and on the same terms: **plotless**. A title that
+clears the admission gate and has no Wikipedia plot never ships ("no Wikipedia plot, no title"), and before
+this the weekly pass found the same ~6,800 of them again every week, because only shipped titles are known to
+the worklist. The weekly pass now records the day and why (`noPlot`: `noArticle`, `noSection`, `belowFloor` or
+`sourceIsScreenWork`; not `fetchFailed`, which is asked again) and skips the title until the verdict expires, 56
+to 111 days later, so one that has gained an article is eventually read. It states no vote count or floors,
+which cannot change the answer. A title that gains a plot loses its verdict; the daily delta neither trusts nor
+records one, because it asks about releases still gaining articles.
+
+The report separates the titles the change set calls `added`: `counts.addedPlotted` can still be classified,
+`counts.addedPlotless` (listed in `addedPlotless`, the summary's "Added without a plot (parked)") are admitted
+and parked. `added` is still every new title, which the later stages read.
+
 A publish made by hand — anything but the workflow's own publish step — leaves the ledger unpruned, so its
 old shards would be laid back beside the published rows. Prune it the same way afterwards, uploading it under
 the newest asset's name with its attempt number raised, so it sorts newest, before deleting the old one:
