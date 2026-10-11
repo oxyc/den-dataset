@@ -18,7 +18,7 @@ import os
 import sys
 
 from . import (aliases, awards, cards, entities, facets, facts, fan_picks, format, franchises, identity, labels,
-               makers, jev_more_like, premise_tags, scores, studios, vectors, versions)
+               makers, jev_more_like, names, premise_tags, scores, studios, vectors, versions)
 from .inputs import corpus_rows, labels_by_key, read_json
 
 
@@ -129,6 +129,14 @@ def run(args, inputs, prose_check, provenance_check):
     if fan_columns.present:
         print(f"  fan picks: {fan_columns.anchors} titles asked", file=sys.stderr)
 
+    name_columns = names.WikidataNames(getattr(args, "names", None), keys, prose_check)
+    name_columns.intern(strings)
+    if name_columns.present:
+        record = name_columns.record
+        print(f"  Wikidata names: {record['kept']} of {record['rows']} kept — {record['inStore']} are store rows, "
+              f"{record['nameTooLong']} names and {record['originalTooLong']} original titles over the "
+              f"length bound", file=sys.stderr)
+
     ordered_strings = strings.freeze()
     prose_complaint = prose_check(ordered_strings)
     if prose_complaint:
@@ -168,6 +176,7 @@ def run(args, inputs, prose_check, provenance_check):
     version_columns.put(sec)
     jev_columns.put(sec)
     fan_columns.put(sec)
+    name_columns.put(sec, strings)
 
     plot_hits, plot_rows, premise_hits, premise_rows = vectors.put(
         sec, keys, args, labels_source, premise_labels_source)
@@ -267,6 +276,12 @@ def run(args, inputs, prose_check, provenance_check):
         # Same shape rule; `check_award_merges.py --gate` refuses while a merge is stale or the list
         # applied is not the committed one.
         meta["awardMerges"] = award_columns.record
+        # Same shape rule. Where the Wikidata names came from — endpoint, the dump its index holds, when it
+        # was read, CC0 — and how many the store kept, since they are not the store's rows.
+        if name_columns.present:
+            meta["wikidataNames"] = {"source": name_columns.source, **name_columns.record}
+        else:
+            meta.pop("wikidataNames", None)
         with open(args.stamp_meta, "w") as fh:
             json.dump(meta, fh, indent=1)
             fh.write("\n")

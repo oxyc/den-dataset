@@ -534,6 +534,18 @@ FAN_PICKS = Artifact(
     required=False,
 )
 
+#: Wikidata's name, original title and year for every film and series with a TMDB id (P4947/P4983), read in
+#: bulk from QLever. The daily job rebuilds it with each new generation and the corpus bundle carries it to
+#: the next day; the store keeps the titles it has no row for. With no input the store writes no wd_name
+#: sections.
+NAMES = Artifact(
+    name="names",
+    filename="names.json",
+    producer="pipeline/names.py",
+    how="python3 pipeline/names.py --out <out-dir>/names.json (the daily job runs it for a new generation)",
+    required=False,
+)
+
 #: The only artifact a release carries (oxyc/den#113). Everything above is an input to it.
 STORE = Artifact(
     name="store",
@@ -570,4 +582,4 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              FRANCHISE_LINE_STATES, FRANCHISE_LINE_ANSWERS, FRANCHISE_LINE_ANSWERS_MANIFEST,
              FRANCHISE_LINE_DECISIONS, FRANCHISES,
              VECTORS, RAW_VECTORS, VECTOR_LABELS, FINALIZE_REPORT, PREMISE_VECTORS, PREMISE_LABELS, PREMISE_TAGS,
-             JEV_MORE_LIKE, FAN_PICKS, STORE, MANIFEST, RELEASE)
+             JEV_MORE_LIKE, FAN_PICKS, NAMES, STORE, MANIFEST, RELEASE)

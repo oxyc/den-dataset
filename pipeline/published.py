@@ -90,6 +90,9 @@ BUNDLE = (
     # transition from the first fan-picks generation; a spending daily run refuses rather than replacing a
     # missing 52k-title base with that day's handful.
     ("fan-picks.json", "fan-picks.json", False),
+    # Rebuilt only with a new generation (`pipeline/names.py`, `refresh`), so a day that rebuilds the live
+    # generation needs the live copy. Optional for generations whose store predates the wd_name sections.
+    ("names.json", "names.json", False),
 )
 
 #: The bundle's own record: the generation and each file's digest.
@@ -124,7 +127,7 @@ def bundle(out_dir, dest):
             durable_arg = {"vectors-premise.bin": "premise_vectors", "labels-premise.json": "premise_labels",
                            "premise-tags-v2.json": "premise_tags",
                            "franchises.json": "franchises", "jev-more-like.json": "jev_more_like",
-                           "fan-picks.json": "fan_picks"}.get(asset)
+                           "fan-picks.json": "fan_picks", "names.json": "names"}.get(asset)
             if required or (durable_arg and durable_arg in used_store_inputs):
                 missing.append(path.format(version=version))
             continue

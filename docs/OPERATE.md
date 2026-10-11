@@ -292,6 +292,14 @@ then the item with an English article. A title nothing chooses for ships with no
 stage counts it (`ambiguousItems`), and the publish refuses until it is decided in that file. A decision for
 an id that is no longer contested is refused as stale.
 
+**The names table.** `names.json` holds Wikidata's name, original title and year for every film and series
+with a TMDB id. The store keeps the ones it has no row for, as `wd_name_*`. The daily job rebuilds the table
+from QLever just before the store stage, but only when the day builds a new generation; a day that rebuilds
+the live generation keeps the bundled copy, so its store stays byte-identical. A failed fetch keeps the
+carried copy and is named in the report. Contested ids follow the rule above, except that an id nothing
+chooses for is left out instead of refusing the publish. Build it by hand with
+`python3 pipeline/names.py --out <out-dir>/names.json`.
+
 ## Wikimedia Enterprise
 
 With `WIKIMEDIA_ENTERPRISE_USERNAME` / `_PASSWORD`, the fetch stage mints a 24h bearer and `lib/plot.py`
