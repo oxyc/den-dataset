@@ -728,7 +728,7 @@ class BatchesInParallel(unittest.TestCase):
 
     def test_claimants_merge_to_what_the_serial_loop_built(self):
         """Six claimant batches, each answering for its own ids: the merged map equals asking each in turn."""
-        def asked(query, namespace, parse, cache):
+        def asked(query, namespace, parse, cache, extra=None, qlever=True):
             ids = [int(i) for i in re.findall(r'"(\d+)"', query)]
             return {i: [f"Q{i}"] for i in ids}
         ids = list(range(1, wikidata.CLAIM_BATCH * 6))
@@ -736,6 +736,202 @@ class BatchesInParallel(unittest.TestCase):
             merged = wikidata.claimants(ids, "movie")
         self.assertEqual(list(merged), ids)
         self.assertEqual(merged, {i: [f"Q{i}"] for i in ids})
+
+
+QLEVER = "qlever.dev"
+
+
+def asked_ids(text):
+    """The TMDB ids a query's `VALUES ?tmdb` line names."""
+    line = next(line for line in text.split("\n") if "VALUES ?tmdb" in line)
+    return [int(i) for i in re.findall(r'"(\d+)"', line)]
+
+
+def answers_up_to(most):
+    """A host that answers a batch of at most `most` ids, a row each, and times out on a larger one."""
+    return lambda ids: 0 if len(ids) > most else rows(*({"tmdb": cell(str(i)), "imdb": cell(f"tt{i}")}
+                                                         for i in ids))
+
+
+class Endpoints(unittest.TestCase):
+    """The enrichment's per-batch queries when WDQS cannot answer one: QLever stands behind it, and a batch
+    neither can answer is asked as halves. Each host answers from a script — a status to raise, or a
+    function of the ids asked — and every request is recorded as (host, text sent, attempts)."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.cache = caching.ResponseCache("wiki", self.directory.name, 3600)
+        self.sent, self.script = [], {}
+        patch = mock.patch.object(wikidata.http, "request", self.answer)
+        patch.start()
+        self.addCleanup(patch.stop)
+        wikidata.ANSWERED.clear()
+        self.addCleanup(wikidata.ANSWERED.clear)
+        patch = mock.patch.dict(wikidata.os.environ, {}, clear=False)
+        patch.start()
+        self.addCleanup(patch.stop)
+        wikidata.os.environ.pop(wikidata.PREFER_VAR, None)
+
+    def answer(self, host, path, params=None, body=None, attempts=wikidata.http.ATTEMPTS, **kwargs):
+        text = body.decode("utf-8")
+        self.sent.append((host, text, attempts))
+        reply = self.script[host]
+        if callable(reply):
+            reply = reply(asked_ids(text))
+        if isinstance(reply, tuple):
+            raise wikidata.http.HTTPError(reply[0], f"https://{host}{path}", reply[1])
+        if isinstance(reply, int):
+            raise wikidata.http.HTTPError(reply, f"https://{host}{path}")
+        return reply
+
+    def hosts(self):
+        return [host for host, _, _ in self.sent]
+
+    def test_a_wdqs_timeout_hands_the_query_to_qlever_and_the_answer_is_kept_under_the_wdqs_text(self):
+        self.script = {wikidata.HOST: 0, QLEVER: rows({"tmdb": cell("1"), "imdb": cell("tt1")})}
+        query = wikidata.mapping_query([1], "movie", LANGUAGES)
+        found = wikidata.mapping([1], "movie", LANGUAGES, self.cache)
+        self.assertEqual(found[1]["imdb"], "tt1")
+        self.assertEqual([(host, attempts) for host, _, attempts in self.sent],
+                         [(wikidata.HOST, 1), (QLEVER, wikidata.http.ATTEMPTS)],
+                         "WDQS once — its retries are the four minutes the daily job lost — then QLever")
+        self.assertEqual(self.sent[0][1], query)
+        self.assertEqual(self.sent[1][1], wikidata.QLEVER_PREFIXES + wikidata.qlever_text(query))
+        self.assertIsNotNone(self.cache.read(self.cache.key("sparql", {"q": query})))
+        self.assertEqual(dict(wikidata.ANSWERED), {"qlever": 1})
+        wikidata.mapping([1], "movie", LANGUAGES, self.cache)
+        self.assertEqual(len(self.sent), 2, "the next call is served from disk")
+
+    def test_every_per_batch_lookup_QLever_can_answer_falls_back_not_only_the_mapping(self):
+        self.script = {wikidata.HOST: 503, QLEVER: rows()}
+        for call in (lambda: wikidata.languages([1], "movie"), lambda: wikidata.kinds([1], "movie"),
+                     lambda: wikidata.origins([1], "movie"),
+                     lambda: wikidata.claimants([1], "movie"), lambda: wikidata.item_evidence(["Q1"], "movie")):
+            self.sent = []
+            call()
+            self.assertEqual(self.hosts(), [wikidata.HOST, QLEVER])
+
+    def test_the_queries_QLever_times_out_on_stay_on_wdqs_with_its_retries(self):
+        """Measured: the class walk, the language labels and the COUNT over sitelinks run out of QLever's
+        30 s at every batch size. Asking it spends two minutes of retries on a failure that is certain. The
+        doc-facts names stay too: QLever orders them differently, and they are composed in that order."""
+        self.script = {wikidata.HOST: 503, QLEVER: rows()}
+        for call in (lambda: wikidata.sources([1], "movie"), lambda: wikidata.targets([1], "movie", languages=("de",)),
+                     lambda: wikidata.wikipedias([1], "movie", "d"),
+                     lambda: wikidata.fetch_property([1], "movie", wikidata.DIRECTOR)):
+            self.sent = []
+            with self.assertRaises(wikidata.http.HTTPError):
+                call()
+            self.assertEqual([(host, attempts) for host, _, attempts in self.sent],
+                             [(wikidata.HOST, wikidata.http.ATTEMPTS)])
+
+    def test_the_label_service_is_replaced_by_labels_in_the_en_then_mul_order_under_the_same_name(self):
+        text = wikidata.qlever_text(wikidata.query_text([1], "movie", "P57"))
+        self.assertNotIn("SERVICE", text)
+        self.assertIn('OPTIONAL { ?v rdfs:label ?vLabel_en . FILTER(LANG(?vLabel_en) = "en") }', text)
+        self.assertIn('OPTIONAL { ?v rdfs:label ?vLabel_mul . FILTER(LANG(?vLabel_mul) = "mul") }', text)
+        self.assertIn("BIND(COALESCE(?vLabel_en, ?vLabel_mul) AS ?vLabel)", text)
+        self.assertLess(text.index("?film wdt:P57 ?v ."), text.index("rdfs:label"), "after ?v is bound")
+        self.assertTrue(text.endswith("ORDER BY ?tmdb ?vLabel"))
+        self.assertEqual(wikidata.parse_labelled(bindings((1, "Nolan"))),
+                         wikidata.parse_labelled(json.dumps({"results": {"bindings": [
+                             {"tmdb": {"value": "1"},
+                              "vLabel": {"type": "literal", "xml:lang": "mul", "value": "Nolan"}}]}}).encode()),
+                         "a language-tagged literal parses as the service's plain one did")
+
+    def test_the_mapping_labels_its_creator_inside_the_optional_that_binds_it(self):
+        """After the OPTIONAL, `?creator` can be unbound, and joining an unbound variable to `rdfs:label`
+        matches every label there is."""
+        text = wikidata.qlever_text(wikidata.mapping_query([1], "tv", LANGUAGES))
+        optional = next(line for line in text.split("\n") if "wdt:P170 ?creator" in line)
+        self.assertTrue(optional.startswith("  OPTIONAL { ?film wdt:P170 ?creator . OPTIONAL { ?creator rdfs:label"))
+        self.assertTrue(optional.endswith("AS ?creatorLabel) }"))
+        self.assertNotIn("SERVICE", text)
+        self.assertEqual(text.count("rdfs:label"), 2)
+
+    def test_the_other_label_queries_are_rewritten_too_and_declare_every_prefix_they_use(self):
+        queries = [wikidata.kind_query([1], "movie"), wikidata.target_query([1], "tv", {1: ["Q9"]}, ("de", "fr")),
+                   wikidata.query_text([1], "movie", "P136"), wikidata.mapping_query([1], "movie", LANGUAGES)]
+        declared = set(re.findall(r"PREFIX (\w+):", wikidata.QLEVER_PREFIXES))
+        for query in queries:
+            text = wikidata.qlever_text(query)
+            self.assertNotIn("SERVICE", text, query)
+            used = set(re.findall(r"(?<![\w<?])([a-z]+):\w", text)) - {"http", "https"}
+            self.assertLessEqual(used, declared, text)
+        target = wikidata.qlever_text(queries[1])
+        self.assertIn("?film rdfs:label ?filmLabel_en", target)
+        self.assertIn("?film rdfs:label ?local", target, "the language labels it already asked for are untouched")
+
+    def test_a_label_service_it_cannot_rewrite_stays_on_wdqs(self):
+        query = ('SELECT ?x ?xLabel WHERE { ?x wdt:P1 ?y . SERVICE wikibase:label { bd:serviceParam '
+                 'wikibase:language "[AUTO_LANGUAGE],en". } }')
+        self.assertIsNone(wikidata.qlever_text(query))
+        self.script = {wikidata.HOST: 429, QLEVER: rows()}
+        with self.assertRaises(wikidata.http.HTTPError):
+            wikidata.sparql(query, fallback=True)
+        self.assertEqual(self.hosts(), [wikidata.HOST])
+
+    def test_a_batch_neither_endpoint_answers_in_time_is_asked_as_halves_and_merged(self):
+        ids = list(range(1, 41))
+        self.script = {wikidata.HOST: answers_up_to(12), QLEVER: answers_up_to(12)}
+        found = wikidata.mapping(ids, "movie", LANGUAGES, self.cache)
+        self.assertEqual({i: found[i]["imdb"] for i in ids}, {i: f"tt{i}" for i in ids})
+        self.assertEqual([len(asked_ids(text)) for host, text, _ in self.sent if host == wikidata.HOST],
+                         [40, 20, 10, 10, 20, 10, 10], "halved until it answers, left half first")
+        whole = self.cache.key("sparql", {"q": wikidata.mapping_query(ids, "movie", LANGUAGES)})
+        self.assertIsNone(self.cache.read(whole), "no merged body is kept under the whole batch's text")
+        self.sent = []
+        self.assertEqual(wikidata.mapping(ids, "movie", LANGUAGES, self.cache), found)
+        self.assertEqual([len(asked_ids(text)) for _, text, _ in self.sent], [40, 40, 20, 20, 20, 20],
+                         "the batch and its halves fail again; the quarters that answered come from disk")
+
+    def test_halving_stops_at_the_floor_and_the_failure_is_the_answer(self):
+        self.script = {wikidata.HOST: 0, QLEVER: 0}
+        ids = list(range(1, wikidata.SPLIT_FLOOR * 4 + 1))
+        with self.assertRaises(wikidata.http.HTTPError) as caught:
+            wikidata.mapping(ids, "movie", LANGUAGES, self.cache)
+        self.assertEqual(caught.exception.status, 0)
+        self.assertEqual(self.hosts(), [wikidata.HOST, QLEVER] * 3, "40, 20, 10 — and no smaller")
+
+    def test_a_refusal_of_the_query_is_neither_retried_nor_halved(self):
+        for status in (400, 413, 404):
+            with self.subTest(status=status):
+                self.sent, self.script = [], {wikidata.HOST: status, QLEVER: rows()}
+                with self.assertRaises(wikidata.http.HTTPError) as caught:
+                    wikidata.mapping(list(range(1, 41)), "movie", LANGUAGES, self.cache)
+                self.assertEqual((caught.exception.status, self.hosts()), (status, [wikidata.HOST]))
+        self.sent, self.script = [], {wikidata.HOST: 0, QLEVER: 400}
+        with self.assertRaises(wikidata.http.HTTPError) as caught:
+            wikidata.mapping(list(range(1, 41)), "movie", LANGUAGES, self.cache)
+        self.assertEqual((caught.exception.status, self.hosts()), (400, [wikidata.HOST, QLEVER]),
+                         "QLever refusing the query is its answer; halving does not change it")
+
+    def test_a_query_that_only_wdqs_is_asked_is_halved_too(self):
+        def sources_up_to(most):
+            return lambda ids: 0 if len(ids) > most else rows(
+                *({"tmdb": cell(str(i)), "sourceArticle": cell("https://en.wikipedia.org/wiki/Novel"),
+                   "screen": cell("false")} for i in ids))
+        self.script = {wikidata.HOST: sources_up_to(12), QLEVER: rows()}
+        found = wikidata.sources(list(range(1, 41)), "movie", self.cache)
+        self.assertEqual(sorted(found), list(range(1, 41)))
+        self.assertEqual(self.hosts(), [wikidata.HOST] * 7, "WDQS alone: 40, 20, 10, 10, 20, 10, 10")
+
+    def test_qlevers_own_timeout_is_halved_but_a_throttle_is_not(self):
+        timed_out = (429, b'{"exception": "Operation timed out. Last operation: Exists Join"}')
+        self.script = {wikidata.HOST: 0, QLEVER: lambda ids: timed_out if len(ids) > 12 else
+                       rows(*({"tmdb": cell(str(i)), "imdb": cell(f"tt{i}")} for i in ids))}
+        self.assertEqual(sorted(wikidata.mapping(list(range(1, 41)), "movie", LANGUAGES)), list(range(1, 41)))
+        self.sent, self.script = [], {wikidata.HOST: 0, QLEVER: (429, b"Too many requests")}
+        with self.assertRaises(wikidata.http.HTTPError):
+            wikidata.mapping(list(range(1, 41)), "movie", LANGUAGES)
+        self.assertEqual(self.hosts(), [wikidata.HOST, QLEVER])
+
+    def test_a_throttle_is_not_halved(self):
+        self.script = {wikidata.HOST: 429, QLEVER: 429}
+        with self.assertRaises(wikidata.http.HTTPError):
+            wikidata.mapping(list(range(1, 41)), "movie", LANGUAGES, self.cache)
+        self.assertEqual(self.hosts(), [wikidata.HOST, QLEVER])
 
 
 if __name__ == "__main__":

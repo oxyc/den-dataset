@@ -17,11 +17,13 @@ with no error anywhere. Measured: that silently cost Inception, The Dark Knight 
 The query TEXT is part of the cache key, so it is reproduced byte for byte from the pass that scraped the
 shipped corpus. Reformatting it is a re-scrape of ~770 requests.
 """
+import collections
 import concurrent.futures
 import json
 import math
 import os
 import re
+import sys
 import urllib.parse
 
 from . import cache as caching
@@ -29,6 +31,113 @@ from . import http
 
 HOST = "query.wikidata.org"
 PATH = "/sparql"
+
+#: A second endpoint for the per-batch queries: QLever's index of the weekly Wikidata dump. When WDQS
+#: throttles (429 with `Retry-After: 120`, 20–90 s queries) a corpus pass takes a day; QLever answered the
+#: same batch query in 0.5 s with the same rows. It is a dump, so an edit made since that week's dump is
+#: not in it. It has no `SERVICE wikibase:label`; `qlever_text` resolves labels in the query instead.
+#:
+#: Its own limit is 30 s, answered as a 429 saying `Operation timed out`. Measured on a 150-id batch (and on
+#: 75, 38, 19 and 10): the mapping takes 14 s, the languages, kinds, origins, claimants and doc-facts
+#: queries under a second — but `source_query` (the class walk), `target_query` with language labels and
+#: `wikipedias_query` (a COUNT over every sitelink) time out at every size. Those three are asked of WDQS
+#: only (`qlever=False` below), since QLever would add two minutes of retries before the same failure.
+QLEVER_HOST = "qlever.dev"
+QLEVER_PATH = "/api/wikidata"
+#: WDQS predeclares these; QLever resolves only prefixes the query declares. Sent to QLever only: the
+#: cache key is the query text as WDQS is asked it, so an answer from either endpoint is kept under it.
+QLEVER_PREFIXES = ("PREFIX wd: <http://www.wikidata.org/entity/>\n"
+                   "PREFIX wdt: <http://www.wikidata.org/prop/direct/>\n"
+                   "PREFIX p: <http://www.wikidata.org/prop/>\n"
+                   "PREFIX psv: <http://www.wikidata.org/prop/statement/value/>\n"
+                   "PREFIX wikibase: <http://wikiba.se/ontology#>\n"
+                   "PREFIX schema: <http://schema.org/>\n"
+                   "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n"
+                   "PREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n")
+#: `qlever` asks QLever first and WDQS only when it fails; anything else asks WDQS first.
+PREFER_VAR = "DEN_SPARQL_PREFER"
+#: Which endpoint answered each live request, for the stage's log.
+ANSWERED = collections.Counter()
+
+_LABEL_SERVICE = re.compile(r'SERVICE wikibase:label \{ bd:serviceParam wikibase:language "([^"]+)"\. \}')
+_SELECTED_LABEL = re.compile(r"\?(\w+)Label\b")
+_OPTIONAL_LINE = re.compile(r"^\s*OPTIONAL \{ [^{}]* \}\s*$")
+
+
+def _label_block(var, languages):
+    """What `SERVICE wikibase:label` does for `?{var}Label`, as patterns QLever can run: the first of
+    `languages` the item has a label in (`en,mul` — `en` first), bound to the same variable. An item with no
+    label in any leaves it unbound where the service would answer the bare Q-id, and every parser drops both."""
+    codes = [code.strip() for code in languages.split(",")]
+    parts = [f'OPTIONAL {{ ?{var} rdfs:label ?{var}Label_{code} . FILTER(LANG(?{var}Label_{code}) = "{code}") }}'
+             for code in codes]
+    return " ".join(parts + [f"BIND(COALESCE({', '.join(f'?{var}Label_{c}' for c in codes)}) AS ?{var}Label)"])
+
+
+def qlever_text(query):
+    """The query QLever is asked for `query`, or None when it cannot be asked there.
+
+    A query without the label service is sent as is. With it, the service line is replaced by the labels'
+    patterns (`_label_block`) for each `?xLabel` the query selects. When `?x` is only bound inside a
+    one-line `OPTIONAL { … }` (the mapping's `?creator`) the patterns go INSIDE it: after it, they would
+    join on a possibly-unbound `?x`, which SPARQL reads as "any label at all". Anything this does not
+    recognise stays on WDQS.
+    """
+    service = _LABEL_SERVICE.search(query)
+    if service is None:
+        return None if "SERVICE wikibase:label" in query else query
+    head = query.split(" WHERE", 1)[0]
+    variables = sorted(set(_SELECTED_LABEL.findall(head)))
+    # `[AUTO_LANGUAGE]` is the service's own, and a code that is not plain letters cannot name a variable.
+    if not variables or not all(code.isalpha() for code in service.group(1).split(",")):
+        return None
+    lines = query.split("\n")
+    blocks = []
+    for var in variables:
+        mention = re.compile(rf"\?{var}\b")
+        at = [i for i, line in enumerate(lines) if mention.search(line) and "SERVICE wikibase:label" not in line]
+        block = _label_block(var, service.group(1))
+        if at and all(lines[i].lstrip().startswith("OPTIONAL {") for i in at):
+            if not _OPTIONAL_LINE.match(lines[at[-1]]):
+                return None
+            lines[at[-1]] = lines[at[-1]].rstrip()[:-1] + block + " }"
+        else:
+            blocks.append(block)
+    text = "\n".join(lines)
+    return _LABEL_SERVICE.sub(lambda _: " ".join(blocks), text, count=1)
+
+
+def _ask(name, query, attempts=http.ATTEMPTS):
+    host, path, text = (QLEVER_HOST, QLEVER_PATH, QLEVER_PREFIXES + query) if name == "qlever" else \
+        (HOST, PATH, query)
+    payload = http.request(host, path, {"format": "json"}, method="POST", body=text.encode("utf-8"),
+                           headers={"Content-Type": "application/sparql-query",
+                                    "Accept": "application/sparql-results+json"}, attempts=attempts)
+    ANSWERED[name] += 1
+    return payload
+
+
+def sparql(query, fallback=False, env=None):
+    """The body of one SPARQL request. With `fallback`, QLever stands behind WDQS (or in front of it, when
+    `PREFER_VAR` says so). WDQS is then asked once: its retries wait out a `Retry-After` of up to two
+    minutes each, which is the throttle QLever is there to avoid. It hands over only on a 429, a 5xx or a
+    timeout — any other status is its answer about the query. QLever hands over on any failure, since a
+    query it cannot run is still one WDQS can."""
+    elsewhere = qlever_text(query) if fallback else None
+    if elsewhere is None:
+        return _ask("wdqs", query)
+    env = os.environ if env is None else env
+    if env.get(PREFER_VAR) == "qlever":
+        try:
+            return _ask("qlever", elsewhere)
+        except http.HTTPError:
+            return _ask("wdqs", query)
+    try:
+        return _ask("wdqs", query, attempts=1)
+    except http.HTTPError as failure:
+        if failure.status != 0 and not http.is_transient(failure.status):
+            raise
+    return _ask("qlever", elsewhere)
 
 #: Batches of one lookup in flight at once. WDQS allows five concurrent queries per client and answers 429
 #: beyond that; three is the doc-facts scrape's figure (`pipeline/docfacts.py`), kept well under the limit.
@@ -162,24 +271,11 @@ def fetch_property(ids, media, prop, cache=None, excluded=None):
     different axis: the two properties are two requests over the same id batch, and a re-run scoped to a
     different id list still repeats whole batches whose membership happens to coincide.
     """
-    query = query_text(ids, media, prop, excluded)
-    key = None
-    if cache is not None:
-        key = cache.key("sparql-docfacts", {"q": query})
-        hit = cache.read(key)
-        if hit is not None:
-            try:
-                return parse_labelled(hit)
-            except WikidataError:
-                pass
-    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
-                           headers={"Content-Type": "application/sparql-query",
-                                    "Accept": "application/sparql-results+json"})
-    parsed = parse_labelled(payload)
-    # After a successful parse only — a WDQS maintenance page must not outlive the outage.
-    if key is not None:
-        cache.write(key, payload)
-    return parsed
+    # WDQS only: the names come back in the order the document is composed in, and QLever sorts them
+    # case-insensitively where WDQS sorts by code point (measured: `LGBTQ-related film` first on one, last on
+    # the other), so an answer from it would be a different embedding input.
+    return _asked_batch(ids, lambda batch: query_text(batch, media, prop, excluded), "sparql-docfacts",
+                        parse_labelled, cache, qlever=False)
 
 
 def doc_facts(ids, media, cache=None, excluded=None):
@@ -370,23 +466,8 @@ def mapping(ids, media, languages, cache=None, excluded=None):
     """
     if not ids:
         return {}
-    query = mapping_query(ids, media, languages, excluded)
-    key = None
-    if cache is not None:
-        key = cache.key("sparql", {"q": query})
-        hit = cache.read(key)
-        if hit is not None:
-            try:
-                return parse_mapping(hit)
-            except WikidataError:
-                pass
-    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
-                           headers={"Content-Type": "application/sparql-query",
-                                    "Accept": "application/sparql-results+json"})
-    parsed = parse_mapping(payload)
-    if key is not None:
-        cache.write(key, payload)
-    return parsed
+    return _asked_batch(ids, lambda batch: mapping_query(batch, media, languages, excluded), "sparql",
+                        parse_mapping, cache)
 
 
 def wikipedias_query(ids, media, excluded=None):
@@ -445,23 +526,8 @@ def wikipedias(ids, media, day, cache=None, excluded=None):
     """
     if not ids:
         return {}
-    query = wikipedias_query(ids, media, excluded)
-    key = None
-    if cache is not None:
-        key = cache.key("sparql-wikipedias", {"q": query, "day": day})
-        hit = cache.read(key)
-        if hit is not None:
-            try:
-                return parse_wikipedias(hit)
-            except WikidataError:
-                pass
-    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
-                           headers={"Content-Type": "application/sparql-query",
-                                    "Accept": "application/sparql-results+json"})
-    parsed = parse_wikipedias(payload)
-    if key is not None:
-        cache.write(key, payload)
-    return parsed
+    return _asked_batch(ids, lambda batch: wikipedias_query(batch, media, excluded), "sparql-wikipedias",
+                        parse_wikipedias, cache, {"day": day}, qlever=False)
 
 
 def kind_query(ids, media, excluded=None):
@@ -492,23 +558,8 @@ def kinds(ids, media, cache=None, excluded=None):
     batch was asked before. An id Wikidata states neither for is absent."""
     if not ids:
         return {}
-    query = kind_query(ids, media, excluded)
-    key = None
-    if cache is not None:
-        key = cache.key("sparql-kind", {"q": query})
-        hit = cache.read(key)
-        if hit is not None:
-            try:
-                return parse_labelled(hit)
-            except WikidataError:
-                pass
-    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
-                           headers={"Content-Type": "application/sparql-query",
-                                    "Accept": "application/sparql-results+json"})
-    parsed = parse_labelled(payload)
-    if key is not None:
-        cache.write(key, payload)
-    return parsed
+    return _asked_batch(ids, lambda batch: kind_query(batch, media, excluded), "sparql-kind", parse_labelled,
+                        cache)
 
 
 def language_query(ids, media, excluded=None):
@@ -559,23 +610,8 @@ def languages(ids, media, cache=None, excluded=None):
     asked before. What a title is IN, Wikidata's and CC0, rather than TMDB's `original_language`."""
     if not ids:
         return {}
-    query = language_query(ids, media, excluded)
-    key = None
-    if cache is not None:
-        key = cache.key("sparql-language", {"q": query})
-        hit = cache.read(key)
-        if hit is not None:
-            try:
-                return parse_languages(hit)
-            except WikidataError:
-                pass
-    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
-                           headers={"Content-Type": "application/sparql-query",
-                                    "Accept": "application/sparql-results+json"})
-    parsed = parse_languages(payload)
-    if key is not None:
-        cache.write(key, payload)
-    return parsed
+    return _asked_batch(ids, lambda batch: language_query(batch, media, excluded), "sparql-language",
+                        parse_languages, cache)
 
 
 def origin_query(ids, media, excluded=None):
@@ -597,7 +633,8 @@ def origins(ids, media, cache=None, excluded=None):
     disk where the same batch was asked before. An id Wikidata states no country for is absent."""
     if not ids:
         return {}
-    found = _asked(origin_query(ids, media, excluded), "sparql-origin", parse_languages, cache)
+    found = _asked_batch(ids, lambda batch: origin_query(batch, media, excluded), "sparql-origin",
+                         parse_languages, cache)
     return {tmdb_id: sorted(code.upper() for code in codes) for tmdb_id, codes in found.items()}
 
 
@@ -659,23 +696,8 @@ def sources(ids, media, cache=None, excluded=None):
     batch was asked before. What lets the source-work fallback tell a novel from a remake's original."""
     if not ids:
         return {}
-    query = source_query(ids, media, excluded)
-    key = None
-    if cache is not None:
-        key = cache.key("sparql-source", {"q": query})
-        hit = cache.read(key)
-        if hit is not None:
-            try:
-                return parse_sources(hit)
-            except WikidataError:
-                pass
-    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
-                           headers={"Content-Type": "application/sparql-query",
-                                    "Accept": "application/sparql-results+json"})
-    parsed = parse_sources(payload)
-    if key is not None:
-        cache.write(key, payload)
-    return parsed
+    return _asked_batch(ids, lambda batch: source_query(batch, media, excluded), "sparql-source",
+                        parse_sources, cache, qlever=False)
 
 
 def target_query(ids, media, excluded=None, languages=()):
@@ -755,23 +777,8 @@ def targets(ids, media, cache=None, excluded=None, languages=()):
     it — Wikidata's, CC0, rather than TMDB's."""
     if not ids:
         return {}
-    query = target_query(ids, media, excluded, languages)
-    key = None
-    if cache is not None:
-        key = cache.key("sparql-target", {"q": query})
-        hit = cache.read(key)
-        if hit is not None:
-            try:
-                return parse_targets(hit)
-            except WikidataError:
-                pass
-    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
-                           headers={"Content-Type": "application/sparql-query",
-                                    "Accept": "application/sparql-results+json"})
-    parsed = parse_targets(payload)
-    if key is not None:
-        cache.write(key, payload)
-    return parsed
+    return _asked_batch(ids, lambda batch: target_query(batch, media, excluded, languages), "sparql-target",
+                        parse_targets, cache, qlever=False)
 
 
 #: Ids per claimant lookup and Q-ids per evidence lookup. Their own sizes, not a stage's: `resolve` is asked
@@ -846,8 +853,11 @@ def parse_evidence(payload):
     return {qid: {name: sorted(values) for name, values in entry.items()} for qid, entry in out.items()}
 
 
-def _asked(query, namespace, parse, cache):
-    key = cache.key(namespace, {"q": query}) if cache is not None else None
+def _asked(query, namespace, parse, cache, extra=None, qlever=True):
+    """One query: from disk where its WDQS text was kept, else live through `sparql` (WDQS, then QLever
+    unless `qlever` is off). The body is kept under the WDQS text whichever endpoint answered, and only
+    once it parses."""
+    key = cache.key(namespace, {"q": query, **(extra or {})}) if cache is not None else None
     if key is not None:
         hit = cache.read(key)
         if hit is not None:
@@ -855,13 +865,46 @@ def _asked(query, namespace, parse, cache):
                 return parse(hit)
             except WikidataError:
                 pass
-    payload = http.request(HOST, PATH, {"format": "json"}, method="POST", body=query.encode("utf-8"),
-                           headers={"Content-Type": "application/sparql-query",
-                                    "Accept": "application/sparql-results+json"})
+    payload = sparql(query, fallback=qlever)
     parsed = parse(payload)
     if key is not None:
         cache.write(key, payload)
     return parsed
+
+
+#: A batch is split no further than this many ids. Past it a timeout is the answer about those ids.
+SPLIT_FLOOR = 10
+
+
+def _splittable(failure):
+    """A timeout (status 0), a request timeout or a 5xx — WDQS answers a query that ran out of time with a
+    500 — or QLever's own timeout, which it sends as a 429 saying `Operation timed out`. Not any other 429:
+    that is a throttle, and more requests would only deepen it. Not any other 4xx: the server's answer about
+    the query, which a smaller batch does not change."""
+    return (failure.status == 0 or failure.status == 408 or 500 <= failure.status <= 599
+            or (failure.status == 429 and b"timed out" in (failure.body or b"")))
+
+
+def _asked_batch(ids, build, namespace, parse, cache, extra=None, qlever=True):
+    """`_asked` for a batch of ids whose answer is a dict keyed by id. A batch that fails for want of time
+    is asked again as two halves, merged — the answers are keyed per id, so they do not overlap — down to
+    `SPLIT_FLOOR` ids. The whole batch's query text stays the cache key when it answers; a halved batch is
+    kept as its halves, each under its own text. The first half to fail ends the attempt.
+
+    `qlever` is off for the queries QLever was measured to time out on at every batch size (its server limit
+    is 30 s): asking it only adds two minutes of retries before the failure."""
+    try:
+        return _asked(build(ids), namespace, parse, cache, extra, qlever)
+    except http.HTTPError as failure:
+        if len(set(ids)) <= SPLIT_FLOOR or not _splittable(failure):
+            raise
+        ordered = sorted(set(ids))
+        middle = len(ordered) // 2
+        print(f"wikidata: {len(ordered)} ids failed ({failure}); asking {middle} and {len(ordered) - middle}",
+              file=sys.stderr)
+    out = _asked_batch(ordered[:middle], build, namespace, parse, cache, extra, qlever)
+    out.update(_asked_batch(ordered[middle:], build, namespace, parse, cache, extra, qlever))
+    return out
 
 
 def claimants(ids, media, cache=None):
@@ -869,7 +912,8 @@ def claimants(ids, media, cache=None):
     ordered = sorted(set(int(i) for i in ids))
     out = {}
     for answer in in_parallel(
-            lambda batch: _asked(claimant_query(batch, media), "sparql-claimant", parse_claimants, cache),
+            lambda batch: _asked_batch(batch, lambda part: claimant_query(part, media), "sparql-claimant",
+                                       parse_claimants, cache),
             [ordered[start:start + CLAIM_BATCH] for start in range(0, len(ordered), CLAIM_BATCH)]):
         out.update(answer)
     return out
@@ -880,7 +924,8 @@ def item_evidence(qids, media, cache=None):
     ordered = sorted(set(qids))
     out = {}
     for answer in in_parallel(
-            lambda batch: _asked(evidence_query(batch, media), "sparql-evidence", parse_evidence, cache),
+            lambda batch: _asked_batch(batch, lambda part: evidence_query(part, media), "sparql-evidence",
+                                       parse_evidence, cache),
             [ordered[start:start + EVIDENCE_BATCH] for start in range(0, len(ordered), EVIDENCE_BATCH)]):
         out.update(answer)
     return out
