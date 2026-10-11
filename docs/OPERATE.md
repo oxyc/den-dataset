@@ -184,9 +184,11 @@ found by hand months later.
 `MAX_TOKENS=1024`. ONNX Runtime picks its kernels from the CPU's flags, so the host's instruction set is part
 of the space. The box's Intel CPU and a hosted runner's AMD EPYC 7763 (both AVX2 only) return
 byte-identical vectors (24/24, #27). An AMD EPYC 9V74 or 9V45 runner (AVX-512, VNNI) moves every vector,
-cosine 0.979 — measured 2026-10-11 after four dailies the canary refused. Hosted runners come in both kinds,
-so the daily job checks its host first and hands the day to a new run on anything with `avx512f`,
-`avx_vnni`, `avx_vnni_int8` or `amx_int8`, then embeds in its own container. The published image cannot run on an
+cosine 0.979 — measured 2026-10-11 after four dailies the canary refused. Hosted runners come in several
+kinds and take no CPU request, so the daily job hands the day to a new run (up to six tries, then the day is
+skipped) on a CPU listed in `data/embed-cpu-blocklist.txt`, and on any other CPU runs the canary before
+anything is bought. A CPU that fails it names itself in the run's notice; add it to the blocklist. Then it
+embeds in its own container. The published image cannot run on an
 Apple Silicon Mac at all: ONNX Runtime needs AVX2, which emulation lacks, so `/health` answers and the first
 embed dies with an illegal instruction ("connection refused" from the client). Whatever the host, the canary
 (2.) is what decides.

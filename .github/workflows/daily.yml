@@ -4,7 +4,8 @@ name: daily
 # published with, ending at "ready to publish". It runs `./den daily`, and a ready run signs its checked
 # manifest with this workflow's GitHub OIDC identity and publishes it. What a day is, which stage a missing
 # credential skips and what it refuses to buy are in `pipeline/daily.py`; `den_daily_test.py` runs the same
-# command over the fixture corpus in CI. The weekly run adds a rolling slice of older titles.
+# command over the fixture corpus in CI. Each week also revisits a rolling slice of older titles: every
+# scheduled run asks for it, and `./den daily` drops it once a ready run that week has carried it.
 #
 # The schedule runs only when the repository variable DEN_DAILY_ENABLED is `true` (enabled 2026-09-30).
 # What it reads, all by name and none required:
@@ -41,12 +42,11 @@ name: daily
 # publishes (`pipeline/paid.py`), so a failed or unpublished day is never bought again.
 on:
   schedule:
-    - cron: "23 3 * * *"   # daily
-    - cron: "47 4 * * 1"   # weekly: the daily run plus this week's revisit slice
+    - cron: "23 3 * * *"
   workflow_dispatch:
     inputs:
       revisit_weeks:
-        description: "Revisit this week's slice of an N-week cycle (empty: no slice)"
+        description: "The revisit cycle in weeks (empty: DEN_REVISIT_WEEKS, or 8); this week's slice runs until a ready run carries it"
         required: false
         default: ""
       spend:
@@ -78,37 +78,27 @@ jobs:
     env:
       OUT: out
       DEN_CACHE_DIR: .cache
+      # What a handed-off run is started with (pipeline/hand-off-day.sh), and what the day runs.
+      ATTEMPT: ${{ inputs.host_attempt || '1' }}
+      WEEKS: ${{ inputs.revisit_weeks || vars.DEN_REVISIT_WEEKS || '8' }}
+      # format() so a dispatch's `false` is a non-empty string and is not replaced by the schedule's variable.
+      SPEND: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.spend) || format('{0}', vars.DEN_DAILY_SPEND == 'true') }}
     steps:
-      # ONNX Runtime picks its kernels from the CPU's flags, and only the plain AVX2 ones give the box's vectors:
-      # on an AVX-512 or VNNI host every vector moves (cosine ~0.979, 2026-10-11) and the canary refuses the day
-      # once it has run. Hosted runners come in both kinds and take no CPU request, so a day that lands on the
-      # other kind hands itself to a new run before it starts anything. After six tries it runs where it is and
-      # the canary decides.
-      - name: A host that embeds in the box's space
+      - uses: actions/checkout@v7
+      # ONNX Runtime picks its kernels from the CPU's flags, so the runner's CPU is part of den-embed's space:
+      # an AMD EPYC 7763 (AVX2) gives the box's vectors byte for byte, a 9V74 or 9V45 (AVX-512, VNNI) moves
+      # every one (cosine ~0.979, 2026-10-11). Hosted runners take no CPU request, so a run on a CPU known to be
+      # outside the space hands the day to a new run before it starts anything.
+      - name: A CPU known to embed outside the box's space
         if: vars.DEN_EMBED_IMAGE != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          ATTEMPT: ${{ inputs.host_attempt || '1' }}
-          WEEKS: ${{ github.event_name == 'workflow_dispatch' && inputs.revisit_weeks || (github.event.schedule == '47 4 * * 1' && (vars.DEN_REVISIT_WEEKS || '8') || '') }}
-          SPEND: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.spend) || format('{0}', vars.DEN_DAILY_SPEND == 'true') }}
         run: |
           cpu="$(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
-          other="$(grep -m1 '^flags' /proc/cpuinfo | tr ' ' '\n' | grep -xE 'avx512f|avx_vnni|avx_vnni_int8|amx_int8' | xargs)"
-          if [ -z "$other" ]; then
-            echo "$cpu: AVX2 kernels, the box's space"
-            exit 0
+          echo "$cpu"
+          if grep -vE '^(#|$)' data/embed-cpu-blocklist.txt | grep -qxF "$cpu"; then
+            pipeline/hand-off-day.sh "$cpu is on data/embed-cpu-blocklist.txt"
           fi
-          if [ "$ATTEMPT" -ge 6 ]; then
-            echo "::warning::$cpu has $other on try $ATTEMPT; running here, the canary decides"
-            exit 0
-          fi
-          echo "::notice::$cpu has $other, which embeds outside the box's space; handing the day to try $((ATTEMPT + 1))"
-          gh workflow run daily.yml -R "$GITHUB_REPOSITORY" --ref main \
-            -f spend="$SPEND" -f revisit_weeks="$WEEKS" -f host_attempt="$((ATTEMPT + 1))"
-          gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
-          sleep 300
-          exit 1
-      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -138,6 +128,21 @@ jobs:
             sleep 5
           done
           docker logs den-embed >&2; exit 1
+      # A CPU not on the blocklist is tried: the canary says whether it embeds in the box's space, before anything
+      # is bought. One that fails names itself, so it can be added to data/embed-cpu-blocklist.txt.
+      - name: This CPU's space
+        if: vars.DEN_EMBED_IMAGE != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cpu="$(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
+          status=0
+          python3 pipeline/embed_canary.py --url http://127.0.0.1:8080 || status=$?
+          case "$status" in
+            0) ;;
+            2) pipeline/hand-off-day.sh "$cpu embeds outside the box's space (the canary failed); add it to data/embed-cpu-blocklist.txt" ;;
+            *) exit "$status" ;;
+          esac
       - name: Published spend reports
         env:
           GH_TOKEN: ${{ github.token }}
@@ -184,9 +189,6 @@ jobs:
           # When the workflow started its pinned image, use that exact service. Preferring the fallback secret
           # here left the local canary-proved image idle and could send writes to a different CPU/runtime build.
           DEN_EMBED_URL: ${{ (vars.DEN_EMBED_IMAGE != '' && 'http://127.0.0.1:8080') || secrets.DEN_EMBED_URL || '' }}
-          WEEKS: ${{ github.event_name == 'workflow_dispatch' && inputs.revisit_weeks || (github.event.schedule == '47 4 * * 1' && (vars.DEN_REVISIT_WEEKS || '8') || '') }}
-          # format() so a dispatch's `false` is a non-empty string and is not replaced by the schedule's variable.
-          SPEND: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.spend) || format('{0}', vars.DEN_DAILY_SPEND == 'true') }}
           SPEND_TYPESAFE: ${{ vars.DEN_DAILY_SPEND_TYPESAFE != 'false' }}
           SPEND_FAN_PICKS: ${{ vars.DEN_DAILY_SPEND_FAN_PICKS != 'false' }}
           SPEND_PREMISE: ${{ vars.DEN_DAILY_SPEND_PREMISE != 'false' }}

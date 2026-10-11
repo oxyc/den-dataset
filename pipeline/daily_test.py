@@ -170,6 +170,39 @@ class Skips(Recorded):
             self.day({"TMDB_API_KEY": "t"}, mode=None, revisit_weeks=8)
         self.assertEqual(modes, ["catalogue"])
 
+    def published(self, name, **report):
+        directory = os.path.join(self.out, "published-reports")
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, name), "w", encoding="utf-8") as fh:
+            json.dump({"date": "2026-09-21", "spend": {"totalUSD": 0.0}, **report}, fh)
+        return directory
+
+    def weeks_asked(self, **kwargs):
+        seen = []
+        original = self.stage
+
+        def stage(name):
+            module = original(name)
+            inner = module.run
+            module.run = lambda ctx: seen.append(ctx.revisit_weeks) or inner(ctx) if name == "changes" else inner(ctx)
+            return module
+        with mock.patch.object(daily, "load", stage):
+            _code, report = self.day(revisit_weeks=8, **kwargs)
+        return seen, report
+
+    def test_a_slice_a_ready_run_carried_this_week_is_not_revisited_again(self):
+        # NOW is Thursday 2026-09-24; Monday 2026-09-21 is the same week.
+        reports = self.published("monday.json", ready=True, revisit={"weeks": 8, "slice": 3, "date": "2026-09-21"})
+        seen, report = self.weeks_asked(published_reports_dir=reports)
+        self.assertEqual(seen, [None])
+        self.assertIn("revisit", [s["stage"] for s in report["skipped"]])
+
+    def test_a_slice_no_ready_run_carried_is_revisited_on_a_later_day_of_the_week(self):
+        reports = self.published("monday.json", ready=False, revisit={"weeks": 8, "slice": 3, "date": "2026-09-21"})
+        self.published("last-week.json", ready=True, revisit={"weeks": 8, "slice": 2, "date": "2026-09-18"})
+        seen, _report = self.weeks_asked(published_reports_dir=reports)
+        self.assertEqual(seen, [8])
+
     def test_the_weekly_run_does_not_refresh_existing_wikipedia_sources(self):
         self.day(mode=None, revisit_weeks=8)
         self.assertNotIn(("refresh",), self.calls)

@@ -117,15 +117,50 @@ def paid_tokens(ctx):
     return total
 
 
+def slice_published(directory, today, weeks):
+    """The published report of a ready run that already carried this week's slice of a `weeks` cycle, or None.
+
+    The slice is chosen by the week (`changes.week`), so every day of a week picks the same titles. The
+    workflow asks for it every day and this drops it once a ready run has carried it — a ready run publishes —
+    so a day that missed it (no host that embeds in the box's space, a refusal) leaves it to the next day
+    rather than to the next week."""
+    if not directory or not os.path.isdir(directory):
+        return None
+    this_week = changes.week(today)
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding="utf-8") as handle:
+                report = json.load(handle)
+        except (OSError, ValueError) as error:
+            raise StageError(f"daily: published report {name} is unreadable: {error}") from error
+        revisit = report.get("revisit") if isinstance(report, dict) else None
+        if not (report.get("ready") is True and isinstance(revisit, dict) and revisit.get("weeks") == weeks):
+            continue
+        try:
+            carried = datetime.date.fromisoformat(revisit.get("date"))
+        except (TypeError, ValueError):
+            raise StageError(f"daily: published report {name} has no valid revisit.date") from None
+        if changes.week(carried) == this_week:
+            return name
+    return None
+
+
 class Day:
     """One run: the context each stage gets, and what the report will say."""
 
     def __init__(self, args, environ, now):
         self.args, self.environ, self.now = args, environ, now
         out = args.out_dir
+        weeks = args.revisit_weeks
+        carried = (slice_published(getattr(args, "published_reports_dir", None), now.date(), weeks)
+                   if weeks else None)
+        if carried:
+            weeks = None
         # The weekly run is the full vote-floor diff: an old title can cross the floor without entering a
         # release-date delta. An explicit mode remains an operator override.
-        mode = args.mode or ("catalogue" if args.revisit_weeks else "delta")
+        mode = args.mode or ("catalogue" if weeks else "delta")
         since = args.since or (now.date() - datetime.timedelta(days=DAYS_BACK)).isoformat()
         overrides = {}
         if mode in ("delta", "catalogue"):
@@ -136,8 +171,10 @@ class Day:
                          "universe_tv": os.path.join(out, directory, "universe-tv.json")}
         self.ctx = Context(out_dir=out, overrides=overrides, stamp_meta=os.path.join(out, "dataset.meta.json"),
                            mode=mode, since=since if mode == "delta" else "", refresh=False,
-                           revisit_weeks=args.revisit_weeks, spend=False)
+                           revisit_weeks=weeks, spend=False)
         self.skipped, self.ran = [], []
+        if carried:
+            self.skip("revisit", f"this week's slice was carried by the ready run in {carried}")
         enabled = lambda setting: bool(args.spend and setting is not False)
         self.can_buy = bool(enabled(getattr(args, "spend_typesafe", None)) and environ.get("TYPESAFE_API_KEY"))
         self.can_buy_fan_picks = bool(enabled(getattr(args, "spend_fan_picks", None)) and
@@ -497,7 +534,8 @@ def register(commands):
                           "the daily export dump")
     sub.add_argument("--since", help=f"the delta's window, YYYY-MM-DD (default: {DAYS_BACK} days ago)")
     sub.add_argument("--revisit-weeks", type=int, metavar="N",
-                     help="also revisit this week's slice of an N-week cycle (the weekly run)")
+                     help="also revisit this week's slice of an N-week cycle, unless a ready run in "
+                          "--published-reports-dir already carried it this week")
     sub.add_argument("--spend", action="store_true",
                      help="buy the classify, critique, genres & moods, and new-title fan-picks answers "
                           "(needs the corresponding provider keys and a live baseline)")
