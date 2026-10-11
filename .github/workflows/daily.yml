@@ -66,6 +66,7 @@ permissions:
   contents: write
   id-token: write
   actions: write   # a run on the wrong kind of host hands the day to a new one
+  issues: write    # an unready run opens or updates the `daily-failing` issue; a ready one closes it
 
 jobs:
   daily:
@@ -129,7 +130,8 @@ jobs:
           done
           docker logs den-embed >&2; exit 1
       # A CPU not on the blocklist is tried: the canary says whether it embeds in the box's space, before anything
-      # is bought. One that fails names itself, so it can be added to data/embed-cpu-blocklist.txt.
+      # is bought. One that fails names itself, in a notice and in an issue (the last step), so it can be added to
+      # data/embed-cpu-blocklist.txt.
       - name: This CPU's space
         if: vars.DEN_EMBED_IMAGE != ''
         env:
@@ -140,7 +142,7 @@ jobs:
           python3 pipeline/embed_canary.py --url http://127.0.0.1:8080 || status=$?
           case "$status" in
             0) ;;
-            2) pipeline/hand-off-day.sh "$cpu embeds outside the box's space (the canary failed); add it to data/embed-cpu-blocklist.txt" ;;
+            2) pipeline/hand-off-day.sh "$cpu embeds outside the box's space (the canary failed); add it to data/embed-cpu-blocklist.txt" "$cpu" ;;
             *) exit "$status" ;;
           esac
       - name: Published spend reports
@@ -313,3 +315,18 @@ jobs:
         run: |
           echo "error: the daily run is not ready to publish; see its report artifact and summary" >&2
           exit 1
+      # An unready run must not end only red in the Actions tab. This opens (or comments on) the `daily-failing`
+      # issue with the verdict line, the run link and the consecutive-failure count, and closes it when a run is
+      # ready. A run that handed the day to another attempt reports nothing, except an unlisted CPU, which gets
+      # its own issue; one that used the last attempt counts as a failure. pipeline/daily_issue.py, docs/OPERATE.md.
+      - name: Report the run to an issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          READY: ${{ steps.day.outcome == 'success' && steps.report.outputs.store != '' }}
+          CANCELLED: ${{ job.status == 'cancelled' }}
+        run: |
+          python3 pipeline/daily_issue.py --repo "$GITHUB_REPOSITORY" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --ready "$READY" --cancelled "$CANCELLED" --report "$OUT/daily-report.json" \
+            --handoff "${RUNNER_TEMP}/day-handoff"
