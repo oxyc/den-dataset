@@ -209,11 +209,20 @@ def below_floor(votes, floors, today):
 CARRY_DAYS = 56
 
 
+#: The version of the rules that decide whether a title has a Wikipedia plot. A plotless verdict is stamped with
+#: it and counts as expired under any other (`standing`), so a carried verdict never outlives a change to them.
+#: BUMP IT whenever one of these changes: the choice of Wikidata item for a TMDB id (`lib/wikidata.py`
+#: resolve/choose), the plot headings (`lib/plot.py`), the other-language or source-work fallbacks in
+#: `reground`, or the section-length floor (`WIKI_PLOT_FLOOR`). Bumping re-asks every carried plotless title.
+PLOT_RULES = 1
+
+
 def no_plot(reason, today):
-    """One plotless verdict as the checkpoint keeps it: the UTC day, and why the title has no Wikipedia plot
-    (`reground`'s `noPlotReason`). An admitted title with no plot never ships ("no Wikipedia plot, no title"),
-    and nothing about its votes or the floors changes that, so the verdict states neither."""
-    return {"on": today, "noPlot": reason}
+    """One plotless verdict as the checkpoint keeps it: the UTC day, why the title has no Wikipedia plot
+    (`reground`'s `noPlotReason`), and the `PLOT_RULES` it was reached under. An admitted title with no plot
+    never ships ("no Wikipedia plot, no title"), and nothing about its votes or the floors changes that, so
+    the verdict states neither."""
+    return {"on": today, "noPlot": reason, "rules": PLOT_RULES}
 
 
 def is_no_plot(held):
@@ -264,7 +273,7 @@ def standing(judged, today, floors, worklist_votes, carry_days=0):
 
     A plotless verdict (`no_plot`) is the other kind in the same map: the title cleared the gate and no
     article gave it a plot. It holds for the same `lifetime`, whatever the floors and the count do, so a
-    title that gains an article is asked again when it expires.
+    title that gains an article is asked again when it expires, and at once under another `PLOT_RULES`.
     """
     def same_count(label, held):
         if label not in worklist_votes:
@@ -279,7 +288,7 @@ def standing(judged, today, floors, worklist_votes, carry_days=0):
 
     def holds(label, held):
         if is_no_plot(held):
-            return True
+            return held.get("rules") == PLOT_RULES
         return held.get("floors") == floor_values(floors) and same_count(label, held)
 
     return {label for label, held in judged.items() if fresh(label, held) and holds(label, held)}

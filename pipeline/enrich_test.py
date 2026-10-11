@@ -894,11 +894,12 @@ class Batch(unittest.TestCase):
         self.plots[("Two", "en")] = found("t" * 300)
         report, asked = self.weekly([("movie", 1), ("movie", 2)], self.DAY)
         self.assertEqual((asked, report["wikiPlot"], report["tagsOnly"]), (["movie:1", "movie:2"], 1, 1))
-        self.assertEqual(self.checkpoint()["judgedBelow"]["movie:1"], {"on": self.DAY, "noPlot": "noArticle"})
+        parked = {"on": self.DAY, "noPlot": "noArticle", "rules": enrich.PLOT_RULES}
+        self.assertEqual(self.checkpoint()["judgedBelow"]["movie:1"], parked)
         self.assertNotIn("movie:2", self.checkpoint()["judgedBelow"], "a title with a plot is shipped, not parked")
 
         ledger = self.through_the_ledger()
-        self.assertEqual(ledger.data["judged"], {"movie:1": {"on": self.DAY, "noPlot": "noArticle"}})
+        self.assertEqual(ledger.data["judged"], {"movie:1": parked})
         self.assertEqual(list(self.checkpoint()["judgedBelow"]), ["movie:1"], "laid back into the new out-dir")
 
         report, asked = self.weekly([("movie", 1), ("movie", 3)], self.later(7))
@@ -936,10 +937,27 @@ class Batch(unittest.TestCase):
         self.assertEqual(self.checkpoint()["judgedBelow"], {})
         shutil.rmtree(os.path.join(self.out, "enriched"))   # a later run's out-dir holds none of it
         put(enrich.checkpoint_path(self.out), json.dumps(
-            {"processed": [], "judgedBelow": {"movie:1": {"on": self.DAY, "noPlot": "noArticle"}}}))
+            {"processed": [], "judgedBelow": {
+                "movie:1": {"on": self.DAY, "noPlot": "noArticle", "rules": enrich.PLOT_RULES}}}))
         before = len(self.claimant_calls)
         self.run_batch([("movie", 1)], today=self.later(1))
         self.assertEqual(self.claimant_calls[before:], [("movie", [1])])
+
+    def test_a_verdict_from_other_plot_rules_is_asked_again(self):
+        """A change to item choice, headings, fallbacks or the length floor bumps `PLOT_RULES`; a verdict
+        reached under the old ones says nothing about what the new ones would find. An unstamped one is old."""
+        self.weekly([("movie", 1)], self.DAY)
+        self.through_the_ledger()
+        _report, asked = self.weekly([("movie", 1)], self.later(7))
+        self.assertEqual(asked, [], "held under the rules it was made under")
+        with mock.patch.object(enrich, "PLOT_RULES", enrich.PLOT_RULES + 1):
+            _report, asked = self.weekly([("movie", 1)], self.later(14))
+        self.assertEqual(asked, ["movie:1"])
+        shutil.rmtree(os.path.join(self.out, "enriched"))
+        put(enrich.checkpoint_path(self.out), json.dumps(
+            {"processed": [], "judgedBelow": {"movie:1": {"on": self.DAY, "noPlot": "noArticle"}}}))
+        _report, asked = self.weekly([("movie", 1)], self.later(15))
+        self.assertEqual(asked, ["movie:1"], "no stamp, no trust")
 
     def test_a_batch_that_admits_nothing_writes_no_batch_and_keeps_its_number(self):
         """Each refused attempt wrote a `batch-N.json` holding `[]` and moved the numbering on."""

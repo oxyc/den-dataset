@@ -133,7 +133,11 @@ this the weekly pass found the same ~6,800 of them again every week, because onl
 the worklist. The weekly pass now records the day and why (`noPlot`: `noArticle`, `noSection`, `belowFloor` or
 `sourceIsScreenWork`; not `fetchFailed`, which is asked again) and skips the title until the verdict expires, 56
 to 111 days later, so one that has gained an article is eventually read. It states no vote count or floors,
-which cannot change the answer. A title that gains a plot loses its verdict; the daily delta neither trusts nor
+which cannot change the answer. Each verdict is stamped with `enrich.PLOT_RULES` and counts as expired under
+any other value (an unstamped one too), so it never outlives a change to the rules that produced it.
+**Bump `PLOT_RULES` whenever the choice of Wikidata item for a TMDB id, the plot headings, the
+other-language or source-work fallbacks, or the section-length floor (`WIKI_PLOT_FLOOR`) change**; the next
+weekly pass then asks every parked title again. A title that gains a plot loses its verdict; the daily delta neither trusts nor
 records one, because it asks about releases still gaining articles.
 
 The report separates the titles the change set calls `added`: `counts.addedPlotted` can still be classified,
