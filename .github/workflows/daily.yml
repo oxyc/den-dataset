@@ -82,8 +82,8 @@ jobs:
       # ONNX Runtime picks its kernels from the CPU's flags, and only the plain AVX2 ones give the box's vectors:
       # on an AVX-512 or VNNI host every vector moves (cosine ~0.979, 2026-10-11) and the canary refuses the day
       # once it has run. Hosted runners come in both kinds and take no CPU request, so a day that lands on the
-      # other kind hands itself to a new run before it starts anything. After six tries it runs where it is and
-      # the canary decides.
+      # other kind hands itself to a new run before it starts anything. After six tries the day is skipped: the
+      # next schedule tries again, and nothing a skipped day would have bought is lost.
       - name: A host that embeds in the box's space
         if: vars.DEN_EMBED_IMAGE != ''
         env:
@@ -99,12 +99,12 @@ jobs:
             exit 0
           fi
           if [ "$ATTEMPT" -ge 6 ]; then
-            echo "::warning::$cpu has $other on try $ATTEMPT; running here, the canary decides"
-            exit 0
+            echo "::warning::$cpu has $other on try $ATTEMPT, the last; skipping the day"
+          else
+            echo "::notice::$cpu has $other, which embeds outside the box's space; handing the day to try $((ATTEMPT + 1))"
+            gh workflow run daily.yml -R "$GITHUB_REPOSITORY" --ref main \
+              -f spend="$SPEND" -f revisit_weeks="$WEEKS" -f host_attempt="$((ATTEMPT + 1))"
           fi
-          echo "::notice::$cpu has $other, which embeds outside the box's space; handing the day to try $((ATTEMPT + 1))"
-          gh workflow run daily.yml -R "$GITHUB_REPOSITORY" --ref main \
-            -f spend="$SPEND" -f revisit_weeks="$WEEKS" -f host_attempt="$((ATTEMPT + 1))"
           gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
           sleep 300
           exit 1
