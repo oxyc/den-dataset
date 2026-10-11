@@ -702,6 +702,81 @@ class OneItemPerTitle(unittest.TestCase):
             self.assertEqual(build({2559: [BONN]}), build(None))
 
 
+def stand_in_row(tmdb, link, article, stub_label, target_label, stub_start=None, start=None, end=None,
+                 target="Q5102879"):
+    row = {"tmdb": cell(str(tmdb)), "link": cell(link), "target": cell(ENTITY + target),
+           "article": cell("https://en.wikipedia.org/wiki/" + article.replace(" ", "_")),
+           "stubLabel": cell(stub_label), "targetLabel": cell(target_label)}
+    for name, value in (("stubStart", stub_start), ("targetStart", start), ("targetEnd", end)):
+        if value:
+            row[name] = cell(value)
+    return row
+
+
+class StubStandIn(unittest.TestCase):
+    """Series 63926 (One-Punch Man) and 57243 (Doctor Who, 2005) are claimed by one item each, with no sitelink
+    at all; the item with the English article does not state the id. Measured over a run's 6,107 plotless
+    titles: 1,055 sit on such a stub."""
+
+    def standing(self, *bindings_):
+        return {tmdb: wikidata.stand_in(found) for tmdb, found in
+                wikidata.parse_stand_ins(rows(*bindings_)).items()}
+
+    def test_a_franchise_member_borrows_the_article_of_its_franchise_of_the_same_name(self):
+        self.assertEqual(self.standing(
+            stand_in_row(63926, "franchise", "One-Punch Man", "One-Punch Man", "One-Punch Man")),
+            {63926: "One-Punch Man"})
+
+    def test_a_franchise_of_another_name_is_not_the_title(self):
+        """Pokémon: the Movie is not the Pokémon franchise, and its plot is not the franchise's."""
+        self.assertEqual(self.standing(
+            stand_in_row(115223, "franchise", "Pokémon", "Pokémon the Movie: Black", "Pokémon")),
+            {115223: None})
+
+    def test_doctor_who_2005_reaches_the_show_that_was_already_running(self):
+        """P1889 is "different from" — the editors point the stub at the main item with it. The year in the
+        stub's label is a qualifier, and the show's run began in 1963 and had not ended in 2005."""
+        self.assertEqual(self.standing(
+            stand_in_row(57243, "different", "Doctor Who", "Doctor Who (2005)", "Doctor Who",
+                         "2005-03-26T00:00:00Z", "1963-11-23T00:00:00Z", target="Q34316")),
+            {57243: "Doctor Who"})
+
+    def test_a_different_from_link_to_a_run_that_began_later_or_ended_before_is_not_the_title(self):
+        """Das Boot (1985) is "different from" Das Boot (2018): same name, another show."""
+        later = stand_in_row(156249, "different", "Das Boot (TV series)", "Das Boot", "Das Boot",
+                             "1985-01-01T00:00:00Z", "2018-11-23T00:00:00Z", target="Q29000995")
+        ended = stand_in_row(1, "different", "Dog", "Dog", "Dog", "2010-01-01T00:00:00Z",
+                             "1990-01-01T00:00:00Z", "2000-01-01T00:00:00Z")
+        undated = stand_in_row(2, "different", "Dog", "Dog", "Dog")
+        self.assertEqual(self.standing(later, ended, undated), {156249: None, 1: None, 2: None})
+
+    def test_two_articles_that_qualify_name_none(self):
+        found = self.standing(
+            stand_in_row(5, "franchise", "Alpha", "Alpha", "Alpha", target="Q1"),
+            stand_in_row(5, "franchise", "Alpha (franchise)", "Alpha", "Alpha", target="Q2"))
+        self.assertEqual(found, {5: None})
+
+    def test_the_query_asks_the_item_the_choice_made_and_nothing_else(self):
+        query = wikidata.stand_in_query([57243, 63926], "tv", {63926: [BONN]})
+        self.assertIn("?film wdt:P4983 ?tmdb .\n  MINUS { VALUES (?tmdb ?film) { (\"63926\" wd:Q116226000) } }\n",
+                      query)
+        for link in ("wdt:P8345 ?target", "wdt:P1889 ?target", "?target wdt:P1889 ?film"):
+            self.assertIn(link, query)
+        self.assertNotIn("P179", query)
+        self.assertEqual(wikidata.stand_in_query([3], "tv"), wikidata.stand_in_query([3], "tv", {2559: [BONN]}))
+
+    def test_only_a_batch_with_a_stub_is_asked_and_the_answer_is_kept(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        cache = caching.ResponseCache("wiki", directory.name, 3600)
+        body = rows(stand_in_row(63926, "franchise", "One-Punch Man", "One-Punch Man", "One-Punch Man"))
+        with mock.patch.object(wikidata.http, "request", return_value=body) as sent:
+            self.assertEqual(wikidata.stand_ins([63926], "tv", cache), {63926: "One-Punch Man"})
+            self.assertEqual(wikidata.stand_ins([63926], "tv", cache), {63926: "One-Punch Man"})
+            self.assertEqual(wikidata.stand_ins([], "tv", cache), {})
+        self.assertEqual(sent.call_count, 1)
+
+
 class BatchesInParallel(unittest.TestCase):
     """A lookup's batches are asked a few at a time and merged as the one-at-a-time loop merged them."""
 

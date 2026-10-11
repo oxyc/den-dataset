@@ -980,6 +980,98 @@ def choose(candidates, evidence):
     return None, "ambiguous"
 
 
+#: Wikidata keeps some TMDB ids on a STUB that no Wikipedia links to: One-Punch Man's series 63926 sits on a
+#: zero-sitelink "anime television series" item, the article on the franchise item beside it; Doctor Who
+#: (2005) on a zero-sitelink item beside the show's own. `resolve` is right to choose the stub (it is the only
+#: claimant), and the mapping then finds no article. Measured over the 6,107 plotless titles of one run: 1,055
+#: sit on such a stub, and what links them to an item with an article is `P8345` (member of a media
+#: franchise, 21) or `P1889` (different from, 12 — the stub's editors point at the main item with it), not a
+#: sitelink-bearing claimant. `P179`/`P361`/`P527`/`P155` reach the series, the whole franchise or a prequel
+#: (a sibling's story), which `_MAPPING` already refused for P179.
+#:
+#: So a stub is given the article of that item only when it can be the same show: the target's English label
+#: is the stub's with any trailing "(2005)" removed, and for `P1889` — which says the two are DIFFERENT
+#: works, and links Das Boot (2018) to the 1985 serial of that name — the target's run began no later than the
+#: stub's and had not ended before it. All Wikidata; none of TMDB's fields.
+STAND_IN_LINKS = {"franchise": "P8345", "different": "P1889"}
+_QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def stand_in_query(ids, media, excluded=None):
+    """Every item with an English article that a TMDB id's item says it belongs to (`P8345`) or differs from
+    (`P1889`, stated by either side), beside both labels and the start (`P580`, else `P577`) and end (`P582`)
+    dates the guard reads. Its own query: `_MAPPING`'s text is a cache key for thousands of bodies."""
+    values = " ".join(f'"{tmdb_id}"' for tmdb_id in sorted(set(int(i) for i in ids)))
+    return (f"SELECT ?tmdb ?link ?target ?stubLabel ?targetLabel ?article ?stubStart ?targetStart ?targetEnd\n"
+            f"WHERE {{\n"
+            f"  VALUES ?tmdb {{ {values} }}\n"
+            f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+            f"{exclusion(ids, excluded)}"
+            f'  {{ ?film wdt:P8345 ?target . BIND("franchise" AS ?link) }}\n'
+            f'  UNION {{ ?film wdt:P1889 ?target . BIND("different" AS ?link) }}\n'
+            f'  UNION {{ ?target wdt:P1889 ?film . BIND("different" AS ?link) }}\n'
+            f"  ?article schema:about ?target ; schema:isPartOf <https://en.wikipedia.org/> .\n"
+            f'  OPTIONAL {{ ?film rdfs:label ?stubLabel . FILTER(LANG(?stubLabel) = "en") }}\n'
+            f'  OPTIONAL {{ ?target rdfs:label ?targetLabel . FILTER(LANG(?targetLabel) = "en") }}\n'
+            f"  OPTIONAL {{ ?film wdt:P580 ?stubStart . }}\n"
+            f"  OPTIONAL {{ ?film wdt:P577 ?stubStart . }}\n"
+            f"  OPTIONAL {{ ?target wdt:P580 ?targetStart . }}\n"
+            f"  OPTIONAL {{ ?target wdt:P582 ?targetEnd . }}\n"
+            f"}}\n"
+            f"ORDER BY ?tmdb ?target")
+
+
+def parse_stand_ins(payload):
+    """`tmdbId -> [row]` — one row per (item, article, link), the cells `stand_in` weighs."""
+    out = {}
+    for binding in _bindings(payload):
+        raw, article = _cell(binding, "tmdb"), _cell(binding, "article")
+        if raw is None or not _INTEGER.fullmatch(raw) or not article or not article_title(article):
+            continue
+        row = {"link": _cell(binding, "link"), "target": _item(_cell(binding, "target") or ""),
+               "article": article_title(article)}
+        for name in ("stubLabel", "targetLabel", "stubStart", "targetStart", "targetEnd"):
+            row[name] = _cell(binding, name)
+        rows = out.setdefault(int(raw), [])
+        if row not in rows:
+            rows.append(row)
+    return out
+
+
+def _same_name(a, b):
+    return bool(a) and bool(b) and _QUALIFIER.sub("", a).casefold() == _QUALIFIER.sub("", b).casefold()
+
+
+def _day(value):
+    return value[:10] if value else None
+
+
+def _stands_in(row):
+    """Whether this one link can name the stub's own show (see `STAND_IN_LINKS`)."""
+    if not _same_name(row["stubLabel"], row["targetLabel"]):
+        return False
+    if row["link"] == "franchise":
+        return True
+    stub, begun, ended = _day(row["stubStart"]), _day(row["targetStart"]), _day(row["targetEnd"])
+    return bool(stub and begun and begun <= stub and (ended is None or ended >= stub))
+
+
+def stand_in(rows):
+    """The one English article a stub may borrow, or None. Two different articles qualifying is None: the
+    stub is then no more one of them than the other."""
+    articles = {row["article"] for row in rows if _stands_in(row)}
+    return articles.pop() if len(articles) == 1 else None
+
+
+def stand_ins(ids, media, cache=None, excluded=None):
+    """`tmdbId -> article` for the ids whose item has no article of its own but names one (`stand_in`)."""
+    if not ids:
+        return {}
+    found = _asked_batch(ids, lambda batch: stand_in_query(batch, media, excluded), "sparql-stand-in",
+                         parse_stand_ins, cache)
+    return {tmdb_id: article for tmdb_id, rows in found.items() if (article := stand_in(rows))}
+
+
 #: A person's choice for the contested titles no rule decides, read before the rules.
 DECISIONS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data",
                          "wikidata-item-decisions.json")

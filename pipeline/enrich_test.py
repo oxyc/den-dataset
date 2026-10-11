@@ -103,10 +103,13 @@ class Batch(unittest.TestCase):
         self.claimants, self.evidence, self.excluded, self.claimant_calls = {}, {}, [], []
         # Wikidata P495 per (media, tmdbId), which picks the tier where the worklist states none.
         self.origins, self.origin_calls = {}, []
+        # Per (media, tmdbId): the article an item no Wikipedia links to borrows from the item it belongs to.
+        self.stand_ins, self.stand_in_calls = {}, []
         for target, stub in ((enrich.wikidata, "mapping"), (enrich.plot, "plot"), (enrich.wikidata, "wikipedias"),
                              (enrich.wikidata, "languages"), (enrich.wikidata, "kinds"),
                              (enrich.wikidata, "sources"), (enrich.wikidata, "origins"),
-                             (enrich.wikidata, "claimants"), (enrich.wikidata, "item_evidence")):
+                             (enrich.wikidata, "claimants"), (enrich.wikidata, "item_evidence"),
+                             (enrich.wikidata, "stand_ins")):
             patch = mock.patch.object(target, stub, getattr(self, stub + "_stub"))
             patch.start()
             self.addCleanup(patch.stop)
@@ -128,6 +131,10 @@ class Batch(unittest.TestCase):
     def origins_stub(self, ids, media, cache=None, excluded=None):
         self.origin_calls.append((media, sorted(ids)))
         return {i: self.origins[(media, i)] for i in ids if (media, i) in self.origins}
+
+    def stand_ins_stub(self, ids, media, cache=None, excluded=None):
+        self.stand_in_calls.append((media, sorted(ids)))
+        return {i: self.stand_ins[(media, i)] for i in ids if (media, i) in self.stand_ins}
 
     def claimants_stub(self, ids, media, cache=None):
         self.claimant_calls.append((media, sorted(ids)))
@@ -264,6 +271,26 @@ class Batch(unittest.TestCase):
         self.assertEqual((row["plotArticleRole"], row["plotArticle"], len(row["overview"])),
                          ("own", "Gen V", 668))
         self.assertNotIn(("The Boys (TV series)", "en"), self.plot_calls, "the source work is not even read")
+
+    def test_a_stub_with_no_article_reads_the_article_of_the_item_it_stands_in_for(self):
+        """One-Punch Man's series id sits on a zero-sitelink item; the article is on the franchise item
+        beside it. Only a title with no article of any kind is asked, and the article read is its own."""
+        self.mapping[("tv", 1)] = {"article": None, "articlesByLang": {}}
+        self.mapping[("tv", 2)] = {"article": "Two"}
+        self.mapping[("tv", 3)] = {"article": None, "articlesByLang": {"de": "Drei"}}
+        self.stand_ins[("tv", 1)] = "One-Punch Man"
+        self.stand_ins[("tv", 3)] = "Never"
+        self.plots[("One-Punch Man", "en")] = found("o" * 300, resolved="One-Punch Man")
+        self.run_batch([("tv", 1), ("tv", 2), ("tv", 3)])
+        row = self.rows()["tv:1"]
+        self.assertEqual((row["plotArticleRole"], row["plotArticle"], row["hasWikiPlot"]),
+                         ("own", "One-Punch Man", True))
+        self.assertEqual(self.stand_in_calls, [("tv", [1])])
+
+    def test_a_stub_nothing_stands_in_for_stays_without_an_article(self):
+        self.mapping[("tv", 1)] = {"article": None, "articlesByLang": {}}
+        self.run_batch([("tv", 1)])
+        self.assertEqual(self.rows()["tv:1"]["noPlotReason"], "noArticle")
 
     def test_an_own_other_language_plot_beats_the_source_work_too(self):
         """The source work is the last resort after EVERY own article, not after English: a title whose
@@ -958,6 +985,11 @@ class Batch(unittest.TestCase):
             {"processed": [], "judgedBelow": {"movie:1": {"on": self.DAY, "noPlot": "noArticle"}}}))
         _report, asked = self.weekly([("movie", 1)], self.later(15))
         self.assertEqual(asked, ["movie:1"], "no stamp, no trust")
+
+    def test_the_stub_stand_in_travels_with_its_plot_rules_bump(self):
+        """Titles on a stub item gained an article under rules 2; a verdict carried from rules 1 predates it."""
+        self.assertTrue(hasattr(enrich.wikidata, "stand_ins"))
+        self.assertGreaterEqual(enrich.PLOT_RULES, 2)
 
     def test_a_batch_that_admits_nothing_writes_no_batch_and_keeps_its_number(self):
         """Each refused attempt wrote a `batch-N.json` holding `[]` and moved the numbering on."""

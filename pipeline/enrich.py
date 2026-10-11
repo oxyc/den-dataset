@@ -214,7 +214,8 @@ CARRY_DAYS = 56
 #: BUMP IT whenever one of these changes: the choice of Wikidata item for a TMDB id (`lib/wikidata.py`
 #: resolve/choose), the plot headings (`lib/plot.py`), the other-language or source-work fallbacks in
 #: `reground`, or the section-length floor (`WIKI_PLOT_FLOOR`). Bumping re-asks every carried plotless title.
-PLOT_RULES = 1
+#: 2: a title on a stub item takes the article of the item it belongs to (`lib/wikidata.stand_ins`).
+PLOT_RULES = 2
 
 
 def no_plot(reason, today):
@@ -649,6 +650,12 @@ def candidates(titles, cache, excluded):
         mapped = wikidata.mapping(ids, media, plot.HEADINGS_BY_LANGUAGE, cache, excluded=excluded.get(media))
         works = wikidata.sources(sorted(i for i, found in mapped.items() if found.get("sourceArticle")),
                                  media, cache, excluded=excluded.get(media))
+        # An item no Wikipedia links to (a stub) is given the article of the item it belongs to, if it can be
+        # the same show (`lib/wikidata.STAND_IN_LINKS`). Asked only of the titles with no article to read.
+        bare = sorted(i for i, found in mapped.items()
+                      if not found.get("article") and not found.get("articlesByLang"))
+        for tmdb_id, article in wikidata.stand_ins(bare, media, cache, excluded=excluded.get(media)).items():
+            mapped[tmdb_id]["article"] = article
         for tmdb_id, found in mapped.items():
             facts[key(media, tmdb_id)] = dict(found, languages=spoken.get(tmdb_id, []),
                                               sourceWorks=works.get(tmdb_id, {}))
