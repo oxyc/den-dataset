@@ -735,6 +735,12 @@ class Held(unittest.TestCase):
         self.assertTrue(rows["movie:5"]["source"]["hasWikiPlot"],
                         "judged but unlabelled is not held: that is the gate's to refuse, not the join's to hide")
 
+    def test_a_title_classify_judged_about_another_work_ships_no_plot(self):
+        """Classified this run, the article judged another work's: no genres & moods, no vector, so no plot."""
+        write(self.shard, [combined(2), combined(3, answers={"validity": {"choice": "source-work"}})])
+        rows = self.rows()
+        self.assertEqual(rows["movie:3"]["source"], {"hasWikiPlot": False, "wikidataItem": "Q9", "heldForLabels": True})
+
     def test_the_report_counts_the_titles_it_held(self):
         done = subprocess.run(
             [sys.executable, SCRIPT, "--combined", self.shard, "--facts", self.facts,

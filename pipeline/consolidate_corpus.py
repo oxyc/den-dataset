@@ -454,6 +454,9 @@ PLOT_FIELDS = ("hasWikiPlot", "plotArticle", "plotLanguage", "plotRevId", "plotA
 #: The `source` field of a title held unclassified with no published source.
 HELD_MARK = "heldForLabels"
 
+#: The classify `validity` choice that says the article is about the requested work (genres_moods_enrich.VALID).
+VALID = "correct-screen-work"
+
 
 def held_source(published, enriched):
     """The `source` of a title nothing has classified: the published one, or — when the base never recorded
@@ -624,7 +627,11 @@ def main():
             # Nothing has classified this title: no shard this run, no genres & moods, no published judgement.
             unclassified = (key not in combined_rows and not row["labels"]
                             and not any((base.get(key) or {}).get(name) for name in BASE_COMBINED))
-            if unclassified:
+            # Classified this run, but classify judged the article about another work, so it has no genres &
+            # moods and no vector: the plot stays out with them (daily run 38310887363, two facts-only titles).
+            refused = (key in combined_rows and not row["labels"]
+                       and ((answers.get("validity") or {}).get("choice")) != VALID)
+            if unclassified or refused:
                 found = held_source((base.get(key) or {}).get("source"), source.get(key))
                 held += 1 if (source.get(key) or {}).get("hasWikiPlot") and not (found or {}).get("hasWikiPlot") \
                     else 0
