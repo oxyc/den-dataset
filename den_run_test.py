@@ -70,11 +70,12 @@ sys.path.insert(0, HERE)
 
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
-from pipeline import (artifacts, audit_combined, enrich, genres_moods, maturity_norway,
+from pipeline import (artifacts, audit_combined, enrich, genres_moods, maturity_italy, maturity_norway,
                       maturity_public, maturity_quebec, maturity_singapore, maturity_taiwan,
                       store)  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
-from pipeline.maturity_test import (payload as maturity_payload, quebec_payload as maturity_quebec_payload,
+from pipeline.maturity_test import (italy_csv as maturity_italy_csv,
+                                    payload as maturity_payload, quebec_payload as maturity_quebec_payload,
                                     source_row as maturity_source_row)  # noqa: E402
 from store import vector_blob  # noqa: E402
 
@@ -491,6 +492,19 @@ class Upstreams:
         if (host == maturity_quebec.HOST
                 and path == maturity_quebec.DOWNLOAD_PREFIX + "fixture.csv"):
             return maturity_quebec_payload()
+        if host == maturity_italy.HOST and path == maturity_italy.INDEX_PATH:
+            return b"".join(f'<a data-anno="{year}">'.encode() for year in range(2021, 2027))
+        if host == maturity_italy.HOST and path.startswith(maturity_italy.DOWNLOAD_PREFIX):
+            year = int(path.removeprefix(maturity_italy.DOWNLOAD_PREFIX).removesuffix(".csv"))
+            if year != 2021:
+                return maturity_italy_csv()
+            rows = [{"ID": str(number), "TITOLO": f"No fixture title {number}",
+                     "REGIA": "No fixture director", "MINUTAGGIO": "90",
+                     "CLASSIFICAZIONE": "Opera per tutti. Adatta a qualsiasi pubblico.",
+                     "NUMERO_CLASSIFICAZIONE": f"C{number:014d}", "SIGLA_SETTORE": "CLOP",
+                     "DATA_CLASSIFICAZIONE": "2026-01-01"}
+                    for number in range(1, maturity_italy.MIN_ROWS + 1)]
+            return maturity_italy_csv(rows)
         raise AssertionError(f"an upstream the fixture does not record was asked: {method} {host}{path}")
 
 
@@ -931,6 +945,7 @@ class DenRun(unittest.TestCase):
                                                 maturity_singapore.API_HOST,
                                                 maturity_singapore.DOWNLOAD_HOST,
                                                 maturity_quebec.HOST,
+                                                maturity_italy.HOST,
                                                 "en.wikipedia.org", "fr.wikipedia.org", "ja.wikipedia.org"})
 
 

@@ -2,7 +2,7 @@
 import dataclasses
 import os
 
-from . import (artifacts, maturity_kavi, maturity_kmrb, maturity_norway, maturity_public,
+from . import (artifacts, maturity_italy, maturity_kavi, maturity_kmrb, maturity_norway, maturity_public,
                maturity_quebec, maturity_singapore, maturity_taiwan)
 
 
@@ -51,6 +51,8 @@ PROVIDERS = (
              fetch=maturity_singapore.fetch),
     Provider(maturity_quebec.AUTHORITY, artifacts.MATURITY_QUEBEC, maturity_quebec.records,
              maturity_quebec.API, maturity_quebec.manifest_entry, fetch=maturity_quebec.fetch),
+    Provider(maturity_italy.AUTHORITY, artifacts.MATURITY_ITALY, maturity_italy.records,
+             maturity_italy.INDEX, maturity_italy.manifest_entry, fetch=maturity_italy.fetch),
     Provider("KAVI", artifacts.MATURITY_KAVI, maturity_kavi.records,
              maturity_kavi.API, maturity_kavi.manifest_entry, acquisition="local"),
 )
