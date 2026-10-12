@@ -242,9 +242,13 @@ class Run(Refresh):
         fresh = caches.pop()
         self.assertIsInstance(fresh, refresh.Fresh)
         key = self.cache.key("en.wikipedia.org/w/api.php", dict(refresh.wikipedia.PARSE_QUERY, page="Film 5"))
-        self.assertIsNone(fresh.read(key))
+        stale = os.path.getmtime(self.cache.path_for(key)) - refresh.FRESH_WINDOW - 1
+        os.utime(self.cache.path_for(key), (stale, stale))
+        self.assertIsNone(fresh.read(key), "a body from before the window is asked again")
         fresh.write("k" * 64, b"{}")
         self.assertEqual(self.cache.read("k" * 64), b"{}")
+        self.assertEqual(fresh.read("k" * 64), b"{}",
+                         "one written inside the window is today's answer: a retry of the day does not ask again")
         self.assertEqual({token for _a, _l, _c, token in self.plot_calls}, {None},
                          "the action API, which records a revision; Enterprise names none")
 

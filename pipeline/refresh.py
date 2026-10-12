@@ -44,6 +44,7 @@ import datetime
 import json
 import os
 import sys
+import time
 
 from lib import cache as caching, http, plot, wikidata, wikipedia
 
@@ -67,20 +68,32 @@ KEPT = ("tmdbId", "mediaType", "animated", "wikidataItem", "wikidataCandidates")
 UNCHANGED, MOVED, GONE, UNKNOWN = "unchanged", "moved", "gone", "unknown"
 
 
-class Fresh:
-    """A response cache with its reads switched off: every request is asked again, and its answer replaces
-    the body on disk, so a later reader of the same request sees the new answer too. The refresh re-reads
-    articles through it; the facts and doc-facts stages re-ask the change set's titles through it, since an
-    answer cached under the same query text is exactly the one being checked."""
+#: Seconds within which an answer on disk counts as asked now. Every body in the cache was written by a live
+#: request, so one written a few hours ago is the answer asking again would get. Without this a daily run that
+#: stopped late re-asked the whole weekly revisit slice on its retry — 27 of the facts stage's 57 minutes on
+#: 2026-10-12 — for answers its first attempt had fetched that morning.
+FRESH_WINDOW = 12 * 60 * 60
 
-    def __init__(self, cache):
-        self.cache = cache
+
+class Fresh:
+    """A response cache that answers only from bodies written in the last `FRESH_WINDOW`: anything older is
+    asked again, and its answer replaces the body on disk, so a later reader of the same request sees the new
+    answer too. The refresh re-reads articles through it; the facts and doc-facts stages re-ask the change
+    set's titles through it, since an answer cached under the same query text before today is exactly the one
+    being checked."""
+
+    def __init__(self, cache, window=FRESH_WINDOW, now=time.time):
+        self.cache, self.window, self.now = cache, window, now
 
     def key(self, path, query=None):
         return self.cache.key(path, query)
 
-    def read(self, _key):
-        return None
+    def read(self, key):
+        try:
+            written = os.path.getmtime(self.cache.path_for(key))
+        except OSError:
+            return None
+        return self.cache.read(key) if self.now() - written < self.window else None
 
     def write(self, key, body):
         self.cache.write(key, body)
