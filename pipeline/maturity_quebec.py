@@ -26,8 +26,19 @@ HEADERS = ("NO_FILM", "TITRE", "TITRE_FRANCAIS", "TITRE_ANGLAIS", "REALISATEUR1"
            "CLASSEMENT", "INDICATION_1", "INDICATION_2", "DATE_DECISION", "NO_FILM_1", "URL")
 
 
-def age(value):
-    return {"G": 0, "13": 13, "16": 16, "18": 18}.get(str(value or "").strip())
+def age(value, indications=()):
+    rating = str(value or "").strip()
+    restricted = {"13": 13, "16": 16, "18": 18}.get(rating)
+    if restricted is not None:
+        return restricted
+    if rating != "G":
+        return None
+    indications = {str(item or "").strip() for item in indications}
+    # General is an admission category, not evidence that the content suits children from birth.
+    # DEC means "not recommended for young children" (under eight); ENF explicitly means children.
+    if "DEC" in indications:
+        return 8
+    return 0 if "ENF" in indications else None
 
 
 def _title_variants(value):
@@ -74,10 +85,13 @@ def records(payload):
         titles = list(dict.fromkeys(titles))
         directors = [_director(row[key]) for key in ("REALISATEUR1", "REALISATEUR2", "REALISATEUR3")]
         rating = row["CLASSEMENT"].strip()
+        indications = [row[key].strip() for key in ("INDICATION_1", "INDICATION_2")
+                       if row[key].strip()]
         year = row["ANNEE"].strip()
         yield {"authority": AUTHORITY, "authorityId": authority_id, "titles": titles,
                "directors": "; ".join(value for value in directors if value),
-               "year": int(year) if year.isdigit() else None, "raw": rating, "age": age(rating),
+               "year": int(year) if year.isdigit() else None,
+               "raw": " / ".join([rating, *indications]), "age": age(rating, indications),
                "assessed": row["DATE_DECISION"].strip(), "runtimeMinutes": None,
                "matchedBy": "exact-title+year+director"}
 
