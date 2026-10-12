@@ -281,13 +281,117 @@ class Batch(unittest.TestCase):
         """What the fallback is for: an adaptation whose article is cast and episode tables. Below the floor
         counts as none — 80 characters of its own lose to the novel."""
         self.mapping.update({("tv", 1): {"article": "Bare", "sourceArticle": "Book"},
-                             ("tv", 2): {"article": "Stub", "sourceArticle": "Book"}})
+                             ("tv", 2): {"article": "Stub", "sourceArticle": "Other Book"}})
         self.plots[("Stub", "en")] = found("s" * 80, resolved="Stub")
         self.plots[("Book", "en")] = found("b" * 900, resolved="Book")
+        self.plots[("Other Book", "en")] = found("o" * 900, resolved="Other Book")
         self.run_batch([("tv", 1), ("tv", 2)])
         rows = self.rows()
         self.assertEqual([(rows[k]["plotArticleRole"], rows[k]["plotArticle"]) for k in ("tv:1", "tv:2")],
-                         [("source-work", "Book")] * 2)
+                         [("source-work", "Book"), ("source-work", "Other Book")])
+
+    # -- a source work is read for one title ---------------------------------------------------------
+
+    def seed(self, *grounded):
+        """A published baseline: one batch of titles already grounded, `(media, id, article, role)` each."""
+        rows = [{"tmdbId": tmdb_id, "mediaType": media, "hasWikiPlot": True, "plotArticle": article,
+                 "plotLanguage": "en", "plotArticleRole": role, "plotArticleRedirected": False}
+                for media, tmdb_id, article, role in grounded]
+        os.makedirs(os.path.join(self.out, "enriched"))
+        put(enrich.batch_path(self.out, 5), enrich.swift_json(rows))
+        put(enrich.checkpoint_path(self.out), enrich.compact(
+            {"nextBatch": 6, "processed": [enrich.key(m, i) for m, i, _a, _r in grounded], "totals": {},
+             "judgedBelow": {}}))
+
+    def test_a_source_work_a_published_title_holds_is_not_taken_again(self):
+        """movie:333 falls back to the novel because its own page is a stub, and movie:311056 already ships
+        on it. Two adaptations on one novel's text are described by a story only one of them tells."""
+        self.seed(("movie", 311056, "Novel", "source-work"))
+        self.mapping[("movie", 333)] = {"article": "Stub", "sourceArticle": "Novel"}
+        self.plots[("Stub", "en")] = found("s" * 80, resolved="Stub")
+        self.plots[("Novel", "en")] = found("n" * 900, resolved="Novel")
+        report = self.run_batch([("movie", 333)])
+        row = self.rows(6)["movie:333"]
+        self.assertEqual((row["hasWikiPlot"], row["noPlotReason"], row["overview"]), (False, "sourceTaken", ""))
+        self.assertEqual([name for name in row if name.startswith("plot") and name != "plotSections"], [])
+        self.assertEqual(report["sourceTaken"], 1)
+        with open(os.path.join(self.out, "enrich-log.txt")) as log:
+            self.assertIn("plot-source-taken id=movie:333", log.read())
+
+    def test_a_source_work_a_published_title_owns_is_not_taken_either(self):
+        """The novel's own page may well be a published title's own article (a book that was filmed)."""
+        self.seed(("movie", 7, "Novel", "own"))
+        self.mapping[("movie", 333)] = {"sourceArticle": "Novel"}
+        self.plots[("Novel", "en")] = found("n" * 900, resolved="Novel")
+        self.run_batch([("movie", 333)])
+        self.assertEqual(self.rows(6)["movie:333"]["noPlotReason"], "sourceTaken")
+
+    def test_a_source_work_nobody_holds_still_grounds_a_title(self):
+        self.seed(("movie", 311056, "Other novel", "source-work"))
+        self.mapping[("movie", 333)] = {"sourceArticle": "Novel"}
+        self.plots[("Novel", "en")] = found("n" * 900, resolved="Novel")
+        self.run_batch([("movie", 333)])
+        self.assertEqual(self.rows(6)["movie:333"]["plotArticle"], "Novel")
+
+    def test_the_article_is_taken_in_its_own_language(self):
+        """`Novel` on the German wiki is another page than `Novel` on the English one."""
+        self.seed(("movie", 7, "Novel", "own"))
+        put(enrich.batch_path(self.out, 5), enrich.swift_json(
+            [{"tmdbId": 7, "mediaType": "movie", "hasWikiPlot": True, "plotArticle": "Novel", "plotLanguage": "de"}]))
+        self.mapping[("movie", 333)] = {"sourceArticle": "Novel"}
+        self.plots[("Novel", "en")] = found("n" * 900, resolved="Novel")
+        self.run_batch([("movie", 333)])
+        self.assertEqual(self.rows(6)["movie:333"]["plotArticle"], "Novel")
+
+    def test_two_new_titles_on_one_source_work_leave_it_to_the_lowest_key(self):
+        """Neither is more entitled to the novel than the other, so the order every list of keys reads in
+        decides — and a series sorts after a movie."""
+        self.mapping.update({("tv", 5): {"sourceArticle": "Novel"}, ("movie", 20): {"sourceArticle": "Novel"},
+                             ("movie", 9): {"sourceArticle": "Novel"}})
+        self.plots[("Novel", "en")] = found("n" * 900, resolved="Novel")
+        report = self.run_batch([("tv", 5), ("movie", 20), ("movie", 9)])
+        rows = self.rows()
+        self.assertEqual({k: (r["hasWikiPlot"], r.get("noPlotReason")) for k, r in rows.items()},
+                         {"movie:9": (True, None), "movie:20": (False, "sourceTaken"),
+                          "tv:5": (False, "sourceTaken")})
+        self.assertEqual(report["sourceTaken"], 2)
+
+    def test_a_source_work_a_new_title_holds_by_its_own_article_is_not_taken(self):
+        """The novel is also a title's own page: that title keeps it whatever its key, and the adaptation
+        that fell back to it goes without."""
+        self.mapping.update({("movie", 1): {"sourceArticle": "Novel"}, ("movie", 9): {"article": "Novel"}})
+        self.plots[("Novel", "en")] = found("n" * 900, resolved="Novel")
+        self.run_batch([("movie", 1), ("movie", 9)])
+        rows = self.rows()
+        self.assertEqual((rows["movie:9"]["plotArticleRole"], rows["movie:1"]["noPlotReason"]), ("own", "sourceTaken"))
+
+    def test_the_next_batch_finds_the_page_the_one_before_took(self):
+        self.mapping.update({("movie", 1): {"sourceArticle": "Novel"}, ("movie", 2): {"sourceArticle": "Novel"}})
+        self.plots[("Novel", "en")] = found("n" * 900, resolved="Novel")
+        self.run_batch([("movie", 1)])
+        self.run_batch([("movie", 1), ("movie", 2)])
+        self.assertEqual((self.rows(1)["movie:1"]["plotArticle"], self.rows(2)["movie:2"]["noPlotReason"]),
+                         ("Novel", "sourceTaken"))
+
+    def test_a_published_title_keeps_the_source_work_it_ships_on(self):
+        """The rule is for titles that do not ship yet. A re-fetch of one that does withdraws nothing."""
+        self.seed(("movie", 1, "Novel", "source-work"), ("movie", 2, "Novel", "source-work"))
+        put(enrich.checkpoint_path(self.out), enrich.compact(
+            {"nextBatch": 6, "processed": [], "totals": {}, "judgedBelow": {}}))
+        self.mapping[("movie", 2)] = {"sourceArticle": "Novel"}
+        self.plots[("Novel", "en")] = found("n" * 900, resolved="Novel")
+        self.run_batch([("movie", 2)])
+        self.assertEqual(self.rows(6)["movie:2"]["plotArticle"], "Novel")
+
+    def test_a_batch_that_cannot_say_what_is_taken_is_refused(self):
+        os.makedirs(os.path.join(self.out, "enriched"))
+        put(enrich.batch_path(self.out, 1), "{not json")
+        put(enrich.checkpoint_path(self.out), enrich.compact(
+            {"nextBatch": 2, "processed": [], "totals": {}, "judgedBelow": {}}))
+        self.mapping[("movie", 3)] = {"sourceArticle": "Novel"}
+        self.plots[("Novel", "en")] = found("n" * 900, resolved="Novel")
+        with self.assertRaises(StageError):
+            self.run_batch([("movie", 3)])
 
     def test_a_source_work_that_redirects_is_not_read_as_one(self):
         """A P144 sitelink that lands elsewhere is not the work either: `La noia` landed on the article about

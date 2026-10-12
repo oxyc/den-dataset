@@ -53,8 +53,10 @@ about.
 
 **One Wikidata item behind several TMDB ids is exempt** — 31 titles are in that position (`Don't Hug Me I'm
 Scared` 1-5 are a single item; `Carlos` is in TMDB as a movie and a series), so the invariant could never
-reach zero with them in it. The identity is `imdbId` (P345), which lives in the facts file, so the
-exemption needs `--facts`.
+reach zero with them in it. The identity is `imdbId` (P345), read from the facts file with `--facts` or, with
+`--corpus` (which a publish passes), from the corpus rows' facts, which state it for every title the store
+ships. Only a group whose members ALL state one and the same identity is exempt, so two works sharing an
+article are still counted, and so is a group with a member that states none.
 
 The cause was the source-work fallback in the enrich pass as the Swift `regroundOnWikipedia` wrote it, which
 grounded the shipped generation: it tried the title's own article, then the Wikidata P144 source work, and
@@ -148,8 +150,10 @@ records it as `maxBatchId`.
 `--facts` does two things at once, which is worth knowing before adding it to a publish. It SCOPES the
 census to the shipped keys — 8,949 of the 47,529 grounded titles never shipped — and it supplies the
 `imdbId` the one-item exemption needs. Measured on the current generation: 1,066 with neither, 1,043 with
-the exemption alone at full scope, 407 with both. The publish gate does not pass it today, so its baseline
-is the unscoped, unexempted count.
+the exemption alone at full scope, 407 with both. The publish gate does not pass it. It scopes by the store
+(`--store`) and takes the exemption from the corpus (`--corpus`), so the stamped baseline counts what ships
+with one work behind several TMDB ids set aside; a baseline stamped before that was higher by those titles,
+which only ever makes the next comparison looser by them.
 
 Exit codes: 0 fine (or a standing violation, warned) · 1 `--fail` and a standing violation · 2 the
 shared-article count REGRESSED against `--shared-plot-baseline` · 3 a title the store ships has a plot and
@@ -219,13 +223,18 @@ def store_plot_vectors(path):
     return {unpack_key(k): bool(h) for k, h in zip(keys, has)}
 
 
-def corpus_plot_claims(path):
-    """`key -> bool` for every corpus row that records a source: whether that row says it has a Wikipedia plot.
+def read_corpus(path):
+    """`(claims, identities)` from one pass over the corpus.
 
-    The corpus is what the store is built from, and its `source` is what the next day's change set reads, so
-    it is the shipped row's own claim. A row with no `source` is absent here, not False: nothing was recorded
-    and the caller keeps what the enriched tree says."""
-    claims = {}
+    `claims` is `key -> bool` for every row that records a source: whether that row says it has a Wikipedia
+    plot. The corpus is what the store is built from, and its `source` is what the next day's change set
+    reads, so it is the shipped row's own claim. A row with no `source` is absent here, not False: nothing
+    was recorded and the caller keeps what the enriched tree says.
+
+    `identities` is `key -> Wikidata identity` (`identity`) of every row whose facts state one. The census
+    needs it to tell one work behind two TMDB ids from two works on one article, and the corpus is the one
+    place every shipped title's identity is, new titles included."""
+    claims, identities = {}, {}
     opener = gzip.open if path.endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8") as fh:
         for line in fh:
@@ -233,7 +242,10 @@ def corpus_plot_claims(path):
                 row = json.loads(line)
                 if isinstance(row.get("source"), dict):
                     claims[row["key"]] = bool(row["source"].get("hasWikiPlot"))
-    return claims
+                found = identity(row.get("facts") or {})
+                if found:
+                    identities[row["key"]] = found
+    return claims, identities
 
 
 def plot_without_vector(has_plot, shipped, claims=None):
@@ -349,19 +361,30 @@ def shared_plot_articles(grounded, same_item=None):
             if len(keys) > 1 and not one_item(keys)}
 
 
-def wikidata_identity(facts_records):
-    """`key -> imdbId` from a facts record list. `imdbId` is P345, one per Wikidata item.
+def identity(facts):
+    """The Wikidata identity one facts record states: its `imdbId` (P345, one per Wikidata item), else the
+    item id itself where the record kept one, else None.
 
-    Ships as `one_or_many` (check_facts_schema.py): a bare string for nearly every title, a list where
-    Wikidata carries more than one. Both shapes read the same here.
+    `imdbId` ships as `one_or_many` (check_facts_schema.py): a bare string for nearly every title, a list
+    where Wikidata carries more than one, which reads as its sorted members joined. The two namespaces cannot
+    collide (`tt…` and `Q…`), so a pair stating one each is never taken for the same item.
     """
+    imdb = facts.get("imdbId")
+    if isinstance(imdb, list):
+        # An item can state several P345 values (Annabelle Serpentine Dance has two): the ids a pair of TMDB
+        # ids state together are the item's identity, whatever order they are listed in.
+        imdb = ",".join(sorted(str(value) for value in imdb if value))
+    item = facts.get("wikidataItem")
+    return imdb or (item if isinstance(item, str) and item else None)
+
+
+def wikidata_identity(facts_records):
+    """`key -> identity` from a facts record list."""
     out = {}
     for rec in facts_records:
-        imdb = rec.get("imdbId")
-        if isinstance(imdb, list):
-            imdb = imdb[0] if len(imdb) == 1 else None
-        if imdb:
-            out[f"{rec['mediaType']}:{rec['tmdbId']}"] = imdb
+        found = identity(rec)
+        if found:
+            out[f"{rec['mediaType']}:{rec['tmdbId']}"] = found
     return out
 
 
@@ -474,11 +497,15 @@ def main():
             return 3
         if args.corpus:
             try:
-                claims = corpus_plot_claims(args.corpus)
+                claims, identities = read_corpus(args.corpus)
             except (OSError, ValueError, KeyError) as err:
                 print(f"\nerror: plot-vector gate: {args.corpus} cannot be read ({err}). Nothing can say "
                       f"which titles the store ships with a plot.", file=sys.stderr)
                 return 3
+            # One Wikidata item behind several TMDB ids is one work. `--facts` states the identities when it
+            # is given; a publish passes the corpus instead, which carries every shipped title's.
+            if same_item is None:
+                same_item = identities
 
     def ships(key):
         return shipped is None or (key in shipped and (claims is None or claims.get(key, True)))

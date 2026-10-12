@@ -596,6 +596,59 @@ class ShippedCensus(unittest.TestCase):
             with open(meta, encoding="utf-8") as fh:
                 self.assertEqual(json.load(fh)["sharedPlotArticleTitles"], 2)
 
+    # One work behind two TMDB ids (Spartacus Q1247476 as tv:49258 and movie:32528; Annabelle's Serpentine
+    # Dance Q3479889 as movie:144410 and movie:194179). The publish passes no facts file, so the corpus rows
+    # the store is built from state the identity.
+
+    @staticmethod
+    def shipped_row(key, imdb=None, item=None):
+        facts = {name: value for name, value in (("imdbId", imdb), ("wikidataItem", item)) if value}
+        return {"key": key, "source": {"hasWikiPlot": True}, "facts": facts}
+
+    def test_one_work_behind_two_tmdb_ids_is_not_a_shared_article(self):
+        rows = {1: [borrower(1), borrower(2)]}
+        code, out, err = self.gate(rows, {"movie:1": True, "movie:2": True},
+                                   [self.shipped_row("movie:1", "tt0361240"), self.shipped_row("movie:2", "tt0361240")],
+                                   baseline="0")
+        self.assertEqual(code, 0, err)
+        self.assertIn("another title : 0", out)
+
+    def test_an_item_stating_two_imdb_ids_is_one_work_in_either_order(self):
+        """Annabelle Serpentine Dance (Q3479889) states two P345 values, and both TMDB ids carry both."""
+        rows = {1: [borrower(1), borrower(2)]}
+        shipped = [self.shipped_row("movie:1"), self.shipped_row("movie:2")]
+        shipped[0]["facts"]["imdbId"] = ["tt0154152", "tt0203883"]
+        shipped[1]["facts"]["imdbId"] = ["tt0203883", "tt0154152"]
+        code, out, err = self.gate(rows, {"movie:1": True, "movie:2": True}, shipped, baseline="0")
+        self.assertEqual(code, 0, err)
+        self.assertIn("another title : 0", out)
+
+    def test_the_item_id_stands_in_where_a_row_states_no_imdb_id(self):
+        rows = {1: [borrower(1), borrower(2)]}
+        code, out, err = self.gate(rows, {"movie:1": True, "movie:2": True},
+                                   [self.shipped_row("movie:1", item="Q3479889"),
+                                    self.shipped_row("movie:2", item="Q3479889")], baseline="0")
+        self.assertEqual(code, 0, err)
+        self.assertIn("another title : 0", out)
+
+    def test_two_works_on_one_article_are_still_refused(self):
+        """Bonn: a different series per item, on one article."""
+        rows = {1: [borrower(1), borrower(2)]}
+        code, out, _ = self.gate(rows, {"movie:1": True, "movie:2": True},
+                                 [self.shipped_row("movie:1", "tt0090400"), self.shipped_row("movie:2", "tt9999999")],
+                                 baseline="0")
+        self.assertEqual(code, 2)
+        self.assertIn("another title : 2", out)
+
+    def test_a_title_whose_row_states_no_identity_does_not_exempt_the_group(self):
+        """A missing fact is not evidence of sameness."""
+        rows = {1: [borrower(1), borrower(2)]}
+        code, out, _ = self.gate(rows, {"movie:1": True, "movie:2": True},
+                                 [self.shipped_row("movie:1", "tt0361240"), self.shipped_row("movie:2")],
+                                 baseline="0")
+        self.assertEqual(code, 2)
+        self.assertIn("another title : 2", out)
+
 
 if __name__ == "__main__":
     unittest.main()
