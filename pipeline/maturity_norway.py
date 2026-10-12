@@ -17,6 +17,8 @@ LICENSE = "https://lovdata.no/lov/2006-05-19-16/%C2%A77"
 XML = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 HEADERS = ("Tittel", "Originaltittel", "Vurdert dato", "Aldersgrense", "Begrunnelse", "Distributør",
            "Regissør", "Prod.år", "Prod.land", "Lengde", "Handling", "Annen info")
+UNSCREENED_REASON = ("filmen er ikke forhåndskontrollert og skal derfor vises med 18-årsgrense. "
+                     "distributør og den som viser filmen")
 
 
 def _normalized(value):
@@ -84,13 +86,18 @@ def records(payload):
         raise StageError(f"maturity: Medietilsynet columns changed: {header!r}")
     for number, row in enumerate(rows, 2):
         row += [None] * (len(HEADERS) - len(row))
-        title, original, assessed, rating, _reason, _distributor, director, year, country, runtime = row[:10]
+        title, original, assessed, rating, reason, _distributor, director, year, country, runtime = row[:10]
         identity = "\x1f".join(str(value or "") for value in
                                (title, original, assessed, rating, director, year, runtime))
+        parsed_age = age(rating)
+        # Some distributors skipped advance review. Norway recorded the resulting legal default as 18,
+        # explicitly saying the film was not screened; it is not a content assessment for a child profile.
+        if parsed_age == 18 and (_normalized(reason) or "").startswith(UNSCREENED_REASON):
+            parsed_age = None
         yield {"authority": "Medietilsynet",
                "authorityId": "xlsx:" + hashlib.sha256(identity.encode()).hexdigest()[:20],
                "row": number, "titles": [value for value in (title, original) if _normalized(value)],
-               "assessed": assessed, "raw": rating, "age": age(rating), "directors": director,
+               "assessed": assessed, "raw": rating, "age": parsed_age, "directors": director,
                "year": _integer(year), "country": country, "runtimeMinutes": _integer(runtime),
                "matchedBy": "exact-title+year+director"}
 

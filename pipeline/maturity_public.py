@@ -65,7 +65,10 @@ def cnc_age(value):
         ages.append(18)
     if ages:
         return max(age for age in ages if 0 <= age <= 18)
-    return 0 if folded == "toutpublic" else None
+    # The bulk export's unrestricted decision can lag later court or ministerial reclassification. Known
+    # examples include Antichrist, Love and Saw 3D, whose export rows still say Tout public while the live
+    # CNC register says 18. An explicit restriction is safe; an unrestricted export row stays unknown.
+    return None
 
 
 def cnc_records(payload):
