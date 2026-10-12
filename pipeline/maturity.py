@@ -19,7 +19,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from lib import cache, http
-from . import artifacts, finalize, maturity_kavi, maturity_public
+from . import artifacts, finalize, maturity_kavi, maturity_kmrb, maturity_public
 from .contract import StageError, UpstreamError
 
 NAME = "maturity"
@@ -29,6 +29,7 @@ PUBLISHES = False
 SPENDS = False
 INPUTS = (artifacts.MANIFEST, artifacts.FACTS, artifacts.MATURITY_KAVI)
 OUTPUTS = (artifacts.MATURITY_NORWAY, artifacts.MATURITY_CNC, artifacts.MATURITY_BRAZIL,
+           artifacts.MATURITY_KMRB,
            artifacts.MATURITY_SOURCES, artifacts.MATURITY)
 
 NORWAY_HOST = "www.medietilsynet.no"
@@ -184,6 +185,9 @@ def link_records(source_records, facts_blob):
             counts["unknownRatingRows"] += 1
             continue
         counts["ratedRows"] += 1
+        if not source.get("authorityId"):
+            counts["missingIdentityRows"] += 1
+            continue
         title_keys = {(title, source["year"]) for raw in source["titles"] if (title := normalized(raw))}
         candidates = set().union(*(index.get(pair, set()) for pair in title_keys)) if title_keys else set()
         directors = _director_parts(source["directors"])
@@ -304,7 +308,8 @@ def _source_snapshot(fetcher, parser, authority, default_url, stamp, store=None,
     return snapshot, None
 
 
-def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None, snapshot_cache=None):
+def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, fetch_kmrb=None,
+        now=None, snapshot_cache=None):
     try:
         version = finalize.manifest_version(ctx)
     except StageError as refusal:
@@ -315,7 +320,8 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None, sn
     stamp = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(datetime.timezone.utc).isoformat()
     # Tests inject their fetchers and are hermetic by default. The real stage uses the persisted Actions
     # response-cache directory added in #233; callers can inject a temporary store to exercise fallback.
-    if snapshot_cache is None and fetch is fetch_norway and fetch_cnc is None and fetch_brazil is None:
+    if (snapshot_cache is None and fetch is fetch_norway and fetch_cnc is None
+            and fetch_brazil is None and fetch_kmrb is None):
         snapshot_cache = cache.configured(SOURCE_CACHE_NAMESPACE, SOURCE_CACHE_DAYS)
     try:
         norway_snapshot, _ = _source_snapshot(fetch, norway_records, "Medietilsynet", NORWAY_URL, stamp,
@@ -328,9 +334,12 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None, sn
     brazil_snapshot, brazil_failure = _source_snapshot(
         fetch_brazil or maturity_public.fetch_brazil, maturity_public.brazil_records, "ClassInd",
         maturity_public.BRAZIL_PAGE, stamp, snapshot_cache)
+    kmrb_snapshot, kmrb_failure = maturity_kmrb.optional_snapshot(
+        _source_snapshot, stamp, snapshot_cache, fetch_kmrb)
     norway = norway_snapshot["payload"]
     cnc = cnc_snapshot["payload"] if cnc_snapshot else None
     brazil = brazil_snapshot["payload"] if brazil_snapshot else None
+    kmrb = kmrb_snapshot["payload"] if kmrb_snapshot else None
     kavi_path = ctx.path(artifacts.MATURITY_KAVI)
     kavi = None
     if os.path.exists(kavi_path):
@@ -339,6 +348,7 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None, sn
     snapshots = [(artifacts.MATURITY_NORWAY, norway)]
     snapshots += [(artifacts.MATURITY_CNC, cnc)] if cnc is not None else []
     snapshots += [(artifacts.MATURITY_BRAZIL, brazil)] if brazil is not None else []
+    snapshots += [(artifacts.MATURITY_KMRB, kmrb)] if kmrb is not None else []
     for artifact, payload in snapshots:
         raw_path = ctx.path(artifact)
         os.makedirs(os.path.dirname(raw_path), exist_ok=True)
@@ -366,27 +376,31 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None, sn
          "retrievedAt": brazil_snapshot["retrievedAt"], "sha256": maturity_public.digest(brazil),
          "bytes": len(brazil), "scope": scope, **({"fallbackAfter": brazil_snapshot["fallbackAfter"]}
                                                    if brazil_snapshot.get("fallbackAfter") else {})})
+    if kmrb is not None:
+        sources.append(maturity_kmrb.manifest_entry(kmrb_snapshot, scope))
     if kavi is not None:
         retrieved = datetime.datetime.fromtimestamp(os.stat(kavi_path).st_mtime, datetime.timezone.utc).isoformat()
         sources.append({"authority": "KAVI", "dataset": "IKLU movie classifications",
                         "sourceUrl": maturity_kavi.API, "landingPage": maturity_kavi.GUIDE,
                         "reuseBasis": maturity_kavi.GUIDE, "retrievedAt": retrieved,
                         "sha256": hashlib.sha256(kavi).hexdigest(), "bytes": len(kavi), "scope": scope})
-    failures = [row for row in (cnc_failure, brazil_failure) if row]
+    failures = [row for row in (cnc_failure, brazil_failure, kmrb_failure) if row]
     _write_json(ctx.path(artifacts.MATURITY_SOURCES),
                 {"schema": 1, "sources": sources, "unavailable": failures})
     norway_linked, norway_audit = link_records(norway_snapshot["rows"], facts)
     cnc_linked, cnc_audit = link_records(cnc_snapshot["rows"] if cnc_snapshot else (), facts)
     brazil_linked, brazil_audit = link_records(brazil_snapshot["rows"] if brazil_snapshot else (), facts)
+    kmrb_linked, kmrb_audit = link_records(kmrb_snapshot["rows"] if kmrb_snapshot else (), facts)
     kavi_linked, kavi_audit = link_records(maturity_kavi.records(kavi) if kavi is not None else (), facts)
-    records, conflicts = combine((norway_linked, cnc_linked, brazil_linked, kavi_linked))
+    records, conflicts = combine((norway_linked, cnc_linked, brazil_linked, kmrb_linked, kavi_linked))
     out = {"schema": 1, "datasetVersion": version, "records": records,
            "derivation": {"rule": "highest verified age across authorities; exact identity only",
                           "sourceSha256": {row["authority"]: row["sha256"] for row in sources},
                           "audit": {"Medietilsynet": norway_audit, "CNC": cnc_audit,
-                                    "ClassInd": brazil_audit, "KAVI": kavi_audit, "unavailable": failures,
+                                    "ClassInd": brazil_audit, "KMRB": kmrb_audit, "KAVI": kavi_audit,
+                                    "unavailable": failures,
                                     "crossAuthorityConflicts": conflicts}}}
     _write_json(ctx.path(artifacts.MATURITY), out)
     return (f"{ctx.path(artifacts.MATURITY)} — {len(records):,} titles; "
-            f"{sum(a['ambiguousRows'] for a in (norway_audit, cnc_audit, brazil_audit, kavi_audit)):,} ambiguous, "
+            f"{sum(a['ambiguousRows'] for a in (norway_audit, cnc_audit, brazil_audit, kmrb_audit, kavi_audit)):,} ambiguous, "
             f"{len(conflicts):,} cross-authority conflicts")
