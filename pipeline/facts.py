@@ -653,7 +653,7 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, again=fr
     types = {kind: [i for i in ids if f"{kind}:{i}" not in again] for kind, ids in types.items()}
     skipped = scrape_batches(fields, types, cache, pace, lambda: save(fields_path, fields), resolved, excluded)
     if any(fresh.values()):
-        skipped += scrape_batches(fields, fresh, refresh.Fresh(cache) if cache is not None else None, pace,
+        skipped += scrape_batches(fields, fresh, refresh.Fresh(cache, refresh.FRESH_WINDOW) if cache is not None else None, pace,
                                   lambda: save(fields_path, fields), resolved, excluded)
     refresh_collapsed_franchises(fields, cache, lambda: save(fields_path, fields), excluded)
     backfill_properties(fields, cache, lambda: save(fields_path, fields), pace, excluded)
