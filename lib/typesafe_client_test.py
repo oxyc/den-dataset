@@ -39,8 +39,11 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body[:len(body) // 2])
             self.close_connection = True
             return
+        refusal = {"error": "no"}
+        if isinstance(step, dict):
+            step, refusal = step["status"], step["body"]
         status, headers = step if isinstance(step, tuple) else (step, {})
-        body = json.dumps(PAYLOAD if status == 200 else {"error": "no"}).encode()
+        body = json.dumps(PAYLOAD if status == 200 else refusal).encode()
         self.send_response(status)
         for name, value in headers.items():
             self.send_header(name, value)
@@ -101,6 +104,19 @@ class ClientTransportTests(unittest.TestCase):
             self.ask()
         self.assertEqual(len(self.server.requests), 1)
         self.sleeps.assert_not_called()
+
+    def test_a_request_over_the_token_limit_is_named_and_not_retried(self):
+        self.server.script = [{"status": 400, "body": {"detail": {"error_type": "max_tokens_exceeded"}}}]
+        with self.assertRaisesRegex(typesafe_client.TokenLimitExceeded, "max_tokens_exceeded"):
+            self.ask()
+        self.assertEqual(len(self.server.requests), 1)
+        self.sleeps.assert_not_called()
+
+    def test_any_other_400_is_still_the_plain_error(self):
+        self.server.script = [{"status": 400, "body": {"detail": {"error_type": "something_else"}}}]
+        with self.assertRaises(typesafe_client.TypeSafeError) as caught:
+            self.ask()
+        self.assertNotIsInstance(caught.exception, typesafe_client.TokenLimitExceeded)
 
     def test_retry_after_is_obeyed(self):
         self.server.script = [(429, {"Retry-After": "7"}), (529, {})]

@@ -109,6 +109,20 @@ class Rules(unittest.TestCase):
         self.assertEqual((out.read("new.txt"), out.read("keys.txt")), (["movie:4"], ["movie:4"]))
         self.assertEqual(changes.listed(context, "new"), {"movie:4"})
 
+    def test_a_title_held_for_its_size_is_counted_apart_from_one_held_for_spend(self):
+        out = Batches(self)
+        out.publish(out.add(row(1)))
+        out.add(row(2), row(3), row(4))
+        out.plan()
+        context = Context(out_dir=out.out)
+        changes.hold(context, ["movie:3"])
+        changes.hold(context, ["movie:2"], "heldForSize")
+        plan = out.read("plan.json")
+        self.assertEqual((plan["added"], plan["heldForSpend"], plan["heldForSize"]),
+                         (["movie:4"], ["movie:3"], ["movie:2"]))
+        self.assertEqual((plan["counts"]["heldForSpend"], plan["counts"]["heldForSize"]), (1, 1))
+        self.assertEqual(changes.listed(context, "new"), {"movie:4"})
+
     def test_the_absolute_snapshot_identity_does_not_chain_the_live_version(self):
         out = Batches(self)
         through = out.add(row(1), row(2))

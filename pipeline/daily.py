@@ -480,6 +480,7 @@ def report(day, ready, why, tokens):
         "counts": plan.get("counts"), "added": plan.get("added", []),
         "addedPlotless": plan.get("addedPlotless", []), "changed": plan.get("changed", {}),
         "heldForSpend": len(plan.get("heldForSpend") or []),
+        "heldForSize": len(plan.get("heldForSize") or []),
         "withdrawn": plan.get("withdrawn", {}), "revisit": plan.get("revisit"),
         "seeded": getattr(day, "seeded", None), "ran": day.ran, "skipped": day.skipped,
         "migrationBoundary": boundary,
@@ -501,6 +502,9 @@ def report(day, ready, why, tokens):
     if out["heldForSpend"]:
         lines += [f"- genres & moods: {out['heldForSpend']} new title(s) held for a later day, past what the "
                   f"TypeSafe budget buys in one", ""]
+    if out["heldForSize"]:
+        lines += [f"- classify: {out['heldForSize']} new title(s) held, their article is too large for any one "
+                  f"Jev request ({', '.join(plan['heldForSize'][:20])})", ""]
     if out["fanPicks"]:
         lines += [f"- fan picks: {out['fanPicks']['asked']} asked, {out['fanPicks']['answered']} answered, "
                   f"{out['fanPicks']['emptyAnswers']} empty, "

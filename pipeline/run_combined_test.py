@@ -206,6 +206,32 @@ class SectionTests(unittest.TestCase):
         self.assertEqual(set(seen), {s["id"] for s in sections})
 
 
+    def test_a_japanese_article_under_the_character_ceiling_is_split_by_tokens(self):
+        """tv:36408 was 36k characters, a third of the 110k ceiling, and ~40k tokens against a 32k limit."""
+        rec = record("あ" * 8000 + "\n\n== Plot ==\n" + "い" * 20000 + "\n\n== Reception ==\n" + "う" * 8000)
+        sections = article_sections.parse_sections(rec["text"], rec["plotSections"])
+        ceiling = article_sections.MAX_STATE_TOKENS
+        self.assertFalse(article_sections.is_oversized(rec, sections, 110_000))
+        self.assertTrue(article_sections.is_oversized(rec, sections, 110_000, ceiling))
+        groups = article_sections.section_groups(rec, sections, 110_000, ceiling)
+        self.assertGreater(len(groups), 1)
+        for group in groups:
+            self.assertLessEqual(article_sections.estimated_tokens(article_sections.state_for(rec, group)),
+                                 ceiling)
+
+    def test_an_english_article_is_not_split_below_the_character_ceiling_it_always_had(self):
+        rec = record("Lead.\n\n== Plot ==\n" + "word " * 14000)  # 70k characters, ~24k tokens
+        sections = article_sections.parse_sections(rec["text"], rec["plotSections"])
+        self.assertFalse(article_sections.is_oversized(rec, sections, 110_000, article_sections.MAX_STATE_TOKENS))
+
+    def test_a_section_no_request_can_carry_is_its_own_error(self):
+        rec = record("Lead.\n\n== Plot ==\n" + "い" * 40000)
+        sections = article_sections.parse_sections(rec["text"], rec["plotSections"])
+        with self.assertRaises(article_sections.SectionTooLarge):
+            article_sections.section_groups(rec, sections, 110_000, article_sections.MAX_STATE_TOKENS)
+        self.assertEqual(len(article_sections.section_groups(rec, sections, 110_000)), 1)
+
+
 class RunnerTests(unittest.TestCase):
     def manifest(self):
         return {
@@ -434,6 +460,78 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual((kept["key"], kept["phase"]), ("movie:7", "combined"))
         self.assertIn("answer keys differ", kept["error"])
         self.assertEqual(kept["usage"], {"input_tokens": 10, "output_tokens": 5})
+
+    def held_run(self, directory, refused, tmdb_ids=(1, 2, 3), body="Lead\n\n== Plot ==\nStory"):
+        """`main` over `tmdb_ids`, the client refusing `refused` (a title's tmdbId -> the error it raises)."""
+        class Refusing:
+            def __init__(self, model):
+                self.model = model
+                self.calls = self.input_tokens = self.output_tokens = self.spend = 0
+
+            def ask_with_metadata(self, state, questions):
+                error = refused.get(state["requestedTarget"]["tmdbId"])
+                if error:
+                    raise error
+                self.calls += 1
+                return ({key: answer_for(question) for key, question in questions.items()},
+                        {"model": combined_questions.PINNED_MODEL,
+                         "usage": {"input_tokens": 10, "output_tokens": 5}})
+
+            def summary(self):
+                return ""
+        articles = os.path.join(directory, "articles.jsonl")
+        output = os.path.join(directory, "out.jsonl")
+        with open(articles, "w", encoding="utf-8") as fh:
+            for tmdb_id in tmdb_ids:
+                rec = record(body)
+                rec["tmdbId"] = tmdb_id
+                fh.write(json.dumps(rec) + "\n")
+        with mock.patch.object(run_combined, "TypeSafe", Refusing):
+            status = run_combined.main(["--articles", articles, "--out", output, "--workers", "1"])
+        with open(output, encoding="utf-8") as fh:
+            written = [json.loads(line)["tmdbId"] for line in fh]
+        return status, written, output
+
+    def test_a_title_over_the_token_limit_is_held_and_the_run_goes_on(self):
+        """tv:36408 answered `HTTP 400 max_tokens_exceeded` 380 titles into 3,472 and the run stopped there."""
+        refusal = run_combined.TokenLimitExceeded('HTTP 400: {"detail":{"error_type":"max_tokens_exceeded"}}')
+        with tempfile.TemporaryDirectory() as directory:
+            status, written, output = self.held_run(directory, {2: refusal})
+            self.assertEqual((status, written), (0, [1, 3]))
+            with open(run_combined.held_path(output), encoding="utf-8") as fh:
+                held = json.load(fh)
+            self.assertEqual(list(held), ["movie:2"])
+            self.assertIn("max_tokens_exceeded", held["movie:2"])
+
+    def test_a_clean_run_leaves_no_held_file_behind(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = os.path.join(directory, "out.jsonl")
+            with open(run_combined.held_path(output), "w", encoding="utf-8") as fh:
+                fh.write("{}")
+            status, written, _ = self.held_run(directory, {})
+            self.assertEqual((status, written), (0, [1, 2, 3]))
+            self.assertFalse(os.path.exists(run_combined.held_path(output)))
+
+    def test_any_other_400_still_stops_the_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status, written, output = self.held_run(
+                directory, {1: run_combined.TypeSafeError('HTTP 400: {"detail":{"error_type":"bad"}}')})
+            self.assertEqual((status, written), (1, []))
+            self.assertFalse(os.path.exists(run_combined.held_path(output)))
+
+    def test_a_section_no_request_can_carry_is_held_without_asking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status, written, output = self.held_run(directory, {}, tmdb_ids=(1,),
+                                                    body="Lead\n\n== Plot ==\n" + "い" * 40000)
+            self.assertEqual((status, written), (0, []))
+            with open(run_combined.held_path(output), encoding="utf-8") as fh:
+                self.assertEqual(list(json.load(fh)), ["movie:1"])
+
+    def test_the_token_ceiling_is_part_of_what_the_manifest_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, _, output = self.held_run(directory, {})
+            with open(output + ".manifest.json", encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh)["config"]["maxStateTokens"], article_sections.MAX_STATE_TOKENS)
 
     def test_resume_exclusion_requires_an_existing_manifest(self):
         with tempfile.TemporaryDirectory() as directory:

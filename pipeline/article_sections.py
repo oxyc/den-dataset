@@ -84,19 +84,64 @@ def encoded_chars(state):
     return len(json.dumps(state, ensure_ascii=False, separators=(",", ":")))
 
 
-def section_groups(rec, sections, max_state_chars):
+#: Jev's documented limits (https://docs.typesafe.ai/models.md, Jev 1.13): 64k tokens a request for the state
+#: plus every question, and 32k for the state plus the LONGEST single question. The second is the one a state
+#: meets first, because the questions of a request are many and short. The longest question is ~1.2k
+#: characters (about 400 tokens), so a state of ~31.5k tokens is the most a request can carry; this leaves
+#: the rest of that room as margin for an estimate that is a model, not a tokenizer.
+MAX_STATE_TOKENS = 28_000
+#: Tokens a character costs, by what it is. Fitted on the shipped pass's 47.5k calls (`inputTokens` against
+#: `stateChars` per language, 72 tokens a question taken out): English 0.28, German 0.31, French and Italian
+#: 0.35, Russian 0.72, Korean 0.86, Japanese 1.10. Rounded UP, because the failure being avoided costs the
+#: title its classification and the estimate may be wrong in the other direction only by asking more calls.
+LATIN_TOKENS, ALPHABETIC_TOKENS, OTHER_TOKENS = 0.35, 0.85, 1.25
+#: Latin-1 is what `str.encode("latin-1", "ignore")` keeps; U+0250-U+058F is the other alphabets that a
+#: character carries one sound of (IPA, Greek, Cyrillic, Armenian). Everything else — CJK, Thai, Arabic,
+#: Devanagari — is priced as Japanese.
+ALPHABETIC = re.compile(r"[ɐ-֏]")
+
+
+def estimated_tokens(state):
+    """What Jev will count the state as, from its characters: no tokenizer is available, and the API only
+    reports `usage` after it has answered, or refused with `max_tokens_exceeded` and no number."""
+    text = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+    latin = len(text.encode("latin-1", "ignore"))
+    alphabetic = len(ALPHABETIC.findall(text))
+    return latin * LATIN_TOKENS + alphabetic * ALPHABETIC_TOKENS + (len(text) - latin - alphabetic) * OTHER_TOKENS
+
+
+def fits(state, max_state_chars, max_state_tokens=None):
+    """Whether one request can carry the state: under the character ceiling AND, when one is given, under the
+    token ceiling.
+
+    Characters alone cannot say: Japanese costs four times English per character, so an article the ceiling
+    allows (110k characters) is several times over Jev's limit in Japanese: tv:96451, tv:45799 and tv:36408
+    each answered `HTTP 400 max_tokens_exceeded`.
+
+    `max_state_tokens` is None for a shard bought before the token ceiling existed, whose manifest records no
+    `maxStateTokens`: the auditor reconstructs what such a shard was asked with the rule it was asked under."""
+    return encoded_chars(state) <= max_state_chars and (
+        max_state_tokens is None or estimated_tokens(state) <= max_state_tokens)
+
+
+class SectionTooLarge(ValueError):
+    """A single section no request can carry. The title cannot be asked as it stands; it is not a fault in
+    the run, so a caller holds the title instead of stopping."""
+
+
+def section_groups(rec, sections, max_state_chars, max_state_tokens=None):
     """Greedily group complete sections under the state ceiling; never make an invisible-section question."""
     groups = []
     current = []
     for section in sections:
         trial = current + [section]
-        if current and encoded_chars(state_for(rec, trial)) > max_state_chars:
+        if current and not fits(state_for(rec, trial), max_state_chars, max_state_tokens):
             groups.append(current)
             current = [section]
         else:
             current = trial
-        if encoded_chars(state_for(rec, current)) > max_state_chars:
-            raise ValueError(
+        if not fits(state_for(rec, current), max_state_chars, max_state_tokens):
+            raise SectionTooLarge(
                 f"{rec['mediaType']}:{rec['tmdbId']} section {section['id']} exceeds max state by itself; "
                 "paragraph fallback is required before launch"
             )
@@ -105,11 +150,11 @@ def section_groups(rec, sections, max_state_chars):
     return groups
 
 
-def is_oversized(rec, sections, max_state_chars):
-    return encoded_chars(state_for(rec, sections)) > max_state_chars
+def is_oversized(rec, sections, max_state_chars, max_state_tokens=None):
+    return not fits(state_for(rec, sections), max_state_chars, max_state_tokens)
 
 
-def select_global_sections(rec, sections, role_answers, max_state_chars):
+def select_global_sections(rec, sections, role_answers, max_state_chars, max_state_tokens=None):
     """For an oversized article, retain the strongest useful evidence and preserve source order.
 
     Role answers come from the prerequisite section-only calls.  The lead is mandatory.  Production and
@@ -126,7 +171,7 @@ def select_global_sections(rec, sections, role_answers, max_state_chars):
 
     for section in sorted(sections[1:], key=lambda item: (-utility(item), item["start"])):
         trial = sorted(chosen + [section], key=lambda item: item["start"])
-        if encoded_chars(state_for(rec, trial)) <= max_state_chars:
+        if fits(state_for(rec, trial), max_state_chars, max_state_tokens):
             chosen = trial
     return sorted(chosen, key=lambda item: item["start"])
 

@@ -74,7 +74,12 @@ What the runner guarantees, and why each matters when every call is paid:
   worker from starting another paid call.
 - **A kernel lock on the output**, so a second agent cannot resume the same set and pay twice.
 - **No silent truncation.** An oversized article is split into complete section groups plus one global
-  call over role-selected evidence; a section that cannot fit alone is an error.
+  call over role-selected evidence. "Oversized" is judged by characters AND by an estimated token count
+  (`article_sections.MAX_STATE_TOKENS`, from Jev's 32k state-plus-longest-question limit,
+  <https://docs.typesafe.ai/models.md>), because Japanese costs ~1.1 tokens a character to English's 0.28. A
+  section that cannot fit alone, or a request Jev refuses with `max_tokens_exceeded`, holds that title: it is
+  written to `<shard>.held.json`, the classify stage takes it out of the change set (`heldForSize` in the
+  plan and the daily report), and the run goes on. Every other error still stops it.
 
 After the writer exits, audit before anything reads the result. `audit_combined.py` checks one complete
 shard; the corpus as it exists is three disjoint shards, because two Japanese articles (`tv:96451`,

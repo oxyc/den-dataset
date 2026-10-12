@@ -161,9 +161,11 @@ def validate_row(row, rec, manifest, global_questions, state_section_ids=None):
             if stored != public_section(expected, answer):
                 fail(where, f"section {expected['id']} differs from reconstructed article")
             section_answers[expected["id"]] = answer
-        expected_oversized = is_oversized(rec, sections, manifest["config"]["maxStateChars"])
+        # A shard bought before the token ceiling records none, and is reconstructed without one.
+        ceilings = (manifest["config"]["maxStateChars"], manifest["config"].get("maxStateTokens"))
+        expected_oversized = is_oversized(rec, sections, *ceilings)
         selected = select_global_sections(
-            rec, sections, section_answers, manifest["config"]["maxStateChars"],
+            rec, sections, section_answers, *ceilings,
         ) if expected_oversized else sections
     else:
         if any(stored != public_section(expected, None) for expected, stored in zip(sections, stored_sections)):
