@@ -20,7 +20,7 @@ import xml.etree.ElementTree as ET
 
 from lib import cache, http
 from . import artifacts, finalize, maturity_kavi, maturity_public
-from .contract import StageError
+from .contract import StageError, UpstreamError
 
 NAME = "maturity"
 PRODUCER = "pipeline/maturity.py"
@@ -263,7 +263,10 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None):
     ctx = dataclasses.replace(ctx, dataset_version=version)
     with open(ctx.require(artifacts.FACTS), encoding="utf-8") as handle:
         facts = json.load(handle)
-    norway = fetch()
+    try:
+        norway = fetch()
+    except http.HTTPError as refusal:
+        raise UpstreamError(f"maturity: the Medietilsynet workbook could not be downloaded ({refusal})") from None
     cnc_result, cnc_failure = _enhancement(fetch_cnc or maturity_public.fetch_cnc, "CNC")
     brazil_result, brazil_failure = _enhancement(fetch_brazil or maturity_public.fetch_brazil, "ClassInd")
     cnc, cnc_url = cnc_result or (None, None)

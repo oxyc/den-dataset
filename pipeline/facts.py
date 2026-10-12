@@ -41,7 +41,7 @@ import sys
 import time
 
 from . import artifacts, changes, finalize, jsonbytes, refresh
-from .contract import REPO, StageError, bind
+from .contract import REPO, StageError, UpstreamError, bind
 from lib import cache as caching
 from lib import http, wikidata
 from lib import wikidata_facts as wd
@@ -203,7 +203,7 @@ def identities(types, cache):
     except wikidata.DecisionError as stale:
         raise StageError(f"facts: {stale}") from None
     except (wikidata.WikidataError, http.HTTPError) as failure:
-        raise StageError(f"facts: choosing each title's Wikidata item failed ({failure}). Nothing new was "
+        raise UpstreamError(f"facts: choosing each title's Wikidata item failed ({failure}). Nothing new was "
                          f"scraped; re-run.") from None
     return found, excluded
 
@@ -279,7 +279,7 @@ def refresh_collapsed_franchises(fields, cache, checkpointed, excluded=None):
             try:
                 got, _ = wd.fetch_facts(batch, media, item, cache, excluded=excluded.get(kind))
             except (wikidata.WikidataError, http.HTTPError) as failure:
-                raise StageError(f"facts: re-asking P179 for {len(batch)} {kind} rows failed ({failure}). The "
+                raise UpstreamError(f"facts: re-asking P179 for {len(batch)} {kind} rows failed ({failure}). The "
                                  f"rest is checkpointed; re-run.") from None
             for tmdb_id in batch:
                 row = fields[f"{kind}:{tmdb_id}"]
@@ -308,7 +308,7 @@ def backfill_properties(fields, cache, checkpointed, pace=PACE, excluded=None):
                 try:
                     got, live = wd.fetch_facts(batch, media, item, cache, excluded=excluded.get(kind))
                 except (wikidata.WikidataError, http.HTTPError) as failure:
-                    raise StageError(f"facts: asking {item.prop} for {len(batch)} {kind} rows failed "
+                    raise UpstreamError(f"facts: asking {item.prop} for {len(batch)} {kind} rows failed "
                                      f"({failure}). The rest is checkpointed; re-run.") from None
                 for tmdb_id in batch:
                     fields[f"{kind}:{tmdb_id}"][item.key] = got.get(tmdb_id, [])
@@ -736,7 +736,7 @@ def run(ctx, cache=None):
         skipped += scrape(keys, has_vector, directory, ctx.dataset_version, ctx.path(artifact), cache,
                           again=again)
     if skipped:
-        raise StageError(f"facts: {skipped} ids were skipped after their batches failed, so the scrape is "
+        raise UpstreamError(f"facts: {skipped} ids were skipped after their batches failed, so the scrape is "
                          f"not finished and the merge would publish without them. Everything else is "
                          f"checkpointed; re-run to sweep them up.")
     return merge(ctx)

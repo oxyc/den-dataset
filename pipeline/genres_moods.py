@@ -41,7 +41,7 @@ from . import genres_moods_enrich as gm
 from . import genres_moods_merge as gmm
 from . import run_combined as rc
 from .combined_questions import PINNED_MODEL, slug, taxonomy
-from .contract import REPO, StageError
+from .contract import REPO, StageError, UpstreamError
 
 NAME = "genres_moods"
 PRODUCER = "pipeline/genres_moods.py"
@@ -324,7 +324,7 @@ def ask(ctx):
         if lock is not None:
             rc.release_output_lock(lock)
     if failed:
-        raise StageError(f"genres_moods: the ask stopped on a failed call; what was bought is in {out} and a "
+        raise UpstreamError(f"genres_moods: the ask stopped on a failed call; what was bought is in {out} and a "
                          f"rerun resumes from it")
     # `--limit` stops the pass short, so what it asked is not the whole selection.
     return min(len(todo), ctx.limit) if ctx.limit else len(todo)

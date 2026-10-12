@@ -17,7 +17,7 @@ import unittest
 from unittest import mock
 
 from . import STAGES, artifacts, daily, enrich
-from .contract import Context, StageError
+from .contract import Context, StageError, UpstreamError
 
 NOW = datetime.datetime(2026, 9, 24, 3, 23, tzinfo=datetime.timezone.utc)
 PER_TITLE = daily.TYPESAFE_PROJECTED_PER_TITLE
@@ -40,6 +40,8 @@ class Recorded(unittest.TestCase):
                      "added": ["movie:1"], "changed": {}, "withdrawn": {}, "revisit": None}
         self.check_refuses = False
         self.migration_refuses = False
+        #: A stage name to the exception its recorder raises.
+        self.raises = {}
         patch = mock.patch.object(daily, "load", self.stage)
         patch.start()
         self.addCleanup(patch.stop)
@@ -71,6 +73,8 @@ class Recorded(unittest.TestCase):
                 raise StageError("publish: pipeline/publish-dataset.sh exited 1")
             if name == "plot_length" and self.migration_refuses:
                 raise StageError("plot_length: pre-transform-baseline: live baseline live predates the transform")
+            if name in self.raises:
+                raise self.raises[name]
             return name
         return types.SimpleNamespace(NAME=name, INPUTS=(), OUTPUTS=(), run=run)
 
@@ -333,6 +337,25 @@ class Refusals(Recorded):
         self.assertEqual((code, report["ready"]), (1, False))
         with open(os.path.join(self.out, daily.SUMMARY), encoding="utf-8") as fh:
             self.assertIn("Not ready", fh.read())
+
+    def test_a_service_that_did_not_answer_is_retryable_and_a_refusal_is_not(self):
+        """The workflow hands a `retryable` day to a fresh run; anything about the data waits for a person."""
+        env = {"DEN_EMBED_URL": "http://embed.invalid"}
+        self.raises = {"docfacts": UpstreamError("docfacts: choosing each title's Wikidata item failed (HTTP 429)")}
+        code, report = self.day(env)
+        self.assertEqual((code, report["ready"], report["retryable"]), (1, False, True))
+        self.assertIn("HTTP 429", report["verdict"])
+        self.calls, self.raises = [], {"store": StageError("strings: the longest entry is 314 bytes")}
+        code, report = self.day(env)
+        self.assertEqual((code, report["retryable"]), (1, False))
+        self.calls, self.raises, self.check_refuses = [], {}, True
+        self.assertFalse(self.day(env)[1]["retryable"], "a refused publish check is about the data")
+
+    def test_a_request_no_stage_caught_still_reports_and_is_retryable(self):
+        self.raises = {"maturity": daily.http.HTTPError(503, "https://example.invalid/x")}
+        code, report = self.day({"DEN_EMBED_URL": "http://embed.invalid"})
+        self.assertEqual((code, report["retryable"]), (1, True))
+        self.assertIn("HTTP 503", report["verdict"])
 
     def test_the_pre_transform_boundary_is_machine_readable_in_both_reports(self):
         self.migration_refuses = True

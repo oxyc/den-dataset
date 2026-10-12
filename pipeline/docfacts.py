@@ -29,7 +29,7 @@ import os
 import sys
 
 from . import artifacts, changes, genres_moods, refresh
-from .contract import StageError
+from .contract import StageError, UpstreamError
 from lib import cache as caching
 from lib import http, wikidata
 
@@ -124,7 +124,7 @@ def identities(titles, cache):
     except wikidata.DecisionError as stale:
         raise StageError(f"docfacts: {stale}") from None
     except (wikidata.WikidataError, http.HTTPError) as refusal:
-        raise StageError(f"docfacts: choosing each title's Wikidata item failed ({refusal}); re-run.") from None
+        raise UpstreamError(f"docfacts: choosing each title's Wikidata item failed ({refusal}); re-run.") from None
     return found, excluded
 
 
@@ -165,7 +165,7 @@ def run(ctx, cache=None):
                 answers = list(pool.map(lambda job: wikidata.doc_facts(job[1], job[0], job[2],
                                                                        excluded=excluded.get(job[0])), group))
             except (wikidata.WikidataError, http.HTTPError) as refusal:
-                raise StageError(
+                raise UpstreamError(
                     f"docfacts: the scrape stopped at {done}/{wanted} ({refusal}). Everything it had "
                     f"already paid for is in {path}; re-run to continue from there.") from None
             for (media, ids, _cache), found in zip(group, answers):

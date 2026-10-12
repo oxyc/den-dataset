@@ -46,7 +46,7 @@ from . import artifacts, changes
 # Aliased: this module has its own `fetch`, and the stage that owns the enriched batches is only needed
 # for the rule its refusal points at.
 from . import fetch as fetch_stage
-from .contract import StageError
+from .contract import StageError, UpstreamError
 from lib import http, wikidata, wikipedia
 
 NAME = "articles"
@@ -183,7 +183,7 @@ def targets(records, cache):
                 found = wikidata.targets(chunk, media, cache, excluded=excluded.get(media),
                                          languages={language[f"{media}:{tmdb_id}"] for tmdb_id in chunk})
             except (http.HTTPError, wikidata.WikidataError) as error:
-                raise StageError(f"articles: the Wikidata lookup that names each title failed ({error}). "
+                raise UpstreamError(f"articles: the Wikidata lookup that names each title failed ({error}). "
                                  f"Nothing was written; re-run once Wikidata answers.") from None
             out.update({f"{media}:{tmdb_id}": target for tmdb_id, target in found.items()})
     return out

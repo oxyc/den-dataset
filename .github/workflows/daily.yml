@@ -350,6 +350,20 @@ jobs:
           for old in $(gh release view paid-state -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
             [ "$old" = "$asset" ] || gh release delete-asset paid-state "$old" -R "$GITHUB_REPOSITORY" --yes
           done
+      # A day that stopped because a service did not answer — Wikidata throttling, a failed TypeSafe call, a
+      # download that timed out — is `retryable` in the report (pipeline/daily.py, `UpstreamError`). It is handed
+      # to a fresh run, which resumes from the cache and the ledger kept above, rather than waiting for tomorrow's
+      # schedule. It shares the six tries with a CPU handoff. A refusal about the data is not retried.
+      - name: Hand on a day an upstream service stopped
+        if: always() && steps.day.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f "$OUT/daily-report.json" ] || exit 0
+          why="$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["verdict"].splitlines()[0][:300] if r.get("retryable") else "")' "$OUT/daily-report.json")"
+          [ -n "$why" ] || exit 0
+          sleep 300
+          pipeline/hand-off-day.sh "$why"
       # A skipped credential or refused gate must be visible as a failed scheduled run. The always() report
       # and artifact steps above have already preserved its diagnosis before this turns the job red.
       - name: Refuse an unready run
