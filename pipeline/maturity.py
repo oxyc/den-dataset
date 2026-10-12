@@ -98,8 +98,8 @@ def link_records(source_records, facts_blob, decisions=None):
         counts["sourceRows"] += 1
         if source["age"] is None:
             counts["unknownRatingRows"] += 1
-            continue
-        counts["ratedRows"] += 1
+        else:
+            counts["ratedRows"] += 1
         if not source.get("authorityId"):
             counts["missingIdentityRows"] += 1
             continue
@@ -134,18 +134,20 @@ def link_records(source_records, facts_blob, decisions=None):
             matched_by = source["matchedBy"]
         counts["matchedRows"] += 1
         observation = {name: source[name] for name in
-                       ("authorityId", "raw", "age", "assessed", "runtimeMinutes") if source.get(name) is not None}
+                       ("authorityId", "raw", "assessed", "runtimeMinutes") if source.get(name) is not None}
+        observation["age"] = source["age"]
         observation.update({"authority": source["authority"], "matchedBy": matched_by})
         observations.setdefault(key, []).append(observation)
 
     records, conflicts = [], []
     for key, found in sorted(observations.items()):
-        ages = sorted({entry["age"] for entry in found})
+        ages = sorted({entry["age"] for entry in found if entry.get("age") is not None})
         if len(ages) > 1:
             conflicts.append({"key": key, "ages": ages})
         media, ident = key.split(":")
-        records.append({"mediaType": media, "tmdbId": int(ident), "minimumAge": max(ages),
-                        "observations": sorted(found, key=lambda row: (row["age"], row["authorityId"]))})
+        records.append({"mediaType": media, "tmdbId": int(ident),
+                        "minimumAge": max(ages) if ages else None,
+                        "observations": sorted(found, key=_observation_order)})
     return records, {**counts, "matchedTitles": len(records), "conflictingTitles": len(conflicts),
                      "ambiguous": ambiguous, "conflicts": conflicts}
 
@@ -164,14 +166,20 @@ def combine(linked):
             observations.setdefault(key, []).extend(record["observations"])
     out, conflicts = [], []
     for key, found in sorted(observations.items()):
-        ages = sorted({row["age"] for row in found})
+        ages = sorted({row["age"] for row in found if row.get("age") is not None})
         if len(ages) > 1:
             conflicts.append({"key": key, "ages": ages})
         media, ident = key.split(":")
-        out.append({"mediaType": media, "tmdbId": int(ident), "minimumAge": max(ages),
-                    "observations": sorted(found, key=lambda row: (row["age"], row["authority"],
-                                                                    row["authorityId"]))})
+        out.append({"mediaType": media, "tmdbId": int(ident),
+                    "minimumAge": max(ages) if ages else None,
+                    "observations": sorted(found, key=_observation_order)})
     return out, conflicts
+
+
+def _observation_order(row):
+    """Stable display/provenance order, with an unknown normalized age after known ages."""
+    age = row.get("age")
+    return (age is None, age if age is not None else 0, row["authority"], row["authorityId"])
 
 
 def _write_json(path, value):

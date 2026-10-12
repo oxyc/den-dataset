@@ -1,7 +1,7 @@
 """`build_store.py` against den-spec's committed fixture — the WRITER's half of the format contract.
 
-store-v4 is implemented three times: this writer, `den-core/crates/den-store` and the mmap in den-atlas.
-Both readers load `den-spec/vectors/store-v4.*` in their own tests and fail without it. The writer — the
+store-v5 is implemented three times: this writer, `den-core/crates/den-store` and the mmap in den-atlas.
+Both readers load `den-spec/vectors/store-v5.*` in their own tests and fail without it. The writer — the
 side that decides what the bytes actually are — had no test at all, so a layout change here would have
 been caught only by the readers failing afterwards, in other repos, on someone else's branch.
 
@@ -81,7 +81,7 @@ def build_store_module():
 
 class FixtureRoundTrip(unittest.TestCase):
     def test_the_writer_reproduces_the_committed_fixture(self):
-        committed = spec_or_fail("vectors", "store-v4.store")
+        committed = spec_or_fail("vectors", "store-v5.store")
         generator = spec_or_fail("tools", "store-fixture.py")
         with tempfile.TemporaryDirectory() as out:
             result = subprocess.run(
@@ -90,14 +90,14 @@ class FixtureRoundTrip(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, f"the fixture generator failed:\n{result.stderr}")
-            rebuilt = os.path.join(out, "store-v4.store")
+            rebuilt = os.path.join(out, "store-v5.store")
             self.assertTrue(os.path.isfile(rebuilt), f"generator wrote nothing:\n{result.stdout}")
             self.assertEqual(
                 sha256(rebuilt),
                 sha256(committed),
                 "build_store.py no longer produces the committed fixture. Three causes, and they want "
                 "different answers: the LAYOUT changed — in which case this is a new format version "
-                "(store-v4.md), not an edit to store-v3; the writer lost its DETERMINISM; or what the "
+                "(store-v5.md), not an edit to store-v4; the writer lost its DETERMINISM; or what the "
                 "writer CHOOSES TO PUBLISH changed, which is a content change at an unchanged layout "
                 "and is fixed by regenerating the fixture in den-spec, not by bumping the version. The "
                 "publication gates are the third kind: a fixture facet carrying no `probabilities` "
@@ -119,7 +119,7 @@ class FixtureRoundTrip(unittest.TestCase):
                     text=True,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                digests.append(sha256(os.path.join(out, "store-v4.store")))
+                digests.append(sha256(os.path.join(out, "store-v5.store")))
         self.assertEqual(digests[0], digests[1], "two runs of the writer disagree byte-for-byte")
 
 
@@ -314,12 +314,23 @@ class MaturityRoundTrip(StoreFixture, unittest.TestCase):
     def test_numeric_age_and_unknown_reach_distinct_store_bytes(self):
         titles = [dict(self.TITLES[0], maturity={"minimumAge": 12, "observations": [
                       {"authority": "CNC", "authorityId": "visa:123", "raw": "Interdit -12 ans",
-                       "age": 12, "matchedBy": "exact-title+year+director"}]}),
-                  dict(self.TITLES[1], maturity=None)]
+                       "age": 12, "matchedBy": "exact-title+year+director",
+                       "assessed": "2026-01-02", "runtimeMinutes": 95, "format": "cinema"}]}),
+                  dict(self.TITLES[1], maturity={"minimumAge": None, "observations": [
+                      {"authority": "Medietilsynet", "authorityId": "n:2",
+                       "raw": "Tillatt for alle", "age": None,
+                       "matchedBy": "exact-title+year+director"}]})]
         with tempfile.TemporaryDirectory() as out:
             store, _ = self.build(out, titles=titles)
         self.assertEqual(store.ints("minimum_age", "B", 1), [12, 0xFF],
                          "unknown must use the sentinel, never the all-ages value zero")
+        self.assertEqual(store.ints("mat_o"), [0, 1, 2])
+        self.assertEqual([store.text(value) for value in store.ints("mat_auth")],
+                         ["CNC", "Medietilsynet"])
+        self.assertEqual([store.text(value) for value in store.ints("mat_raw")],
+                         ["Interdit -12 ans", "Tillatt for alle"])
+        self.assertEqual(store.ints("mat_age", "B", 1), [12, 0xFF])
+        self.assertEqual(store.ints("mat_runtime", "H", 2), [95, 0])
 
 
 class GenresAndMoodsHaveOneSource(StoreFixture, unittest.TestCase):
@@ -1152,8 +1163,8 @@ class EverySeriesATitleIsPartOfShips(StoreFixture, unittest.TestCase):
                          "most specific first, deduplicated, a non-Q-id dropped, none as an empty span")
         self.assertNotIn("franchise", store.table, "the single-valued store-v1 column is gone")
         self.assertEqual(
-            struct.unpack("<I", store.blob[8:12])[0], 4,
-            "the maturity column makes this format 4; franchise remains the v2 list",
+            struct.unpack("<I", store.blob[8:12])[0], 5,
+            "the rating-evidence table makes this format 5; franchise remains the v2 list",
         )
 
 

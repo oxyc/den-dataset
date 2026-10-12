@@ -199,11 +199,22 @@ class Linker(unittest.TestCase):
             source_row(title="The Film", rating="Forbudt"))))
         records, audit = maturity.link_norway(rows, facts(movie(1), movie(2, "Another Film", director="Qbob")))
         self.assertEqual([(row["tmdbId"], row["minimumAge"]) for row in records], [(1, 15), (2, 7)])
-        self.assertEqual(audit["matchedRows"], 3)
+        self.assertEqual(audit["matchedRows"], 4)
         self.assertEqual(audit["matchedTitles"], 2)
         self.assertEqual(audit["conflictingTitles"], 1)
         self.assertEqual(audit["unknownRatingRows"], 1)
         self.assertEqual(records[0]["observations"][0]["matchedBy"], "exact-title+year+director")
+        self.assertEqual(records[0]["observations"][-1]["raw"], "Forbudt")
+        self.assertIsNone(records[0]["observations"][-1]["age"])
+
+    def test_a_display_only_official_rating_survives_without_becoming_all_ages(self):
+        rows = list(maturity_norway.records(payload(source_row(rating="Tillatt for alle"))))
+        records, audit = maturity.link_norway(rows, facts(movie(1)))
+        self.assertEqual(records[0]["minimumAge"], None)
+        self.assertEqual(records[0]["observations"][0]["raw"], "Tillatt for alle")
+        self.assertIsNone(records[0]["observations"][0]["age"])
+        self.assertEqual(audit["matchedRows"], 1)
+        self.assertEqual(audit["ratedRows"], 0)
 
     def test_wrong_director_missing_year_and_multiple_candidates_remain_unknown(self):
         rows = list(maturity_norway.records(payload(
@@ -680,7 +691,7 @@ class PublicAdapters(unittest.TestCase):
         self.assertTrue(all(row["year"] is None for row in found))
         automatic, audit = maturity.link_records(found, facts(movie(1, "THE FILM")))
         self.assertEqual(automatic, [])
-        self.assertEqual(audit["missingIdentityRows"], 4)
+        self.assertEqual(audit["missingIdentityRows"], 7)
 
     def test_singapore_fetch_validates_the_catalogue_download(self):
         base = {name: "" for name in maturity_singapore.HEADERS}

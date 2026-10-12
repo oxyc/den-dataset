@@ -1,6 +1,6 @@
 """The wire primitives every section group writes through.
 
-The layout is den-spec `wire/store-v4.md` § "Layout": a 64-byte header, a table of 32-byte entries,
+The layout is den-spec `wire/store-v5.md` § "Layout": a 64-byte header, a table of 32-byte entries,
 then the section bodies, each 8-byte aligned. Nothing here knows what a section MEANS — that is the
 group modules' half — and nothing there knows how a section reaches the file.
 """
@@ -8,8 +8,8 @@ import hashlib
 import struct
 import sys
 
-#: 4 adds the public-authority numeric minimum-age column; older stores remain valid inputs to readers.
-FORMAT_VERSION = 4
+#: 5 retains sparse public-authority observations for title details; the filter column stays unchanged.
+FORMAT_VERSION = 5
 MAGIC = b"DENSTOR1"
 ENDIAN_CHECK = 0x01020304
 HEADER_BYTES = 64

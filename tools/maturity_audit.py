@@ -38,7 +38,7 @@ def load(path):
         observations = row.get("observations")
         if (media not in ("movie", "tv") or isinstance(ident, bool)
                 or not isinstance(ident, int) or ident <= 0 or isinstance(minimum, bool)
-                or not isinstance(minimum, int) or not 0 <= minimum <= 18
+                or (minimum is not None and (not isinstance(minimum, int) or not 0 <= minimum <= 18))
                 or not isinstance(observations, list) or not observations):
             raise ValueError(f"{path}: malformed maturity record")
         key = f"{media}:{ident}"
@@ -51,17 +51,18 @@ def load(path):
             authority, age, method = (observation.get(name) for name in
                                       ("authority", "age", "matchedBy"))
             if (not isinstance(authority, str) or not authority or isinstance(age, bool)
-                    or not isinstance(age, int) or not 0 <= age <= 18
+                    or (age is not None and (not isinstance(age, int) or not 0 <= age <= 18))
                     or not isinstance(method, str) or not method):
                 raise ValueError(f"{path}: malformed maturity observation for {key}")
             safe.append({name: observation[name] for name in SAFE_OBSERVATION_FIELDS
-                         if observation.get(name) is not None})
-        ages = {observation["age"] for observation in safe}
-        if minimum != max(ages):
+                         if name == "age" or observation.get(name) is not None})
+        ages = {observation["age"] for observation in safe if observation["age"] is not None}
+        if minimum != (max(ages) if ages else None):
             raise ValueError(f"{path}: minimumAge is not the highest observation for {key}")
         found[key] = {"mediaType": media, "tmdbId": ident, "minimumAge": minimum,
                       "observations": sorted(safe, key=lambda value: (
-                          value["authority"], value["age"], str(value.get("authorityId", ""))))}
+                          value["authority"], value["age"] is None, value["age"] or 0,
+                          str(value.get("authorityId", ""))))}
     return root.get("datasetVersion"), hashlib.sha256(body).hexdigest(), found
 
 
@@ -83,7 +84,7 @@ def build(path, per_authority=50, seed="maturity-audit-v1"):
             authority_titles[authority] += 1
         for pair in methods:
             method_titles[pair] += 1
-        if len({row["age"] for row in record["observations"]}) > 1:
+        if len({row["age"] for row in record["observations"] if row["age"] is not None}) > 1:
             conflicts.append(record)
             continue
         for authority in authorities:
