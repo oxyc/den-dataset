@@ -67,7 +67,13 @@ SUMMARY = "daily-report.md"
 #: labels, so looking back further than a day costs little and a day the job did not run is not lost.
 DAYS_BACK = 7
 PAID = ("classify", "critique")
-TYPESAFE_PROJECTED_PER_TITLE = 0.0004
+#: What one new title costs through every TypeSafe step it goes through, measured on daily run 38201604704
+#: (2,500 titles, $2.0064): classify $1.1797 (28.1 M input tokens), genres & moods $0.8267 for 2,484 asked
+#: titles, and franchises $0.0055 (86 titles and 15 line questions). The cost is the input tokens at
+#: $0.042 a million, as `paid_tokens` meters them. A projection that priced one call a title ($0.0004) let a
+#: $1 day spend $2.01.
+TYPESAFE_PROJECTED_PER_STEP = {"classify": 0.00048, "genres_moods": 0.00034, "franchises": 0.000003}
+TYPESAFE_PROJECTED_PER_TITLE = sum(TYPESAFE_PROJECTED_PER_STEP.values())
 #: The stages whose ask is one step of several: they run every day, and buy only when the day can. What a day
 #: that cannot buy leaves undone.
 ASKS = {"genres_moods": "nothing bought; genres & moods derived from what is answered",
