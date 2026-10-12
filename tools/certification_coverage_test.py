@@ -30,6 +30,28 @@ class Inputs(unittest.TestCase):
         self.assertEqual([(r["id"], r["year"], r["percentile"]) for r in rows],
                          [(2, None, 0), (1, 2024, .5)])
 
+    def test_loads_verified_public_maturity_and_rejects_a_non_conservative_age(self):
+        body = {"records": [{"mediaType": "movie", "tmdbId": 1, "minimumAge": 16,
+                             "observations": [
+                                 {"authority": "CNC", "age": 12, "matchedBy": "exact"},
+                                 {"authority": "KAVI", "authorityId": "secret-id", "raw": "secret-raw",
+                                  "age": 16, "matchedBy": "exact"}]}],
+                "derivation": {"audit": {"CNC": {"ambiguousRows": 2},
+                                           "crossAuthorityConflicts": [{"key": "movie:1"}]}}}
+        with tempfile.TemporaryDirectory() as work:
+            path = os.path.join(work, "maturity.json")
+            with open(path, "w") as fh:
+                json.dump(body, fh)
+            values, audit = coverage.load_public_maturity(path)
+            body["records"][0]["minimumAge"] = 12
+            with open(path, "w") as fh:
+                json.dump(body, fh)
+            with self.assertRaisesRegex(ValueError, "highest observation"):
+                coverage.load_public_maturity(path)
+        self.assertEqual(values[("movie", 1)]["minimumAge"], 16)
+        self.assertEqual(audit, {"crossAuthorityConflicts": 1, "ambiguousRows": 2})
+        self.assertNotIn("secret", repr(values))
+
 
 class Sources(unittest.TestCase):
     def test_tmdb_movie_and_tv_shapes_are_normalized_only_in_memory(self):
@@ -68,7 +90,11 @@ class Report(unittest.TestCase):
     def test_sources_are_separate_overlap_and_strata_are_aggregate(self):
         wd = {("movie", 1): {"US": {"G"}}, ("tv", 2): {"GB": {"mystery"}}}
         runtime = {("movie", 1): {"US": {"PG-13"}}, ("movie", 3): {"DE": {"FSK 6"}}}
-        report = coverage.aggregate(self.titles, wd, runtime, "GB", datetime.date(2026, 1, 1))
+        public = {("movie", 1): {"minimumAge": 12, "authorities": {
+            "CNC": {"ages": {12}, "methods": {"exact-title+year+director"}}}}}
+        report = coverage.aggregate(self.titles, wd, runtime, public,
+                                    {"crossAuthorityConflicts": 1, "ambiguousRows": 2},
+                                    "GB", datetime.date(2026, 1, 1))
         self.assertEqual(report["overlap"], {"both": 1, "wikidataOnly": 1,
                                              "tmdbRuntimeOnly": 1, "neither": 0})
         self.assertEqual(report["sources"]["wikidata"]["all"]["anyCertification"], 2)
@@ -76,6 +102,12 @@ class Report(unittest.TestCase):
         self.assertEqual(report["sources"]["tmdbRuntime"]["all"]["age:12"], 0)
         self.assertEqual(report["sources"]["wikidata"]["all"]["onlyUnknownOrUnmapped"], 1)
         self.assertEqual(report["sources"]["wikidata"]["recency:last5"]["titles"], 1)
+        self.assertEqual(report["sources"]["publicBaseline"]["all"]["anyCertification"], 1)
+        self.assertEqual(report["publicAuthorities"]["CNC"]["all"]["age:12"], 1)
+        self.assertEqual(report["publicAudit"], {
+            "crossAuthorityConflicts": 1, "ambiguousRows": 2,
+            "matchMethods": {"exact-title+year+director": 1}})
+        self.assertEqual(report["overlapThreeSources"]["allThree"], 1)
 
     def test_region_wins_and_only_absence_uses_us_fallback(self):
         values = {
@@ -83,7 +115,7 @@ class Report(unittest.TestCase):
             ("tv", 2): {"GB": {"unmapped"}, "US": {"TV-Y"}},
             ("movie", 3): {"US": {"PG-13"}},
         }
-        report = coverage.aggregate(self.titles, values, {}, "GB", datetime.date(2026, 1, 1))
+        report = coverage.aggregate(self.titles, values, {}, region="GB", as_of=datetime.date(2026, 1, 1))
         counts = report["sources"]["wikidata"]["all"]
         self.assertEqual(counts["viewerRegion"], 2)
         self.assertEqual(counts["usFallback"], 1)
@@ -97,7 +129,7 @@ class Report(unittest.TestCase):
 
     def test_maximum_effective_age_conservatively_decides_kid_eligibility(self):
         values = {("movie", 1): {"US": {"G", "PG-13", "R"}}}
-        report = coverage.aggregate(self.titles, values, {}, "US", datetime.date(2026, 1, 1))
+        report = coverage.aggregate(self.titles, values, {}, region="US", as_of=datetime.date(2026, 1, 1))
         counts = report["sources"]["wikidata"]["all"]
         self.assertEqual(counts["age:0"], 1)
         self.assertEqual(counts["age:13"], 1)
@@ -106,19 +138,28 @@ class Report(unittest.TestCase):
         self.assertEqual(counts["eligibleAt:17"], 1)
 
     def test_serialized_report_contains_no_title_identifier_or_raw_rating(self):
-        report = coverage.aggregate(self.titles, {("movie", 1): {"US": {"secret-rating"}}}, {},
+        public = {("movie", 1): {"minimumAge": 12, "authorities": {
+            "secret-authority": {"ages": {12}, "methods": {"secret-method"}}}}}
+        report = coverage.aggregate(self.titles, {("movie", 1): {"US": {"secret-rating"}}}, {}, public,
                                     as_of=datetime.date(2026, 1, 1))
         body = json.dumps(report)
         for forbidden in ("tmdbId", "movie:1", "secret-rating"):
             self.assertNotIn(forbidden, body)
 
+    def test_public_maturity_outside_the_measured_spine_is_refused(self):
+        public = {("movie", 99): {"minimumAge": 12, "authorities": {
+            "CNC": {"ages": {12}, "methods": {"exact"}}}}}
+        with self.assertRaisesRegex(ValueError, "outside the measured corpus"):
+            coverage.aggregate(self.titles, {}, {}, public)
+
     def test_main_writes_only_the_aggregate_report(self):
         with tempfile.TemporaryDirectory() as work, \
              mock.patch.object(coverage, "load_titles", return_value=self.titles), \
+             mock.patch.object(coverage, "load_public_maturity", return_value=({}, {})), \
              mock.patch.object(coverage, "fetch_wikidata", return_value={}), \
              mock.patch.object(coverage, "fetch_tmdb", return_value={}):
             out = os.path.join(work, "aggregate.json")
-            args = ["--labels", "l", "--facts", "f", "--out", out,
+            args = ["--labels", "l", "--facts", "f", "--maturity", "m", "--out", out,
                     "--generated-at", "2026-01-02T03:04:05+00:00"]
             self.assertEqual(coverage.main(args), 0)
             with open(out, "rb") as fh:
@@ -134,7 +175,26 @@ class Report(unittest.TestCase):
 
     def test_generated_at_requires_an_offset(self):
         with self.assertRaisesRegex(SystemExit, "UTC offset"):
-            coverage.main(["--labels", "l", "--facts", "f", "--generated-at", "2026-01-02T03:04:05"])
+            coverage.main(["--labels", "l", "--facts", "f", "--maturity", "m",
+                           "--generated-at", "2026-01-02T03:04:05"])
+
+    def test_smoke_limit_restricts_the_public_artifact_to_the_measured_prefix(self):
+        public = {("movie", 1): {"minimumAge": 12, "authorities": {
+            "CNC": {"ages": {12}, "methods": {"exact"}}}},
+                  ("tv", 2): {"minimumAge": 16, "authorities": {
+            "KAVI": {"ages": {16}, "methods": {"exact"}}}}}
+        with tempfile.TemporaryDirectory() as work, \
+             mock.patch.object(coverage, "load_titles", return_value=self.titles), \
+             mock.patch.object(coverage, "load_public_maturity", return_value=(public, {})), \
+             mock.patch.object(coverage, "fetch_wikidata", return_value={}), \
+             mock.patch.object(coverage, "fetch_tmdb", return_value={}):
+            out = os.path.join(work, "aggregate.json")
+            coverage.main(["--labels", "l", "--facts", "f", "--maturity", "m", "--limit", "1",
+                           "--out", out, "--generated-at", "2026-01-02T03:04:05+00:00"])
+            with open(out) as fh:
+                report = json.load(fh)
+        self.assertEqual(report["scope"]["titles"], 1)
+        self.assertEqual(report["sources"]["publicBaseline"]["all"]["anyCertification"], 1)
 
 
 if __name__ == "__main__":
