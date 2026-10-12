@@ -310,6 +310,18 @@ class StoreFixture:
         return ReadBack(store), result.stderr
 
 
+class MaturityRoundTrip(StoreFixture, unittest.TestCase):
+    def test_numeric_age_and_unknown_reach_distinct_store_bytes(self):
+        titles = [dict(self.TITLES[0], maturity={"minimumAge": 12, "observations": [
+                      {"authority": "CNC", "authorityId": "visa:123", "raw": "Interdit -12 ans",
+                       "age": 12, "matchedBy": "exact-title+year+director"}]}),
+                  dict(self.TITLES[1], maturity=None)]
+        with tempfile.TemporaryDirectory() as out:
+            store, _ = self.build(out, titles=titles)
+        self.assertEqual(store.ints("minimum_age", "B", 1), [12, 0xFF],
+                         "unknown must use the sentinel, never the all-ages value zero")
+
+
 class GenresAndMoodsHaveOneSource(StoreFixture, unittest.TestCase):
     """A title's genres & moods are the corpus `labels` field, joined from `genres-moods.json`, and nothing
     else.
