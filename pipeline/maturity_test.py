@@ -8,7 +8,8 @@ import unittest
 import zipfile
 import xml.etree.ElementTree as ET
 
-from . import maturity, maturity_decisions, maturity_kavi, maturity_kmrb, maturity_public
+from . import (maturity, maturity_decisions, maturity_kavi, maturity_kmrb, maturity_public,
+               maturity_taiwan)
 from .contract import Context, StageError
 from lib import cache, http
 
@@ -411,6 +412,65 @@ class Stage(unittest.TestCase):
 
 
 class PublicAdapters(unittest.TestCase):
+    def test_taiwan_keeps_certificate_age_and_identity_but_requires_reviewed_linking(self):
+        csv_body = (",".join(maturity_taiwan.HEADERS) + "\n"
+                    "113,局影外第113002號,輔12,愛愛愛上你,ANYONE BUT YOU,美國,英語,Studio,1 時 43 分 24 秒\n").encode()
+        snapshot = maturity_taiwan._zip([("113.csv", csv_body)])
+        [row] = list(maturity_taiwan.records(snapshot))
+        self.assertTrue(row["authorityId"].startswith("bamid:113:局影外第113002號:"))
+        self.assertEqual((row["titles"], row["age"], row["runtimeMinutes"]),
+                         (["愛愛愛上你", "ANYONE BUT YOU"], 12, 103))
+        self.assertIsNone(row["year"], "the archive year is a certificate year, not production year")
+        automatic, audit = maturity.link_records([row], facts(movie(1, "ANYONE BUT YOU")))
+        self.assertEqual(automatic, [])
+        self.assertEqual(audit["missingIdentityRows"], 1)
+        reviewed, _ = maturity.link_records(
+            [row], facts(movie(1, "ANYONE BUT YOU")), {("BAMID", row["authorityId"]): "movie:1"})
+        self.assertEqual(reviewed[0]["observations"][0]["matchedBy"], "authority-id-decision")
+
+    def test_taiwan_maps_only_documented_thresholds_and_refuses_schema_drift(self):
+        self.assertEqual([maturity_taiwan.age(value) for value in ("普", "護", "輔12", "輔15", "限")],
+                         [0, 6, 12, 15, 18])
+        self.assertIsNone(maturity_taiwan.age("未定"))
+        self.assertEqual(maturity_taiwan._runtime("97分鐘30秒"), 97)
+        bad = maturity_taiwan._zip([("bad.csv", b"title,rating\nFilm,12\n")])
+        with self.assertRaisesRegex(StageError, "columns changed"):
+            list(maturity_taiwan.records(bad))
+
+    def test_taiwan_reads_the_historical_combined_title_layout(self):
+        csv_body = (",".join(maturity_taiwan.LEGACY_HEADERS) + "\n"
+                    '104,cert-old,護,"蜘蛛巢城\nTHE THRONE OF BLOOD",日本/日語,Studio,1 時 50 分\n').encode()
+        [row] = list(maturity_taiwan.records(maturity_taiwan._zip([("104.csv", csv_body)])))
+        self.assertEqual(row["titles"], ["蜘蛛巢城", "THE THRONE OF BLOOD"])
+        self.assertEqual((row["age"], row["runtimeMinutes"]), (6, 110))
+
+    def test_taiwan_collapses_repeats_and_refuses_conflicting_age(self):
+        header = ",".join(maturity_taiwan.HEADERS) + "\n"
+        rows = ("105,105094,護,正義曙光,BATMAN,美國,英語,Studio,152 分\n"
+                "105,105094,輔12,正義曙光,BATMAN,美國,英語,Studio,152 分\n")
+        [row] = list(maturity_taiwan.records(maturity_taiwan._zip([("105.csv", (header + rows).encode())])))
+        self.assertIsNone(row["age"], "a repeated row with conflicting ratings must remain unknown")
+        self.assertEqual(row["raw"], "護|輔12")
+
+    def test_taiwan_fetch_retains_each_official_csv_in_a_deterministic_snapshot(self):
+        csv_body = (",".join(maturity_taiwan.HEADERS) + "\n"
+                    "113,cert-1,普,片名,Title,國,語,Studio,90 分\n").encode()
+        attachments = " ".join(
+            f"{year}年(https://file.moc.gov.tw/archive/{year}.csv)" for year in range(104, 114))
+        index = json.dumps([{"相關檔案": attachments}]).encode()
+        asked = []
+
+        def request(host, path, params, headers):
+            asked.append((host, path, params))
+            return index if host == maturity_taiwan.INDEX_HOST else csv_body
+
+        first, source = maturity_taiwan.fetch(request)
+        second, _ = maturity_taiwan.fetch(request)
+        self.assertEqual(first, second)
+        self.assertEqual(source, maturity_taiwan.INDEX)
+        self.assertTrue(list(maturity_taiwan.records(first))[0]["authorityId"].startswith("bamid:113:cert-1:"))
+        self.assertEqual(asked[1][:2], (maturity_taiwan.FILE_HOST, "/archive/104.csv"))
+
     def test_kmrb_snapshot_keeps_raw_pages_but_emits_only_identity_and_age(self):
         snapshot = maturity_kmrb._zip([kmrb_page([{}])])
         [row] = list(maturity_kmrb.records(snapshot))
