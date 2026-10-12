@@ -478,18 +478,37 @@ def read_answers(ctx, persist=True, p=FIRST):
     return load_answers(ctx, persist, p)[0]
 
 
+def same_candidates(listed, answered_with):
+    """Whether an answer bought under `answered_with` still holds for today's `listed` candidates: the same
+    groups in the same letters, and a shared-character candidate (`("characters", keys)`) that has only
+    gained titles. That candidate is every title outside a title's groups that shares one of its fictional
+    characters, so any new film of Batman's lengthens it for every Batman title already answered; the letters
+    those answers chose, and the groups they name, are unchanged. Treating that as new candidates set aside
+    29 answered Batman titles at once, and a daily run holds no article to ask them again."""
+    if len(listed) != len(answered_with):
+        return False
+    for now, then in zip(listed, answered_with):
+        if now == then:
+            continue
+        if not (isinstance(now, tuple) and isinstance(then, tuple) and now[0] == then[0] == "characters"
+                and set(then[1]) <= set(now[1])):
+            return False
+    return True
+
+
 def line_targets(asked, answers):
     """The titles the line pass asks: those answered under their current candidates that the franchise pass
     calls a separate adaptation, with those candidates."""
     return {key: listed for key, listed in asked.items()
-            if key in answers and answers[key][1] == listed
+            if key in answers and same_candidates(listed, answers[key][1])
             and answers[key][0]["fr__separate_adaptation"]["noul"] >= SEPARATE_TAKE}
 
 
 def continues_line(key, listed, line):
     """Whether the line pass says a title continues its group's line, asked under the same candidates."""
     got = line.get(key)
-    return got is not None and got[1] == listed and got[0]["fr__continues_line"]["noul"] >= LINE_TAKE
+    return got is not None and same_candidates(listed, got[1]) and \
+        got[0]["fr__continues_line"]["noul"] >= LINE_TAKE
 
 
 def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None):
@@ -511,7 +530,7 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None
         if key not in answers:
             continue
         got, answered_with = answers[key]
-        if listed != answered_with:
+        if not same_candidates(listed, answered_with):
             continue
         for index, gid in enumerate(listed):
             if isinstance(gid, str) and flagged.get(gid) == "catalogue" and key in groups[gid].members:
@@ -522,10 +541,11 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None
         if key not in answers:
             counts["not answered"] += 1
             continue
-        got, listed = answers[key]
-        if listed != asked[key]:
+        got, answered_with = answers[key]
+        if not same_candidates(asked[key], answered_with):
             counts["answered under other candidates"] += 1
             continue
+        listed = asked[key]
         choice = got["fr__group"]
         letter = choice["choice"]
         if letter not in fg.LETTERS or fg.LETTERS.index(letter) >= len(listed):

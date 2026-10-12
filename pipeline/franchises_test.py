@@ -497,6 +497,34 @@ class Stage(unittest.TestCase):
         self.assertEqual(got["Qmixed"]["members"],
                          {"movie:1": None, "tv:2": "adaptation:tv:2"})
 
+    def answered_under(self, candidates, asked_now):
+        """`resolve` over one title answered "A" under `candidates`, now asked under `asked_now`."""
+        titles = {k: franchises.fg.Title(k, k, 2000 + n) for n, k in enumerate(("movie:1", "movie:2", "movie:3"))}
+        groups = {"Qs": franchises.fg.Group("Qs", "series", "Series", {"movie:1", "movie:2"})}
+        answer = {"fr__group": {"choice": "A", "confidence": 1.0, "probabilities": {"A": 1.0}},
+                  "fr__one_franchise": {"noul": 0.0}, "fr__separate_adaptation": {"noul": 0.0}}
+        return franchises.resolve(titles, groups, {}, {}, {"movie:1": asked_now},
+                                  {"movie:1": (answer, candidates)}, {})
+
+    def test_an_answer_holds_when_only_the_shared_character_candidate_gained_titles(self):
+        """A new film of a character lengthens that candidate for every title already answered (daily run
+        38201604704: two new Batman titles set aside 29 answered ones, and the golden set fell below its
+        floor). The letters and groups they chose are unchanged."""
+        was = ["Qs", ("characters", ("movie:1", "movie:3"))]
+        got, counts = self.answered_under(was, ["Qs", ("characters", ("movie:1", "movie:3", "movie:4"))])
+        self.assertEqual(got["Qs"]["members"], {"movie:1": None})
+        self.assertNotIn("answered under other candidates", counts)
+
+    def test_an_answer_is_set_aside_when_a_group_or_a_character_title_went_away(self):
+        was = ["Qs", ("characters", ("movie:1", "movie:3"))]
+        for now in (["Qother", ("characters", ("movie:1", "movie:3"))],
+                    ["Qs", ("characters", ("movie:1",))],
+                    ["Qs", ("characters", ("movie:1", "movie:3")), "Qs2"],
+                    ["Qs", "Qs2"]):
+            got, counts = self.answered_under(was, now)
+            self.assertEqual(got, {}, now)
+            self.assertEqual(counts["answered under other candidates"], 1, now)
+
     def test_below_a_floor_nothing_is_written(self):
         self.golden({**GOLDEN, "apart": [["movie:5", "movie:7"]]})
         with self.assertRaises(StageError) as refused:

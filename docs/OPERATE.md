@@ -74,7 +74,7 @@ public reports, sums `spend.totalUSD` for the UTC calendar month, and refuses a 
 cross either ceiling. An unreadable report is fatal rather than counted as zero.
 
 The daily TypeSafe step is the exception to refusing: a day with more new titles to classify than its cap
-or the month has room for (`Ledger.allowance`, at $0.0004 a title) classifies the first that fit, in the
+or the month has room for (`Ledger.allowance`, at $0.00082 a title: classify, genres & moods and franchises together) classifies the first that fit, in the
 store's row order (movies, then series, by id), and holds the rest (`changes.hold`, `heldForSpend` in the
 report). A held title is out of the change set, so no later stage touches it, and the corpus join keeps it at
 its published source (`held_source`) so a plot never ships without its vector. The corpus marks such a source

@@ -20,6 +20,7 @@ from . import STAGES, artifacts, daily, enrich
 from .contract import Context, StageError
 
 NOW = datetime.datetime(2026, 9, 24, 3, 23, tzinfo=datetime.timezone.utc)
+PER_TITLE = daily.TYPESAFE_PROJECTED_PER_TITLE
 
 
 def args(out, **kwargs):
@@ -245,30 +246,41 @@ class Fits(Recorded):
         code, report = self.day(self.ENV, spend=True)
         self.assertEqual(code, 0, report["verdict"])
         self.assertTrue(report["ready"])
-        # $1.00 at $0.0004 a title is 2,500, in the store's row order.
-        self.assertEqual(self.listed("new"), keys[:2500])
-        self.assertEqual(self.listed("keys"), keys[:2500])
-        self.assertEqual(report["heldForSpend"], 500)
-        self.assertEqual(report["added"], keys[:2500])
-        self.assertEqual(report["counts"]["heldForSpend"], 500)
-        self.assertAlmostEqual(report["spend"]["steps"]["typesafe"]["projectedUSD"], 1.0)
+        # $1.00 at the projected cost of a title, in the store's row order.
+        fits = int(1.0 / PER_TITLE + 1e-9)
+        self.assertEqual(self.listed("new"), keys[:fits])
+        self.assertEqual(self.listed("keys"), keys[:fits])
+        self.assertEqual(report["heldForSpend"], 3000 - fits)
+        self.assertEqual(report["added"], keys[:fits])
+        self.assertEqual(report["counts"]["heldForSpend"], 3000 - fits)
+        self.assertAlmostEqual(report["spend"]["steps"]["typesafe"]["projectedUSD"], fits * PER_TITLE)
         self.assertIn("classify", self.ran(), "the paid stages still run, over the prefix")
 
+    def test_the_projection_prices_every_step_a_title_goes_through(self):
+        """Daily run 38201604704 labelled 2,500 titles under a $1.00 cap and spent $2.0064: classify $1.1797,
+        genres & moods $0.8267 and franchises $0.0055. One call a title ($0.0004) projected half of it."""
+        measured = 1.1797 + 0.8267 + 0.0049 + 0.0006
+        projected = 2500 * PER_TITLE
+        self.assertGreaterEqual(projected, measured, "a day must not spend more than it projected")
+        self.assertLess(projected, measured * 1.1, "and not hold titles the cap could have bought")
+        self.assertEqual(set(daily.TYPESAFE_PROJECTED_PER_STEP), {"classify", "genres_moods", "franchises"})
+
     def test_a_parked_title_is_not_billed_and_a_backlog_that_fits_holds_nothing(self):
-        self.backlog(5000, plotless=2600)
+        self.backlog(5000, plotless=3900)
         code, report = self.day(self.ENV, spend=True)
         self.assertEqual(code, 0, report["verdict"])
         self.assertEqual(report["heldForSpend"], 0)
         self.assertEqual(len(self.listed("new")), 5000, "the parked ones stay listed, as they always were")
-        self.assertAlmostEqual(report["spend"]["steps"]["typesafe"]["projectedUSD"], 0.96)
+        self.assertAlmostEqual(report["spend"]["steps"]["typesafe"]["projectedUSD"], 1100 * PER_TITLE)
 
     def test_the_month_can_cut_the_day_shorter_than_the_cap(self):
         self.backlog(3000)
         reports = self.spent(9.96)
         code, report = self.day(self.ENV, spend=True, published_reports_dir=reports)
         self.assertEqual(code, 0, report["verdict"])
-        self.assertEqual(len(self.listed("new")), 100, "$0.04 left in the month")
-        self.assertAlmostEqual(report["spend"]["steps"]["typesafe"]["projectedUSD"], 0.04)
+        fits = int(0.04 / PER_TITLE + 1e-9)
+        self.assertEqual(len(self.listed("new")), fits, "$0.04 left in the month")
+        self.assertAlmostEqual(report["spend"]["steps"]["typesafe"]["projectedUSD"], fits * PER_TITLE)
 
     def test_a_month_with_no_room_for_the_day_still_refuses(self):
         self.backlog(100)
@@ -294,8 +306,9 @@ class Fits(Recorded):
         keys = self.backlog(6000)
         with mock.patch.object(daily.classify, "answered", return_value={key: "sha" for key in keys[:2500]}):
             _code, report = self.day(self.ENV, spend=True)
-        self.assertEqual(self.listed("new"), keys[:5000], "the 2,500 bought, then 2,500 more fit")
-        self.assertEqual(report["heldForSpend"], 1000)
+        fits = 2500 + int(1.0 / PER_TITLE + 1e-9)
+        self.assertEqual(self.listed("new"), keys[:fits], "the 2,500 bought, then what the cap buys fit")
+        self.assertEqual(report["heldForSpend"], 6000 - fits)
 
 
 class Refusals(Recorded):
