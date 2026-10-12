@@ -497,11 +497,11 @@ class Stage(unittest.TestCase):
         self.assertEqual(got["Qmixed"]["members"],
                          {"movie:1": None, "tv:2": "adaptation:tv:2"})
 
-    def answered_under(self, candidates, asked_now):
-        """`resolve` over one title answered "A" under `candidates`, now asked under `asked_now`."""
+    def answered_under(self, candidates, asked_now, choice="A"):
+        """`resolve` over one title answered `choice` under `candidates`, now asked under `asked_now`."""
         titles = {k: franchises.fg.Title(k, k, 2000 + n) for n, k in enumerate(("movie:1", "movie:2", "movie:3"))}
         groups = {"Qs": franchises.fg.Group("Qs", "series", "Series", {"movie:1", "movie:2"})}
-        answer = {"fr__group": {"choice": "A", "confidence": 1.0, "probabilities": {"A": 1.0}},
+        answer = {"fr__group": {"choice": choice, "confidence": 1.0, "probabilities": {choice: 1.0}},
                   "fr__one_franchise": {"noul": 0.0}, "fr__separate_adaptation": {"noul": 0.0}}
         return franchises.resolve(titles, groups, {}, {}, {"movie:1": asked_now},
                                   {"movie:1": (answer, candidates)}, {})
@@ -514,6 +514,16 @@ class Stage(unittest.TestCase):
         got, counts = self.answered_under(was, ["Qs", ("characters", ("movie:1", "movie:3", "movie:4"))])
         self.assertEqual(got["Qs"]["members"], {"movie:1": None})
         self.assertNotIn("answered under other candidates", counts)
+
+    def test_an_answer_that_chose_the_characters_letter_is_set_aside_when_that_list_gained_a_title(self):
+        """The answer put the title with the titles it was shown; one it never saw does not join them."""
+        was = ["Qs", ("characters", ("movie:1", "movie:3"))]
+        got, counts = self.answered_under(was, ["Qs", ("characters", ("movie:1", "movie:3", "movie:4"))], "B")
+        self.assertEqual(got, {})
+        self.assertEqual(counts["answered under other candidates"], 1)
+        # Unchanged, the same answer still stands and the group is exactly the titles it was shown.
+        got, _ = self.answered_under(was, list(was), "B")
+        self.assertEqual(got["characters:movie:1"]["members"], {"movie:1": None})
 
     def test_an_answer_is_set_aside_when_a_group_or_a_character_title_went_away(self):
         was = ["Qs", ("characters", ("movie:1", "movie:3"))]

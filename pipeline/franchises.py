@@ -478,20 +478,26 @@ def read_answers(ctx, persist=True, p=FIRST):
     return load_answers(ctx, persist, p)[0]
 
 
-def same_candidates(listed, answered_with):
+def same_candidates(listed, answered_with, answer=None):
     """Whether an answer bought under `answered_with` still holds for today's `listed` candidates: the same
     groups in the same letters, and a shared-character candidate (`("characters", keys)`) that has only
     gained titles. That candidate is every title outside a title's groups that shares one of its fictional
     characters, so any new film of Batman's lengthens it for every Batman title already answered; the letters
     those answers chose, and the groups they name, are unchanged. Treating that as new candidates set aside
-    29 answered Batman titles at once, and a daily run holds no article to ask them again."""
+    29 answered Batman titles at once, and a daily run holds no article to ask them again.
+
+    Only while the chosen candidate is unchanged: an answer that chose the characters letter put the title
+    with the titles it was shown, and a title it never saw does not join them. `answer` is the answer's typed
+    result; without it no choice is known and a grown candidate is not tolerated by the caller's own check."""
     if len(listed) != len(answered_with):
         return False
-    for now, then in zip(listed, answered_with):
+    letter = ((answer or {}).get("fr__group") or {}).get("choice")
+    chosen = fg.LETTERS.index(letter) if letter in fg.LETTERS else None
+    for index, (now, then) in enumerate(zip(listed, answered_with)):
         if now == then:
             continue
-        if not (isinstance(now, tuple) and isinstance(then, tuple) and now[0] == then[0] == "characters"
-                and set(then[1]) <= set(now[1])):
+        if index == chosen or not (isinstance(now, tuple) and isinstance(then, tuple)
+                                   and now[0] == then[0] == "characters" and set(then[1]) <= set(now[1])):
             return False
     return True
 
@@ -500,7 +506,7 @@ def line_targets(asked, answers):
     """The titles the line pass asks: those answered under their current candidates that the franchise pass
     calls a separate adaptation, with those candidates."""
     return {key: listed for key, listed in asked.items()
-            if key in answers and same_candidates(listed, answers[key][1])
+            if key in answers and same_candidates(listed, answers[key][1], answers[key][0])
             and answers[key][0]["fr__separate_adaptation"]["noul"] >= SEPARATE_TAKE}
 
 
@@ -530,7 +536,7 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None
         if key not in answers:
             continue
         got, answered_with = answers[key]
-        if not same_candidates(listed, answered_with):
+        if not same_candidates(listed, answered_with, got):
             continue
         for index, gid in enumerate(listed):
             if isinstance(gid, str) and flagged.get(gid) == "catalogue" and key in groups[gid].members:
@@ -542,7 +548,7 @@ def resolve(titles, groups, flagged, automatic, asked, answers, names, line=None
             counts["not answered"] += 1
             continue
         got, answered_with = answers[key]
-        if not same_candidates(asked[key], answered_with):
+        if not same_candidates(asked[key], answered_with, got):
             counts["answered under other candidates"] += 1
             continue
         listed = asked[key]
