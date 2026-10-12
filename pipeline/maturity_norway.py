@@ -66,7 +66,9 @@ def xlsx_rows(payload):
 def age(raw):
     text = _normalized(raw)
     if text == "tillatt for alle":
-        return 0
+        # This is a harmfulness/admission decision, not an assertion that the film suits young children.
+        # Medietilsynet explicitly notes that a film for adults can still receive this classification.
+        return None
     match = re.fullmatch(r"(\d{1,2}) år", text or "")
     if not match:
         return None

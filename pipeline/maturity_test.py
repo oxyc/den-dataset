@@ -168,8 +168,8 @@ class NorwayAdapter(unittest.TestCase):
         self.assertNotIn("copyrighted reason", json.dumps(record))
         self.assertNotIn("copyrighted synopsis", json.dumps(record))
 
-    def test_maps_all_ages_and_numeric_history_but_not_banned_or_missing(self):
-        self.assertEqual(maturity_norway.age("Tillatt for alle"), 0)
+    def test_maps_numeric_history_but_not_unrestricted_banned_or_missing(self):
+        self.assertIsNone(maturity_norway.age("Tillatt for alle"))
         for age in (5, 6, 7, 9, 10, 11, 12, 15, 16, 18):
             self.assertEqual(maturity_norway.age(f"{age} år"), age)
         self.assertIsNone(maturity_norway.age("Forbudt"))
@@ -195,10 +195,10 @@ class Linker(unittest.TestCase):
     def test_exact_title_year_director_match_uses_highest_verified_age(self):
         rows = list(maturity_norway.records(payload(
             source_row(rating="12 år"), source_row(rating="15 år"),
-            source_row(title="Another Film", rating="Tillatt for alle", director="Bob Director"),
+            source_row(title="Another Film", rating="7 år", director="Bob Director"),
             source_row(title="The Film", rating="Forbudt"))))
         records, audit = maturity.link_norway(rows, facts(movie(1), movie(2, "Another Film", director="Qbob")))
-        self.assertEqual([(row["tmdbId"], row["minimumAge"]) for row in records], [(1, 15), (2, 0)])
+        self.assertEqual([(row["tmdbId"], row["minimumAge"]) for row in records], [(1, 15), (2, 7)])
         self.assertEqual(audit["matchedRows"], 3)
         self.assertEqual(audit["matchedTitles"], 2)
         self.assertEqual(audit["conflictingTitles"], 1)
@@ -617,20 +617,24 @@ class PublicAdapters(unittest.TestCase):
         with self.assertRaisesRegex(StageError, "has no header"):
             list(maturity_italy.records(broken))
 
-    def test_quebec_maps_the_ladder_and_restores_catalogue_name_order(self):
+    def test_quebec_maps_restrictions_and_only_explicit_general_age_evidence(self):
         rows = []
-        for number, rating in enumerate(("G", "13", "16", "18"), 1):
+        cases = (("G", "", ""), ("G", "DEC", ""), ("G", "ENF", ""),
+                 ("13", "", ""), ("16", "", ""), ("18", "", ""))
+        for number, (rating, indication_1, indication_2) in enumerate(cases, 1):
             rows.append({name: "" for name in maturity_quebec.HEADERS})
             rows[-1].update({"NO_FILM": str(number), "NO_FILM_1": str(number),
                              "TITRE": "FILM, THE", "TITRE_FRANCAIS": "FILM, LE",
                              "REALISATEUR1": "DIRECTOR, ALICE", "ANNEE": "2022",
-                             "CLASSEMENT": rating, "DATE_DECISION": "2025-01-01",
+                             "CLASSEMENT": rating, "INDICATION_1": indication_1,
+                             "INDICATION_2": indication_2, "DATE_DECISION": "2025-01-01",
                              "URL": f"https://repertoire.cinema.mcc.gouv.qc.ca/film/{number}"})
         found = list(maturity_quebec.records(quebec_payload(rows)))
-        self.assertEqual([row["age"] for row in found[:4]], [0, 13, 16, 18])
+        self.assertEqual([row["age"] for row in found[:6]], [None, 8, 0, 13, 16, 18])
+        self.assertEqual([row["raw"] for row in found[:3]], ["G", "G / DEC", "G / ENF"])
         self.assertEqual(found[0]["titles"], ["FILM, THE", "THE FILM", "FILM, LE", "LE FILM"])
         self.assertEqual(found[0]["directors"], "ALICE DIRECTOR")
-        linked, audit = maturity.link_records(found[:1], facts(movie(1, "THE FILM")))
+        linked, audit = maturity.link_records(found[1:2], facts(movie(1, "THE FILM")))
         self.assertEqual(linked[0]["tmdbId"], 1)
         self.assertEqual(audit["matchedRows"], 1)
 
