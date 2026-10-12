@@ -520,6 +520,18 @@ This is an explicit operator measurement, not part of `daily`. It can make many 
 report contains aggregate counts only: private TMDB title-level certifications and derived ages remain in
 memory and are never checkpointed or written.
 
+Select the public records for human identity review without making a network request:
+
+```sh
+python3 tools/maturity_audit.py --maturity out/maturity-<version>.json \
+  --per-authority 50 --out out/maturity-audit.json
+```
+
+The queue contains every title whose verified official observations disagree, plus a deterministic sample
+per authority from the non-conflicting matches. It carries only the factual observations already present in
+the publishable maturity artifact; unexpected fields are discarded. Keep the seed fixed to reproduce a
+review, or pass `--seed` deliberately to draw a new sample.
+
 ### A first generation
 
 The daily job refuses `--spend` without a live baseline: a first generation is the whole corpus (~$20 of
