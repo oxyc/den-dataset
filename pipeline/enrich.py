@@ -214,7 +214,7 @@ CARRY_DAYS = 56
 #: BUMP IT whenever one of these changes: the choice of Wikidata item for a TMDB id (`lib/wikidata.py`
 #: resolve/choose), the plot headings (`lib/plot.py`), the other-language or source-work fallbacks in
 #: `reground`, or the section-length floor (`WIKI_PLOT_FLOOR`). Bumping re-asks every carried plotless title.
-PLOT_RULES = 1
+PLOT_RULES = 2
 
 
 def no_plot(reason, today):
@@ -395,6 +395,9 @@ def reground(record, facts, cache, token):
     A source work that is itself a film or a series is not read at all (`source_work`). A title left with
     no plot by that refusal is `sourceIsScreenWork`, whatever its own articles held: no heading rule or
     threshold changes it, only an own plot being written.
+
+    This reads one title alone. Holding the source work to ONE title is the batch's job
+    (`settle_source_claims`), which sees every other title's page.
     """
     facts = facts or {}
     source, refused = source_work(facts)
@@ -479,6 +482,83 @@ def reground(record, facts, cache, token):
         return "noPlot", dict(record, noPlotReason=reason), None
     found, article, role = best
     return "grounded", grounded(record, found, article, role), found.get("source")
+
+
+#: Why a title gets no plot when its only plot is a source work another title is already grounded on.
+SOURCE_TAKEN = "sourceTaken"
+
+#: What `grounded` adds to a record that a plotless one does not carry.
+GROUNDING = ("plotArticle", "plotRevId", "plotLanguage", "plotArticleRole", "plotArticleRedirected")
+
+
+def page_of(record):
+    """`(language, article)`: the page a grounded record's plot was read from, keyed as the census keys it
+    (`check_plot_invariants.shared_plot_articles`); None for a record with no plot."""
+    if not record.get("hasWikiPlot") or not record.get("plotArticle"):
+        return None
+    return record.get("plotLanguage") or "en", record["plotArticle"]
+
+
+def claims_in(out_dir):
+    """`page -> {keys}`: which titles the batches already in `out_dir` ground on each page, newest record
+    per title. A seeded out-dir holds the published dataset's titles in one batch (`published.seed`), so
+    this is the published claims plus anything an earlier batch of the run took.
+
+    Raises on a batch it cannot read: read as empty it would let a source work be taken a second time."""
+    directory = os.path.join(out_dir, "enriched")
+    latest = {}
+    for _number, name in batches(directory):
+        try:
+            with open(os.path.join(directory, name), encoding="utf-8") as handle:
+                for row in json.load(handle):
+                    latest[key(row["mediaType"], row["tmdbId"])] = page_of(row)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise StageError(f"enrich: {name} cannot be read ({error}), so which articles are already taken "
+                             f"is unknown") from None
+    claims = {}
+    for label, page in latest.items():
+        if page is not None:
+            claims.setdefault(page, set()).add(label)
+    return claims
+
+
+def store_order(label):
+    """Movies before series, then by number: the order every list of keys reads in (`changes.order`)."""
+    media, tmdb_id = label.split(":", 1)
+    return media != "movie", int(tmdb_id)
+
+
+def settle_source_claims(results, claims):
+    """`(results, refused)`: the verdicts of one batch with the source-work last resort held to one title
+    per article, and `refused` as `[(key, page)]`.
+
+    A source work is another work's article: a novel, or the franchise page of a series. Taken by a second
+    title it describes two stories with one text, and which of them is right cannot be told, so the title
+    that comes second gets no plot (`SOURCE_TAKEN`) — a wrong plot is worse than none. The article is taken
+    when `claims` (`claims_in`) has a title on it other than this one, or another title of this batch is
+    grounded on it by its own article, or by the source work with the lower key (`store_order`). A title
+    that already holds its page in `claims` keeps it: a re-fetch of a shipped title withdraws nothing.
+
+    Across batches the first to ground a page keeps it, and a drain takes titles in key order, so it is the
+    lowest key there too; a title deferred to a later batch finds the page taken."""
+    results = list(results)
+    owned = {page_of(found) for _record, (verdict, found, _detail) in results
+             if verdict == "grounded" and found.get("plotArticleRole") != "source-work"}
+    refused = []
+    labels = [key(record["mediaType"], record["tmdbId"]) for record, _outcome in results]
+    for index in sorted((i for i, (_record, (verdict, found, _detail)) in enumerate(results)
+                         if verdict == "grounded" and found.get("plotArticleRole") == "source-work"),
+                        key=lambda i: store_order(labels[i])):
+        record, (_verdict, found, _detail) = results[index]
+        label, page = labels[index], page_of(found)
+        if label not in claims.get(page, ()) and (claims.get(page) or page in owned):
+            parked = {name: value for name, value in found.items() if name not in GROUNDING}
+            results[index] = (record, ("noPlot", dict(parked, overview="", hasWikiPlot=False, plotSections=[],
+                                                      noPlotReason=SOURCE_TAKEN), None))
+            refused.append((label, page))
+        else:
+            owned.add(page)
+    return results, refused
 
 
 #: Fields a batch row never carries (oxyc/den-dataset#53): every one TMDB's detail call supplied, which
@@ -763,7 +843,11 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     with concurrent.futures.ThreadPoolExecutor(max_workers=WIKI_WORKERS) as pool:
         outcomes = pool.map(lambda r: reground(r, facts.get(key(r["mediaType"], r["tmdbId"])), cache, token),
                             titles)
-        for record, (verdict, found, detail) in zip(titles, outcomes):
+        # The source work is the last resort, and a page another title already holds is not left to it.
+        settled, refused = settle_source_claims(zip(titles, outcomes), claims_in(out_dir))
+        for label, page in refused:
+            log(out_dir, f"plot-source-taken id={label} article={page[1]!r} ({page[0]})")
+        for record, (verdict, found, detail) in settled:
             label = key(record["mediaType"], record["tmdbId"])
             if verdict == "deferred":
                 deferred.add(label)
@@ -827,7 +911,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     settled = processed | held | below
     report = {"count": len(survivors), "belowFloor": counts["belowFloor"],
               "anime": counts["anime"], "deferred": len(deferred), "remaining": sum(key(*e) not in settled for e in worklist),
-              "wikiPlot": with_plot, "tagsOnly": len(survivors) - with_plot,
+              "wikiPlot": with_plot, "tagsOnly": len(survivors) - with_plot, "sourceTaken": len(refused),
               "plotsFromEnterprise": from_enterprise, "plotsFromActionApi": with_plot - from_enterprise,
               "enterpriseRequests": enterprise.gate.sent_this_run - requests_before,
               # Which count admitted each title that cleared the gate: TMDB's, or — for a title TMDB's

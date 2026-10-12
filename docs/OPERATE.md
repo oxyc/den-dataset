@@ -157,7 +157,8 @@ nothing; the stage log says how many titles it left.
 clears the admission gate and has no Wikipedia plot never ships ("no Wikipedia plot, no title"), and before
 this the weekly pass found the same ~6,800 of them again every week, because only shipped titles are known to
 the worklist. The weekly pass now records the day and why (`noPlot`: `noArticle`, `noSection`, `belowFloor` or
-`sourceIsScreenWork`; not `fetchFailed`, which is asked again) and skips the title until the verdict expires, 56
+`sourceIsScreenWork` or `sourceTaken`, a source work another title already holds; not `fetchFailed`, which is
+asked again) and skips the title until the verdict expires, 56
 to 111 days later, so one that has gained an article is eventually read. It states no vote count or floors,
 which cannot change the answer. Each verdict is stamped with `enrich.PLOT_RULES` and counts as expired under
 any other value (an unstamped one too), so it never outlives a change to the rules that produced it.

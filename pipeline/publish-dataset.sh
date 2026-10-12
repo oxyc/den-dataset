@@ -483,9 +483,9 @@ else python3 "$(dirname "$0")/manifest_counts.py" --stamp "$meta" "$DIR"; fi
 # and counting them regressed the gate against a dataset they are not in. A title is counted from the day it
 # ships, against the count the previous publish stamped.
 #
-# `--facts` is deliberately NOT passed. It would enable the one-item exemption (31 titles are one Wikidata
-# item behind several TMDB ids, which is why this can never ratchet to zero) but it also scopes the census
-# to the shipped keys, which moves the baseline for a reason that has nothing to do with the grounding.
+# `--facts` is deliberately NOT passed: no facts file travels beside the store any more. The one-item
+# exemption (one Wikidata item behind several TMDB ids is one work, not a shared article, and it is why this
+# can never ratchet to zero) is read from the corpus rows' facts instead, which `--corpus` already supplies.
 #
 # `maxBatchId` is stamped just above, so the census is bounded to the batches this publish can actually see
 # rather than to a live directory that keeps growing.
