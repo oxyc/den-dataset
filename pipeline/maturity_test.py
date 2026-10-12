@@ -8,7 +8,7 @@ import unittest
 import zipfile
 import xml.etree.ElementTree as ET
 
-from . import maturity, maturity_kavi, maturity_kmrb, maturity_public
+from . import maturity, maturity_decisions, maturity_kavi, maturity_kmrb, maturity_public
 from .contract import Context, StageError
 from lib import cache, http
 
@@ -165,6 +165,67 @@ class Linker(unittest.TestCase):
         self.assertEqual(records, [])
         self.assertEqual(audit["unmatchedRows"], 1)
 
+    def test_a_reviewed_official_id_can_resolve_incomplete_or_ambiguous_metadata(self):
+        rows = [{"authority": "CNC", "authorityId": "visa:44", "titles": ["The Film"],
+                 "directors": None, "year": 2022, "raw": "Interdit -12 ans", "age": 12,
+                 "matchedBy": "exact-title+year+director"}]
+        decisions = {("CNC", "visa:44"): "movie:1"}
+        records, audit = maturity.link_records(rows, facts(movie(1), movie(2)), decisions)
+        self.assertEqual(records[0]["tmdbId"], 1)
+        self.assertEqual(records[0]["observations"][0]["matchedBy"], "authority-id-decision")
+        self.assertEqual(audit["decisionMatchedRows"], 1)
+
+    def test_a_review_that_conflicts_with_new_unique_exact_metadata_is_refused(self):
+        rows = [{"authority": "CNC", "authorityId": "visa:44", "titles": ["Other Film"],
+                 "directors": "Bob Director", "year": 2022, "raw": "Interdit -12 ans", "age": 12,
+                 "matchedBy": "exact-title+year+director"}]
+        with self.assertRaisesRegex(StageError, r"exact identity now excludes it \(movie:2\)"):
+            maturity.link_records(rows, facts(movie(1), movie(2, "Other Film", director="Qbob")),
+                                  {("CNC", "visa:44"): "movie:1"})
+
+    def test_a_review_cannot_target_a_title_absent_from_the_current_corpus(self):
+        rows = [{"authority": "CNC", "authorityId": "visa:44", "titles": [], "directors": None,
+                 "year": None, "raw": "Interdit -12 ans", "age": 12,
+                 "matchedBy": "exact-title+year+director"}]
+        with self.assertRaisesRegex(StageError, "absent corpus key movie:9"):
+            maturity.link_records(rows, facts(movie(1)), {("CNC", "visa:44"): "movie:9"})
+
+
+class AuthorityDecisions(unittest.TestCase):
+    def load(self, blob):
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+            json.dump(blob, handle)
+            path = handle.name
+        try:
+            return maturity_decisions.load(path)
+        finally:
+            os.unlink(path)
+
+    def test_loads_only_a_unique_strict_official_id_ledger(self):
+        decisions, digest = self.load({"schema": 1, "decisions": [
+            {"authority": "KAVI", "authorityId": "iklu:7", "key": "movie:1"}]})
+        self.assertEqual(decisions, {("KAVI", "iklu:7"): "movie:1"})
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+        malformed = [
+            {"schema": 1, "decisions": [{"authority": "Other", "authorityId": "x", "key": "movie:1"}]},
+            {"schema": 1, "decisions": [{"authority": "KAVI", "authorityId": "x", "key": "tv:1"}]},
+            {"schema": 1, "decisions": [{"authority": "KAVI", "authorityId": "x",
+                                           "key": "movie:1", "note": "bypass"}]},
+            {"schema": 1, "decisions": [
+                {"authority": "KAVI", "authorityId": "x", "key": "movie:1"},
+                {"authority": "KAVI", "authorityId": "x", "key": "movie:2"}]},
+        ]
+        for blob in malformed:
+            with self.subTest(blob=blob), self.assertRaises(StageError):
+                self.load(blob)
+
+    def test_current_available_source_must_still_contain_every_reviewed_id(self):
+        decisions = {("KAVI", "iklu:7"): "movie:1"}
+        with self.assertRaisesRegex(StageError, "absent IDs: iklu:7"):
+            maturity_decisions.validate_source(decisions, "KAVI", [{"authorityId": "iklu:8"}])
+        with self.assertRaisesRegex(StageError, "absent corpus keys: movie:1"):
+            maturity_decisions.validate_targets(decisions, facts())
+
 
 class Stage(unittest.TestCase):
     def test_an_optional_kmrb_snapshot_uses_the_same_exact_public_evidence_path(self):
@@ -223,6 +284,8 @@ class Stage(unittest.TestCase):
         self.assertEqual([row["authority"] for row in manifest["sources"]],
                          ["Medietilsynet", "CNC", "ClassInd"])
         self.assertEqual(derived["records"][0]["minimumAge"], 16)
+        self.assertEqual(derived["derivation"]["authorityDecisionsSha256"],
+                         maturity_decisions.load()[1])
         self.assertNotIn("copyrighted", json.dumps(derived))
 
     def test_a_dead_enhancement_source_is_unknown_not_a_partial_fake(self):

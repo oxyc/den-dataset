@@ -339,7 +339,7 @@ def by_key(path, label):
 MATURITY_OBSERVATION_FIELDS = (
     "authority", "authorityId", "raw", "age", "matchedBy", "assessed", "runtimeMinutes", "format",
 )
-MATURITY_MATCH_METHODS = {"exact-title+year+director"}
+MATURITY_MATCH_METHODS = {"exact-title+year+director", "authority-id-decision"}
 
 
 def maturity_rows(path):
