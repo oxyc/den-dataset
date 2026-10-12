@@ -152,7 +152,7 @@ def run(ctx, cache=None):
     todo = outstanding(labels, rows)
     wanted = sum(len(ids) for ids in todo.values())
     print(f"  doc-facts: {before} cached, {wanted} to fetch ({len(again)} of them again)", file=sys.stderr)
-    fresh = refresh.Fresh(cache) if cache is not None else None
+    fresh = refresh.Fresh(cache, refresh.FRESH_WINDOW) if cache is not None else None
     work = [(media, ids, cache) for media, ids in batches(
         {media: [i for i in ids if f"{media}:{i}" not in again] for media, ids in todo.items()})]
     work += [(media, ids, fresh) for media, ids in batches(

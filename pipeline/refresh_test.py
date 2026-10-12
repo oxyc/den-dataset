@@ -242,15 +242,20 @@ class Run(Refresh):
         fresh = caches.pop()
         self.assertIsInstance(fresh, refresh.Fresh)
         key = self.cache.key("en.wikipedia.org/w/api.php", dict(refresh.wikipedia.PARSE_QUERY, page="Film 5"))
-        stale = os.path.getmtime(self.cache.path_for(key)) - refresh.FRESH_WINDOW - 1
-        os.utime(self.cache.path_for(key), (stale, stale))
-        self.assertIsNone(fresh.read(key), "a body from before the window is asked again")
+        self.assertIsNone(fresh.read(key), "not even a body written moments ago: the edit may be newer")
         fresh.write("k" * 64, b"{}")
         self.assertEqual(self.cache.read("k" * 64), b"{}")
-        self.assertEqual(fresh.read("k" * 64), b"{}",
-                         "one written inside the window is today's answer: a retry of the day does not ask again")
         self.assertEqual({token for _a, _l, _c, token in self.plot_calls}, {None},
                          "the action API, which records a revision; Enterprise names none")
+
+    def test_a_windowed_fresh_answers_from_a_body_written_inside_it_and_asks_again_before_it(self):
+        """The facts and doc-facts re-asks: a retry of the day takes what its first attempt fetched."""
+        fresh = refresh.Fresh(self.cache, refresh.FRESH_WINDOW)
+        fresh.write("k" * 64, b"{}")
+        self.assertEqual(fresh.read("k" * 64), b"{}")
+        stale = os.path.getmtime(self.cache.path_for("k" * 64)) - refresh.FRESH_WINDOW - 1
+        os.utime(self.cache.path_for("k" * 64), (stale, stale))
+        self.assertIsNone(fresh.read("k" * 64))
 
     def test_a_refreshed_record_keeps_its_animated_flag_and_item_and_drops_every_tmdb_field(self):
         self.refreshed()
