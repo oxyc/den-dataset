@@ -563,7 +563,15 @@ def main():
     if left:
         sys.exit(f"{len(left)} titles the published corpus holds would leave it — they are in no facts file "
                  f"and no shard, e.g. {left[:4]}. The facts' delta pass keeps every published title.")
-    spine = sorted(answered | set(facts) | set(base))
+    # A title this run classified that the day did not finalize — classify judged its article about another
+    # work, so it has no genres & moods, no vector and no facts — has nothing the store can carry. A published
+    # title is in the facts by the delta pass, so this is only ever a new one: it waits, its answers kept in
+    # the paid-answers ledger, until a run can finalize it, as a title held for spend does.
+    unfinalized = sorted(answered - set(facts) - set(base))
+    if unfinalized:
+        print(f"waiting: {len(unfinalized)} new titles were classified but not finalized (no genres & moods), "
+              f"e.g. {unfinalized[:4]}", file=sys.stderr)
+    spine = sorted((answered | set(facts) | set(base)) - set(unfinalized))
     from_base = held = 0
     try:
         for key in spine:
@@ -662,7 +670,8 @@ def main():
                       "withLabels": with_labels,
                       "withDelta": with_delta, "withStructural": with_structural,
                       "withPass": len(combined_rows), "fromBase": from_base, "heldAtPublishedSource": held,
-                      "factsOnly": written - len(answered) - from_base,
+                      "factsOnly": written - (len(answered) - len(unfinalized)) - from_base,
+                      "unfinalized": len(unfinalized),
                       "entities": len(entities), "out": out_path, "entitiesOut": ents_path,
                       "tombstones": len(withdrawals), "combined": combined_report, "delta": delta_report,
                       "structural": structural_report},

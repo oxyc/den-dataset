@@ -146,6 +146,27 @@ class Spine(unittest.TestCase):
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertEqual(json.loads(done.stdout)["factsOnly"], 2)
 
+    def test_a_new_classified_title_the_day_did_not_finalize_waits_outside_the_corpus(self):
+        """Classify judged movie:3's article about another work: no genres & moods, so no vector and no facts.
+        The store holds the corpus to the facts row for row, so writing it would refuse the whole day."""
+        with tempfile.TemporaryDirectory() as dir:
+            paths = {n: os.path.join(dir, n) for n in
+                     ("combined.jsonl", "delta.jsonl", "facts.json", "labels.json", "corpus.jsonl")}
+            write(paths["combined.jsonl"], [combined(1), combined(3)])
+            write(paths["delta.jsonl"], [])
+            facts_file(paths["facts.json"], ["movie:1"])
+            labels_file(paths["labels.json"], ["movie:1"])
+            argv = [sys.executable, SCRIPT, "--combined", paths["combined.jsonl"],
+                    "--delta", paths["delta.jsonl"], "--facts", paths["facts.json"],
+                    "--maturity", maturity_for(paths["facts.json"]),
+                    "--labels", paths["labels.json"], "--out", paths["corpus.jsonl"]]
+            done = subprocess.run(argv, capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual([r["key"] for r in read(paths["corpus.jsonl"])], ["movie:1"])
+            report = json.loads(done.stdout)
+            self.assertEqual((report["unfinalized"], report["factsOnly"]), (1, 0))
+            self.assertIn("movie:3", done.stderr)
+
 
 class MaturityEvidence(unittest.TestCase):
     OBSERVATION = {"authority": "CNC", "authorityId": "visa:123", "raw": "Interdit -12 ans",
