@@ -507,6 +507,19 @@ without it KAVI remains unknown and the other public authorities still run.
 
 The accepted, private, and excluded source matrix is in `docs/MATURITY-SOURCES.md`.
 
+Measure the verified public baseline beside Wikidata discovery and private runtime TMDB coverage with:
+
+```sh
+python3 tools/certification_coverage.py --labels out/labels-t02.json \
+  --facts out/facts-<version>.json --maturity out/maturity-<version>.json \
+  --movie-export out/movie_ids.json.gz --tv-export out/tv_series_ids.json.gz \
+  --region US --out out/maturity-coverage.json
+```
+
+This is an explicit operator measurement, not part of `daily`. It can make many network requests. The
+report contains aggregate counts only: private TMDB title-level certifications and derived ages remain in
+memory and are never checkpointed or written.
+
 ### A first generation
 
 The daily job refuses `--spend` without a live baseline: a first generation is the whole corpus (~$20 of
