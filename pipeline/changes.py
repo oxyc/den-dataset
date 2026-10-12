@@ -353,11 +353,12 @@ def planned(ctx):
     return plan if plan.get("baseline") else None
 
 
-def hold(ctx, held):
+def hold(ctx, held, field="heldForSpend"):
     """Take `held` out of this out-dir's change set, in place: out of `keys.txt` and `new.txt`, out of the
-    plan's `added`, with the counts following and `heldForSpend` naming them.
+    plan's `added`, with the counts following and `field` naming them.
 
-    The daily job calls it for the titles the day's TypeSafe budget cannot reach. Every later stage then reads
+    The daily job calls it for the titles the day's TypeSafe budget cannot reach (`heldForSpend`), and the
+    classify stage for the ones no single request can carry (`heldForSize`). Every later stage then reads
     a change set that simply does not have them yet, so none is classified, embedded or asked about, and the
     corpus join holds each at its published source (`consolidate_corpus.held_source`) until a day that can pay
     for it. Calling it again adds to what was held."""
@@ -377,11 +378,11 @@ def hold(ctx, held):
     gone = held & set(plan["added"])
     plotless = set(plan.get("addedPlotless") or [])
     plan["added"] = [key for key in plan["added"] if key not in gone]
-    plan["heldForSpend"] = sorted(set(plan.get("heldForSpend") or []) | held, key=order)
+    plan[field] = sorted(set(plan.get(field) or []) | held, key=order)
     counts["added"] = len(plan["added"])
     if "addedPlotted" in counts:
         counts["addedPlotted"] -= len(gone - plotless)
-    counts["heldForSpend"] = len(plan["heldForSpend"])
+    counts[field] = len(plan[field])
     caching.write_atomically(plan_path, (json.dumps(plan, indent=1) + "\n").encode("utf-8"))
 
 

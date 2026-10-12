@@ -233,4 +233,23 @@ def run(ctx):
     if ctx.plan:
         return f"planned only — nothing bought, nothing written to {out}"
     check_outputs(ctx)
+    hold_unaskable(ctx, out, changing=articles is not None)
     return out
+
+
+def hold_unaskable(ctx, out, changing):
+    """Take out of the change set the titles the pass could not ask because no single request can carry their
+    article (`run_combined.held_path`): none is labelled, none is half-done, and the join keeps each at its
+    published source until a day that can ask it. They are named in the log and counted in the plan as
+    `heldForSize`. A whole-corpus run has no change set to take them out of, so it only says so: those titles
+    are unclassified in the shard."""
+    path = rc.held_path(out)
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as handle:
+        held = json.load(handle)
+    where = "taken out of the change set" if changing else "left unclassified in the shard"
+    print(f"classify: {len(held)} title(s) no single request can carry, {where}: "
+          f"{', '.join(sorted(held))}", file=sys.stderr)
+    if changing:
+        changes.hold(ctx, held, "heldForSize")

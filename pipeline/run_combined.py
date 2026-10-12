@@ -22,10 +22,11 @@ if not __package__:
     # Run as a file, which is how the classify stage runs it: the repo, not pipeline/, is the import root.
     sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from lib import typesafe_client
-from lib.typesafe_client import TypeSafe, TypeSafeError
+from lib.typesafe_client import TokenLimitExceeded, TypeSafe, TypeSafeError
 from pipeline import article_sections, combined_questions
-from pipeline.article_sections import (encoded_chars, is_oversized, parse_sections, public_section,
-                                       section_groups, select_global_sections, sha256_text, state_for)
+from pipeline.article_sections import (SectionTooLarge, encoded_chars, is_oversized, parse_sections,
+                                       public_section, section_groups, select_global_sections, sha256_text,
+                                       state_for)
 from pipeline.combined_questions import (PINNED_MODEL, PROMPT, ROOT, TAXONOMY, global_questions,
                                          section_question)
 from pipeline.delta_questions import delta_questions
@@ -260,6 +261,7 @@ def manifest_config(args, global_qs, label_mapping, tax, enriched_evidence_sha):
         "taxonomyVersion": tax["version"],
         "requestedModel": args.model,
         "maxStateChars": args.max_state_chars,
+        "maxStateTokens": getattr(args, "max_state_tokens", article_sections.MAX_STATE_TOKENS),
         "globalQuestions": global_qs,
         "globalQuestionsSha256": sha256_text(canonical(global_qs)),
         "sectionQuestionTemplate": section_question("SECTION_ID"),
@@ -425,7 +427,8 @@ def classify(rec, client, global_qs, manifest, max_state_chars, abort_event=None
     """
     sections = sections_for_record(rec)
     role_answers, calls = {}, []
-    oversized = is_oversized(rec, sections, max_state_chars)
+    max_state_tokens = manifest["config"].get("maxStateTokens")
+    oversized = is_oversized(rec, sections, max_state_chars, max_state_tokens)
     if state_section_ids is not None:
         global_sections = sections_by_id(rec, sections, state_section_ids)
         oversized = len(global_sections) < len(sections)
@@ -446,7 +449,7 @@ def classify(rec, client, global_qs, manifest, max_state_chars, abort_event=None
         role_answers = {section["id"]: answers[f"section__{section['id']}"] for section in sections}
         global_sections = sections
     else:
-        groups = section_groups(rec, sections, max_state_chars)
+        groups = section_groups(rec, sections, max_state_chars, max_state_tokens)
         for group_number, group in enumerate(groups, 1):
             questions = {f"section__{section['id']}": section_question(section["id"])
                          for section in group}
@@ -456,7 +459,8 @@ def classify(rec, client, global_qs, manifest, max_state_chars, abort_event=None
             calls.append(provenance)
             role_answers.update({section["id"]: answers[f"section__{section['id']}"]
                                  for section in group})
-        global_sections = select_global_sections(rec, sections, role_answers, max_state_chars)
+        global_sections = select_global_sections(
+            rec, sections, role_answers, max_state_chars, max_state_tokens)
         global_answers, provenance = call(
             client, state_for(rec, global_sections), global_qs, "global-after-section-audit",
             [s["id"] for s in global_sections], abort_event)
@@ -502,10 +506,10 @@ def classify(rec, client, global_qs, manifest, max_state_chars, abort_event=None
     }
 
 
-def plan(records, global_qs, max_state_chars, state_ids_by_key=None):
+def plan(records, global_qs, max_state_chars, state_ids_by_key=None, max_state_tokens=None):
     """Price a run. ``state_ids_by_key`` (article key -> state section ids) prices
     ``classify(state_section_ids=...)``, refusing a title it has no state for."""
-    rows = calls = section_count = decisions = oversized_count = 0
+    rows = calls = section_count = decisions = oversized_count = held_count = 0
     max_sections = 0
     article_chars = state_chars = question_chars = 0
     oversized_details = []
@@ -534,9 +538,16 @@ def plan(records, global_qs, max_state_chars, state_ids_by_key=None):
         state_chars += min(encoded_chars(state), max_state_chars)
         section_qs = {f"section__{s['id']}": section_question(s["id"]) for s in sections}
         question_chars += len(canonical({**global_qs, **section_qs}))
-        if is_oversized(rec, sections, max_state_chars):
+        if is_oversized(rec, sections, max_state_chars, max_state_tokens):
             oversized_count += 1
-            groups = section_groups(rec, sections, max_state_chars)
+            try:
+                groups = section_groups(rec, sections, max_state_chars, max_state_tokens)
+            except SectionTooLarge:
+                held_count += 1
+                oversized_details.append({"key": article_key(rec), "title": rec.get("title"),
+                                          "articleChars": len(rec["text"]), "sections": len(sections),
+                                          "held": True})
+                continue
             calls += len(groups) + 1
             oversized_details.append({
                 "key": article_key(rec), "title": rec.get("title"), "articleChars": len(rec["text"]),
@@ -554,6 +565,7 @@ def plan(records, global_qs, max_state_chars, state_ids_by_key=None):
         "meanSections": round(section_count / rows, 2) if rows else 0,
         "maxSections": max_sections,
         "oversizedTitles": oversized_count,
+        "heldTitles": held_count,
         "oversized": oversized_details,
         "articleChars": article_chars,
         "roughInputTokens": estimated_tokens,
@@ -583,6 +595,23 @@ def release_output_lock(handle):
     handle.close()
 
 
+def held_path(out):
+    return out + ".held.json"
+
+
+def write_held(out, held):
+    """`{key: why}` for the titles this run could not ask, beside the shard; no file when there are none, so
+    a rerun's answer is never a stale one. The caller that owns the change set decides what holding means
+    (`pipeline/classify.py`)."""
+    path = held_path(out)
+    if held:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(held, fh, ensure_ascii=False, sort_keys=True, indent=1)
+            fh.write("\n")
+    elif os.path.exists(path):
+        os.remove(path)
+
+
 def paid_run(args, global_qs, label_mapping, tax, enriched_evidence_sha,
              records, input_keys, selected_records, state_ids_by_key=None):
     manifest_path = args.manifest or args.out + ".manifest.json"
@@ -606,6 +635,7 @@ def paid_run(args, global_qs, label_mapping, tax, enriched_evidence_sha,
     abort_reason = None
     output = open(args.out, "a", encoding="utf-8")
     written = failed = 0
+    held = {}
 
     def work(rec):
         nonlocal written, failed, abort_reason
@@ -615,6 +645,13 @@ def paid_run(args, global_qs, label_mapping, tax, enriched_evidence_sha,
             state_ids = None if state_ids_by_key is None else state_ids_by_key[article_key(rec)]
             row = classify(rec, client, global_qs, manifest, args.max_state_chars, abort_event, state_ids)
         except RunAborted:
+            return
+        except (TokenLimitExceeded, SectionTooLarge) as exc:
+            # This title cannot be asked as it stands; the next can. Left unlabelled, counted and named,
+            # not written as a row and not a reason to stop 3,000 others (`held_path`).
+            with lock:
+                held[article_key(rec)] = f"{type(exc).__name__}: {exc}"
+                print(f"  HELD {article_key(rec)} {rec.get('title')}: {exc}", file=sys.stderr)
             return
         except (TypeSafeError, ValueError) as exc:
             if isinstance(exc, InvalidAnswers):
@@ -644,9 +681,10 @@ def paid_run(args, global_qs, label_mapping, tax, enriched_evidence_sha,
             list(pool.map(work, todo))
     finally:
         output.close()
+        write_held(args.out, held)
 
     print(json.dumps({
-        "written": written, "failed": failed, "calls": client.calls,
+        "written": written, "failed": failed, "held": sorted(held), "calls": client.calls,
         "aborted": abort_event.is_set(), "abortReason": abort_reason,
         "inputTokens": client.input_tokens, "spendUSD": round(client.spend, 4),
         "out": args.out, "manifest": manifest_path,
@@ -709,7 +747,9 @@ def main(argv=None):
     else:
         selected_records = records[:args.limit] if args.limit else records
     if args.plan:
-        print(json.dumps(plan(selected_records, global_qs, args.max_state_chars), ensure_ascii=False, indent=2))
+        print(json.dumps(plan(selected_records, global_qs, args.max_state_chars,
+                              max_state_tokens=article_sections.MAX_STATE_TOKENS),
+                         ensure_ascii=False, indent=2))
         return 0
 
     lock_handle = acquire_output_lock(args.out + ".lock")

@@ -43,6 +43,12 @@ class TypeSafeError(RuntimeError):
     pass
 
 
+class TokenLimitExceeded(TypeSafeError):
+    """`HTTP 400 {"detail": {"error_type": "max_tokens_exceeded"}}`: this one request is over Jev's token limit
+    (64k for the state and every question, 32k for the state and the longest question). It says nothing about
+    the next request, so unlike every other 400 a caller can go on without it."""
+
+
 def api_key(env_path=None):
     """The key from the environment, else from `den.env` — the convention `docs/OPERATE.md` already sets.
 
@@ -119,6 +125,8 @@ class TypeSafe:
             except urllib.error.HTTPError as exc:
                 if exc.code not in RETRYABLE or attempt == RETRY_STATUS_MAX - 1:
                     detail = _scrub(exc.read().decode("utf-8", "replace")[:400], self._key)
+                    if exc.code == 400 and '"max_tokens_exceeded"' in detail:
+                        raise TokenLimitExceeded(f"HTTP {exc.code}: {detail}") from None
                     raise TypeSafeError(f"HTTP {exc.code}: {detail}") from None
                 wait = _retry_after(exc)
                 if wait is not None and wait > MAX_RETRY_AFTER:

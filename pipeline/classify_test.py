@@ -262,6 +262,42 @@ class Equivalence(unittest.TestCase):
             self.assertIn("run_combined.py", str(refused.exception))
 
 
+class Held(unittest.TestCase):
+    """A title no single request can carry is taken out of the change set, so nothing later asks about it."""
+
+    def change_set(self, out):
+        directory = context(out).path(artifacts.CHANGES)
+        os.makedirs(directory)
+        for name in ("keys", "new"):
+            with open(os.path.join(directory, f"{name}.txt"), "w", encoding="utf-8") as fh:
+                fh.write("movie:7\nmovie:8\n")
+        with open(os.path.join(directory, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"baseline": {"datasetVersion": "live"}, "added": ["movie:7", "movie:8"],
+                       "counts": {"keys": 2, "added": 2}}, fh)
+        return directory
+
+    def test_the_titles_the_pass_could_not_ask_leave_the_change_set(self):
+        with tempfile.TemporaryDirectory() as out:
+            directory = self.change_set(out)
+            shard = os.path.join(out, SHARD)
+            with open(script.held_path(shard), "w", encoding="utf-8") as fh:
+                json.dump({"movie:8": "TokenLimitExceeded: HTTP 400"}, fh)
+            classify.hold_unaskable(context(out), shard, changing=True)
+            with open(os.path.join(directory, "plan.json"), encoding="utf-8") as fh:
+                plan = json.load(fh)
+            self.assertEqual((plan["added"], plan["heldForSize"]), (["movie:7"], ["movie:8"]))
+            self.assertEqual(plan["counts"]["heldForSize"], 1)
+            with open(os.path.join(directory, "new.txt"), encoding="utf-8") as fh:
+                self.assertEqual(fh.read().split(), ["movie:7"])
+
+    def test_a_pass_that_held_nothing_changes_nothing(self):
+        with tempfile.TemporaryDirectory() as out:
+            directory = self.change_set(out)
+            classify.hold_unaskable(context(out), os.path.join(out, SHARD), changing=True)
+            with open(os.path.join(directory, "plan.json"), encoding="utf-8") as fh:
+                self.assertNotIn("heldForSize", json.load(fh))
+
+
 class Topology(unittest.TestCase):
     def test_the_pass_shards_are_owned_by_the_stage_that_writes_them(self):
         """`combined` used to name `run_combined.py` on the artifact — a field that could name one script
