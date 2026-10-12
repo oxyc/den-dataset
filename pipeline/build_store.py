@@ -76,11 +76,12 @@ from store.inputs import (INPUT_ARGS, build_inputs, input_digest,  # noqa: E402
 #:   llm        — a model's answer over that text
 #:   ours       — this pipeline's own bookkeeping: offsets, indices, counts, controlled vocabularies
 #:   identifier — an id rather than content: the TMDB key, the IMDb id, a TMDB person id
+#:   public_authority — redistributable factual classifications issued by a public authority
 #:   tmdb       — TMDB CONTENT, which is what #118 is removing
 #:   imdb       — IMDb's dataset CONTENT: vote counts, ratings. Nothing here reads them, and IMDb's
 #:                licence rules out a public database, so they may never ship. Not the `imdb` SECTION,
 #:                which is the id (Wikidata's P345) — an `identifier`.
-SOURCES = {"wikidata", "wikipedia", "llm", "ours", "identifier", "tmdb", "imdb"}
+SOURCES = {"wikidata", "wikipedia", "llm", "ours", "identifier", "public_authority", "tmdb", "imdb"}
 
 #: Every section, and its source. Asserted at assembly against the sections actually written; a new
 #: section with no entry here is fatal, and so is a stale required entry. Optional section groups may be
@@ -147,6 +148,8 @@ PROVENANCE = {
     "runtime": "wikidata",
     "franchise_v": "wikidata", "franchise_o": "wikidata",
     "orig_lang": "wikidata",
+    # Highest verified numeric age from redistributable official classification records. Unknown is 255.
+    "minimum_age": "public_authority",
     "ent_qid": "wikidata", "ent_name": "wikidata",
     "ent_tmdb": "identifier",
     "ent_credits": "ours",

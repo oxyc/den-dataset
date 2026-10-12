@@ -18,7 +18,7 @@ import os
 import sys
 
 from . import (aliases, awards, cards, entities, facets, facts, fan_picks, format, franchises, identity, labels,
-               makers, jev_more_like, names, premise_tags, scores, studios, vectors, versions)
+               makers, maturity, jev_more_like, names, premise_tags, scores, studios, vectors, versions)
 from .inputs import corpus_rows, labels_by_key, read_json
 
 
@@ -84,6 +84,7 @@ def run(args, inputs, prose_check, provenance_check):
     facet_columns = facets.Facets()
     score_columns = scores.Scores()
     fact_columns = facts.Facts(genre_map)
+    maturity_column = maturity.Maturity()
 
     for key in keys:
         r = rows[key]
@@ -158,6 +159,7 @@ def run(args, inputs, prose_check, provenance_check):
         facet_columns.add(strings, key, r)
         score_columns.add(key, r)
         fact_columns.add(strings, key, row_facts, titles, entity_index)
+        maturity_column.add(key, r)
 
     card_columns.put(sec, n)
     label_columns.put(sec, n)
@@ -169,6 +171,7 @@ def run(args, inputs, prose_check, provenance_check):
     # format rather than a matter of taste.
     facet_columns.put_applicability(sec, n)
     fact_columns.put_trailing(sec, n)
+    maturity_column.put(sec, n)
 
     entity_index.put(sec, strings, fact_columns.makers, fact_columns.entity_lists["cast"])
     makers.put(sec, fact_columns.makers)
@@ -224,6 +227,7 @@ def run(args, inputs, prose_check, provenance_check):
                       "withNames": card_columns.named, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
                       "premiseTagged": tag_columns.tagged, "otherVersions": version_columns.titles,
+                      "maturityTitles": maturity_column.known,
                       "jevMoreLike": jev_columns.anchors, "fanPicksAsked": fan_columns.anchors,
                       "entities": len(entity_index.qids), "iconicStudios": len(studio_list.kept),
                       "awardTitles": award_columns.titles, "ceremonies": len(award_columns.ceremonies),

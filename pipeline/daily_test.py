@@ -89,7 +89,7 @@ class Skips(Recorded):
         code, report = self.day(mode="delta")
         self.assertEqual(code, 0)
         self.assertEqual(self.ran(), ["changes", "articles", "genres_moods", "docfacts", "plot_length", "finalize",
-                                      "facts", "franchises", "corpus", "store", "publish"])
+                                      "facts", "maturity", "franchises", "corpus", "store", "publish"])
         self.assertEqual([s["stage"] for s in report["skipped"]],
                          ["worklist", "fetch", "classify", "critique", "genres_moods (ask)", "premise_tags", "embed",
                           "franchises (ask)"])

@@ -77,6 +77,13 @@ def genres_moods_file(path, keys):
         json.dump({"count": len(keys), "taxonomyVersion": "t02", "titles": {k: entry for k in keys}}, fh)
 
 
+def maturity_for(facts, records=()):
+    path = facts + ".maturity.json"
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"schema": 1, "records": list(records)}, fh)
+    return path
+
+
 def run(dir, combined_paths, delta_paths, facts, labels, out, extra=(), structural_paths=()):
     """The script as the pipeline runs it, returning (exit code, stderr)."""
     argv = [sys.executable, SCRIPT]
@@ -86,7 +93,8 @@ def run(dir, combined_paths, delta_paths, facts, labels, out, extra=(), structur
         argv += ["--delta", path]
     for path in structural_paths:
         argv += ["--structural", path]
-    argv += ["--facts", facts, "--labels", labels, "--out", out, *extra]
+    argv += ["--facts", facts, "--maturity", maturity_for(facts),
+             "--labels", labels, "--out", out, *extra]
     done = subprocess.run(argv, capture_output=True, text=True, cwd=dir)
     return done.returncode, done.stderr
 
@@ -131,6 +139,7 @@ class Spine(unittest.TestCase):
             labels_file(paths["labels.json"], ["movie:1", "movie:2", "tv:9"])
             argv = [sys.executable, SCRIPT, "--combined", paths["combined.jsonl"],
                     "--delta", paths["delta.jsonl"], "--facts", paths["facts.json"],
+                    "--maturity", maturity_for(paths["facts.json"]),
                     "--labels", paths["labels.json"], "--out", paths["corpus.jsonl"]]
             done = subprocess.run(argv, capture_output=True, text=True)
             self.assertEqual(done.returncode, 0, done.stderr)
@@ -303,7 +312,8 @@ class Supersede(unittest.TestCase):
             argv += ["--combined", path]
         for path in delta_paths:
             argv += ["--delta", path]
-        argv += ["--facts", self.p["f.json"], "--labels", self.p["l.json"],
+        argv += ["--facts", self.p["f.json"], "--maturity", maturity_for(self.p["f.json"]),
+                 "--labels", self.p["l.json"],
                  "--out", out or self.p["corpus.jsonl"], *extra]
         return subprocess.run(argv, capture_output=True, text=True)
 
@@ -414,7 +424,8 @@ class Withdrawn(unittest.TestCase):
     def test_the_report_counts_the_withdrawals(self):
         self.withdraw()
         done = subprocess.run([sys.executable, SCRIPT, "--combined", self.c, "--delta", self.d,
-                               "--facts", self.f, "--labels", self.l, "--out", self.out,
+                               "--facts", self.f, "--maturity", maturity_for(self.f),
+                               "--labels", self.l, "--out", self.out,
                                "--withdrawn", self.tombstones], capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         report = json.loads(done.stdout)
@@ -432,7 +443,8 @@ class Withdrawn(unittest.TestCase):
         started(again, LATE)
         started(again_d, LATE)
         done = subprocess.run([sys.executable, SCRIPT, "--combined", self.c, "--combined", again,
-                               "--delta", self.d, "--delta", again_d, "--facts", self.f, "--labels", self.l,
+                               "--delta", self.d, "--delta", again_d, "--facts", self.f,
+                               "--maturity", maturity_for(self.f), "--labels", self.l,
                                "--out", self.out, "--withdrawn", self.tombstones],
                               capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -476,7 +488,8 @@ class Withdrawn(unittest.TestCase):
         self.withdraw(when="2026-09-24T20:00:00+00:00")
         done = subprocess.run([sys.executable, SCRIPT, "--combined", self.c, "--combined", again,
                                "--delta", self.d, "--delta", again_d, "--facts", self.f,
-                               "--labels", self.l, "--out", self.out, "--withdrawn", self.tombstones],
+                               "--maturity", maturity_for(self.f), "--labels", self.l,
+                               "--out", self.out, "--withdrawn", self.tombstones],
                               capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         rows = {r["key"]: r for r in read(self.out)}
@@ -642,7 +655,8 @@ class Held(unittest.TestCase):
 
     def test_the_report_counts_the_titles_it_held(self):
         done = subprocess.run(
-            [sys.executable, SCRIPT, "--combined", self.shard, "--facts", self.facts, "--labels", self.labels,
+            [sys.executable, SCRIPT, "--combined", self.shard, "--facts", self.facts,
+             "--maturity", maturity_for(self.facts), "--labels", self.labels,
              "--out", self.out, "--base", self.base, "--enriched", self.enriched],
             capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)

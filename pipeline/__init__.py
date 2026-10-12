@@ -42,7 +42,7 @@ from .contract import (Artifact, Binding, Context, StageError, bind, load,  # no
 #: `worklist --mode delta` skips the titles the previous run's `genres-moods.json` names, because a delta
 #: extends an out-dir rather than starting one.
 STAGES = ("worklist", "fetch", "changes", "articles", "classify", "critique", "genres_moods", "docfacts",
-          "embed", "plot_length", "finalize", "facts", "franchises", "corpus", "store", "publish")
+          "embed", "plot_length", "finalize", "facts", "maturity", "franchises", "corpus", "store", "publish")
 
 
 def stage(name):

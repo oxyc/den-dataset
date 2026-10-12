@@ -62,6 +62,7 @@ INPUTS = (
     artifacts.DELTA,
     artifacts.STRUCTURAL,
     artifacts.FACTS,
+    artifacts.MATURITY,
     artifacts.GENRES_MOODS.called("labels"),
     artifacts.WITHDRAWN,
     artifacts.ENRICHED.called("enriched"),

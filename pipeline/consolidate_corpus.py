@@ -336,10 +336,28 @@ def by_key(path, label):
     return out
 
 
+def maturity_rows(path):
+    """The verified maturity artifact, where zero matched titles is a valid fail-closed result."""
+    with open(path, encoding="utf-8") as fh:
+        blob = json.load(fh)
+    rows = blob.get("records") if isinstance(blob, dict) else None
+    if not isinstance(rows, list):
+        sys.exit(f"maturity: {path} has no records list")
+    out = {}
+    for row in rows:
+        if not isinstance(row, dict) or "mediaType" not in row or "tmdbId" not in row:
+            sys.exit(f"maturity: {path} has an unkeyed record")
+        key = key_of(row)
+        if key in out:
+            sys.exit(f"maturity: {path} has duplicate key {key}")
+        out[key] = row
+    return out
+
+
 #: The inputs this join reads, in the order the parser below declares them. `pipeline/corpus.py` builds
 #: the command line out of its own declaration and `pipeline/corpus_test.py` holds the two lists
 #: together, so an input can only be added or dropped in one place without something going red.
-INPUT_ARGS = ("combined", "delta", "structural", "facts", "labels", "withdrawn", "enriched", "base")
+INPUT_ARGS = ("combined", "delta", "structural", "facts", "maturity", "labels", "withdrawn", "enriched", "base")
 
 
 def build_parser():
@@ -350,6 +368,7 @@ def build_parser():
     ap.add_argument("--delta", action="append", default=[], help="a shard of the delta pass")
     ap.add_argument("--structural", action="append", default=[], help="a shard of the structural pass")
     ap.add_argument("--facts", required=True, help="the FULL facts file, not facts-slim")
+    ap.add_argument("--maturity", required=True, help="verified public-authority numeric maturity facts")
     ap.add_argument("--labels", required=True, help="genres-moods.json: each title's genres & moods")
     ap.add_argument("--withdrawn", help="tombstones: titles whose older pass rows no longer stand")
     ap.add_argument("--enriched", help="the enriched batch directory each row's `source` is read from")
@@ -452,6 +471,19 @@ def main():
     entities = facts_blob.get("entities") or {}
     facts = {key_of(r): r for r in facts_blob["records"]}
 
+    print("reading maturity …", file=sys.stderr)
+    maturity = maturity_rows(args.maturity)
+    malformed = sorted(key for key, value in maturity.items()
+                       if not isinstance(value.get("minimumAge"), int)
+                       or isinstance(value.get("minimumAge"), bool)
+                       or not 0 <= value["minimumAge"] <= 18)
+    if malformed:
+        sys.exit(f"maturity: {len(malformed)} records have no integer minimumAge from 0 through 18, "
+                 f"e.g. {malformed[:4]}")
+    outside = sorted(set(maturity) - set(facts))
+    if outside:
+        sys.exit(f"maturity: {len(outside)} records name no title in the facts artifact, e.g. {outside[:4]}")
+
     print("reading genres & moods …", file=sys.stderr)
     labels = by_key(args.labels, "labels")
 
@@ -478,7 +510,7 @@ def main():
     print("joining …", file=sys.stderr)
     out_path = args.out
     opener = gzip.open if out_path.endswith(".gz") else open
-    written, with_delta, with_structural, with_facts, with_labels = 0, 0, 0, 0, 0
+    written, with_delta, with_structural, with_facts, with_maturity, with_labels = 0, 0, 0, 0, 0, 0
     # mtime=0 so an unchanged corpus produces byte-identical output and the publish step does not
     # re-upload an asset that did not change.
     handle = (gzip.GzipFile(filename="", mode="wb", fileobj=open(out_path, "wb"), compresslevel=9, mtime=0)
@@ -521,6 +553,8 @@ def main():
                 # Wikidata, CC0. The full record — composers, cinematographers, narrativeLocations and
                 # mainSubjects included, all of which facts-slim dropped.
                 "facts": {k: v for k, v in (fact or {}).items() if k not in ("mediaType", "tmdbId")},
+                "maturity": {k: v for k, v in (maturity.get(key) or {}).items()
+                             if k not in ("mediaType", "tmdbId")} or None,
                 "labels": labels.get(key),
                 "applicability": typed(answers, APPLICABILITY),
                 "facets": typed(answers, FACET_AXES),
@@ -555,6 +589,7 @@ def main():
             with_delta += 1 if d else 0
             with_structural += 1 if row["structural"] else 0
             with_facts += 1 if fact else 0
+            with_maturity += 1 if row["maturity"] else 0
             with_labels += 1 if row["labels"] else 0
     finally:
         handle.close()
@@ -566,6 +601,9 @@ def main():
     # bug in the join, not a corpus that legitimately lacks it.
     if with_facts != len(facts):
         sys.exit(f"{len(facts) - with_facts} facts records did not reach the corpus")
+    if with_maturity != len(maturity):
+        sys.exit(f"maturity: {len(maturity) - with_maturity} of {len(maturity)} records in {args.maturity} "
+                 f"did not reach the corpus")
 
     # A join that silently misses is how `labels` was null on all 47,529 rows: the lookup returned a dict
     # for every key and none of them matched.
@@ -586,7 +624,8 @@ def main():
         blob = json.dumps(entities, ensure_ascii=False, sort_keys=True)
         eh.write(blob.encode("utf-8") if ents_path.endswith(".gz") else blob)
 
-    print(json.dumps({"titles": written, "withFacts": with_facts, "withLabels": with_labels,
+    print(json.dumps({"titles": written, "withFacts": with_facts, "withMaturity": with_maturity,
+                      "withLabels": with_labels,
                       "withDelta": with_delta, "withStructural": with_structural,
                       "withPass": len(combined_rows), "fromBase": from_base, "heldAtPublishedSource": held,
                       "factsOnly": written - len(answered) - from_base,
