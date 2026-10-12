@@ -49,6 +49,9 @@ def run(args, inputs, prose_check, provenance_check):
     print(f"  wikidata items: {len(item_record['ambiguous'])} titles with no decided item", file=sys.stderr)
 
     entity_table = read_json(args.entities)
+    alias_record["entityDropped"] = aliases.apply_entities(entity_table)
+    print(f"  entity aliases: {alias_record['entityDropped']} dropped by data/alias-decisions.json",
+          file=sys.stderr)
     genre_map, facts_records = facts.read_genre_map(read_json(args.facts), args.facts)
 
     # The card is built from `facts` — Wikidata — and the TMDB metadata sidecar is no longer read at all.
