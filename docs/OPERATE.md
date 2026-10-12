@@ -532,6 +532,13 @@ per authority from the non-conflicting matches. It carries only the factual obse
 the publishable maturity artifact; unexpected fields are discarded. Keep the seed fixed to reproduce a
 review, or pass `--seed` deliberately to draw a new sample.
 
+The maturity stage always tries the live Medietilsynet, CNC and ClassInd sources first. A successful body is
+cached only after the current adapter has parsed it. If a later request fails at the HTTP/transport layer,
+the stage may reuse that validated snapshot for at most 30 days; `maturity-sources.json` retains its original
+`retrievedAt` and records the live failure as `fallbackAfter`. A schema/body error is still fatal, and an
+expired, missing or hash-mismatched cache is never evidence. The persisted `.cache` is operational state,
+not a release asset; the byte-for-byte source used by a build is still copied under `maturity-sources/`.
+
 ### A first generation
 
 The daily job refuses `--spend` without a live baseline: a first generation is the whole corpus (~$20 of
