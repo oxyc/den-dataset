@@ -175,6 +175,16 @@ class NorwayAdapter(unittest.TestCase):
         self.assertIsNone(maturity_norway.age("Forbudt"))
         self.assertIsNone(maturity_norway.age(None))
 
+    def test_unreviewed_administrative_eighteen_is_not_a_content_age(self):
+        reason = ("Filmen er ikke forhåndskontrollert og skal derfor vises med 18-årsgrense. "
+                  "Distributør og den som viser filmen, er strafferettslig ansvarlig.")
+        [record] = list(maturity_norway.records(payload(
+            source_row(rating="18 år", reason=reason))))
+        self.assertIsNone(record["age"])
+        [assessed] = list(maturity_norway.records(payload(
+            source_row(rating="18 år", reason="Blodige voldsskildringer."))))
+        self.assertEqual(assessed["age"], 18)
+
     def test_changed_columns_are_refused_instead_of_silently_shifted(self):
         body = workbook([["Title", *maturity_norway.HEADERS[1:]], source_row()])
         with self.assertRaisesRegex(StageError, "columns changed"):
@@ -817,7 +827,8 @@ class PublicAdapters(unittest.TestCase):
         self.assertNotIn("secret", json.dumps(rows))
 
     def test_cnc_maps_only_explicit_restrictions(self):
-        self.assertEqual(maturity_public.cnc_age("Tout public"), 0)
+        self.assertIsNone(maturity_public.cnc_age("Tout public"))
+        self.assertIsNone(maturity_public.cnc_age("Tous publics avec avertissement"))
         self.assertEqual(maturity_public.cnc_age("Interdit mineurs"), 18)
         self.assertEqual(maturity_public.cnc_age("Interdit -16 ans - Interdit -12 ans"), 16)
         self.assertIsNone(maturity_public.cnc_age("Avertissement"))
