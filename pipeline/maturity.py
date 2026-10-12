@@ -27,6 +27,7 @@ SPENDS = False
 INPUTS = (artifacts.MANIFEST, artifacts.FACTS, artifacts.MATURITY_KAVI)
 OUTPUTS = (artifacts.MATURITY_NORWAY, artifacts.MATURITY_CNC, artifacts.MATURITY_BRAZIL,
            artifacts.MATURITY_KMRB, artifacts.MATURITY_TAIWAN, artifacts.MATURITY_SINGAPORE,
+           artifacts.MATURITY_QUEBEC,
            artifacts.MATURITY_SOURCES, artifacts.MATURITY)
 
 SOURCE_CACHE_NAMESPACE = "maturity_source"
