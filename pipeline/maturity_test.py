@@ -9,8 +9,8 @@ import unittest
 import zipfile
 import xml.etree.ElementTree as ET
 
-from . import (maturity, maturity_decisions, maturity_kavi, maturity_kmrb, maturity_public,
-               maturity_singapore, maturity_taiwan)
+from . import (maturity, maturity_decisions, maturity_kavi, maturity_kmrb, maturity_norway,
+               maturity_providers, maturity_public, maturity_singapore, maturity_taiwan)
 from .contract import Context, StageError
 from lib import cache, http
 
@@ -59,7 +59,7 @@ def source_row(title="The Film", original=None, rating="12 år", director="Alice
 
 
 def payload(*rows):
-    return workbook([list(maturity.HEADERS), *rows])
+    return workbook([list(maturity_norway.HEADERS), *rows])
 
 
 def kmrb_page(items, page_number=1, total=None, page_size=1000):
@@ -96,28 +96,28 @@ def movie(ident, title="The Film", year=2022, director="Qalice"):
 
 class NorwayAdapter(unittest.TestCase):
     def test_reads_blank_cells_and_keeps_only_factual_fields(self):
-        [record] = list(maturity.norway_records(payload(source_row(original=None))))
+        [record] = list(maturity_norway.records(payload(source_row(original=None))))
         self.assertEqual(record["titles"], ["The Film"])
         self.assertEqual((record["age"], record["year"], record["runtimeMinutes"]), (12, 2022, 100))
         self.assertNotIn("copyrighted reason", json.dumps(record))
         self.assertNotIn("copyrighted synopsis", json.dumps(record))
 
     def test_maps_all_ages_and_numeric_history_but_not_banned_or_missing(self):
-        self.assertEqual(maturity.norway_age("Tillatt for alle"), 0)
+        self.assertEqual(maturity_norway.age("Tillatt for alle"), 0)
         for age in (5, 6, 7, 9, 10, 11, 12, 15, 16, 18):
-            self.assertEqual(maturity.norway_age(f"{age} år"), age)
-        self.assertIsNone(maturity.norway_age("Forbudt"))
-        self.assertIsNone(maturity.norway_age(None))
+            self.assertEqual(maturity_norway.age(f"{age} år"), age)
+        self.assertIsNone(maturity_norway.age("Forbudt"))
+        self.assertIsNone(maturity_norway.age(None))
 
     def test_changed_columns_are_refused_instead_of_silently_shifted(self):
-        body = workbook([["Title", *maturity.HEADERS[1:]], source_row()])
+        body = workbook([["Title", *maturity_norway.HEADERS[1:]], source_row()])
         with self.assertRaisesRegex(StageError, "columns changed"):
-            list(maturity.norway_records(body))
+            list(maturity_norway.records(body))
 
 
 class Linker(unittest.TestCase):
     def test_exact_title_year_director_match_uses_highest_verified_age(self):
-        rows = list(maturity.norway_records(payload(
+        rows = list(maturity_norway.records(payload(
             source_row(rating="12 år"), source_row(rating="15 år"),
             source_row(title="Another Film", rating="Tillatt for alle", director="Bob Director"),
             source_row(title="The Film", rating="Forbudt"))))
@@ -130,7 +130,7 @@ class Linker(unittest.TestCase):
         self.assertEqual(records[0]["observations"][0]["matchedBy"], "exact-title+year+director")
 
     def test_wrong_director_missing_year_and_multiple_candidates_remain_unknown(self):
-        rows = list(maturity.norway_records(payload(
+        rows = list(maturity_norway.records(payload(
             source_row(director="Someone Else"), source_row(year=None), source_row())))
         records, audit = maturity.link_norway(rows, facts(movie(1), movie(3)))
         self.assertEqual(records, [])
@@ -149,7 +149,7 @@ class Linker(unittest.TestCase):
 
     def test_combines_authorities_by_the_highest_verified_age(self):
         norway, _ = maturity.link_records(
-            maturity.norway_records(payload(source_row(rating="12 år"))), facts(movie(1)))
+            maturity_norway.records(payload(source_row(rating="12 år"))), facts(movie(1)))
         cnc = [{"authority": "CNC", "authorityId": "visa:1", "titles": ["The Film"],
                 "directors": "Alice Director", "year": 2022, "raw": "Interdit -16 ans", "age": 16,
                 "matchedBy": "exact-title+year+director"}]
@@ -162,7 +162,7 @@ class Linker(unittest.TestCase):
 
     def test_no_series_can_be_matched_to_the_movie_only_source(self):
         series = {**movie(8), "mediaType": "tv"}
-        rows = list(maturity.norway_records(payload(source_row())))
+        rows = list(maturity_norway.records(payload(source_row())))
         records, audit = maturity.link_norway(rows, facts(series))
         self.assertEqual(records, [])
         self.assertEqual(audit["unmatchedRows"], 1)
@@ -229,6 +229,27 @@ class AuthorityDecisions(unittest.TestCase):
             maturity_decisions.validate_targets(decisions, facts())
 
 
+class ProviderRegistry(unittest.TestCase):
+    def test_every_authority_has_one_complete_registered_adapter(self):
+        providers = maturity_providers.PROVIDERS
+        authorities = [provider.authority for provider in providers]
+        self.assertEqual(len(authorities), len(set(authorities)))
+        self.assertEqual(set(authorities), maturity_decisions.AUTHORITIES)
+        self.assertEqual(set(maturity_providers.BY_AUTHORITY), set(authorities))
+        for provider in providers:
+            with self.subTest(authority=provider.authority):
+                declared = maturity.INPUTS if provider.acquisition == "local" else maturity.OUTPUTS
+                self.assertIn(provider.artifact, declared)
+                self.assertIn(provider.acquisition, {"local", "remote"})
+                self.assertEqual(callable(provider.fetch), provider.acquisition == "remote")
+                self.assertTrue(callable(provider.records))
+                self.assertTrue(callable(provider.manifest_entry))
+                self.assertRegex(provider.source_url, r"^https://")
+        self.assertEqual([provider.authority for provider in maturity_providers.REMOTE
+                          if provider.required],
+                         ["Medietilsynet"])
+
+
 class Stage(unittest.TestCase):
     def test_an_optional_kmrb_snapshot_uses_the_same_exact_public_evidence_path(self):
         norway = payload(source_row(title="Other", director="Bob Director"))
@@ -239,11 +260,13 @@ class Stage(unittest.TestCase):
                 json.dump({"datasetVersion": "testver"}, handle)
             with open(os.path.join(out, "facts-testver.json"), "w", encoding="utf-8") as handle:
                 json.dump(facts(movie(1)), handle)
-            maturity.run(Context(out_dir=out), fetch=lambda: norway,
-                         fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
-                         fetch_brazil=lambda: (_ for _ in ()).throw(
-                             http.HTTPError(0, "https://dados.mj.gov.br")),
-                         fetch_kmrb=lambda: (kmrb, maturity_kmrb.URL))
+            maturity.run(Context(out_dir=out), fetchers={
+                "Medietilsynet": lambda: norway,
+                "CNC": lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                "ClassInd": lambda: (_ for _ in ()).throw(
+                    http.HTTPError(0, "https://dados.mj.gov.br")),
+                "KMRB": lambda: (kmrb, maturity_kmrb.URL),
+            })
             with open(os.path.join(out, "maturity-testver.json"), encoding="utf-8") as handle:
                 derived = json.load(handle)
             with open(os.path.join(out, "maturity-sources.json"), encoding="utf-8") as handle:
@@ -267,9 +290,11 @@ class Stage(unittest.TestCase):
                    "The Film;Alice Director;;;2022;;44;Interdit -16 ans;\n").encode()
             brazil = ("Código;Titulo no Brasil;Titulo original;Ano de produção;Diretores;"
                       "Classificação Atribuída\n9;The Film;;2022;Alice Director;14 anos\n").encode()
-            result = maturity.run(Context(out_dir=out), fetch=lambda: body,
-                                  fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
-                                  fetch_brazil=lambda: (brazil, "https://dados.mj.gov.br/classind.csv"), now=now)
+            result = maturity.run(Context(out_dir=out), fetchers={
+                "Medietilsynet": lambda: body,
+                "CNC": lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                "ClassInd": lambda: (brazil, "https://dados.mj.gov.br/classind.csv"),
+            }, now=now)
             with open(os.path.join(out, "maturity-sources.json"), encoding="utf-8") as handle:
                 manifest = json.load(handle)
             with open(os.path.join(out, "maturity-testver.json"), encoding="utf-8") as handle:
@@ -301,9 +326,11 @@ class Stage(unittest.TestCase):
                 json.dump(facts(movie(1)), handle)
             def unavailable():
                 raise http.HTTPError(0, "https://dados.mj.gov.br/")
-            maturity.run(Context(out_dir=out), fetch=lambda: body,
-                         fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
-                         fetch_brazil=unavailable)
+            maturity.run(Context(out_dir=out), fetchers={
+                "Medietilsynet": lambda: body,
+                "CNC": lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                "ClassInd": unavailable,
+            })
             with open(os.path.join(out, "maturity-sources.json"), encoding="utf-8") as handle:
                 manifest = json.load(handle)
             with open(os.path.join(out, "maturity-testver.json"), encoding="utf-8") as handle:
@@ -331,20 +358,22 @@ class Stage(unittest.TestCase):
 
             with tempfile.TemporaryDirectory() as out:
                 prepare(out)
-                maturity.run(Context(out_dir=out), fetch=lambda: body,
-                             fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
-                             fetch_brazil=lambda: (brazil, "https://dados.mj.gov.br/classind.csv"),
-                             now=first, snapshot_cache=snapshots)
+                maturity.run(Context(out_dir=out), fetchers={
+                    "Medietilsynet": lambda: body,
+                    "CNC": lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                    "ClassInd": lambda: (brazil, "https://dados.mj.gov.br/classind.csv"),
+                }, now=first, snapshot_cache=snapshots)
 
             def unavailable():
                 raise http.HTTPError(0, "https://dados.mj.gov.br/")
 
             with tempfile.TemporaryDirectory() as out:
                 prepare(out)
-                maturity.run(Context(out_dir=out), fetch=lambda: body,
-                             fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
-                             fetch_brazil=unavailable, now=first + datetime.timedelta(days=1),
-                             snapshot_cache=snapshots)
+                maturity.run(Context(out_dir=out), fetchers={
+                    "Medietilsynet": lambda: body,
+                    "CNC": lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                    "ClassInd": unavailable,
+                }, now=first + datetime.timedelta(days=1), snapshot_cache=snapshots)
                 with open(os.path.join(out, "maturity-sources.json"), encoding="utf-8") as handle:
                     manifest = json.load(handle)
                 with open(os.path.join(out, "maturity-sources", "classind-audiovisual.csv"), "rb") as handle:
@@ -403,9 +432,12 @@ class Stage(unittest.TestCase):
                 json.dump(facts(movie(1)), handle)
             with open(os.path.join(out, "maturity-sources", "kavi-movies.jsonl"), "wb") as handle:
                 handle.write(kavi)
-            maturity.run(Context(out_dir=out), fetch=lambda: norway,
-                         fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
-                         fetch_brazil=lambda: (_ for _ in ()).throw(http.HTTPError(0, "https://dados.mj.gov.br")))
+            maturity.run(Context(out_dir=out), fetchers={
+                "Medietilsynet": lambda: norway,
+                "CNC": lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                "ClassInd": lambda: (_ for _ in ()).throw(
+                    http.HTTPError(0, "https://dados.mj.gov.br")),
+            })
             with open(os.path.join(out, "maturity-testver.json"), encoding="utf-8") as handle:
                 derived = json.load(handle)
         self.assertEqual(derived["records"][0]["minimumAge"], 18)
