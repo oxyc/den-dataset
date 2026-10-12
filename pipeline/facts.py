@@ -58,11 +58,17 @@ PUBLISHES = False
 SPENDS = False
 SCRIPT = os.path.join(REPO, "pipeline", "merge_facts.py")
 
-#: Ids per SPARQL request. 25 rather than the Swift's default 100: a 100-id batch stalled from this
-#: client until the 60 s timeout while the identical query answered in ~1 s elsewhere, and the run never
-#: cleared its first batch on resume. `pipeline/facts-run.sh` passed 25 for that reason, so the cached
-#: bodies on disk are keyed on 25-id batches — the batch is part of the query text, and the query text is
-#: the cache key.
+#: Titles per scrape batch: every property is one SPARQL request per batch, so a batch costs ~30 requests
+#: whatever its size (measured on WDQS: 0.2-1.0 s at 25 ids and 0.2-1.3 s at 150, the cast query returning
+#: 2,300 rows). At 25 the weekly revisit slice (6,692 titles) sent ~9,200 requests and took 3 h 10 min; at
+#: `wikidata.TMDB_CHUNK` it sends a sixth of them. 150 and not more: the language query falls off a cliff
+#: between 175 and 200 ids (60 s timeouts), the same one `TMDB_CHUNK` is sized for. A batch that still times
+#: out is halved (`wikidata._asked_batch`). The batch is part of the query text, which is the cache key, so
+#: bodies cached at 25 ids are no longer hit by a re-scrape; a checkpointed title never asks at all.
+SCRAPE_BATCH = wikidata.TMDB_CHUNK
+
+#: Ids per P179 re-ask for rows an older scrape collapsed (`refresh_collapsed_franchises`): the size those
+#: cached bodies were asked at, so the re-ask is answered from the cache.
 BATCH = 25
 
 #: Seconds between LIVE property requests. Firing them back to back sustains ~3 requests a second for
@@ -216,8 +222,8 @@ def scrape_batches(fields, types, cache, pace, checkpointed, resolved=None, excl
     done = skipped = 0
     for kind, ids in types.items():
         media = "tv" if kind == "tv" else "movie"
-        for start in range(0, len(ids), BATCH):
-            batch = ids[start:start + BATCH]
+        for start in range(0, len(ids), SCRAPE_BATCH):
+            batch = ids[start:start + SCRAPE_BATCH]
             try:
                 for item in wd.SPECS:
                     if item.tv_only and media != "tv":

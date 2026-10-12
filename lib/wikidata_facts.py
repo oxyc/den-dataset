@@ -27,7 +27,8 @@ import urllib.parse
 
 from . import http
 from .wikidata import (ANSWERED, HOST, ID_PROPERTY, PATH, PREFER_VAR, QLEVER_HOST,  # noqa: F401
-                       QLEVER_PATH, QLEVER_PREFIXES, WikidataError, exclusion, in_parallel, sparql)
+                       QLEVER_PATH, QLEVER_PREFIXES, TMDB_CHUNK, WikidataError, _asked_batch, exclusion,
+                       in_parallel, sparql)
 
 #: The per-property requests, keyed on their text like the doc-facts ones — a different namespace path, so
 #: the two scrapes' entries cannot collide.
@@ -268,23 +269,17 @@ def parse_facts(payload, item):
 _sparql = sparql
 
 
-def fetch_facts(ids, media, item, cache=None, excluded=None):
+def fetch_facts(ids, media, item, cache=None, excluded=None, chunk=0):
     """`(tmdbId -> value, whether it was asked live)`. A body is kept only once it parses, so a WDQS
-    maintenance page cannot outlive the outage; a kept body that no longer parses is asked again."""
-    query = facts_query(ids, media, item, excluded)
-    key = cache.key(CACHE_PATH, {"q": query}) if cache is not None else None
-    if key is not None:
-        hit = cache.read(key)
-        if hit is not None:
-            try:
-                return parse_facts(hit, item), False
-            except WikidataError:
-                pass
-    payload = _sparql(query, fallback=True)
-    parsed = parse_facts(payload, item)
-    if key is not None:
-        cache.write(key, payload)
-    return parsed, True
+    maintenance page cannot outlive the outage; a kept body that no longer parses is asked again.
+
+    Asked through `lib/wikidata._asked_batch`: more than `chunk` ids go out in sorted chunks (0, the default,
+    is one query whatever the size), and a query that runs out of time is asked again as two halves. Each
+    answer is kept under its own query text, so a batch asked whole keeps the key it always had."""
+    asked = sum(ANSWERED.values())
+    found = _asked_batch(ids, lambda part: facts_query(part, media, item, excluded), CACHE_PATH,
+                         lambda payload: parse_facts(payload, item), cache, chunk=chunk)
+    return found, sum(ANSWERED.values()) > asked
 
 
 #: What a P179 ("part of the series") target must be an instance of, through P279*, to count as a
@@ -477,13 +472,27 @@ def article_title(url):
 
 
 def _run(select, body, ids, media, excluded=None):
-    query = (f"SELECT ?tmdb {select} WHERE {{\n"
-             f"  VALUES ?tmdb {{ {_values(ids)} }}\n"
-             f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
-             f"{exclusion(ids, excluded)}"
-             f"  {body}\n"
-             f"}}")
-    return bindings(_sparql(query, fallback=True))
+    """The bindings of one titles-hop query over `ids`, in chunks of `TMDB_CHUNK` and halved on a timeout
+    (`_asked_batch`). Not cached. Grouped by TMDB id on the way, so the halves merge; every consumer reads
+    a binding on its own, so which id's rows come first does not matter."""
+    def query(part):
+        return (f"SELECT ?tmdb {select} WHERE {{\n"
+                f"  VALUES ?tmdb {{ {_values(part)} }}\n"
+                f"  ?film wdt:{ID_PROPERTY[media]} ?tmdb .\n"
+                f"{exclusion(part, excluded)}"
+                f"  {body}\n"
+                f"}}")
+
+    def by_title(payload):
+        out = {}
+        for binding in bindings(payload):
+            tmdb_id = _int(_value(binding, "tmdb"))
+            if tmdb_id is not None:
+                out.setdefault(tmdb_id, []).append(binding)
+        return out
+
+    return [binding for rows in _asked_batch(ids, query, "sparql-titles", by_title, None, chunk=TMDB_CHUNK).values()
+            for binding in rows]
 
 
 def _language(tag):

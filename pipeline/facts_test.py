@@ -675,14 +675,20 @@ class Resume(Staged):
         self.assertIn("does not parse", str(refused.exception))
         self.assertEqual(self.wd.asked["facts"], [])
 
-    def test_the_batches_are_the_ones_the_cache_was_filled_with(self):
-        """The id batch is inside the query text, and the query text is the cache key."""
+    def test_a_property_is_asked_once_per_150_titles_not_once_per_25(self):
+        """A batch costs ~30 requests whatever its size, so the scrape's time is its batch count: 400 titles
+        are 3 batches, 3 asks of each property. At 25 ids that was 16."""
         with open(os.path.join(self.out, "labels-t02.json"), "w", encoding="utf-8") as fh:
-            json.dump({"records": [{"mediaType": "movie", "tmdbId": i} for i in range(60)]}, fh)
+            json.dump({"records": [{"mediaType": "movie", "tmdbId": i} for i in range(400)]}, fh)
         self.run_stage()
-        sizes = {len(ids) for media, ids, key in self.wd.asked["facts"] if key == "imdbId" and 0 in ids[:1]}
+        sizes = [len(ids) for media, ids, key in self.wd.asked["facts"] if key == "imdbId" and media == "movie"
+                 and len(ids) > 3]
+        self.assertEqual(sizes, [150, 150, 100])
+        self.assertEqual(facts.SCRAPE_BATCH, 150)
+        self.assertEqual([len(ids) for media, ids in self.wd.asked["titles"] if len(ids) > 3], [150, 150, 100])
+
+    def test_the_collapsed_franchise_re_ask_keeps_the_batch_its_cached_bodies_were_asked_at(self):
         self.assertEqual(facts.BATCH, 25)
-        self.assertEqual(sizes, {25})
 
     def test_a_cached_answer_is_not_paced(self):
         slept = []

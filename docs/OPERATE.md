@@ -346,6 +346,14 @@ second at 175. A batch that times out on every endpoint it is asked of is asked 
 down to ten ids, and the answers are merged (the log says `wikidata: N ids failed … asking A and B`); a
 refusal of the query (a 4xx other than QLever's timeout) is not split, and neither is a 429 throttle.
 
+**How many titles a facts request carries.** The scrape asks each property (31 of them, plus the titles hop's
+two requests) once per batch of 150 titles (`facts.SCRAPE_BATCH`, = `TMDB_CHUNK`), so a stage's time is its
+batch count times ~30 requests, not its title count. WDQS answers a request in 0.2-1.3 s whether it carries 25
+ids or 150; the weekly revisit slice (6,692 titles) took 3 h 10 min at 25 ids. 150 is as far as the language
+query goes (it times out at 200); a request that still times out is asked again as halves. Each answer is
+cached under its own query text, so changing the batch size re-asks cached bodies once; the revisit slice
+reads no cache anyway.
+
 **The delta pass.** The facts are two passes merged: the titles in `labels-t02.json` (stamped `hasVector`)
 and `out/facts-delta-ids.txt` (not stamped, so den-atlas's `/recommend` never lets a vectorless record into
 an ANN path). `./den daily` writes the list — every title the live facts carry that the new labels do not,
