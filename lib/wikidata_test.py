@@ -922,10 +922,27 @@ class Endpoints(unittest.TestCase):
         self.script = {wikidata.HOST: 0, QLEVER: lambda ids: timed_out if len(ids) > 12 else
                        rows(*({"tmdb": cell(str(i)), "imdb": cell(f"tt{i}")} for i in ids))}
         self.assertEqual(sorted(wikidata.mapping(list(range(1, 41)), "movie", LANGUAGES)), list(range(1, 41)))
-        self.sent, self.script = [], {wikidata.HOST: 0, QLEVER: (429, b"Too many requests")}
+        self.sent, self.script = [], {wikidata.HOST: 429, QLEVER: (429, b"Too many requests")}
         with self.assertRaises(wikidata.http.HTTPError):
             wikidata.mapping(list(range(1, 41)), "movie", LANGUAGES)
-        self.assertEqual(self.hosts(), [wikidata.HOST, QLEVER])
+        self.assertEqual([(host, attempts) for host, _, attempts in self.sent],
+                         [(wikidata.HOST, 1), (QLEVER, wikidata.http.ATTEMPTS), (wikidata.HOST, wikidata.http.ATTEMPTS)],
+                         "a throttle is not halved: WDQS is asked again, with its retries, and its failure stands")
+
+    def test_both_endpoints_throttling_waits_on_wdqs_instead_of_giving_up(self):
+        """The 2026-10-12 daily run died at docfacts on WDQS 429 then QLever 429. WDQS's retries honour its
+        `Retry-After`, so the batch is answered there."""
+        answered = rows({"tmdb": cell("1"), "imdb": cell("tt1")})
+        replies = iter([429, answered])
+
+        def wdqs(_ids):
+            return next(replies)
+        self.script = {wikidata.HOST: wdqs, QLEVER: (429, b"Too many requests")}
+        found = wikidata.mapping([1], "movie", LANGUAGES, self.cache)
+        self.assertEqual(found[1]["imdb"], "tt1")
+        self.assertEqual([(host, attempts) for host, _, attempts in self.sent],
+                         [(wikidata.HOST, 1), (QLEVER, wikidata.http.ATTEMPTS), (wikidata.HOST, wikidata.http.ATTEMPTS)])
+        self.assertEqual(dict(wikidata.ANSWERED), {"wdqs": 1})
 
     def test_the_catalogue_passs_500_ids_are_asked_in_chunks_of_150(self):
         """`fetch` hands `enrich` 500 ids; WDQS answers the language query for 175 of the most-linked films in
@@ -953,7 +970,8 @@ class Endpoints(unittest.TestCase):
         self.script = {wikidata.HOST: 429, QLEVER: 429}
         with self.assertRaises(wikidata.http.HTTPError):
             wikidata.mapping(list(range(1, 41)), "movie", LANGUAGES, self.cache)
-        self.assertEqual(self.hosts(), [wikidata.HOST, QLEVER])
+        self.assertEqual(self.hosts(), [wikidata.HOST, QLEVER, wikidata.HOST],
+                         "WDQS once, QLever, then WDQS with its retries — and no halves")
 
 
 if __name__ == "__main__":
