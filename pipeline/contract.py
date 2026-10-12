@@ -46,6 +46,13 @@ class StageError(Exception):
     """A stage could not run. Its message names what is missing and the command that builds it."""
 
 
+class UpstreamError(StageError):
+    """A stage stopped because a service it asks did not answer — Wikidata throttling, a TypeSafe call that
+    failed, a download that timed out — not because anything in the data is wrong. Asking again later is the
+    remedy, so the daily job hands the day to a fresh run (`pipeline/daily.py`, `retryable`), which resumes
+    from what this one kept."""
+
+
 @dataclasses.dataclass(frozen=True)
 class Artifact:
     """One file — or one set of shards — a stage reads or writes.

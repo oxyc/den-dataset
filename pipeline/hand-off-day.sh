@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Hand the daily run to a fresh runner, then stop this one (.github/workflows/daily.yml).
 #
-#   pipeline/hand-off-day.sh "<why this host cannot embed>" ["<cpu model, when it is not on the blocklist>"]
+#   pipeline/hand-off-day.sh "<why this run cannot finish the day>" ["<cpu model, when it is not on the blocklist>"]
 #
 # Reads ATTEMPT, SPEND, WEEKS and GH_TOKEN from the job. The new run gets the same spend and revisit inputs
 # and the next try number; on the sixth try nothing is handed on and the day is skipped, so the next schedule
-# tries again. Called before anything is bought, so a handed-off run costs nothing.
+# tries again. Called before anything is bought (a CPU outside the box's space), or after the day stopped on a
+# service that did not answer, once the cache and the paid-answers ledger are kept, so the next run resumes.
 #
 # It leaves $RUNNER_TEMP/day-handoff (state=handed|exhausted, why=, cpu=) for pipeline/daily_issue.py, the
 # workflow's last step, which reports an exhausted day as a failure and an unlisted CPU as an issue. A handed-off

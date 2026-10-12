@@ -50,7 +50,7 @@ from . import franchise_groups as fg
 from . import run_combined as rc
 from .article_sections import parse_sections
 from .combined_questions import PINNED_MODEL, taxonomy
-from .contract import REPO, StageError
+from .contract import REPO, StageError, UpstreamError
 
 NAME = "franchises"
 PRODUCER = "pipeline/franchises.py"
@@ -364,7 +364,7 @@ def ask(ctx, asked, groups, titles, p=FIRST):
         if lock is not None:
             rc.release_output_lock(lock)
     if failed:
-        raise StageError(f"franchises: the ask stopped on a failed call; what was bought is in {out} and a rerun "
+        raise UpstreamError(f"franchises: the ask stopped on a failed call; what was bought is in {out} and a rerun "
                          f"resumes from it")
     return min(len(rows), ctx.limit) if ctx.limit else len(rows)
 

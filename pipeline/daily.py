@@ -51,11 +51,12 @@ import os
 import sys
 
 from lib import cache as caching
+from lib import http
 
 from . import (artifacts, changes, classify, finalize, load, model_steps, paid, plot_length, premise_daily,
                published, spend)
 from . import names as wikidata_names
-from .contract import Context, StageError
+from .contract import Context, StageError, UpstreamError
 from . import STAGES
 from tools import fan_picks
 
@@ -432,7 +433,7 @@ def finalize_ctx(ctx):
     return dataclasses.replace(ctx, dataset_version=finalize.manifest_version(ctx))
 
 
-def report(day, ready, why, tokens):
+def report(day, ready, why, tokens, retryable=False):
     """`daily-report.json` and `.md` in the out-dir: what moved, what ran and did not, and what it cost."""
     ctx = day.ctx
     plan_path = os.path.join(ctx.path(artifacts.CHANGES), "plan.json")
@@ -474,7 +475,7 @@ def report(day, ready, why, tokens):
             "afterMigration": "rerun the no-spend smoke before enabling DEN_DAILY_ENABLED",
         }
     out = {
-        "date": day.now.date().isoformat(), "ready": ready, "verdict": why,
+        "date": day.now.date().isoformat(), "ready": ready, "verdict": why, "retryable": retryable,
         "baseline": plan.get("baseline"), "datasetVersion": meta.get("datasetVersion"),
         "store": {key: meta.get(key) for key in ("storeFile", "storeSha256", "storeBytes", "storeRecords")},
         "counts": plan.get("counts"), "added": plan.get("added", []),
@@ -562,16 +563,24 @@ def run(args, environ=None, now=None):
     day = Day(args, environ, when(now))
     os.makedirs(os.path.abspath(args.out_dir), exist_ok=True)
     before = paid_tokens(day.ctx)
+    # Whether the day stopped on a service that did not answer rather than on anything in the data: the
+    # workflow then hands the day to a fresh run, which resumes from the kept cache and paid answers.
+    retryable = False
     try:
         prepare(day)
         # What an earlier run bought and the ledger laid back is not today's spend.
         before = paid_tokens(day.ctx)
         ready, why = run_day(day)
+    except UpstreamError as refusal:
+        ready, why, retryable = False, str(refusal), True
     except StageError as refusal:
         ready, why = False, str(refusal)
+    except http.HTTPError as refusal:
+        # A request no stage turned into a refusal of its own.
+        ready, why, retryable = False, f"daily: a request failed and nothing caught it ({refusal})", True
     finally:
         day.persist()
-    out = report(day, ready, why, paid_tokens(day.ctx) - before)
+    out = report(day, ready, why, paid_tokens(day.ctx) - before, retryable)
     print(f"daily: {'ready to publish' if ready else 'NOT ready'} — {why}", file=sys.stderr)
     print(json.dumps({k: out[k] for k in ("ready", "datasetVersion", "counts", "spend")}, sort_keys=True))
     return 0 if ready else 1

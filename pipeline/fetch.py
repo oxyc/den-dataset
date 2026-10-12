@@ -23,7 +23,7 @@ import sys
 import time
 
 from . import artifacts, enrich, floors as floor_rules, refresh
-from .contract import REPO, StageError, bind
+from .contract import REPO, StageError, UpstreamError, bind
 from lib import enterprise
 
 NAME = "fetch"
@@ -187,7 +187,7 @@ def drain(ctx, media, after_batch=None):
         except enrich.Aborted as error:
             aborts += 1
             if aborts >= ABORTS:
-                raise StageError(f"fetch: {ABORTS} consecutive {media} batches aborted (last: {error}) — "
+                raise UpstreamError(f"fetch: {ABORTS} consecutive {media} batches aborted (last: {error}) — "
                                  f"stopping for inspection. The checkpoint holds everything the successful "
                                  f"batches processed, so this resumes.")
             print(f"fetch: {media} batch aborted ({error}); retry #{aborts} after backoff", file=sys.stderr)
