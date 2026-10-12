@@ -492,8 +492,9 @@ an embedder it carries none of them and says so, so strings and vectors never pa
 ### KAVI maturity backfill
 
 KAVI permits its IKLU API to be used by external services, but broad responses stop at 100 rows and expose no
-working pagination. Build the optional movie snapshot in resumable one-day windows; the collector refuses a day
-that reaches the cap rather than treating a possibly truncated answer as complete:
+working pagination. Build the optional movie snapshot in resumable date windows. The collector begins with 31
+days, bisects a window that reaches the cap, and refuses a saturated single day rather than treating a possibly
+truncated answer as complete:
 
 ```sh
 python3 tools/kavi_maturity.py --out out/maturity-sources/kavi-movies.jsonl \
