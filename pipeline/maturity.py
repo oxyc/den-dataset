@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """MATURITY — conservative numeric ages from redistributable classification authorities.
 
-The first source is Medietilsynet's complete Norwegian film database (1913–2022). Its workbook is kept
-byte-for-byte beside a manifest; only factual identity and classification fields enter the derived JSON.
-Synopsis and classification-reason prose are never copied. A source row is accepted only when exact
-normalized title, production year, and an exact director name identify one corpus movie. Everything else
-stays unknown; there is intentionally no fuzzy or model-assisted path.
+Raw public-authority snapshots are kept byte-for-byte beside a manifest; only factual identity and
+classification fields enter the derived JSON. Synopsis and classification-reason prose are never copied.
+A source row is accepted only when exact normalized title, production year, and an exact director name
+identify one corpus movie. Everything else stays unknown; there is intentionally no fuzzy or
+model-assisted path.
 """
 import dataclasses
 import datetime
@@ -19,7 +19,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from lib import cache, http
-from . import artifacts, finalize
+from . import artifacts, finalize, maturity_public
 from .contract import StageError
 
 NAME = "maturity"
@@ -28,7 +28,8 @@ HOW = "./den stage maturity --out-dir <dir>"
 PUBLISHES = False
 SPENDS = False
 INPUTS = (artifacts.MANIFEST, artifacts.FACTS)
-OUTPUTS = (artifacts.MATURITY_NORWAY, artifacts.MATURITY_SOURCES, artifacts.MATURITY)
+OUTPUTS = (artifacts.MATURITY_NORWAY, artifacts.MATURITY_CNC, artifacts.MATURITY_BRAZIL,
+           artifacts.MATURITY_SOURCES, artifacts.MATURITY)
 
 NORWAY_HOST = "www.medietilsynet.no"
 NORWAY_PATH = "/contentassets/afe645f8781745e484a8f51d5e50a4ad/filmdatabasen.xlsx"
@@ -110,16 +111,18 @@ def norway_records(payload):
         identity = "\x1f".join(str(value or "") for value in
                               (title, original, assessed, rating, director, year, runtime))
         yield {
+            "authority": "Medietilsynet",
             "authorityId": "xlsx:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20],
             "row": number,
             "titles": [value for value in (title, original) if normalized(value)],
             "assessed": assessed,
             "raw": rating,
             "age": norway_age(rating),
-            "director": director,
+            "directors": director,
             "year": _integer(year),
             "country": country,
             "runtimeMinutes": _integer(runtime),
+            "matchedBy": "exact-title+year+director",
         }
 
 
@@ -158,7 +161,7 @@ def _director_parts(value):
     return parts
 
 
-def link_norway(source_records, facts_blob):
+def link_records(source_records, facts_blob):
     entities = facts_blob.get("entities") or {}
     targets, index = {}, {}
     for fact in facts_blob.get("records") or ():
@@ -181,7 +184,7 @@ def link_norway(source_records, facts_blob):
         counts["ratedRows"] += 1
         title_keys = {(title, source["year"]) for raw in source["titles"] if (title := normalized(raw))}
         candidates = set().union(*(index.get(pair, set()) for pair in title_keys)) if title_keys else set()
-        directors = _director_parts(source["director"])
+        directors = _director_parts(source["directors"])
         if source["year"] is None or not title_keys or not directors:
             counts["missingIdentityRows"] += 1
             continue
@@ -195,7 +198,7 @@ def link_norway(source_records, facts_blob):
         counts["matchedRows"] += 1
         observation = {name: source[name] for name in
                        ("authorityId", "raw", "age", "assessed", "runtimeMinutes") if source.get(name) is not None}
-        observation.update({"authority": "Medietilsynet", "matchedBy": "exact-title+year+director"})
+        observation.update({"authority": source["authority"], "matchedBy": source["matchedBy"]})
         observations.setdefault(key, []).append(observation)
 
     records, conflicts = [], []
@@ -210,6 +213,30 @@ def link_norway(source_records, facts_blob):
                      "ambiguous": ambiguous, "conflicts": conflicts}
 
 
+def link_norway(source_records, facts_blob):
+    """Compatibility name for the original adapter and its focused tests."""
+    return link_records(source_records, facts_blob)
+
+
+def combine(linked):
+    """One conservative title row across authorities: the highest verified numeric observation wins."""
+    observations = {}
+    for records in linked:
+        for record in records:
+            key = f"{record['mediaType']}:{record['tmdbId']}"
+            observations.setdefault(key, []).extend(record["observations"])
+    out, conflicts = [], []
+    for key, found in sorted(observations.items()):
+        ages = sorted({row["age"] for row in found})
+        if len(ages) > 1:
+            conflicts.append({"key": key, "ages": ages})
+        media, ident = key.split(":")
+        out.append({"mediaType": media, "tmdbId": int(ident), "minimumAge": max(ages),
+                    "observations": sorted(found, key=lambda row: (row["age"], row["authority"],
+                                                                    row["authorityId"]))})
+    return out, conflicts
+
+
 def fetch_norway():
     return http.request(NORWAY_HOST, NORWAY_PATH,
                         headers={"Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})
@@ -220,7 +247,15 @@ def _write_json(path, value):
     cache.write_atomically(path, (json.dumps(value, ensure_ascii=False, indent=1, sort_keys=True) + "\n").encode())
 
 
-def run(ctx, fetch=fetch_norway, now=None):
+def _enhancement(fetcher, authority):
+    """A dead optional authority leaves its titles unknown; a body/schema error still refuses the stage."""
+    try:
+        return fetcher(), None
+    except http.HTTPError as refusal:
+        return None, {"authority": authority, "error": str(refusal)}
+
+
+def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None):
     try:
         version = finalize.manifest_version(ctx)
     except StageError as refusal:
@@ -228,21 +263,48 @@ def run(ctx, fetch=fetch_norway, now=None):
     ctx = dataclasses.replace(ctx, dataset_version=version)
     with open(ctx.require(artifacts.FACTS), encoding="utf-8") as handle:
         facts = json.load(handle)
-    payload = fetch()
-    raw_path = ctx.path(artifacts.MATURITY_NORWAY)
-    os.makedirs(os.path.dirname(raw_path), exist_ok=True)
-    cache.write_atomically(raw_path, payload)
-    digest = hashlib.sha256(payload).hexdigest()
+    norway = fetch()
+    cnc_result, cnc_failure = _enhancement(fetch_cnc or maturity_public.fetch_cnc, "CNC")
+    brazil_result, brazil_failure = _enhancement(fetch_brazil or maturity_public.fetch_brazil, "ClassInd")
+    cnc, cnc_url = cnc_result or (None, None)
+    brazil, brazil_url = brazil_result or (None, None)
+    snapshots = [(artifacts.MATURITY_NORWAY, norway)]
+    snapshots += [(artifacts.MATURITY_CNC, cnc)] if cnc is not None else []
+    snapshots += [(artifacts.MATURITY_BRAZIL, brazil)] if brazil is not None else []
+    for artifact, payload in snapshots:
+        raw_path = ctx.path(artifact)
+        os.makedirs(os.path.dirname(raw_path), exist_ok=True)
+        cache.write_atomically(raw_path, payload)
     stamp = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(datetime.timezone.utc).isoformat()
-    source = {"authority": "Medietilsynet", "dataset": "Filmdatabasen 1913–2022", "sourceUrl": NORWAY_URL,
-              "landingPage": NORWAY_PAGE, "reuseBasis": NORWAY_LICENSE, "retrievedAt": stamp,
-              "sha256": digest, "bytes": len(payload),
-              "scope": "factual classification and identity fields only; prose fields excluded"}
-    _write_json(ctx.path(artifacts.MATURITY_SOURCES), {"schema": 1, "sources": [source]})
-    records, audit = link_norway(norway_records(payload), facts)
+    scope = "factual classification and identity fields only; prose fields excluded"
+    sources = [
+        {"authority": "Medietilsynet", "dataset": "Filmdatabasen 1913–2022", "sourceUrl": NORWAY_URL,
+         "landingPage": NORWAY_PAGE, "reuseBasis": NORWAY_LICENSE, "retrievedAt": stamp,
+         "sha256": hashlib.sha256(norway).hexdigest(), "bytes": len(norway), "scope": scope},
+    ]
+    if cnc is not None:
+        sources.append({"authority": "CNC", "dataset": "Visas d'exploitation 1945–2025", "sourceUrl": cnc_url,
+         "landingPage": maturity_public.CNC_PAGE, "reuseBasis": maturity_public.CNC_LICENSE,
+         "retrievedAt": stamp, "sha256": maturity_public.digest(cnc), "bytes": len(cnc), "scope": scope})
+    if brazil is not None:
+        sources.append({"authority": "ClassInd", "dataset": "Obras Audiovisuais", "sourceUrl": brazil_url,
+         "landingPage": maturity_public.BRAZIL_PAGE, "reuseBasis": maturity_public.BRAZIL_LICENSE,
+         "retrievedAt": stamp, "sha256": maturity_public.digest(brazil), "bytes": len(brazil), "scope": scope})
+    failures = [row for row in (cnc_failure, brazil_failure) if row]
+    _write_json(ctx.path(artifacts.MATURITY_SOURCES),
+                {"schema": 1, "sources": sources, "unavailable": failures})
+    norway_linked, norway_audit = link_records(norway_records(norway), facts)
+    cnc_linked, cnc_audit = link_records(maturity_public.cnc_records(cnc) if cnc is not None else (), facts)
+    brazil_linked, brazil_audit = link_records(
+        maturity_public.brazil_records(brazil) if brazil is not None else (), facts)
+    records, conflicts = combine((norway_linked, cnc_linked, brazil_linked))
     out = {"schema": 1, "datasetVersion": version, "records": records,
-           "derivation": {"rule": "highest verified age; exact identity only", "sourceSha256": digest,
-                          "audit": audit}}
+           "derivation": {"rule": "highest verified age across authorities; exact identity only",
+                          "sourceSha256": {row["authority"]: row["sha256"] for row in sources},
+                          "audit": {"Medietilsynet": norway_audit, "CNC": cnc_audit,
+                                    "ClassInd": brazil_audit, "unavailable": failures,
+                                    "crossAuthorityConflicts": conflicts}}}
     _write_json(ctx.path(artifacts.MATURITY), out)
     return (f"{ctx.path(artifacts.MATURITY)} — {len(records):,} titles; "
-            f"{audit['ambiguousRows']:,} ambiguous, {audit['conflictingTitles']:,} conflicts")
+            f"{sum(a['ambiguousRows'] for a in (norway_audit, cnc_audit, brazil_audit)):,} ambiguous, "
+            f"{len(conflicts):,} cross-authority conflicts")

@@ -69,7 +69,7 @@ sys.path.insert(0, HERE)
 
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
-from pipeline import artifacts, audit_combined, enrich, genres_moods, maturity, store  # noqa: E402
+from pipeline import artifacts, audit_combined, enrich, genres_moods, maturity, maturity_public, store  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 from pipeline.maturity_test import payload as maturity_payload, source_row as maturity_source_row  # noqa: E402
 from store import vector_blob  # noqa: E402
@@ -442,6 +442,20 @@ class Upstreams:
         if host == maturity.NORWAY_HOST and path == maturity.NORWAY_PATH:
             return maturity_payload(maturity_source_row(title="No fixture title",
                                                          director="No fixture director"))
+        if host == "www.data.gouv.fr" and path == f"/api/1/datasets/{maturity_public.CNC_DATASET}/":
+            assert not params, params
+            return json.dumps({"resources": [{"id": maturity_public.CNC_RESOURCE,
+                "url": "https://static.data.gouv.fr/fixture-cnc.csv"}]}).encode()
+        if host == "static.data.gouv.fr" and path == "/fixture-cnc.csv":
+            return ("Titre;Réalisation;Production;Format;Date;Nationalité;N° de visa;Décision;Localisation\n"
+                    "No fixture title;No fixture director;;;2020;;1;Tout public;\n").encode()
+        if host == "dados.mj.gov.br" and path == "/api/3/action/package_show":
+            assert params == {"id": maturity_public.BRAZIL_DATASET}, params
+            return json.dumps({"result": {"resources": [{"id": maturity_public.BRAZIL_RESOURCE,
+                "url": "https://dados.mj.gov.br/fixture-classind.csv"}]}}).encode()
+        if host == "dados.mj.gov.br" and path == "/fixture-classind.csv":
+            return ("Código;Titulo no Brasil;Titulo original;Ano de produção;Diretores;"
+                    "Classificação Atribuída\n1;No fixture title;;2020;No fixture director;Livre\n").encode()
         raise AssertionError(f"an upstream the fixture does not record was asked: {method} {host}{path}")
 
 
@@ -877,6 +891,7 @@ class DenRun(unittest.TestCase):
     def test_only_the_recorded_upstreams_were_asked(self):
         self.assertEqual(self.upstreams.hosts, {"query.wikidata.org",
                                                 maturity.NORWAY_HOST,
+                                                "www.data.gouv.fr", "static.data.gouv.fr", "dados.mj.gov.br",
                                                 "en.wikipedia.org", "fr.wikipedia.org", "ja.wikipedia.org"})
 
 

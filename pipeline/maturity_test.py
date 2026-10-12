@@ -8,8 +8,9 @@ import unittest
 import zipfile
 import xml.etree.ElementTree as ET
 
-from . import maturity
+from . import maturity, maturity_public
 from .contract import Context, StageError
+from lib import http
 
 
 def _column(index):
@@ -115,6 +116,19 @@ class Linker(unittest.TestCase):
         self.assertEqual(audit["ambiguousRows"], 1)
         self.assertEqual(audit["ambiguous"][0]["candidates"], ["movie:1", "movie:3"])
 
+    def test_combines_authorities_by_the_highest_verified_age(self):
+        norway, _ = maturity.link_records(
+            maturity.norway_records(payload(source_row(rating="12 år"))), facts(movie(1)))
+        cnc = [{"authority": "CNC", "authorityId": "visa:1", "titles": ["The Film"],
+                "directors": "Alice Director", "year": 2022, "raw": "Interdit -16 ans", "age": 16,
+                "matchedBy": "exact-title+year+director"}]
+        france, _ = maturity.link_records(cnc, facts(movie(1)))
+        records, conflicts = maturity.combine((norway, france))
+        self.assertEqual(records[0]["minimumAge"], 16)
+        self.assertEqual([row["authority"] for row in records[0]["observations"]],
+                         ["Medietilsynet", "CNC"])
+        self.assertEqual(conflicts, [{"key": "movie:1", "ages": [12, 16]}])
+
     def test_no_series_can_be_matched_to_the_movie_only_source(self):
         series = {**movie(8), "mediaType": "tv"}
         rows = list(maturity.norway_records(payload(source_row())))
@@ -132,18 +146,89 @@ class Stage(unittest.TestCase):
             with open(os.path.join(out, "facts-testver.json"), "w", encoding="utf-8") as handle:
                 json.dump(facts(movie(1)), handle)
             now = datetime.datetime(2026, 10, 12, 12, 30, tzinfo=datetime.timezone.utc)
-            result = maturity.run(Context(out_dir=out), fetch=lambda: body, now=now)
+            cnc = ("Titre;Réalisation;Production;Format;Date;Nationalité;N° de visa;Décision;Localisation\n"
+                   "The Film;Alice Director;;;2022;;44;Interdit -16 ans;\n").encode()
+            brazil = ("Código;Titulo no Brasil;Titulo original;Ano de produção;Diretores;"
+                      "Classificação Atribuída\n9;The Film;;2022;Alice Director;14 anos\n").encode()
+            result = maturity.run(Context(out_dir=out), fetch=lambda: body,
+                                  fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                                  fetch_brazil=lambda: (brazil, "https://dados.mj.gov.br/classind.csv"), now=now)
             with open(os.path.join(out, "maturity-sources.json"), encoding="utf-8") as handle:
                 manifest = json.load(handle)
             with open(os.path.join(out, "maturity-testver.json"), encoding="utf-8") as handle:
                 derived = json.load(handle)
             with open(os.path.join(out, "maturity-sources", "medietilsynet-1913-2022.xlsx"), "rb") as handle:
                 self.assertEqual(handle.read(), body)
+            with open(os.path.join(out, "maturity-sources", "cnc-visas.csv"), "rb") as handle:
+                self.assertEqual(handle.read(), cnc)
+            with open(os.path.join(out, "maturity-sources", "classind-audiovisual.csv"), "rb") as handle:
+                self.assertEqual(handle.read(), brazil)
         self.assertIn("1 titles", result)
         self.assertEqual(manifest["sources"][0]["sha256"], hashlib.sha256(body).hexdigest())
         self.assertEqual(manifest["sources"][0]["retrievedAt"], "2026-10-12T12:30:00+00:00")
-        self.assertEqual(derived["records"][0]["minimumAge"], 12)
+        self.assertEqual([row["authority"] for row in manifest["sources"]],
+                         ["Medietilsynet", "CNC", "ClassInd"])
+        self.assertEqual(derived["records"][0]["minimumAge"], 16)
         self.assertNotIn("copyrighted", json.dumps(derived))
+
+    def test_a_dead_enhancement_source_is_unknown_not_a_partial_fake(self):
+        body = payload(source_row())
+        cnc = ("Titre;Réalisation;Date;N° de visa;Décision\n"
+               "The Film;Alice Director;2022;44;Interdit -16 ans\n").encode()
+        with tempfile.TemporaryDirectory() as out:
+            with open(os.path.join(out, "dataset.meta.json"), "w", encoding="utf-8") as handle:
+                json.dump({"datasetVersion": "testver"}, handle)
+            with open(os.path.join(out, "facts-testver.json"), "w", encoding="utf-8") as handle:
+                json.dump(facts(movie(1)), handle)
+            def unavailable():
+                raise http.HTTPError(0, "https://dados.mj.gov.br/")
+            maturity.run(Context(out_dir=out), fetch=lambda: body,
+                         fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                         fetch_brazil=unavailable)
+            with open(os.path.join(out, "maturity-sources.json"), encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            with open(os.path.join(out, "maturity-testver.json"), encoding="utf-8") as handle:
+                derived = json.load(handle)
+            self.assertFalse(os.path.exists(os.path.join(out, "maturity-sources", "classind-audiovisual.csv")))
+        self.assertEqual([row["authority"] for row in manifest["sources"]], ["Medietilsynet", "CNC"])
+        self.assertEqual(manifest["unavailable"][0]["authority"], "ClassInd")
+        self.assertEqual(derived["records"][0]["minimumAge"], 16)
+
+
+class PublicAdapters(unittest.TestCase):
+    def test_cnc_keeps_only_identity_and_numeric_decision_facts(self):
+        body = ("Titre;Réalisation;Production;Format;Date;Nationalité;N° de visa;Décision;Localisation du dossier visa\n"
+                "The Film;Alice Director;copyrighted prose;Long-métrage;2022;France;44;Interdit -12 ans;secret\n"
+                "Another Film;Bob Director;;;2020;;45;Avertissement;\n").encode("utf-8")
+        rows = list(maturity_public.cnc_records(body))
+        self.assertEqual((rows[0]["authorityId"], rows[0]["age"], rows[0]["year"]),
+                         ("visa:44", 12, 2022))
+        self.assertIsNone(rows[1]["age"])
+        self.assertNotIn("copyrighted", json.dumps(rows))
+        self.assertNotIn("secret", json.dumps(rows))
+
+    def test_cnc_maps_only_explicit_restrictions(self):
+        self.assertEqual(maturity_public.cnc_age("Tout public"), 0)
+        self.assertEqual(maturity_public.cnc_age("Interdit mineurs"), 18)
+        self.assertEqual(maturity_public.cnc_age("Interdit -16 ans - Interdit -12 ans"), 16)
+        self.assertIsNone(maturity_public.cnc_age("Avertissement"))
+        self.assertIsNone(maturity_public.cnc_age("Censure"))
+
+    def test_brazil_maps_official_ladder_and_discards_prose(self):
+        body = ("Código;Titulo no Brasil;Titulo original;País de origem;Ano de produção;Produtores;"
+                "Diretores;Atores;Classificação Atribuída;Contém\n"
+                "9;O Filme;The Film;Brasil;2022;producer;Alice Director;actor;"
+                "não recomendado para menores de 14 (catorze) anos;copyrighted reason\n").encode("utf-8")
+        [row] = list(maturity_public.brazil_records(body))
+        self.assertEqual((row["authorityId"], row["titles"], row["age"]),
+                         ("classind:9", ["O Filme", "The Film"], 14))
+        self.assertNotIn("copyrighted", json.dumps(row))
+        self.assertEqual(maturity_public.brazil_age("Livre"), 0)
+        self.assertIsNone(maturity_public.brazil_age("Especialmente recomendado"))
+
+    def test_changed_public_columns_are_refused(self):
+        with self.assertRaisesRegex(StageError, "CNC columns changed"):
+            list(maturity_public.cnc_records(b"Title,Director\nA,B\n"))
 
 
 if __name__ == "__main__":
