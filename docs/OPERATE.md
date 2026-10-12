@@ -505,6 +505,8 @@ The adjacent `.state.json` records completed dates. Re-running the same command 
 deduplicates IKLU ids already appended. `den stage maturity --out-dir out` consumes the snapshot when present;
 without it KAVI remains unknown and the other public authorities still run.
 
+The accepted, private, and excluded source matrix is in `docs/MATURITY-SOURCES.md`.
+
 ### A first generation
 
 The daily job refuses `--spend` without a live baseline: a first generation is the whole corpus (~$20 of
