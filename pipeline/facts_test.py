@@ -675,17 +675,19 @@ class Resume(Staged):
         self.assertIn("does not parse", str(refused.exception))
         self.assertEqual(self.wd.asked["facts"], [])
 
-    def test_a_property_is_asked_once_per_150_titles_not_once_per_25(self):
+    def test_a_property_is_asked_once_per_batch_of_up_to_150_titles_not_once_per_25(self):
         """A batch costs ~30 requests whatever its size, so the scrape's time is its batch count: 400 titles
-        are 3 batches, 3 asks of each property. At 25 ids that was 16."""
+        are 4 batches (`stable_batches`), 4 asks of each property. At 25 ids that was 16."""
         with open(os.path.join(self.out, "labels-t02.json"), "w", encoding="utf-8") as fh:
             json.dump({"records": [{"mediaType": "movie", "tmdbId": i} for i in range(400)]}, fh)
         self.run_stage()
         sizes = [len(ids) for media, ids, key in self.wd.asked["facts"] if key == "imdbId" and media == "movie"
                  and len(ids) > 3]
-        self.assertEqual(sizes, [150, 150, 100])
+        self.assertEqual(sizes, [len(batch) for batch in facts.stable_batches(range(400))])
+        self.assertEqual(len(sizes), 4)
+        self.assertLessEqual(max(sizes), facts.SCRAPE_BATCH)
         self.assertEqual(facts.SCRAPE_BATCH, 150)
-        self.assertEqual([len(ids) for media, ids in self.wd.asked["titles"] if len(ids) > 3], [150, 150, 100])
+        self.assertEqual([len(ids) for media, ids in self.wd.asked["titles"] if len(ids) > 3], sizes)
 
     def test_the_collapsed_franchise_re_ask_keeps_the_batch_its_cached_bodies_were_asked_at(self):
         self.assertEqual(facts.BATCH, 25)
@@ -910,6 +912,27 @@ class Topology(unittest.TestCase):
         self.assertEqual(pipeline.producers()["delta_ids"][0], "docs/OPERATE.md")
         self.assertTrue(os.path.isfile(os.path.join(REPO, "docs", "OPERATE.md")))
         self.assertFalse(facts.SPENDS)
+
+
+class StableBatches(unittest.TestCase):
+    """The batch is the cache key, so a retry whose list gained a few titles must ask the same batches."""
+
+    IDS = list(range(1000, 61000, 10))
+
+    def test_an_added_id_changes_only_its_own_batch(self):
+        before = facts.stable_batches(self.IDS)
+        after = facts.stable_batches(self.IDS + [1005, 30005])
+        changed = [batch for batch in after if batch not in before]
+        self.assertLessEqual(len(changed), 3, "the batches the new ids joined, and at most one neighbour a "
+                                              "ceiling cut carried the shift into")
+        self.assertGreater(len(after), 40)
+
+    def test_batches_stay_under_the_query_ceiling_and_near_it(self):
+        batches = facts.stable_batches(reversed(self.IDS))
+        self.assertEqual([i for batch in batches for i in batch], self.IDS, "every id once, sorted")
+        self.assertLessEqual(max(map(len, batches[:-1])), facts.SCRAPE_BATCH)
+        self.assertGreaterEqual(min(map(len, batches[:-1])), facts.BATCH_FLOOR)
+        self.assertGreater(len(self.IDS) / len(batches), 110, "not many more requests than fixed batches of 150")
 
 
 if __name__ == "__main__":

@@ -33,6 +33,7 @@ under the manifest's name would be missing to them. It is passed to the merge to
 and the version inside it are one value.
 """
 import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -66,6 +67,32 @@ SCRIPT = os.path.join(REPO, "pipeline", "merge_facts.py")
 #: out is halved (`wikidata._asked_batch`). The batch is part of the query text, which is the cache key, so
 #: bodies cached at 25 ids are no longer hit by a re-scrape; a checkpointed title never asks at all.
 SCRAPE_BATCH = wikidata.TMDB_CHUNK
+
+#: The fewest ids a batch closes at, and the odds an id after that closes it (`stable_batches`). Batches
+#: average ~119 ids, under the 150 ceiling; 7 titles added to 5,700 change ~7.5 of 48 batches. One in 50
+#: averaged 130 but changed ~11.6, because more batches ran to the ceiling, whose cut is positional.
+BATCH_FLOOR = 100
+BATCH_CUT = 25
+
+
+def stable_batches(ids, floor=BATCH_FLOOR, cut=BATCH_CUT, ceiling=SCRAPE_BATCH):
+    """`ids`, sorted, cut into batches at ids chosen by their own hash rather than by position.
+
+    The batch is part of the query text, and the query text is the cache key. Cut every 150th position, one id
+    added near the front of the list moved every boundary after it, so a same-day retry whose list differed by
+    7 titles hit none of its first attempt's 5,726 answers (daily run 38310887363 against 38275226696). Here a
+    batch closes after `floor` ids at the first id whose hash says so, or at `ceiling`: an added or dropped id
+    shifts positions, but the next boundary is still the same id, so only its own batch changes."""
+    out, batch = [], []
+    for value in sorted(ids):
+        batch.append(value)
+        mark = int.from_bytes(hashlib.sha256(str(value).encode()).digest()[:4], "big")
+        if len(batch) >= ceiling or (len(batch) >= floor and mark % cut == 0):
+            out.append(batch)
+            batch = []
+    if batch:
+        out.append(batch)
+    return out
 
 #: Ids per P179 re-ask for rows an older scrape collapsed (`refresh_collapsed_franchises`): the size those
 #: cached bodies were asked at, so the re-ask is answered from the cache.
@@ -222,8 +249,7 @@ def scrape_batches(fields, types, cache, pace, checkpointed, resolved=None, excl
     done = skipped = 0
     for kind, ids in types.items():
         media = "tv" if kind == "tv" else "movie"
-        for start in range(0, len(ids), SCRAPE_BATCH):
-            batch = ids[start:start + SCRAPE_BATCH]
+        for batch in stable_batches(ids):
             try:
                 for item in wd.SPECS:
                     if item.tv_only and media != "tv":
