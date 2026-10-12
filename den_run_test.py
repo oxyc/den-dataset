@@ -43,6 +43,7 @@ version given by hand is only checked against that one (`test_a_given_version_is
 """
 import base64
 import contextlib
+import csv
 import fnmatch
 import gzip
 import hashlib
@@ -70,7 +71,7 @@ sys.path.insert(0, HERE)
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
 from pipeline import (artifacts, audit_combined, enrich, genres_moods, maturity, maturity_public,
-                      maturity_taiwan, store)  # noqa: E402
+                      maturity_singapore, maturity_taiwan, store)  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 from pipeline.maturity_test import payload as maturity_payload, source_row as maturity_source_row  # noqa: E402
 from store import vector_blob  # noqa: E402
@@ -465,6 +466,21 @@ class Upstreams:
         if host == maturity_taiwan.FILE_HOST and re.fullmatch(r"/fixture-bamid-\d+\.csv", path):
             return (",".join(maturity_taiwan.HEADERS) + "\n"
                     "113,fixture-1,普,無相符測試片,NO FIXTURE TITLE,台灣,國語,Studio,90 分\n").encode()
+        if host == maturity_singapore.API_HOST and path == maturity_singapore.API_PATH:
+            url = (f"https://{maturity_singapore.DOWNLOAD_HOST}"
+                   f"{maturity_singapore.DOWNLOAD_PREFIX}fixture.csv")
+            return json.dumps({"code": 0, "data": {"url": url}}).encode()
+        if (host == maturity_singapore.DOWNLOAD_HOST
+                and path == maturity_singapore.DOWNLOAD_PREFIX + "fixture.csv"):
+            row = {name: "" for name in maturity_singapore.HEADERS}
+            row.update({"Year": "2025", "Title": "No fixture title", "Rating": "G - General",
+                        "Decision": "Passed Clean", "Decision_Date": "1/2/2025",
+                        "Classified_By": "IMDA"})
+            target = io.StringIO()
+            writer = csv.DictWriter(target, fieldnames=maturity_singapore.HEADERS)
+            writer.writeheader()
+            writer.writerows([row] * maturity_singapore.MIN_ROWS)
+            return target.getvalue().encode()
         raise AssertionError(f"an upstream the fixture does not record was asked: {method} {host}{path}")
 
 
@@ -902,6 +918,8 @@ class DenRun(unittest.TestCase):
                                                 maturity.NORWAY_HOST,
                                                 "www.data.gouv.fr", "static.data.gouv.fr", "dados.mj.gov.br",
                                                 maturity_taiwan.INDEX_HOST, "file.moc.gov.tw",
+                                                maturity_singapore.API_HOST,
+                                                maturity_singapore.DOWNLOAD_HOST,
                                                 "en.wikipedia.org", "fr.wikipedia.org", "ja.wikipedia.org"})
 
 

@@ -1,3 +1,4 @@
+import csv
 import datetime
 import hashlib
 import io
@@ -9,7 +10,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from . import (maturity, maturity_decisions, maturity_kavi, maturity_kmrb, maturity_public,
-               maturity_taiwan)
+               maturity_singapore, maturity_taiwan)
 from .contract import Context, StageError
 from lib import cache, http
 
@@ -412,6 +413,56 @@ class Stage(unittest.TestCase):
 
 
 class PublicAdapters(unittest.TestCase):
+    def test_singapore_maps_only_unambiguous_numeric_restrictions_and_requires_review(self):
+        base = {name: "" for name in maturity_singapore.HEADERS}
+        base.update({"Year": "2025", "Title": "Film", "Also_Known_As": "THE FILM",
+                     "Directors": "Alice Director", "Format": "Digital",
+                     "Decision": "Passed Clean", "Decision_Date": "1/2/2025",
+                     "Total_Running_Time_Actual": "7200", "Classified_By": "IMDA"})
+        rows = []
+        for rating in ("G - General", "PG - Parental Guidance", "PG13 - Parental Guidance 13",
+                       "NC16 - No Children Below 16", "M18 - Mature 18", "R21 - Restricted 21"):
+            rows.append({**base, "Rating": rating, "Episode_No": str(len(rows))})
+        rows.append({**base, "Rating": "M18 - Mature 18", "Episode_No": "industry",
+                     "Classified_By": "Industry"})
+        rows.extend([{**base, "Rating": "G - General"}] * (maturity_singapore.MIN_ROWS - len(rows)))
+        target = io.StringIO()
+        writer = csv.DictWriter(target, fieldnames=maturity_singapore.HEADERS)
+        writer.writeheader()
+        writer.writerows(rows)
+        found = list(maturity_singapore.records(target.getvalue().encode()))
+        self.assertEqual(sorted(row["age"] for row in found if row["age"] is not None), [0, 0, 16, 18])
+        self.assertEqual(sum(row["age"] is None for row in found), 3)
+        self.assertEqual(found[0]["runtimeMinutes"], 120)
+        self.assertTrue(all(row["year"] is None for row in found))
+        automatic, audit = maturity.link_records(found, facts(movie(1, "THE FILM")))
+        self.assertEqual(automatic, [])
+        self.assertEqual(audit["missingIdentityRows"], 4)
+
+    def test_singapore_fetch_validates_the_catalogue_download(self):
+        base = {name: "" for name in maturity_singapore.HEADERS}
+        base.update({"Year": "2025", "Title": "Film", "Rating": "G - General",
+                     "Decision": "Passed Clean", "Decision_Date": "1/2/2025",
+                     "Classified_By": "IMDA"})
+        target = io.StringIO()
+        writer = csv.DictWriter(target, fieldnames=maturity_singapore.HEADERS)
+        writer.writeheader()
+        writer.writerows([base] * maturity_singapore.MIN_ROWS)
+        csv_body = target.getvalue().encode()
+        download_path = maturity_singapore.DOWNLOAD_PREFIX + "fixture.csv"
+        metadata = json.dumps({"code": 0, "data": {
+            "url": f"https://{maturity_singapore.DOWNLOAD_HOST}{download_path}"}}).encode()
+        asked = []
+
+        def request(host, path, headers):
+            asked.append((host, path))
+            return metadata if host == maturity_singapore.API_HOST else csv_body
+
+        body, source = maturity_singapore.fetch(request)
+        self.assertEqual((body, source), (csv_body, maturity_singapore.API))
+        self.assertEqual(asked, [(maturity_singapore.API_HOST, maturity_singapore.API_PATH),
+                                 (maturity_singapore.DOWNLOAD_HOST, download_path)])
+
     def test_taiwan_keeps_certificate_age_and_identity_but_requires_reviewed_linking(self):
         csv_body = (",".join(maturity_taiwan.HEADERS) + "\n"
                     "113,局影外第113002號,輔12,愛愛愛上你,ANYONE BUT YOU,美國,英語,Studio,1 時 43 分 24 秒\n").encode()
