@@ -463,6 +463,15 @@ MATURITY_BRAZIL = Artifact(
     filename="maturity-sources/classind-audiovisual.csv",
 )
 
+MATURITY_KAVI = Artifact(
+    name="maturity_kavi",
+    filename="maturity-sources/kavi-movies.jsonl",
+    producer="tools/kavi_maturity.py",
+    how="python3 tools/kavi_maturity.py --out <out-dir>/maturity-sources/kavi-movies.jsonl "
+        "--begin YYYY-MM-DD --end YYYY-MM-DD",
+    required=False,
+)
+
 MATURITY_SOURCES = Artifact(
     name="maturity_sources",
     filename="maturity-sources.json",
@@ -609,7 +618,8 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              PUBLISHED_META, PUBLISHED_CORPUS,
              PUBLISHED_GENRES_MOODS, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
              EMBEDDER, EMBEDDING_SPACE, PLOT_LENGTH_TRANSFORM, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
-             MATURITY_NORWAY, MATURITY_CNC, MATURITY_BRAZIL, MATURITY_SOURCES, MATURITY,
+             MATURITY_NORWAY, MATURITY_CNC, MATURITY_BRAZIL, MATURITY_KAVI,
+             MATURITY_SOURCES, MATURITY,
              FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISE_DECISIONS,
              FRANCHISE_LINE_STATES, FRANCHISE_LINE_ANSWERS, FRANCHISE_LINE_ANSWERS_MANIFEST,
              FRANCHISE_LINE_DECISIONS, FRANCHISES,

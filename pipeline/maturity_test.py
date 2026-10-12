@@ -8,7 +8,7 @@ import unittest
 import zipfile
 import xml.etree.ElementTree as ET
 
-from . import maturity, maturity_public
+from . import maturity, maturity_kavi, maturity_public
 from .contract import Context, StageError
 from lib import http
 
@@ -194,8 +194,46 @@ class Stage(unittest.TestCase):
         self.assertEqual(manifest["unavailable"][0]["authority"], "ClassInd")
         self.assertEqual(derived["records"][0]["minimumAge"], 16)
 
+    def test_an_operator_kavi_snapshot_joins_the_same_exact_identity_path(self):
+        norway = payload(source_row(title="Other", director="Bob Director"))
+        cnc = b"Titre;R\xc3\xa9alisation;Date;N\xc2\xb0 de visa;D\xc3\xa9cision\n"
+        kavi = (json.dumps({"id": 7, "type": "movie", "name": "The Film", "year": 2022,
+                            "directors": ["Alice Director"], "agelimit": 18}) + "\n").encode()
+        with tempfile.TemporaryDirectory() as out:
+            os.makedirs(os.path.join(out, "maturity-sources"))
+            with open(os.path.join(out, "dataset.meta.json"), "w", encoding="utf-8") as handle:
+                json.dump({"datasetVersion": "testver"}, handle)
+            with open(os.path.join(out, "facts-testver.json"), "w", encoding="utf-8") as handle:
+                json.dump(facts(movie(1)), handle)
+            with open(os.path.join(out, "maturity-sources", "kavi-movies.jsonl"), "wb") as handle:
+                handle.write(kavi)
+            maturity.run(Context(out_dir=out), fetch=lambda: norway,
+                         fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                         fetch_brazil=lambda: (_ for _ in ()).throw(http.HTTPError(0, "https://dados.mj.gov.br")))
+            with open(os.path.join(out, "maturity-testver.json"), encoding="utf-8") as handle:
+                derived = json.load(handle)
+        self.assertEqual(derived["records"][0]["minimumAge"], 18)
+        self.assertEqual(derived["records"][0]["observations"][0]["authority"], "KAVI")
+
 
 class PublicAdapters(unittest.TestCase):
+    def test_kavi_keeps_movie_identity_and_official_age_only(self):
+        body = (json.dumps({"id": 100235, "type": "movie", "name": "BIRDS, THE", "nameFi": "Linnut",
+                            "nameSv": "Fåglarna", "year": 1963, "directors": ["Alfred Hitchcock"],
+                            "agelimit": 16, "registrationDate": "2013-01-17",
+                            "durationInSeconds": 7169, "warnings": ["copyrighted prose"]}) + "\n").encode()
+        [row] = list(maturity_kavi.records(body))
+        self.assertEqual((row["authorityId"], row["titles"], row["age"], row["runtimeMinutes"]),
+                         ("iklu:100235", ["BIRDS, THE", "Linnut", "Fåglarna"], 16, 119))
+        self.assertNotIn("copyrighted", json.dumps(row))
+
+    def test_kavi_refuses_schema_drift_and_does_not_invent_an_age(self):
+        with self.assertRaisesRegex(StageError, "changed schema"):
+            list(maturity_kavi.records(b'{"id":1}\n'))
+        body = (json.dumps({"id": 1, "type": "movie", "name": "One", "year": 2020,
+                            "directors": ["A"], "agelimit": 13}) + "\n").encode()
+        self.assertIsNone(next(maturity_kavi.records(body))["age"])
+
     def test_cnc_keeps_only_identity_and_numeric_decision_facts(self):
         body = ("Titre;Réalisation;Production;Format;Date;Nationalité;N° de visa;Décision;Localisation du dossier visa\n"
                 "The Film;Alice Director;copyrighted prose;Long-métrage;2022;France;44;Interdit -12 ans;secret\n"

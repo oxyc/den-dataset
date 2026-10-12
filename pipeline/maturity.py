@@ -19,7 +19,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from lib import cache, http
-from . import artifacts, finalize, maturity_public
+from . import artifacts, finalize, maturity_kavi, maturity_public
 from .contract import StageError
 
 NAME = "maturity"
@@ -27,7 +27,7 @@ PRODUCER = "pipeline/maturity.py"
 HOW = "./den stage maturity --out-dir <dir>"
 PUBLISHES = False
 SPENDS = False
-INPUTS = (artifacts.MANIFEST, artifacts.FACTS)
+INPUTS = (artifacts.MANIFEST, artifacts.FACTS, artifacts.MATURITY_KAVI)
 OUTPUTS = (artifacts.MATURITY_NORWAY, artifacts.MATURITY_CNC, artifacts.MATURITY_BRAZIL,
            artifacts.MATURITY_SOURCES, artifacts.MATURITY)
 
@@ -268,6 +268,11 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None):
     brazil_result, brazil_failure = _enhancement(fetch_brazil or maturity_public.fetch_brazil, "ClassInd")
     cnc, cnc_url = cnc_result or (None, None)
     brazil, brazil_url = brazil_result or (None, None)
+    kavi_path = ctx.path(artifacts.MATURITY_KAVI)
+    kavi = None
+    if os.path.exists(kavi_path):
+        with open(kavi_path, "rb") as handle:
+            kavi = handle.read()
     snapshots = [(artifacts.MATURITY_NORWAY, norway)]
     snapshots += [(artifacts.MATURITY_CNC, cnc)] if cnc is not None else []
     snapshots += [(artifacts.MATURITY_BRAZIL, brazil)] if brazil is not None else []
@@ -290,6 +295,12 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None):
         sources.append({"authority": "ClassInd", "dataset": "Obras Audiovisuais", "sourceUrl": brazil_url,
          "landingPage": maturity_public.BRAZIL_PAGE, "reuseBasis": maturity_public.BRAZIL_LICENSE,
          "retrievedAt": stamp, "sha256": maturity_public.digest(brazil), "bytes": len(brazil), "scope": scope})
+    if kavi is not None:
+        retrieved = datetime.datetime.fromtimestamp(os.stat(kavi_path).st_mtime, datetime.timezone.utc).isoformat()
+        sources.append({"authority": "KAVI", "dataset": "IKLU movie classifications",
+                        "sourceUrl": maturity_kavi.API, "landingPage": maturity_kavi.GUIDE,
+                        "reuseBasis": maturity_kavi.GUIDE, "retrievedAt": retrieved,
+                        "sha256": hashlib.sha256(kavi).hexdigest(), "bytes": len(kavi), "scope": scope})
     failures = [row for row in (cnc_failure, brazil_failure) if row]
     _write_json(ctx.path(artifacts.MATURITY_SOURCES),
                 {"schema": 1, "sources": sources, "unavailable": failures})
@@ -297,14 +308,15 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None):
     cnc_linked, cnc_audit = link_records(maturity_public.cnc_records(cnc) if cnc is not None else (), facts)
     brazil_linked, brazil_audit = link_records(
         maturity_public.brazil_records(brazil) if brazil is not None else (), facts)
-    records, conflicts = combine((norway_linked, cnc_linked, brazil_linked))
+    kavi_linked, kavi_audit = link_records(maturity_kavi.records(kavi) if kavi is not None else (), facts)
+    records, conflicts = combine((norway_linked, cnc_linked, brazil_linked, kavi_linked))
     out = {"schema": 1, "datasetVersion": version, "records": records,
            "derivation": {"rule": "highest verified age across authorities; exact identity only",
                           "sourceSha256": {row["authority"]: row["sha256"] for row in sources},
                           "audit": {"Medietilsynet": norway_audit, "CNC": cnc_audit,
-                                    "ClassInd": brazil_audit, "unavailable": failures,
+                                    "ClassInd": brazil_audit, "KAVI": kavi_audit, "unavailable": failures,
                                     "crossAuthorityConflicts": conflicts}}}
     _write_json(ctx.path(artifacts.MATURITY), out)
     return (f"{ctx.path(artifacts.MATURITY)} — {len(records):,} titles; "
-            f"{sum(a['ambiguousRows'] for a in (norway_audit, cnc_audit, brazil_audit)):,} ambiguous, "
+            f"{sum(a['ambiguousRows'] for a in (norway_audit, cnc_audit, brazil_audit, kavi_audit)):,} ambiguous, "
             f"{len(conflicts):,} cross-authority conflicts")
