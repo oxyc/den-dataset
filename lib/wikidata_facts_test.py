@@ -13,6 +13,8 @@ import unittest
 from unittest import mock
 
 from . import cache as caching
+from . import http
+from . import wikidata
 from . import wikidata_facts as wd
 
 SPEC = {item.key: item for item in wd.SPECS}
@@ -21,6 +23,10 @@ SPEC = {item.key: item for item in wd.SPECS}
 def body(*rows):
     return json.dumps({"results": {"bindings": [
         {name: {"value": value} for name, value in row.items()} for row in rows]}}).encode()
+
+
+def body_of(rows):
+    return body(*rows)
 
 
 class Query(unittest.TestCase):
@@ -330,6 +336,83 @@ class Fetch(unittest.TestCase):
         self.assertIsNone(self.cache.read(key))
 
 
+class Batching(unittest.TestCase):
+    """Many titles to a query: the cost of a scrape is its request count, not its row count. WDQS is a
+    script that answers each VALUES id with one row, and fails (a timeout) above `limit` ids when told to."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.cache = caching.ResponseCache("wiki", self.directory.name, 3600)
+        self.sent, self.limit = [], None
+        for patch in (mock.patch.object(wd.http, "request", self.answer),):
+            patch.start()
+            self.addCleanup(patch.stop)
+        wd.ANSWERED.clear()
+        self.addCleanup(wd.ANSWERED.clear)
+
+    def answer(self, host, path, params=None, body=None, **kwargs):
+        text = body.decode("utf-8")
+        ids = re.findall(r'"(\d+)"', text.split("VALUES ?tmdb {", 1)[1].split("}", 1)[0])
+        self.sent.append((host, [int(i) for i in ids], "altLabel" in text))
+        if self.limit is not None and len(ids) > self.limit:
+            raise http.HTTPError(0, f"https://{host}{path}")
+        if "altLabel" in text:
+            return body_of({"tmdb": i, "alias": f"Alias {i}"} for i in ids)
+        if "wdt:P345" in text:
+            return body_of({"tmdb": i, "v": f"tt{i}"} for i in ids)
+        return body_of({"tmdb": i, "label": f"Title {i}", "labelLang": "en"} for i in ids)
+
+    def wdqs(self):
+        return [ids for host, ids, _ in self.sent if host == wd.HOST]
+
+    def test_a_scrape_batch_is_one_request_per_property_not_one_per_25_titles(self):
+        ids = list(range(1, 151))
+        got, live = wd.fetch_facts(ids, "movie", SPEC["imdbId"], self.cache)
+        self.assertEqual((len(got), live, len(self.wdqs())), (150, True, 1))
+
+    def test_more_ids_than_the_chunk_go_out_in_sorted_chunks_and_merge(self):
+        ids = list(range(300, 0, -1))
+        got, live = wd.fetch_facts(ids, "movie", SPEC["imdbId"], self.cache, chunk=wikidata.TMDB_CHUNK)
+        self.assertEqual([len(sent) for sent in self.wdqs()], [150, 150])
+        self.assertEqual(self.wdqs()[0], list(range(1, 151)))
+        self.assertEqual((got, live), ({i: f"tt{i}" for i in ids}, True))
+
+    def test_chunks_are_cached_one_by_one_and_a_second_look_asks_nothing(self):
+        ids = list(range(1, 301))
+        wd.fetch_facts(ids, "movie", SPEC["imdbId"], self.cache, chunk=150)
+        self.sent.clear()
+        got, live = wd.fetch_facts(ids, "movie", SPEC["imdbId"], self.cache, chunk=150)
+        self.assertEqual((len(got), live, self.sent), (300, False, []))
+        first = wd.facts_query(list(range(1, 151)), "movie", SPEC["imdbId"])
+        self.assertIsNotNone(self.cache.read(self.cache.key(wd.CACHE_PATH, {"q": first})),
+                             "a chunk is kept under the text a batch of its size always had")
+
+    def test_a_query_that_times_out_is_asked_again_as_halves_and_merged(self):
+        self.limit = 40
+        got, _ = wd.fetch_facts(list(range(1, 151)), "movie", SPEC["imdbId"], self.cache)
+        self.assertEqual(got, {i: f"tt{i}" for i in range(1, 151)})
+        self.assertEqual([len(ids) for ids in self.wdqs() if len(ids) <= self.limit], [37, 38, 37, 38])
+        self.assertTrue(all(len(ids) <= self.limit or len(ids) in (150, 75) for ids in self.wdqs()))
+
+    def test_the_titles_hop_asks_two_requests_per_chunk_and_gives_every_title(self):
+        ids = list(range(1, 301))
+        got = wd.titles(ids, "movie")
+        mains = [ids for _, ids, alias in self.sent if not alias]
+        aliases = [ids for _, ids, alias in self.sent if alias]
+        self.assertEqual(([len(i) for i in mains], [len(i) for i in aliases]), ([150, 150], [150, 150]))
+        self.assertEqual(sorted(got), ids)
+        self.assertEqual(got[299], {"article": None, "label": "Title 299", "original": None,
+                                    "aliases": ["Alias 299"]})
+
+    def test_the_titles_hop_is_halved_on_a_timeout_too(self):
+        self.limit = 80
+        got = wd.titles(list(range(1, 151)), "movie")
+        self.assertEqual(sorted(got), list(range(1, 151)))
+        self.assertEqual(sorted(len(ids) for ids in self.wdqs()), [75, 75, 75, 75, 150, 150],
+                         "each of the two queries fails whole once, then answers as two halves")
+
+
 class Fallback(unittest.TestCase):
     """The per-batch queries' second endpoint. Each host answers from a script: a status to raise, or a
     body; every request is recorded as (host, the text sent, the attempts it was allowed)."""
@@ -406,7 +489,7 @@ class Fallback(unittest.TestCase):
     def test_the_prefix_block_declares_every_prefix_a_per_batch_query_uses(self):
         """WDQS predeclares them and QLever does not, so one missing here fails every batch on QLever."""
         asked = []
-        with mock.patch.object(wd, "_sparql", lambda query, **_: asked.append(query) or body()):
+        with mock.patch.object(wikidata, "sparql", lambda query, **_: asked.append(query) or body()):
             wd.titles([1], "movie", excluded={1: ["Q9"]})
         asked += [wd.facts_query([1, 2], media, item, excluded={1: ["Q9"]})
                   for item in wd.SPECS for media in ("movie", "tv")]
@@ -424,10 +507,12 @@ class Lookups(unittest.TestCase):
 
     def setUp(self):
         self.answers = {}
-        patch = mock.patch.object(wd, "_sparql",
-                                  lambda query, **_: self.answers["alias" if "altLabel" in query else "main"])
-        patch.start()
-        self.addCleanup(patch.stop)
+        # The titles hop asks through `lib/wikidata`'s batch machinery; the entity lookups through `_sparql`.
+        for target, name in ((wikidata, "sparql"), (wd, "_sparql")):
+            patch = mock.patch.object(target, name,
+                                      lambda query, **_: self.answers["alias" if "altLabel" in query else "main"])
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def test_the_title_strings_do_not_depend_on_row_order(self):
         """WDQS returns the cross product of a title's articles, P1476 values and labels in no fixed order.
@@ -476,7 +561,7 @@ class Lookups(unittest.TestCase):
         """Without it, `en` and `mul` rows cannot be told apart and the rule above has nothing to go on."""
         asked = []
         self.answers = {"main": body(), "alias": body()}
-        with mock.patch.object(wd, "_sparql", lambda query, **_: asked.append(query) or body()):
+        with mock.patch.object(wikidata, "sparql", lambda query, **_: asked.append(query) or body()):
             wd.titles([1], "movie")
         self.assertIn("(LANG(?label) AS ?labelLang) (LANG(?orig) AS ?origLang)", asked[0])
 
