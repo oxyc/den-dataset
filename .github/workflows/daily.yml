@@ -40,8 +40,9 @@ name: daily
 # (`pipeline/published.py` says what that is and how a day is seeded from it). What it bought is kept in the
 # paid-answers ledger on the `paid-state` release, downloaded first and uploaded last whether or not the run
 # publishes (`pipeline/paid.py`), so a failed or unpublished day is never bought again. `.cache` — Wikipedia and
-# Wikidata responses, and vectors by verified space and document — is kept in actions/cache the same way, so a
-# failed day is not fetched, scraped and embedded again either; it is re-derivable, so eviction only costs time.
+# Wikidata responses, validated public-authority maturity snapshots, and vectors by verified space and document —
+# is kept in actions/cache the same way. Maturity snapshots are a bounded last-known-good fallback; everything
+# else is re-derivable, so eviction only costs time.
 on:
   schedule:
     - cron: "23 3 * * *"

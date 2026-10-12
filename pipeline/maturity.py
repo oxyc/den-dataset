@@ -39,6 +39,8 @@ NORWAY_LICENSE = "https://lovdata.no/lov/2006-05-19-16/%C2%A77"
 XML = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 HEADERS = ("Tittel", "Originaltittel", "Vurdert dato", "Aldersgrense", "Begrunnelse", "Distributør",
            "Regissør", "Prod.år", "Prod.land", "Lengde", "Handling", "Annen info")
+SOURCE_CACHE_NAMESPACE = "maturity_source"
+SOURCE_CACHE_DAYS = 30
 
 
 def normalized(value):
@@ -247,15 +249,62 @@ def _write_json(path, value):
     cache.write_atomically(path, (json.dumps(value, ensure_ascii=False, indent=1, sort_keys=True) + "\n").encode())
 
 
-def _enhancement(fetcher, authority):
-    """A dead optional authority leaves its titles unknown; a body/schema error still refuses the stage."""
+def _cached_snapshot(store, authority):
+    if store is None:
+        return None
+    body = store.read(store.key(f"{authority}/body"))
+    metadata = store.read(store.key(f"{authority}/metadata"))
+    if body is None or metadata is None:
+        return None
     try:
-        return fetcher(), None
+        metadata = json.loads(metadata.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if (not isinstance(metadata, dict) or metadata.get("authority") != authority
+            or metadata.get("sha256") != hashlib.sha256(body).hexdigest()
+            or not isinstance(metadata.get("sourceUrl"), str)
+            or not metadata["sourceUrl"].startswith("https://")
+            or not isinstance(metadata.get("retrievedAt"), str)):
+        return None
+    return {"payload": body, "sourceUrl": metadata["sourceUrl"],
+            "retrievedAt": metadata["retrievedAt"]}
+
+
+def _remember_snapshot(store, authority, snapshot):
+    if store is None:
+        return
+    body = snapshot["payload"]
+    metadata = {"authority": authority, "sourceUrl": snapshot["sourceUrl"],
+                "retrievedAt": snapshot["retrievedAt"], "sha256": hashlib.sha256(body).hexdigest()}
+    # Metadata last: an interruption can leave an unreferenced new body, never metadata that vouches for
+    # bytes it did not hash. `_cached_snapshot` checks the pair again before use.
+    store.write(store.key(f"{authority}/body"), body)
+    store.write(store.key(f"{authority}/metadata"), json.dumps(metadata, sort_keys=True).encode())
+
+
+def _source_snapshot(fetcher, parser, authority, default_url, stamp, store=None, required=False):
+    """Fetch and validate one source, falling back only to a recent validated last-known-good body."""
+    try:
+        fetched = fetcher()
     except http.HTTPError as refusal:
-        return None, {"authority": authority, "error": str(refusal)}
+        snapshot = _cached_snapshot(store, authority)
+        if snapshot is None:
+            if required:
+                raise
+            return None, {"authority": authority, "error": str(refusal)}
+        # Re-validate cached bytes under today's parser. A source schema we no longer understand must not
+        # become valid merely because its body came from yesterday.
+        snapshot["rows"] = list(parser(snapshot["payload"]))
+        snapshot["fallbackAfter"] = str(refusal)
+        return snapshot, None
+    payload, source_url = fetched if isinstance(fetched, tuple) else (fetched, default_url)
+    snapshot = {"payload": payload, "sourceUrl": source_url, "retrievedAt": stamp,
+                "rows": list(parser(payload))}
+    _remember_snapshot(store, authority, snapshot)
+    return snapshot, None
 
 
-def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None):
+def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None, snapshot_cache=None):
     try:
         version = finalize.manifest_version(ctx)
     except StageError as refusal:
@@ -263,14 +312,25 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None):
     ctx = dataclasses.replace(ctx, dataset_version=version)
     with open(ctx.require(artifacts.FACTS), encoding="utf-8") as handle:
         facts = json.load(handle)
+    stamp = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(datetime.timezone.utc).isoformat()
+    # Tests inject their fetchers and are hermetic by default. The real stage uses the persisted Actions
+    # response-cache directory added in #233; callers can inject a temporary store to exercise fallback.
+    if snapshot_cache is None and fetch is fetch_norway and fetch_cnc is None and fetch_brazil is None:
+        snapshot_cache = cache.configured(SOURCE_CACHE_NAMESPACE, SOURCE_CACHE_DAYS)
     try:
-        norway = fetch()
+        norway_snapshot, _ = _source_snapshot(fetch, norway_records, "Medietilsynet", NORWAY_URL, stamp,
+                                              snapshot_cache, required=True)
     except http.HTTPError as refusal:
         raise UpstreamError(f"maturity: the Medietilsynet workbook could not be downloaded ({refusal})") from None
-    cnc_result, cnc_failure = _enhancement(fetch_cnc or maturity_public.fetch_cnc, "CNC")
-    brazil_result, brazil_failure = _enhancement(fetch_brazil or maturity_public.fetch_brazil, "ClassInd")
-    cnc, cnc_url = cnc_result or (None, None)
-    brazil, brazil_url = brazil_result or (None, None)
+    cnc_snapshot, cnc_failure = _source_snapshot(
+        fetch_cnc or maturity_public.fetch_cnc, maturity_public.cnc_records, "CNC",
+        maturity_public.CNC_PAGE, stamp, snapshot_cache)
+    brazil_snapshot, brazil_failure = _source_snapshot(
+        fetch_brazil or maturity_public.fetch_brazil, maturity_public.brazil_records, "ClassInd",
+        maturity_public.BRAZIL_PAGE, stamp, snapshot_cache)
+    norway = norway_snapshot["payload"]
+    cnc = cnc_snapshot["payload"] if cnc_snapshot else None
+    brazil = brazil_snapshot["payload"] if brazil_snapshot else None
     kavi_path = ctx.path(artifacts.MATURITY_KAVI)
     kavi = None
     if os.path.exists(kavi_path):
@@ -283,21 +343,29 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None):
         raw_path = ctx.path(artifact)
         os.makedirs(os.path.dirname(raw_path), exist_ok=True)
         cache.write_atomically(raw_path, payload)
-    stamp = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(datetime.timezone.utc).isoformat()
     scope = "factual classification and identity fields only; prose fields excluded"
     sources = [
         {"authority": "Medietilsynet", "dataset": "Filmdatabasen 1913–2022", "sourceUrl": NORWAY_URL,
-         "landingPage": NORWAY_PAGE, "reuseBasis": NORWAY_LICENSE, "retrievedAt": stamp,
+         "landingPage": NORWAY_PAGE, "reuseBasis": NORWAY_LICENSE,
+         "retrievedAt": norway_snapshot["retrievedAt"],
          "sha256": hashlib.sha256(norway).hexdigest(), "bytes": len(norway), "scope": scope},
     ]
+    if norway_snapshot.get("fallbackAfter"):
+        sources[0]["fallbackAfter"] = norway_snapshot["fallbackAfter"]
     if cnc is not None:
-        sources.append({"authority": "CNC", "dataset": "Visas d'exploitation 1945–2025", "sourceUrl": cnc_url,
+        sources.append({"authority": "CNC", "dataset": "Visas d'exploitation 1945–2025",
+         "sourceUrl": cnc_snapshot["sourceUrl"],
          "landingPage": maturity_public.CNC_PAGE, "reuseBasis": maturity_public.CNC_LICENSE,
-         "retrievedAt": stamp, "sha256": maturity_public.digest(cnc), "bytes": len(cnc), "scope": scope})
+         "retrievedAt": cnc_snapshot["retrievedAt"], "sha256": maturity_public.digest(cnc),
+         "bytes": len(cnc), "scope": scope, **({"fallbackAfter": cnc_snapshot["fallbackAfter"]}
+                                                if cnc_snapshot.get("fallbackAfter") else {})})
     if brazil is not None:
-        sources.append({"authority": "ClassInd", "dataset": "Obras Audiovisuais", "sourceUrl": brazil_url,
+        sources.append({"authority": "ClassInd", "dataset": "Obras Audiovisuais",
+         "sourceUrl": brazil_snapshot["sourceUrl"],
          "landingPage": maturity_public.BRAZIL_PAGE, "reuseBasis": maturity_public.BRAZIL_LICENSE,
-         "retrievedAt": stamp, "sha256": maturity_public.digest(brazil), "bytes": len(brazil), "scope": scope})
+         "retrievedAt": brazil_snapshot["retrievedAt"], "sha256": maturity_public.digest(brazil),
+         "bytes": len(brazil), "scope": scope, **({"fallbackAfter": brazil_snapshot["fallbackAfter"]}
+                                                   if brazil_snapshot.get("fallbackAfter") else {})})
     if kavi is not None:
         retrieved = datetime.datetime.fromtimestamp(os.stat(kavi_path).st_mtime, datetime.timezone.utc).isoformat()
         sources.append({"authority": "KAVI", "dataset": "IKLU movie classifications",
@@ -307,10 +375,9 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, now=None):
     failures = [row for row in (cnc_failure, brazil_failure) if row]
     _write_json(ctx.path(artifacts.MATURITY_SOURCES),
                 {"schema": 1, "sources": sources, "unavailable": failures})
-    norway_linked, norway_audit = link_records(norway_records(norway), facts)
-    cnc_linked, cnc_audit = link_records(maturity_public.cnc_records(cnc) if cnc is not None else (), facts)
-    brazil_linked, brazil_audit = link_records(
-        maturity_public.brazil_records(brazil) if brazil is not None else (), facts)
+    norway_linked, norway_audit = link_records(norway_snapshot["rows"], facts)
+    cnc_linked, cnc_audit = link_records(cnc_snapshot["rows"] if cnc_snapshot else (), facts)
+    brazil_linked, brazil_audit = link_records(brazil_snapshot["rows"] if brazil_snapshot else (), facts)
     kavi_linked, kavi_audit = link_records(maturity_kavi.records(kavi) if kavi is not None else (), facts)
     records, conflicts = combine((norway_linked, cnc_linked, brazil_linked, kavi_linked))
     out = {"schema": 1, "datasetVersion": version, "records": records,

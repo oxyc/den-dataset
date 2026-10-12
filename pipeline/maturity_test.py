@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 
 from . import maturity, maturity_kavi, maturity_public
 from .contract import Context, StageError
-from lib import http
+from lib import cache, http
 
 
 def _column(index):
@@ -193,6 +193,83 @@ class Stage(unittest.TestCase):
         self.assertEqual([row["authority"] for row in manifest["sources"]], ["Medietilsynet", "CNC"])
         self.assertEqual(manifest["unavailable"][0]["authority"], "ClassInd")
         self.assertEqual(derived["records"][0]["minimumAge"], 16)
+
+    def test_a_recent_validated_snapshot_survives_a_transient_authority_outage(self):
+        body = payload(source_row())
+        cnc = ("Titre;Réalisation;Date;N° de visa;Décision\n"
+               "The Film;Alice Director;2022;44;Interdit -16 ans\n").encode()
+        brazil = ("Código;Titulo no Brasil;Titulo original;Ano de produção;Diretores;"
+                  "Classificação Atribuída\n9;The Film;;2022;Alice Director;14 anos\n").encode()
+        first = datetime.datetime(2026, 10, 1, 12, tzinfo=datetime.timezone.utc)
+        with tempfile.TemporaryDirectory() as root:
+            snapshots = cache.ResponseCache("test_maturity", root, 30 * cache.DAY_SECONDS)
+
+            def prepare(out):
+                with open(os.path.join(out, "dataset.meta.json"), "w", encoding="utf-8") as handle:
+                    json.dump({"datasetVersion": "testver"}, handle)
+                with open(os.path.join(out, "facts-testver.json"), "w", encoding="utf-8") as handle:
+                    json.dump(facts(movie(1)), handle)
+
+            with tempfile.TemporaryDirectory() as out:
+                prepare(out)
+                maturity.run(Context(out_dir=out), fetch=lambda: body,
+                             fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                             fetch_brazil=lambda: (brazil, "https://dados.mj.gov.br/classind.csv"),
+                             now=first, snapshot_cache=snapshots)
+
+            def unavailable():
+                raise http.HTTPError(0, "https://dados.mj.gov.br/")
+
+            with tempfile.TemporaryDirectory() as out:
+                prepare(out)
+                maturity.run(Context(out_dir=out), fetch=lambda: body,
+                             fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                             fetch_brazil=unavailable, now=first + datetime.timedelta(days=1),
+                             snapshot_cache=snapshots)
+                with open(os.path.join(out, "maturity-sources.json"), encoding="utf-8") as handle:
+                    manifest = json.load(handle)
+                with open(os.path.join(out, "maturity-sources", "classind-audiovisual.csv"), "rb") as handle:
+                    self.assertEqual(handle.read(), brazil)
+        source = next(row for row in manifest["sources"] if row["authority"] == "ClassInd")
+        self.assertEqual(source["retrievedAt"], first.isoformat())
+        self.assertIn("HTTP 0", source["fallbackAfter"])
+        self.assertEqual(manifest["unavailable"], [])
+
+    def test_a_corrupt_cached_pair_is_not_used_as_authority_evidence(self):
+        with tempfile.TemporaryDirectory() as root:
+            snapshots = cache.ResponseCache("test_maturity", root, 30 * cache.DAY_SECONDS)
+            snapshots.write(snapshots.key("ClassInd/body"), b"not the recorded body")
+            snapshots.write(snapshots.key("ClassInd/metadata"), json.dumps({
+                "authority": "ClassInd", "sourceUrl": "https://dados.mj.gov.br/file.csv",
+                "retrievedAt": "2026-10-01T00:00:00+00:00", "sha256": "0" * 64}).encode())
+
+            def unavailable():
+                raise http.HTTPError(0, "https://dados.mj.gov.br/")
+
+            snapshot, failure = maturity._source_snapshot(
+                unavailable, maturity_public.brazil_records, "ClassInd", maturity_public.BRAZIL_PAGE,
+                "2026-10-02T00:00:00+00:00", snapshots)
+        self.assertIsNone(snapshot)
+        self.assertEqual(failure["authority"], "ClassInd")
+
+    def test_a_snapshot_past_the_fallback_window_is_not_used(self):
+        brazil = ("Código;Titulo no Brasil;Titulo original;Ano de produção;Diretores;"
+                  "Classificação Atribuída\n9;The Film;;2022;Alice Director;14 anos\n").encode()
+        with tempfile.TemporaryDirectory() as root:
+            writer = cache.ResponseCache("test_maturity", root, 30 * cache.DAY_SECONDS)
+            maturity._remember_snapshot(writer, "ClassInd", {
+                "payload": brazil, "sourceUrl": "https://dados.mj.gov.br/file.csv",
+                "retrievedAt": "2026-01-01T00:00:00+00:00"})
+            expired = cache.ResponseCache("test_maturity", root, -1)
+
+            def unavailable():
+                raise http.HTTPError(0, "https://dados.mj.gov.br/")
+
+            snapshot, failure = maturity._source_snapshot(
+                unavailable, maturity_public.brazil_records, "ClassInd", maturity_public.BRAZIL_PAGE,
+                "2026-10-02T00:00:00+00:00", expired)
+        self.assertIsNone(snapshot)
+        self.assertEqual(failure["authority"], "ClassInd")
 
     def test_an_operator_kavi_snapshot_joins_the_same_exact_identity_path(self):
         norway = payload(source_row(title="Other", director="Bob Director"))
