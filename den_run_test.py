@@ -70,8 +70,8 @@ sys.path.insert(0, HERE)
 
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
-from pipeline import (artifacts, audit_combined, enrich, genres_moods, maturity, maturity_public,
-                      maturity_singapore, maturity_taiwan, store)  # noqa: E402
+from pipeline import (artifacts, audit_combined, enrich, genres_moods, maturity_norway,
+                      maturity_public, maturity_singapore, maturity_taiwan, store)  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 from pipeline.maturity_test import payload as maturity_payload, source_row as maturity_source_row  # noqa: E402
 from store import vector_blob  # noqa: E402
@@ -441,7 +441,7 @@ class Upstreams:
                                          "wikitext": page["wikitext"]}}).encode("utf-8")
         if host == "query.wikidata.org":
             return json.dumps(self.wikidata.answer(body.decode("utf-8")), ensure_ascii=False).encode("utf-8")
-        if host == maturity.NORWAY_HOST and path == maturity.NORWAY_PATH:
+        if host == maturity_norway.HOST and path == maturity_norway.PATH:
             return maturity_payload(maturity_source_row(title="No fixture title",
                                                          director="No fixture director"))
         if host == "www.data.gouv.fr" and path == f"/api/1/datasets/{maturity_public.CNC_DATASET}/":
@@ -915,7 +915,7 @@ class DenRun(unittest.TestCase):
 
     def test_only_the_recorded_upstreams_were_asked(self):
         self.assertEqual(self.upstreams.hosts, {"query.wikidata.org",
-                                                maturity.NORWAY_HOST,
+                                                maturity_norway.HOST,
                                                 "www.data.gouv.fr", "static.data.gouv.fr", "dados.mj.gov.br",
                                                 maturity_taiwan.INDEX_HOST, "file.moc.gov.tw",
                                                 maturity_singapore.API_HOST,

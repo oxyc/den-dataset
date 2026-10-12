@@ -10,17 +10,13 @@ model-assisted path.
 import dataclasses
 import datetime
 import hashlib
-import io
 import json
 import os
 import re
 import unicodedata
-import zipfile
-import xml.etree.ElementTree as ET
 
 from lib import cache, http
-from . import (artifacts, finalize, maturity_decisions, maturity_kavi, maturity_kmrb, maturity_public,
-               maturity_singapore, maturity_taiwan)
+from . import artifacts, finalize, maturity_decisions, maturity_providers
 from .contract import StageError, UpstreamError
 
 NAME = "maturity"
@@ -33,14 +29,6 @@ OUTPUTS = (artifacts.MATURITY_NORWAY, artifacts.MATURITY_CNC, artifacts.MATURITY
            artifacts.MATURITY_KMRB, artifacts.MATURITY_TAIWAN, artifacts.MATURITY_SINGAPORE,
            artifacts.MATURITY_SOURCES, artifacts.MATURITY)
 
-NORWAY_HOST = "www.medietilsynet.no"
-NORWAY_PATH = "/contentassets/afe645f8781745e484a8f51d5e50a4ad/filmdatabasen.xlsx"
-NORWAY_URL = f"https://{NORWAY_HOST}{NORWAY_PATH}"
-NORWAY_PAGE = "https://www.medietilsynet.no/filmdatabasen/"
-NORWAY_LICENSE = "https://lovdata.no/lov/2006-05-19-16/%C2%A77"
-XML = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
-HEADERS = ("Tittel", "Originaltittel", "Vurdert dato", "Aldersgrense", "Begrunnelse", "Distributør",
-           "Regissør", "Prod.år", "Prod.land", "Lengde", "Handling", "Annen info")
 SOURCE_CACHE_NAMESPACE = "maturity_source"
 SOURCE_CACHE_DAYS = 30
 
@@ -51,83 +39,6 @@ def normalized(value):
         return None
     text = " ".join(unicodedata.normalize("NFKC", value).casefold().split())
     return text or None
-
-
-def _column(reference):
-    match = re.match(r"[A-Z]+", reference or "")
-    if not match:
-        raise ValueError(f"invalid XLSX cell reference {reference!r}")
-    number = 0
-    for letter in match.group():
-        number = number * 26 + ord(letter) - 64
-    return number - 1
-
-
-def xlsx_rows(payload):
-    """Yield workbook rows using only the stdlib; blank cells retain their declared column."""
-    try:
-        archive = zipfile.ZipFile(io.BytesIO(payload))
-        shared = []
-        with archive.open("xl/sharedStrings.xml") as source:
-            for _event, element in ET.iterparse(source, events=("end",)):
-                if element.tag == XML + "si":
-                    shared.append("".join(part.text or "" for part in element.iter(XML + "t")))
-                    element.clear()
-        with archive.open("xl/worksheets/sheet1.xml") as source:
-            for _event, element in ET.iterparse(source, events=("end",)):
-                if element.tag != XML + "row":
-                    continue
-                cells = {}
-                for cell in element.findall(XML + "c"):
-                    value = cell.find(XML + "v")
-                    raw = "" if value is None else value.text or ""
-                    cells[_column(cell.get("r"))] = shared[int(raw)] if cell.get("t") == "s" and raw else raw
-                yield [cells.get(index) for index in range(max(cells, default=-1) + 1)]
-                element.clear()
-    except (KeyError, ValueError, zipfile.BadZipFile, ET.ParseError) as broken:
-        raise StageError(f"maturity: Medietilsynet workbook is not a readable XLSX: {broken}") from None
-
-
-def norway_age(raw):
-    text = normalized(raw)
-    if text == "tillatt for alle":
-        return 0
-    match = re.fullmatch(r"(\d{1,2}) år", text or "")
-    if not match:
-        return None
-    age = int(match.group(1))
-    return age if 0 <= age <= 18 else None
-
-
-def _integer(value):
-    text = str(value or "").strip()
-    return int(text) if text.isdigit() else None
-
-
-def norway_records(payload):
-    rows = iter(xlsx_rows(payload))
-    header = next(rows, None)
-    if header != list(HEADERS):
-        raise StageError(f"maturity: Medietilsynet columns changed: {header!r}")
-    for number, row in enumerate(rows, 2):
-        row += [None] * (len(HEADERS) - len(row))
-        title, original, assessed, rating, _reason, _distributor, director, year, country, runtime = row[:10]
-        identity = "\x1f".join(str(value or "") for value in
-                              (title, original, assessed, rating, director, year, runtime))
-        yield {
-            "authority": "Medietilsynet",
-            "authorityId": "xlsx:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20],
-            "row": number,
-            "titles": [value for value in (title, original) if normalized(value)],
-            "assessed": assessed,
-            "raw": rating,
-            "age": norway_age(rating),
-            "directors": director,
-            "year": _integer(year),
-            "country": country,
-            "runtimeMinutes": _integer(runtime),
-            "matchedBy": "exact-title+year+director",
-        }
 
 
 def _year(fact):
@@ -262,11 +173,6 @@ def combine(linked):
     return out, conflicts
 
 
-def fetch_norway():
-    return http.request(NORWAY_HOST, NORWAY_PATH,
-                        headers={"Accept": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})
-
-
 def _write_json(path, value):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     cache.write_atomically(path, (json.dumps(value, ensure_ascii=False, indent=1, sort_keys=True) + "\n").encode())
@@ -327,8 +233,7 @@ def _source_snapshot(fetcher, parser, authority, default_url, stamp, store=None,
     return snapshot, None
 
 
-def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, fetch_kmrb=None, fetch_taiwan=None,
-        fetch_singapore=None, now=None, snapshot_cache=None):
+def run(ctx, fetchers=None, now=None, snapshot_cache=None):
     try:
         version = finalize.manifest_version(ctx)
     except StageError as refusal:
@@ -339,129 +244,84 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, fetch_kmrb=N
     decisions, decisions_sha = maturity_decisions.load()
     maturity_decisions.validate_targets(decisions, facts)
     stamp = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(datetime.timezone.utc).isoformat()
-    # Tests inject their fetchers and are hermetic by default. The real stage uses the persisted Actions
-    # response-cache directory added in #233; callers can inject a temporary store to exercise fallback.
-    if (snapshot_cache is None and fetch is fetch_norway and fetch_cnc is None
-            and fetch_brazil is None and fetch_kmrb is None and fetch_taiwan is None
-            and fetch_singapore is None):
+    # An explicit mapping is a hermetic provider set. Production uses every configured registry entry.
+    injected = fetchers is not None
+    fetchers = dict(fetchers or {})
+    remote_authorities = {provider.authority for provider in maturity_providers.REMOTE}
+    unknown = sorted(set(fetchers) - remote_authorities)
+    if unknown:
+        raise StageError(f"maturity: unknown provider fetchers: {unknown!r}")
+    if injected:
+        missing = [provider.authority for provider in maturity_providers.REMOTE
+                   if provider.required and provider.authority not in fetchers]
+        if missing:
+            raise StageError(f"maturity: required provider fetchers missing: {missing!r}")
+    if snapshot_cache is None and not injected:
         snapshot_cache = cache.configured(SOURCE_CACHE_NAMESPACE, SOURCE_CACHE_DAYS)
-    try:
-        norway_snapshot, _ = _source_snapshot(fetch, norway_records, "Medietilsynet", NORWAY_URL, stamp,
-                                              snapshot_cache, required=True)
-    except http.HTTPError as refusal:
-        raise UpstreamError(f"maturity: the Medietilsynet workbook could not be downloaded ({refusal})") from None
-    cnc_snapshot, cnc_failure = _source_snapshot(
-        fetch_cnc or maturity_public.fetch_cnc, maturity_public.cnc_records, "CNC",
-        maturity_public.CNC_PAGE, stamp, snapshot_cache)
-    brazil_snapshot, brazil_failure = _source_snapshot(
-        fetch_brazil or maturity_public.fetch_brazil, maturity_public.brazil_records, "ClassInd",
-        maturity_public.BRAZIL_PAGE, stamp, snapshot_cache)
-    kmrb_snapshot, kmrb_failure = maturity_kmrb.optional_snapshot(
-        _source_snapshot, stamp, snapshot_cache, fetch_kmrb)
-    if fetch_taiwan is not None or fetch is fetch_norway:
-        taiwan_snapshot, taiwan_failure = _source_snapshot(
-            fetch_taiwan or maturity_taiwan.fetch, maturity_taiwan.records, "BAMID",
-            maturity_taiwan.INDEX, stamp, snapshot_cache)
-    else:
-        taiwan_snapshot, taiwan_failure = None, None
-    if fetch_singapore is not None or fetch is fetch_norway:
-        singapore_snapshot, singapore_failure = _source_snapshot(
-            fetch_singapore or maturity_singapore.fetch, maturity_singapore.records, "IMDA",
-            maturity_singapore.API, stamp, snapshot_cache)
-    else:
-        singapore_snapshot, singapore_failure = None, None
-    norway = norway_snapshot["payload"]
-    cnc = cnc_snapshot["payload"] if cnc_snapshot else None
-    brazil = brazil_snapshot["payload"] if brazil_snapshot else None
-    kmrb = kmrb_snapshot["payload"] if kmrb_snapshot else None
-    taiwan = taiwan_snapshot["payload"] if taiwan_snapshot else None
-    singapore = singapore_snapshot["payload"] if singapore_snapshot else None
-    kavi_path = ctx.path(artifacts.MATURITY_KAVI)
-    kavi = None
-    if os.path.exists(kavi_path):
-        with open(kavi_path, "rb") as handle:
-            kavi = handle.read()
-    kavi_rows = list(maturity_kavi.records(kavi)) if kavi is not None else []
-    snapshots = [(artifacts.MATURITY_NORWAY, norway)]
-    snapshots += [(artifacts.MATURITY_CNC, cnc)] if cnc is not None else []
-    snapshots += [(artifacts.MATURITY_BRAZIL, brazil)] if brazil is not None else []
-    snapshots += [(artifacts.MATURITY_KMRB, kmrb)] if kmrb is not None else []
-    snapshots += [(artifacts.MATURITY_TAIWAN, taiwan)] if taiwan is not None else []
-    snapshots += [(artifacts.MATURITY_SINGAPORE, singapore)] if singapore is not None else []
-    for artifact, payload in snapshots:
-        raw_path = ctx.path(artifact)
+
+    snapshots, failures = {}, []
+    for provider in maturity_providers.REMOTE:
+        if injected and provider.authority not in fetchers:
+            continue
+        if not injected and not provider.configured():
+            continue
+        try:
+            snapshot, failure = _source_snapshot(
+                fetchers.get(provider.authority, provider.fetch), provider.records, provider.authority,
+                provider.source_url, stamp, snapshot_cache, required=provider.required)
+        except http.HTTPError as refusal:
+            raise UpstreamError(
+                f"maturity: the {provider.authority} source could not be downloaded ({refusal})") from None
+        if snapshot is not None:
+            snapshots[provider.authority] = snapshot
+        if failure is not None:
+            failures.append(failure)
+
+    for provider in maturity_providers.PROVIDERS:
+        if provider.acquisition != "local":
+            continue
+        path = ctx.path(provider.artifact)
+        if not os.path.exists(path):
+            continue
+        with open(path, "rb") as handle:
+            payload = handle.read()
+        snapshots[provider.authority] = {
+            "payload": payload, "sourceUrl": provider.source_url,
+            "retrievedAt": datetime.datetime.fromtimestamp(
+                os.stat(path).st_mtime, datetime.timezone.utc).isoformat(),
+            "rows": list(provider.records(payload)),
+        }
+
+    for provider in maturity_providers.REMOTE:
+        snapshot = snapshots.get(provider.authority)
+        if snapshot is None:
+            continue
+        raw_path = ctx.path(provider.artifact)
         os.makedirs(os.path.dirname(raw_path), exist_ok=True)
-        cache.write_atomically(raw_path, payload)
+        cache.write_atomically(raw_path, snapshot["payload"])
+
     scope = "factual classification and identity fields only; prose fields excluded"
-    sources = [
-        {"authority": "Medietilsynet", "dataset": "Filmdatabasen 1913–2022", "sourceUrl": NORWAY_URL,
-         "landingPage": NORWAY_PAGE, "reuseBasis": NORWAY_LICENSE,
-         "retrievedAt": norway_snapshot["retrievedAt"],
-         "sha256": hashlib.sha256(norway).hexdigest(), "bytes": len(norway), "scope": scope},
-    ]
-    if norway_snapshot.get("fallbackAfter"):
-        sources[0]["fallbackAfter"] = norway_snapshot["fallbackAfter"]
-    if cnc is not None:
-        sources.append({"authority": "CNC", "dataset": "Visas d'exploitation 1945–2025",
-         "sourceUrl": cnc_snapshot["sourceUrl"],
-         "landingPage": maturity_public.CNC_PAGE, "reuseBasis": maturity_public.CNC_LICENSE,
-         "retrievedAt": cnc_snapshot["retrievedAt"], "sha256": maturity_public.digest(cnc),
-         "bytes": len(cnc), "scope": scope, **({"fallbackAfter": cnc_snapshot["fallbackAfter"]}
-                                                if cnc_snapshot.get("fallbackAfter") else {})})
-    if brazil is not None:
-        sources.append({"authority": "ClassInd", "dataset": "Obras Audiovisuais",
-         "sourceUrl": brazil_snapshot["sourceUrl"],
-         "landingPage": maturity_public.BRAZIL_PAGE, "reuseBasis": maturity_public.BRAZIL_LICENSE,
-         "retrievedAt": brazil_snapshot["retrievedAt"], "sha256": maturity_public.digest(brazil),
-         "bytes": len(brazil), "scope": scope, **({"fallbackAfter": brazil_snapshot["fallbackAfter"]}
-                                                   if brazil_snapshot.get("fallbackAfter") else {})})
-    if kmrb is not None:
-        sources.append(maturity_kmrb.manifest_entry(kmrb_snapshot, scope))
-    if taiwan is not None:
-        sources.append(maturity_taiwan.manifest_entry(taiwan_snapshot, scope))
-    if singapore is not None:
-        sources.append(maturity_singapore.manifest_entry(singapore_snapshot, scope))
-    if kavi is not None:
-        retrieved = datetime.datetime.fromtimestamp(os.stat(kavi_path).st_mtime, datetime.timezone.utc).isoformat()
-        sources.append({"authority": "KAVI", "dataset": "IKLU movie classifications",
-                        "sourceUrl": maturity_kavi.API, "landingPage": maturity_kavi.GUIDE,
-                        "reuseBasis": maturity_kavi.GUIDE, "retrievedAt": retrieved,
-                        "sha256": hashlib.sha256(kavi).hexdigest(), "bytes": len(kavi), "scope": scope})
-    failures = [row for row in (cnc_failure, brazil_failure, kmrb_failure, taiwan_failure,
-                                singapore_failure) if row]
+    sources = [provider.manifest_entry(snapshots[provider.authority], scope)
+               for provider in maturity_providers.PROVIDERS if provider.authority in snapshots]
     _write_json(ctx.path(artifacts.MATURITY_SOURCES),
                 {"schema": 1, "sources": sources, "unavailable": failures})
-    authority_rows = {
-        "Medietilsynet": norway_snapshot["rows"],
-        "CNC": cnc_snapshot["rows"] if cnc_snapshot else None,
-        "ClassInd": brazil_snapshot["rows"] if brazil_snapshot else None,
-        "KMRB": kmrb_snapshot["rows"] if kmrb_snapshot else None,
-        "BAMID": taiwan_snapshot["rows"] if taiwan_snapshot else None,
-        "IMDA": singapore_snapshot["rows"] if singapore_snapshot else None,
-        "KAVI": kavi_rows if kavi is not None else None,
-    }
+    authority_rows = {provider.authority: snapshots[provider.authority]["rows"]
+                      for provider in maturity_providers.PROVIDERS
+                      if provider.authority in snapshots}
     for authority, rows in authority_rows.items():
-        if rows is not None:
-            maturity_decisions.validate_source(decisions, authority, rows)
-    norway_linked, norway_audit = link_records(authority_rows["Medietilsynet"], facts, decisions)
-    cnc_linked, cnc_audit = link_records(authority_rows["CNC"] or (), facts, decisions)
-    brazil_linked, brazil_audit = link_records(authority_rows["ClassInd"] or (), facts, decisions)
-    kmrb_linked, kmrb_audit = link_records(authority_rows["KMRB"] or (), facts, decisions)
-    taiwan_linked, taiwan_audit = link_records(authority_rows["BAMID"] or (), facts, decisions)
-    singapore_linked, singapore_audit = link_records(authority_rows["IMDA"] or (), facts, decisions)
-    kavi_linked, kavi_audit = link_records(authority_rows["KAVI"] or (), facts, decisions)
-    records, conflicts = combine((norway_linked, cnc_linked, brazil_linked, kmrb_linked,
-                                  taiwan_linked, singapore_linked, kavi_linked))
+        maturity_decisions.validate_source(decisions, authority, rows)
+    linked, audits = [], {}
+    for authority in (provider.authority for provider in maturity_providers.PROVIDERS):
+        authority_linked, audits[authority] = link_records(authority_rows.get(authority, ()), facts, decisions)
+        linked.append(authority_linked)
+    records, conflicts = combine(linked)
     out = {"schema": 1, "datasetVersion": version, "records": records,
            "derivation": {"rule": "highest verified age; exact identity or reviewed official ID only",
-                          "authorityDecisionsSha256": decisions_sha,
-                          "sourceSha256": {row["authority"]: row["sha256"] for row in sources},
-                          "audit": {"Medietilsynet": norway_audit, "CNC": cnc_audit,
-                                    "ClassInd": brazil_audit, "KMRB": kmrb_audit,
-                                    "BAMID": taiwan_audit, "IMDA": singapore_audit, "KAVI": kavi_audit,
-                                    "unavailable": failures,
-                                    "crossAuthorityConflicts": conflicts}}}
+                           "authorityDecisionsSha256": decisions_sha,
+                           "sourceSha256": {row["authority"]: row["sha256"] for row in sources},
+                           "audit": {**audits, "unavailable": failures,
+                                     "crossAuthorityConflicts": conflicts}}}
     _write_json(ctx.path(artifacts.MATURITY), out)
     return (f"{ctx.path(artifacts.MATURITY)} — {len(records):,} titles; "
-            f"{sum(a['ambiguousRows'] for a in (norway_audit, cnc_audit, brazil_audit, kmrb_audit, taiwan_audit, singapore_audit, kavi_audit)):,} ambiguous, "
+            f"{sum(audit['ambiguousRows'] for audit in audits.values()):,} ambiguous, "
             f"{len(conflicts):,} cross-authority conflicts")

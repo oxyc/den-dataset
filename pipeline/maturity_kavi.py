@@ -1,4 +1,5 @@
 """KAVI IKLU movie rows collected without accepting the API's silent 100-result truncation."""
+import hashlib
 import json
 
 from .contract import StageError
@@ -34,3 +35,11 @@ def records(payload):
                "runtimeMinutes": (row.get("durationInSeconds") // 60
                                   if isinstance(row.get("durationInSeconds"), int) else None),
                "matchedBy": "exact-title+year+director"}
+
+
+def manifest_entry(snapshot, scope):
+    payload = snapshot["payload"]
+    return {"authority": AUTHORITY, "dataset": "IKLU movie classifications",
+            "sourceUrl": snapshot["sourceUrl"], "landingPage": GUIDE, "reuseBasis": GUIDE,
+            "retrievedAt": snapshot["retrievedAt"], "sha256": hashlib.sha256(payload).hexdigest(),
+            "bytes": len(payload), "scope": scope}

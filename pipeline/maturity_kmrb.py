@@ -161,13 +161,6 @@ def fetch(api_key=None, request=http.request):
     return snapshot, URL
 
 
-def optional_snapshot(source_snapshot, stamp, store, fetcher=None):
-    """Join the shared validated-cache policy only after this optional source has a key or test fetcher."""
-    if fetcher is None and not os.environ.get("KMRB_API_KEY"):
-        return None, None
-    return source_snapshot(fetcher or fetch, records, "KMRB", URL, stamp, store)
-
-
 def manifest_entry(snapshot, scope):
     payload = snapshot["payload"]
     return {"authority": "KMRB", "dataset": "Self-rating classifications since 2023-06",
