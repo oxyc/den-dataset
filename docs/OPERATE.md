@@ -489,6 +489,21 @@ The next daily run with `DEN_EMBED_URL` carries every committed row that differs
 into its out-dir and re-embeds exactly those vectors; the report's `premiseCorrections` counts them. Without
 an embedder it carries none of them and says so, so strings and vectors never part.
 
+### KAVI maturity backfill
+
+KAVI permits its IKLU API to be used by external services, but broad responses stop at 100 rows and expose no
+working pagination. Build the optional movie snapshot in resumable one-day windows; the collector refuses a day
+that reaches the cap rather than treating a possibly truncated answer as complete:
+
+```sh
+python3 tools/kavi_maturity.py --out out/maturity-sources/kavi-movies.jsonl \
+  --begin 2012-01-01 --end 2026-10-12 --pause-ms 250
+```
+
+The adjacent `.state.json` records completed dates. Re-running the same command asks only unfinished dates and
+deduplicates IKLU ids already appended. `den stage maturity --out-dir out` consumes the snapshot when present;
+without it KAVI remains unknown and the other public authorities still run.
+
 ### A first generation
 
 The daily job refuses `--spend` without a live baseline: a first generation is the whole corpus (~$20 of
