@@ -109,7 +109,9 @@ def write_inputs(out):
     with open(os.path.join(out, FIXTURE_FILES["maturity"][0]), "w", encoding="utf-8") as fh:
         json.dump({"schema": 1, "datasetVersion": VERSION,
                    "records": [{"mediaType": "movie", "tmdbId": 1, "minimumAge": 12,
-                                "observations": [{"authority": "fixture", "age": 12}]}]}, fh)
+                                "observations": [{"authority": "fixture",
+                                                  "authorityId": "fixture:1", "age": 12,
+                                                  "matchedBy": "exact-title+year+director"}]}]}, fh)
     fixture.genres_moods_file(os.path.join(out, FIXTURE_FILES["genres_moods"][0]), list(PASS_KEYS))
     os.makedirs(os.path.join(out, "enriched"), exist_ok=True)
     with open(os.path.join(out, "enriched", "batch-1.json"), "w", encoding="utf-8") as fh:

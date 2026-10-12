@@ -84,7 +84,8 @@ def maturity_for(facts, records=()):
     return path
 
 
-def run(dir, combined_paths, delta_paths, facts, labels, out, extra=(), structural_paths=()):
+def run(dir, combined_paths, delta_paths, facts, labels, out, extra=(), structural_paths=(),
+        maturity_records=()):
     """The script as the pipeline runs it, returning (exit code, stderr)."""
     argv = [sys.executable, SCRIPT]
     for path in combined_paths:
@@ -93,7 +94,7 @@ def run(dir, combined_paths, delta_paths, facts, labels, out, extra=(), structur
         argv += ["--delta", path]
     for path in structural_paths:
         argv += ["--structural", path]
-    argv += ["--facts", facts, "--maturity", maturity_for(facts),
+    argv += ["--facts", facts, "--maturity", maturity_for(facts, maturity_records),
              "--labels", labels, "--out", out, *extra]
     done = subprocess.run(argv, capture_output=True, text=True, cwd=dir)
     return done.returncode, done.stderr
@@ -144,6 +145,49 @@ class Spine(unittest.TestCase):
             done = subprocess.run(argv, capture_output=True, text=True)
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertEqual(json.loads(done.stdout)["factsOnly"], 2)
+
+
+class MaturityEvidence(unittest.TestCase):
+    OBSERVATION = {"authority": "CNC", "authorityId": "visa:123", "raw": "Interdit -12 ans",
+                   "age": 12, "matchedBy": "exact-title+year+director", "assessed": "2026-01-02"}
+
+    def test_verified_evidence_reaches_the_corpus_and_unknown_stays_null(self):
+        with tempfile.TemporaryDirectory() as directory:
+            combined_path = os.path.join(directory, "combined.jsonl")
+            delta_path = os.path.join(directory, "delta.jsonl")
+            facts_path = os.path.join(directory, "facts.json")
+            labels_path = os.path.join(directory, "labels.json")
+            out = os.path.join(directory, "corpus.jsonl")
+            write(combined_path, [combined(1), combined(2)])
+            write(delta_path, [])
+            facts_file(facts_path, ["movie:1", "movie:2"])
+            labels_file(labels_path, ["movie:1", "movie:2"])
+            maturity = [{"mediaType": "movie", "tmdbId": 1, "minimumAge": 12,
+                         "observations": [{**self.OBSERVATION, "reason": "prose must not ship"}]}]
+            code, error = run(directory, [combined_path], [delta_path], facts_path, labels_path, out,
+                              maturity_records=maturity)
+            self.assertEqual(code, 0, error)
+            rows = {row["key"]: row for row in read(out)}
+        self.assertEqual(rows["movie:1"]["maturity"], {
+            "minimumAge": 12, "observations": [self.OBSERVATION]})
+        self.assertIsNone(rows["movie:2"]["maturity"], "unknown must not become an all-ages zero")
+        self.assertNotIn("reason", json.dumps(rows))
+
+    def test_untraceable_non_conservative_or_fuzzy_age_is_refused(self):
+        valid = {"mediaType": "movie", "tmdbId": 1, "minimumAge": 12,
+                 "observations": [self.OBSERVATION]}
+        cases = [
+            {**valid, "observations": []},
+            {**valid, "minimumAge": 7},
+            {**valid, "observations": [{**self.OBSERVATION, "authorityId": ""}]},
+            {**valid, "observations": [{**self.OBSERVATION, "matchedBy": "fuzzy-title"}]},
+            {**valid, "observations": [{**self.OBSERVATION, "age": True}]},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for record in cases:
+                path = maturity_for(os.path.join(directory, "facts.json"), [record])
+                with self.subTest(record=record), self.assertRaises(SystemExit):
+                    cc.maturity_rows(path)
 
 
 class Joins(unittest.TestCase):

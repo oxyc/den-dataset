@@ -336,8 +336,18 @@ def by_key(path, label):
     return out
 
 
+MATURITY_OBSERVATION_FIELDS = (
+    "authority", "authorityId", "raw", "age", "matchedBy", "assessed", "runtimeMinutes", "format",
+)
+MATURITY_MATCH_METHODS = {"exact-title+year+director"}
+
+
 def maturity_rows(path):
-    """The verified maturity artifact, where zero matched titles is a valid fail-closed result."""
+    """Verified public-authority ages, reduced to the factual fields the corpus may publish.
+
+    This is the publication boundary, so it verifies the producer's evidence instead of trusting a
+    top-level number. Zero matched titles remains a valid fail-closed result.
+    """
     with open(path, encoding="utf-8") as fh:
         blob = json.load(fh)
     rows = blob.get("records") if isinstance(blob, dict) else None
@@ -347,10 +357,34 @@ def maturity_rows(path):
     for row in rows:
         if not isinstance(row, dict) or "mediaType" not in row or "tmdbId" not in row:
             sys.exit(f"maturity: {path} has an unkeyed record")
+        media, ident, minimum = row["mediaType"], row["tmdbId"], row.get("minimumAge")
+        observations = row.get("observations")
+        if (media not in ("movie", "tv") or isinstance(ident, bool) or not isinstance(ident, int)
+                or ident <= 0 or isinstance(minimum, bool) or not isinstance(minimum, int)
+                or not 0 <= minimum <= 18 or not isinstance(observations, list) or not observations):
+            sys.exit(f"maturity: {path} has a malformed record for {media}:{ident}")
         key = key_of(row)
         if key in out:
             sys.exit(f"maturity: {path} has duplicate key {key}")
-        out[key] = row
+        safe = []
+        for observation in observations:
+            if not isinstance(observation, dict):
+                sys.exit(f"maturity: {path} has a malformed observation for {key}")
+            authority = observation.get("authority")
+            authority_id = observation.get("authorityId")
+            age = observation.get("age")
+            method = observation.get("matchedBy")
+            if (not isinstance(authority, str) or not authority
+                    or not isinstance(authority_id, str) or not authority_id
+                    or isinstance(age, bool) or not isinstance(age, int) or not 0 <= age <= 18
+                    or method not in MATURITY_MATCH_METHODS):
+                sys.exit(f"maturity: {path} has no accepted authority evidence for {key}")
+            safe.append({name: observation[name] for name in MATURITY_OBSERVATION_FIELDS
+                         if observation.get(name) is not None})
+        if minimum != max(observation["age"] for observation in safe):
+            sys.exit(f"maturity: {path} minimumAge is not the highest observation for {key}")
+        out[key] = {"mediaType": media, "tmdbId": ident, "minimumAge": minimum,
+                    "observations": safe}
     return out
 
 
