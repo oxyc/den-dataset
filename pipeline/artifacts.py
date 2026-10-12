@@ -444,6 +444,27 @@ FACTS = Artifact(
     manifest_key="factsFile",
 )
 
+#: The immutable authority snapshot and its manifest used by the numeric maturity stage. They stay in the
+#: build bundle, not the public release; the corpus carries only the matched factual observations. The
+#: Norwegian source deliberately excludes no rows at download time, so its digest can be checked against
+#: the authority's complete workbook before the adapter discards synopsis and classification-reason prose.
+MATURITY_NORWAY = Artifact(
+    name="maturity_norway",
+    filename="maturity-sources/medietilsynet-1913-2022.xlsx",
+)
+
+MATURITY_SOURCES = Artifact(
+    name="maturity_sources",
+    filename="maturity-sources.json",
+)
+
+#: Publishable authority observations matched conservatively to corpus titles, plus aggregate/audit facts.
+#: `minimumAge` is an integer from 0 through 18; absence from this artifact means unknown.
+MATURITY = Artifact(
+    name="maturity",
+    filename="maturity-{version}.json",
+)
+
 VECTORS = Artifact(
     name="vectors",
     filename="vectors-bge-m3.bin",
@@ -578,6 +599,7 @@ CATALOGUE = (EXPORT_MOVIE, EXPORT_TV, UNIVERSE_MOVIE, UNIVERSE_TV, ARTICLES, COM
              PUBLISHED_META, PUBLISHED_CORPUS,
              PUBLISHED_GENRES_MOODS, CHANGES, DOC_FACTS, PLOT_TRANSLATIONS, EMBED_LABELS, EMBED_VECTORS, COMPOSITION,
              EMBEDDER, EMBEDDING_SPACE, PLOT_LENGTH_TRANSFORM, CORPUS, ENTITIES, CORPUS_FACTS, DELTA_IDS, DELTA_FACTS, FACTS,
+             MATURITY_NORWAY, MATURITY_SOURCES, MATURITY,
              FRANCHISE_STATES, FRANCHISE_ANSWERS, FRANCHISE_ANSWERS_MANIFEST, FRANCHISE_DECISIONS,
              FRANCHISE_LINE_STATES, FRANCHISE_LINE_ANSWERS, FRANCHISE_LINE_ANSWERS_MANIFEST,
              FRANCHISE_LINE_DECISIONS, FRANCHISES,

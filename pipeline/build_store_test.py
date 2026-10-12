@@ -1,7 +1,7 @@
 """`build_store.py` against den-spec's committed fixture — the WRITER's half of the format contract.
 
-store-v2 is implemented three times: this writer, `den-core/crates/den-store` and the mmap in den-atlas.
-Both readers load `den-spec/vectors/store-v2.*` in their own tests and fail without it. The writer — the
+store-v4 is implemented three times: this writer, `den-core/crates/den-store` and the mmap in den-atlas.
+Both readers load `den-spec/vectors/store-v4.*` in their own tests and fail without it. The writer — the
 side that decides what the bytes actually are — had no test at all, so a layout change here would have
 been caught only by the readers failing afterwards, in other repos, on someone else's branch.
 
@@ -81,7 +81,7 @@ def build_store_module():
 
 class FixtureRoundTrip(unittest.TestCase):
     def test_the_writer_reproduces_the_committed_fixture(self):
-        committed = spec_or_fail("vectors", "store-v3.store")
+        committed = spec_or_fail("vectors", "store-v4.store")
         generator = spec_or_fail("tools", "store-fixture.py")
         with tempfile.TemporaryDirectory() as out:
             result = subprocess.run(
@@ -90,14 +90,14 @@ class FixtureRoundTrip(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, f"the fixture generator failed:\n{result.stderr}")
-            rebuilt = os.path.join(out, "store-v3.store")
+            rebuilt = os.path.join(out, "store-v4.store")
             self.assertTrue(os.path.isfile(rebuilt), f"generator wrote nothing:\n{result.stdout}")
             self.assertEqual(
                 sha256(rebuilt),
                 sha256(committed),
                 "build_store.py no longer produces the committed fixture. Three causes, and they want "
                 "different answers: the LAYOUT changed — in which case this is a new format version "
-                "(store-v3.md), not an edit to store-v2; the writer lost its DETERMINISM; or what the "
+                "(store-v4.md), not an edit to store-v3; the writer lost its DETERMINISM; or what the "
                 "writer CHOOSES TO PUBLISH changed, which is a content change at an unchanged layout "
                 "and is fixed by regenerating the fixture in den-spec, not by bumping the version. The "
                 "publication gates are the third kind: a fixture facet carrying no `probabilities` "
@@ -119,7 +119,7 @@ class FixtureRoundTrip(unittest.TestCase):
                     text=True,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                digests.append(sha256(os.path.join(out, "store-v3.store")))
+                digests.append(sha256(os.path.join(out, "store-v4.store")))
         self.assertEqual(digests[0], digests[1], "two runs of the writer disagree byte-for-byte")
 
 
@@ -1140,8 +1140,8 @@ class EverySeriesATitleIsPartOfShips(StoreFixture, unittest.TestCase):
                          "most specific first, deduplicated, a non-Q-id dropped, none as an empty span")
         self.assertNotIn("franchise", store.table, "the single-valued store-v1 column is gone")
         self.assertEqual(
-            struct.unpack("<I", store.blob[8:12])[0], 3,
-            "the structural profile makes this format 3; franchise remains the v2 list",
+            struct.unpack("<I", store.blob[8:12])[0], 4,
+            "the maturity column makes this format 4; franchise remains the v2 list",
         )
 
 

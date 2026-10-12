@@ -23,18 +23,18 @@ from lib import cache, tmdb, wikidata  # noqa: E402
 
 
 COUNTRY_PROPERTY = {"US": ("P1657", "P2363"), "GB": ("P2629",), "DE": ("P1981",)}
-BANDS = ("littleKids", "family", "teen", "mature")
-BAND_RANK = {name: rank for rank, name in enumerate(BANDS)}
-RATINGS = {
-    "US": {"G": "littleKids", "TV-Y": "littleKids", "TV-G": "littleKids",
-           "PG": "family", "TV-Y7": "family", "TV-Y7-FV": "family", "TV-PG": "family",
-           "PG-13": "teen", "TV-14": "teen", "R": "mature", "NC-17": "mature", "TV-MA": "mature"},
-    "GB": {"U": "littleKids", "PG": "family", "12": "teen", "12A": "teen",
-           "15": "mature", "18": "mature", "R18": "mature"},
-    "DE": {"0": "littleKids", "FSK 0": "littleKids", "6": "family", "FSK 6": "family",
-           "12": "teen", "FSK 12": "teen", "16": "mature", "FSK 16": "mature",
-           "18": "mature", "FSK 18": "mature"},
+# Only labels with a defensible numeric boundary are mapped. Advisory labels such as US/GB ``PG`` do not
+# state an age and deliberately remain unknown: guessing a low age is worse than losing coverage. Values
+# describe the age at which the title is eligible without a parent; accompaniment is profile/session
+# policy, not part of this title fact.
+AGES = {
+    "US": {"G": 0, "TV-Y": 0, "TV-G": 0, "TV-Y7": 7, "TV-Y7-FV": 7,
+           "PG-13": 13, "TV-14": 14, "R": 17, "NC-17": 18, "TV-MA": 17},
+    "GB": {"U": 0, "12": 12, "12A": 12, "15": 15, "18": 18, "R18": 18},
+    "DE": {"0": 0, "FSK 0": 0, "6": 6, "FSK 6": 6, "12": 12, "FSK 12": 12,
+           "16": 16, "FSK 16": 16, "18": 18, "FSK 18": 18},
 }
+AGE_CEILINGS = (0, 6, 7, 9, 10, 12, 13, 14, 15, 16, 17, 18)
 
 
 def _open(path, mode="rt"):
@@ -162,10 +162,10 @@ def fetch_tmdb(titles, client=None, workers=8, pause_ms=0):
         return dict(pool.map(one, titles))
 
 
-def band(country, value):
+def minimum_age(country, value):
     text = re.sub(r"\s+", " ", str(value).strip().upper().replace("–", "-").replace("—", "-"))
     text = re.sub(r"^(?:RATED|BBFC)\s+", "", text)
-    return RATINGS.get(country, {}).get(text)
+    return AGES.get(country, {}).get(text)
 
 
 def _groups(title, as_of):
@@ -188,12 +188,11 @@ def _observed(values, region):
     # unknown regional value fail closed instead of being silently replaced by a more permissive US one.
     effective_country = region if countries.get(region) else "US" if countries.get("US") else None
     raw = countries.get(effective_country, ()) if effective_country else ()
-    effective = {mapped for value in raw if (mapped := band(effective_country, value)) is not None}
-    maximum = max(effective, key=BAND_RANK.__getitem__) if effective else None
+    effective = {mapped for value in raw if (mapped := minimum_age(effective_country, value)) is not None}
+    maximum = max(effective) if effective else None
     return {"any": bool(countries), "region": bool(countries.get(region)),
-            "usFallback": effective_country == "US" and region != "US", "bands": effective,
-            "onlyUnknown": bool(raw) and not effective, "maximumBand": maximum,
-            "familyEligible": maximum in {"littleKids", "family"}}
+            "usFallback": effective_country == "US" and region != "US", "ages": effective,
+            "onlyUnknown": bool(raw) and not effective, "minimumAge": maximum}
 
 
 def aggregate(titles, wikidata_values, tmdb_runtime_values, region="US", as_of=None, generated_at=None):
@@ -213,9 +212,11 @@ def aggregate(titles, wikidata_values, tmdb_runtime_values, region="US", as_of=N
                 count["viewerRegion"] += observed["region"]
                 count["usFallback"] += observed["usFallback"]
                 count["onlyUnknownOrUnmapped"] += observed["onlyUnknown"]
-                count["familyEligibleUnknownBlocked"] += observed["familyEligible"]
-                for name in observed["bands"]:
-                    count[f"band:{name}"] += 1
+                for age in observed["ages"]:
+                    count[f"age:{age}"] += 1
+                for ceiling in AGE_CEILINGS:
+                    count[f"eligibleAt:{ceiling}"] += (observed["minimumAge"] is not None and
+                                                        observed["minimumAge"] <= ceiling)
         wd, runtime = observations["wikidata"]["any"], observations["tmdbRuntime"]["any"]
         overlap["both"] += wd and runtime
         overlap["wikidataOnly"] += wd and not runtime
@@ -225,18 +226,19 @@ def aggregate(titles, wikidata_values, tmdb_runtime_values, region="US", as_of=N
     def complete(count):
         return {name: int(count.get(name, 0)) for name in
                 ("titles", "anyCertification", "viewerRegion", "usFallback", "onlyUnknownOrUnmapped",
-                 "familyEligibleUnknownBlocked", *(f"band:{name}" for name in BANDS))}
+                 *(f"age:{age}" for age in AGE_CEILINGS),
+                 *(f"eligibleAt:{age}" for age in AGE_CEILINGS))}
 
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "generatedAt": generated_at.astimezone(datetime.timezone.utc).isoformat(),
         "scope": {"titles": len(titles), "viewerRegion": region, "asOf": as_of.isoformat()},
         "definitions": {
             "licensingBoundary": "TMDB title-level certifications and derived values remain in memory; this report contains aggregate counts only.",
             "viewerRegion": "title has any raw certification stated for the requested country",
             "usFallback": "requested region has no certification and the title has a raw US certification",
-            "bandCounts": "a title is counted once in every band mapped from the selected viewer-region values, or US values only when the region is absent",
-            "familyEligibleUnknownBlocked": "the maximum mapped band selected from viewer-region values, or US values only when the region is absent, is littleKids/family; unknown/unmapped is excluded",
+            "ageCounts": "a title is counted once at every exact numeric age mapped from the selected viewer-region values, or US values only when the region is absent",
+            "eligibleAt": "the highest mapped age selected from viewer-region values, or US values only when the region is absent, is at most the named ceiling; unknown/unmapped is excluded",
             "popularity": "percentile among corpus titles present in the supplied TMDB daily exports",
             "recency": "Wikidata release/start year relative to asOf",
         },

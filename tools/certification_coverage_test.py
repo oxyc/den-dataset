@@ -50,11 +50,12 @@ class Sources(unittest.TestCase):
         self.assertIn("wdt:P1657|wdt:P2363", query)
         self.assertIn('("2" wd:Q9)', query)
 
-    def test_band_mapping_preserves_pg13_and_r_boundary(self):
-        self.assertEqual(coverage.band("US", "PG-13"), "teen")
-        self.assertEqual(coverage.band("US", "R"), "mature")
-        self.assertEqual(coverage.band("GB", "12A"), "teen")
-        self.assertIsNone(coverage.band("US", "Not Rated"))
+    def test_age_mapping_preserves_exact_boundaries_and_does_not_guess_pg(self):
+        self.assertEqual(coverage.minimum_age("US", "PG-13"), 13)
+        self.assertEqual(coverage.minimum_age("US", "R"), 17)
+        self.assertEqual(coverage.minimum_age("GB", "12A"), 12)
+        self.assertIsNone(coverage.minimum_age("US", "PG"))
+        self.assertIsNone(coverage.minimum_age("US", "Not Rated"))
 
 
 class Report(unittest.TestCase):
@@ -65,41 +66,44 @@ class Report(unittest.TestCase):
     ]
 
     def test_sources_are_separate_overlap_and_strata_are_aggregate(self):
-        wd = {("movie", 1): {"US": {"PG"}}, ("tv", 2): {"GB": {"mystery"}}}
+        wd = {("movie", 1): {"US": {"G"}}, ("tv", 2): {"GB": {"mystery"}}}
         runtime = {("movie", 1): {"US": {"PG-13"}}, ("movie", 3): {"DE": {"FSK 6"}}}
         report = coverage.aggregate(self.titles, wd, runtime, "GB", datetime.date(2026, 1, 1))
         self.assertEqual(report["overlap"], {"both": 1, "wikidataOnly": 1,
                                              "tmdbRuntimeOnly": 1, "neither": 0})
         self.assertEqual(report["sources"]["wikidata"]["all"]["anyCertification"], 2)
         self.assertEqual(report["sources"]["wikidata"]["all"]["viewerRegion"], 1)
-        self.assertEqual(report["sources"]["tmdbRuntime"]["all"]["band:family"], 0)
+        self.assertEqual(report["sources"]["tmdbRuntime"]["all"]["age:12"], 0)
         self.assertEqual(report["sources"]["wikidata"]["all"]["onlyUnknownOrUnmapped"], 1)
         self.assertEqual(report["sources"]["wikidata"]["recency:last5"]["titles"], 1)
 
     def test_region_wins_and_only_absence_uses_us_fallback(self):
         values = {
-            ("movie", 1): {"GB": {"PG"}, "US": {"R"}, "DE": {"FSK 0"}},
+            ("movie", 1): {"GB": {"12"}, "US": {"R"}, "DE": {"FSK 0"}},
             ("tv", 2): {"GB": {"unmapped"}, "US": {"TV-Y"}},
-            ("movie", 3): {"US": {"PG"}},
+            ("movie", 3): {"US": {"PG-13"}},
         }
         report = coverage.aggregate(self.titles, values, {}, "GB", datetime.date(2026, 1, 1))
         counts = report["sources"]["wikidata"]["all"]
         self.assertEqual(counts["viewerRegion"], 2)
         self.assertEqual(counts["usFallback"], 1)
-        self.assertEqual(counts["band:littleKids"], 0)  # the US and DE values for regional rows do not leak in
-        self.assertEqual(counts["band:family"], 2)
-        self.assertEqual(counts["band:mature"], 0)
+        self.assertEqual(counts["age:0"], 0)  # the US and DE values for regional rows do not leak in
+        self.assertEqual(counts["age:17"], 0)
         self.assertEqual(counts["onlyUnknownOrUnmapped"], 1)
-        self.assertEqual(counts["familyEligibleUnknownBlocked"], 2)
+        self.assertEqual(counts["age:12"], 1)
+        self.assertEqual(counts["age:13"], 1)
+        self.assertEqual(counts["eligibleAt:12"], 1)
+        self.assertEqual(counts["eligibleAt:13"], 2)
 
-    def test_maximum_effective_band_conservatively_decides_kid_eligibility(self):
-        values = {("movie", 1): {"US": {"G", "PG", "R"}}}
+    def test_maximum_effective_age_conservatively_decides_kid_eligibility(self):
+        values = {("movie", 1): {"US": {"G", "PG-13", "R"}}}
         report = coverage.aggregate(self.titles, values, {}, "US", datetime.date(2026, 1, 1))
         counts = report["sources"]["wikidata"]["all"]
-        self.assertEqual(counts["band:littleKids"], 1)
-        self.assertEqual(counts["band:family"], 1)
-        self.assertEqual(counts["band:mature"], 1)
-        self.assertEqual(counts["familyEligibleUnknownBlocked"], 0)
+        self.assertEqual(counts["age:0"], 1)
+        self.assertEqual(counts["age:13"], 1)
+        self.assertEqual(counts["age:17"], 1)
+        self.assertEqual(counts["eligibleAt:16"], 0)
+        self.assertEqual(counts["eligibleAt:17"], 1)
 
     def test_serialized_report_contains_no_title_identifier_or_raw_rating(self):
         report = coverage.aggregate(self.titles, {("movie", 1): {"US": {"secret-rating"}}}, {},

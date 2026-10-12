@@ -46,6 +46,7 @@ FIXTURE_FILES = {
     "combined": ("combined-v1-r2.jsonl", "combined-v1-r2-token-fallback.jsonl"),
     "delta": ("delta-v2.jsonl", "delta-v2-rest.jsonl"),
     "facts": (f"facts-{VERSION}.json",),
+    "maturity": (f"maturity-{VERSION}.json",),
     "genres_moods": ("genres-moods.json",),
 }
 
@@ -105,6 +106,10 @@ def write_inputs(out):
         write_manifest(os.path.join(out, name))
     fixture.facts_file(os.path.join(out, FIXTURE_FILES["facts"][0]), list(FACTS_KEYS),
                        entities={"Q42": {"en": "Ada Director"}})
+    with open(os.path.join(out, FIXTURE_FILES["maturity"][0]), "w", encoding="utf-8") as fh:
+        json.dump({"schema": 1, "datasetVersion": VERSION,
+                   "records": [{"mediaType": "movie", "tmdbId": 1, "minimumAge": 12,
+                                "observations": [{"authority": "fixture", "age": 12}]}]}, fh)
     fixture.genres_moods_file(os.path.join(out, FIXTURE_FILES["genres_moods"][0]), list(PASS_KEYS))
     os.makedirs(os.path.join(out, "enriched"), exist_ok=True)
     with open(os.path.join(out, "enriched", "batch-1.json"), "w", encoding="utf-8") as fh:
@@ -153,6 +158,7 @@ class CommandLine(unittest.TestCase):
                              sorted(os.path.join(out, n) for n in FIXTURE_FILES["delta"]))
             self.assertEqual(parsed.structural, [], "the optional lane is absent before its first backfill")
             self.assertEqual(parsed.labels, os.path.join(out, "genres-moods.json"))
+            self.assertEqual(parsed.maturity, os.path.join(out, f"maturity-{VERSION}.json"))
             self.assertIsNone(parsed.withdrawn, "no tombstone file, no flag")
             self.assertEqual(parsed.out, os.path.join(out, f"corpus-{VERSION}.jsonl.gz"))
 
@@ -316,6 +322,7 @@ class Equivalence(unittest.TestCase):
         for name in sorted(FIXTURE_FILES["delta"]):
             command += ["--delta", os.path.join(out, name)]
         command += ["--facts", os.path.join(out, FIXTURE_FILES["facts"][0]),
+                    "--maturity", os.path.join(out, FIXTURE_FILES["maturity"][0]),
                     "--labels", os.path.join(out, FIXTURE_FILES["genres_moods"][0]),
                     "--enriched", os.path.join(out, "enriched"),
                     "--expect", "4", "--out", target]
@@ -423,6 +430,7 @@ class Supersede(unittest.TestCase):
             for name in sorted(FIXTURE_FILES["delta"] + self.REGROUND[1:]):
                 command += ["--delta", os.path.join(out, name)]
             command += ["--facts", os.path.join(out, FIXTURE_FILES["facts"][0]),
+                        "--maturity", os.path.join(out, FIXTURE_FILES["maturity"][0]),
                         "--labels", os.path.join(out, FIXTURE_FILES["genres_moods"][0]),
                         "--withdrawn", os.path.join(out, "withdrawn.jsonl"),
                         "--enriched", os.path.join(out, "enriched"),
