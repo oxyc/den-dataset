@@ -35,18 +35,22 @@ and a mapping that contradicts a now-unique exact identity fails the build inste
 new evidence. If an optional authority is unavailable, its mappings contribute nothing until a validated
 snapshot is available again. The ledger SHA-256 is recorded in every maturity derivation.
 
-For BAMID, build a bounded deterministic suggestion queue from one completed output directory with:
+Build a bounded deterministic suggestion queue for any registered authority from one completed output
+directory. For example, the modern Italian source uses:
 
 ```sh
-python3 tools/bamid_review.py \
+python3 tools/maturity_review.py \
+  --authority DGCA-Italy \
   --facts OUT/facts-DATASET_VERSION.json \
-  --snapshot OUT/maturity-sources/bamid-film-classifications.zip \
-  --out OUT/bamid-review.json
+  --snapshot OUT/maturity-sources/dgca-italy-film-classifications.zip \
+  --out OUT/dgca-italy-review.json
 ```
 
-The queue contains only unique exact-title suggestions and factual source/target identity fields. It does
-not alter `data/maturity-authority-decisions.json`; every suggested mapping must still be checked by a
-person before being added there.
+The same command supports `BAMID`, `IMDA`, `DGCA-Italy-NullaOsta`, and every other provider declared in
+`pipeline/maturity_providers.py`; `tools/bamid_review.py` remains a compatibility shortcut. The queue
+contains only unique exact-title suggestions and factual source/target identity fields. It does not alter
+`data/maturity-authority-decisions.json`; every suggested mapping must still be checked by a person before
+being added there.
 
 ## Private runtime enhancement
 

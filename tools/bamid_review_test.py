@@ -3,8 +3,9 @@ import os
 import tempfile
 import unittest
 
-from pipeline import maturity_taiwan
-from . import bamid_review
+from pipeline import maturity_italy, maturity_italy_historical, maturity_taiwan
+from pipeline.maturity_test import italy_historical_payload, italy_snapshot
+from . import bamid_review, maturity_review
 
 
 def source(rows):
@@ -79,6 +80,56 @@ class Review(unittest.TestCase):
             valid_path = self.write(directory, "valid.json", {"records": []})
             with self.assertRaisesRegex(ValueError, "limit"):
                 bamid_review.build(valid_path, snapshot_path, limit=0, decisions={})
+
+    def test_generic_queue_uses_the_registered_modern_italy_provider(self):
+        facts = {"records": [
+            {"mediaType": "movie", "tmdbId": 7,
+             "titles": {"en": "Reviewed Film", "aliases": []},
+             "released": {"date": "2025-01-01"}},
+        ]}
+        snapshot = italy_snapshot([{
+            "NUMERO_CLASSIFICAZIONE": "C12345678901234", "TITOLO": "Reviewed Film",
+            "TITOLO_ORIGINALE": "", "REGIA": "Director", "MINUTAGGIO": "95",
+            "CLASSIFICAZIONE": "Opera vietata ai minori di anni 14",
+            "DATA_CLASSIFICAZIONE": "2025-02-03",
+        }])
+        with tempfile.TemporaryDirectory() as directory:
+            report = maturity_review.build(
+                self.write(directory, "facts.json", facts),
+                self.write(directory, "italy.zip", snapshot, binary=True),
+                maturity_italy.AUTHORITY, decisions={})
+        candidate = next(row for row in report["candidates"]
+                         if row["source"]["authorityId"] == "C12345678901234")
+        self.assertEqual(candidate["decision"], {
+            "authority": maturity_italy.AUTHORITY,
+            "authorityId": "C12345678901234", "key": "movie:7"})
+        self.assertEqual(candidate["source"]["directors"], "Director")
+
+    def test_generic_queue_uses_the_registered_historical_italy_provider(self):
+        facts = {"records": [
+            {"mediaType": "movie", "tmdbId": 8,
+             "titles": {"en": "Historical Film", "aliases": []}},
+        ]}
+        snapshot = italy_historical_payload([{
+            "PROTOCOLLO": "9999", "TITOLO": "Historical Film",
+            "DATA": "03-02-1970", "DIVIETO": "18",
+        }])
+        with tempfile.TemporaryDirectory() as directory:
+            report = maturity_review.build(
+                self.write(directory, "facts.json", facts),
+                self.write(directory, "historical.csv", snapshot, binary=True),
+                maturity_italy_historical.AUTHORITY, decisions={})
+        candidate = next(row for row in report["candidates"]
+                         if row["source"]["authorityId"] == "nulla-osta:9999")
+        self.assertEqual(candidate["decision"]["key"], "movie:8")
+        self.assertEqual(candidate["source"]["age"], 18)
+
+    def test_generic_queue_refuses_an_unknown_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            facts_path = self.write(directory, "facts.json", {"records": []})
+            snapshot_path = self.write(directory, "source", b"", binary=True)
+            with self.assertRaisesRegex(ValueError, "unknown maturity authority"):
+                maturity_review.build(facts_path, snapshot_path, "Not-A-Provider", decisions={})
 
 
 if __name__ == "__main__":
