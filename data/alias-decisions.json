@@ -8,8 +8,20 @@
     "though it collides — that is what lets 'parasite' find 기생충 and '96 hours' find Taken.",
     "",
     "Matching ignores punctuation, accents, leading articles and format suffixes, so one entry covers every",
-    "spelling of the same name. 'why' is the evidence, not a restatement of the verdict."
+    "spelling of the same name. 'why' is the evidence, not a restatement of the verdict.",
+    "",
+    "'entities.drop' is the same judgement on a person's, company's or source work's alias (store/aliases.py",
+    "apply_entities): an altLabel that is not a name of that item at all."
   ],
+  "entities": {
+    "drop": [
+      {
+        "qid": "Q16325985",
+        "alias": "यह एक पूर्व भारतीय प्रधानमंत्री के ऊपर लिखो हुई उनकी एक आत्म कथा है , जो की एक काफी ही मशहूर किताबों में से एक मानी जाती है.",
+        "why": "A Hindi sentence ('an autobiography written about a former Indian prime minister, considered one of the most famous books') entered as an en altLabel of The Accidental Prime Minister, Sanjaya Baru's memoir. It is a description, not a name, and at 314 bytes stopped the 2026-10-12 store build on the dictionary's prose bound."
+      }
+    ]
+  },
   "drop": [
     {
       "mediaType": "movie",

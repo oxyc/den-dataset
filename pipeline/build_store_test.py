@@ -1718,7 +1718,28 @@ class TheAliasDecisionsAreApplied(StoreFixture, unittest.TestCase):
 
         self.assertEqual(names("movie:103"), ["Taxi Driver"], "the dropped alias reached alias_titles")
         self.assertEqual(names("movie:9"), ["Gamma", "Beta"], "an undecided alias still ships until decided")
-        self.assertEqual(record, {"sha256": sha256(self.DECISIONS), "dropped": 1, "undecided": 1})
+        self.assertEqual(record, {"sha256": sha256(self.DECISIONS), "dropped": 1, "undecided": 1,
+                                  "entityDropped": 0})
+
+    def test_a_dropped_entity_alias_does_not_ship(self):
+        """The committed `entities.drop` takes a Hindi sentence off Q16325985's aliases. Left in, it is over
+        the dictionary's prose bound and the build refuses; the item's real alias still ships."""
+        with open(self.DECISIONS, encoding="utf-8") as fh:
+            prose = json.load(fh)["entities"]["drop"][0]["alias"]
+        entities = {"Q16325985": {"en": "The Accidental Prime Minister", "aliases": [prose, "TAPM"]}}
+        with tempfile.TemporaryDirectory() as out:
+            meta = os.path.join(out, "dataset.meta.json")
+            with open(meta, "w") as fh:
+                json.dump({"datasetVersion": "test"}, fh)
+            store, _ = self.build(out, entities=entities, stamp=meta)
+            with open(meta) as fh:
+                record = json.load(fh)["aliasDecisions"]
+
+        row = store.ints("ent_qid").index(16325985)
+        offsets = store.ints("ent_alias_o")
+        aliases = [store.text(i) for i in store.ints("ent_alias_v")[offsets[row]:offsets[row + 1]]]
+        self.assertEqual(aliases, ["TAPM"])
+        self.assertEqual(record["entityDropped"], 1)
 
 
 class TheTitlesWithNoItemChosenAreRecorded(StoreFixture, unittest.TestCase):

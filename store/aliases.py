@@ -153,3 +153,29 @@ def apply(rows, path=DECISIONS):
     with open(path, "rb") as fh:
         sha = hashlib.sha256(fh.read()).hexdigest()
     return {"sha256": sha, "dropped": dropped, "undecided": undecided}
+
+
+def apply_entities(table, path=DECISIONS):
+    """Remove every `entities.drop` alias from the entity table, in place, and return how many came out.
+
+    An entity's aliases are its `skos:altLabel`s too, and reach the store's dictionary through `ent_alias`.
+    One that is not a name at all — a description typed into the alias field — trips the dictionary's prose
+    bound and stops the build, which is the bound doing its job: a person looks at it and records the drop
+    here, with the evidence, as for a title's alias.
+    """
+    if not os.path.exists(path):
+        return 0
+    with open(path, encoding="utf-8") as fh:
+        rows = (json.load(fh).get("entities") or {}).get("drop", [])
+    drops = defaultdict(set)
+    for row in rows:
+        drops[row["qid"]].add(hard_fold(row["alias"]))
+    dropped = 0
+    for qid, folded in drops.items():
+        ent = table.get(qid)
+        if not isinstance(ent, dict) or not ent.get("aliases"):
+            continue
+        kept = [a for a in ent["aliases"] if hard_fold(a) not in folded]
+        dropped += len(ent["aliases"]) - len(kept)
+        ent["aliases"] = kept
+    return dropped
