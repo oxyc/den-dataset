@@ -535,5 +535,67 @@ class HeldTitles(unittest.TestCase):
         self.assertIn("cannot be read", err)
 
 
+class ShippedCensus(unittest.TestCase):
+    """The shared-article census counts the titles the store ships, not every title the enriched tree holds
+    (daily run 38183199266: 5,961 new titles enriched without spend, none in the store, 98 against 81)."""
+
+    def gate(self, rows_by_batch, vectors, corpus_rows=None, baseline="1"):
+        import gzip
+        with tempfile.TemporaryDirectory() as dir:
+            e, labels = write_case(dir, rows_by_batch)
+            argv = ["--enriched-dir", e, "--labels", labels, "--store", write_store(dir, vectors),
+                    "--shared-plot-baseline", baseline]
+            if corpus_rows is not None:
+                corpus = os.path.join(dir, "corpus-abc.jsonl.gz")
+                with gzip.open(corpus, "wt", encoding="utf-8") as fh:
+                    for row in corpus_rows:
+                        fh.write(json.dumps(row) + "\n")
+                argv += ["--corpus", corpus]
+            return run(argv)
+
+    def test_a_new_title_the_store_does_not_carry_does_not_regress_the_gate(self):
+        """movie:3 shares movie:1's article but is in no store: 1 title borrows, as published."""
+        rows = {1: [borrower(1), borrower(2, plotArticle="Solaris")], 2: [borrower(3)]}
+        code, out, err = self.gate(rows, {"movie:1": True, "movie:2": True}, baseline="0")
+        self.assertEqual(code, 0, err)
+        self.assertIn("another title : 0", out)
+        self.assertIn("1 grounded titles do not ship in this store", out)
+
+    def test_a_title_held_at_its_published_row_is_not_counted(self):
+        rows = {1: [borrower(1), borrower(2)]}
+        code, out, err = self.gate(rows, {"movie:1": True, "movie:2": True},
+                                   [{"key": "movie:1", "source": {"hasWikiPlot": True}},
+                                    {"key": "movie:2", "source": {"hasWikiPlot": False}}], baseline="0")
+        self.assertEqual(code, 0, err)
+        self.assertIn("another title : 0", out)
+
+    def test_the_same_sharing_is_refused_once_the_title_ships(self):
+        """Classified, movie:3 is in the store: the sharing the first run did not count is counted."""
+        rows = {1: [borrower(1), borrower(3)]}
+        code, out, err = self.gate(rows, {"movie:1": True, "movie:3": True},
+                                   [{"key": "movie:1", "source": {"hasWikiPlot": True}},
+                                    {"key": "movie:3", "source": {"hasWikiPlot": True}}], baseline="0")
+        self.assertEqual(code, 2)
+        self.assertIn("REGRESSED", err)
+        self.assertIn("another title : 2", out)
+
+    def test_a_shipped_title_sharing_with_a_shipped_title_is_still_counted(self):
+        code, out, _ = self.gate({1: [borrower(1), borrower(2)]}, {"movie:1": True, "movie:2": True})
+        self.assertEqual(code, 2)
+        self.assertIn("another title : 2", out)
+
+    def test_the_stamp_is_the_shipped_count(self):
+        """The next publish ratchets against what this one shipped."""
+        with tempfile.TemporaryDirectory() as dir:
+            e, labels = write_case(dir, {1: [borrower(1), borrower(2), borrower(3)]})
+            store = write_store(dir, {"movie:1": True, "movie:2": True})
+            meta = os.path.join(dir, "dataset.meta.json")
+            with open(meta, "w", encoding="utf-8") as fh:
+                json.dump({}, fh)
+            run(["--enriched-dir", e, "--labels", labels, "--store", store, "--stamp-meta", meta])
+            with open(meta, encoding="utf-8") as fh:
+                self.assertEqual(json.load(fh)["sharedPlotArticleTitles"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

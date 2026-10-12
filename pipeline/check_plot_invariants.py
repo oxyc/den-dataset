@@ -69,6 +69,20 @@ The consequence is measurable downstream — 63% of shared-article groups agree 
 `ending=happy` (the novel's) while `movie:3084`, the only one grounded on its own film article, is correctly
 `ending=tragic`.
 
+### The census counts what the store ships
+
+With `--store` the census covers only the titles the store carries (and, with `--corpus`, whose corpus row says
+they have a plot). The enriched tree also holds titles that do not ship: a day that cannot buy labelling still
+enriches the catalogue's new titles, 5,961 of them on 2026-10-11, and those never reach the store until they are
+classified. Counted anyway, their articles regressed the gate against a published dataset they are not in
+(98 against 81, daily run 38183199266) and refused a day that shipped exactly the titles of the one before. The
+published 81 is reproduced from the shipped corpus rows alone.
+
+This does not loosen the gate for a title that will ship. The day such a title is classified it is in the store
+and its corpus row has a plot, so it is counted from then on, against the baseline the previous publish
+stamped. The same sharing is refused that day, naming its clusters: it has to be fixed or accepted with
+`DEN_ALLOW_SHARED_PLOTS` then, not before it can ship. Without `--store` every enriched title is counted.
+
 ### The per-title check the census is a proxy for
 
 Provenance recovered for all 47,529 grounded titles says the collision census sees **35% of the defect**:
@@ -446,6 +460,29 @@ def main():
     def inscope(key):
         return scope is None or key in scope
 
+    # With `--store`, the grounding census is about what the store SHIPS, read before it so the census can
+    # use it. A day that cannot label what it enriched (no spend) enriches thousands of new titles that
+    # do not ship; counting their articles regressed the gate against a dataset they are not in (daily run
+    # 38183199266: 98 against 81, with every added title held out of the store).
+    shipped, claims = None, None
+    if args.store:
+        try:
+            shipped = store_plot_vectors(args.store)
+        except (OSError, ValueError, struct.error) as err:
+            print(f"\nerror: plot-vector gate: {err}. Nothing can say whether every title with a plot "
+                  f"has a vector.", file=sys.stderr)
+            return 3
+        if args.corpus:
+            try:
+                claims = corpus_plot_claims(args.corpus)
+            except (OSError, ValueError, KeyError) as err:
+                print(f"\nerror: plot-vector gate: {args.corpus} cannot be read ({err}). Nothing can say "
+                      f"which titles the store ships with a plot.", file=sys.stderr)
+                return 3
+
+    def ships(key):
+        return shipped is None or (key in shipped and (claims is None or claims.get(key, True)))
+
     plot_no_labels = sorted(k for k, v in has_plot.items() if v and k not in labelled and inscope(k))
     labels_no_plot = sorted(k for k in labelled if has_plot.get(k) is False and inscope(k))
 
@@ -457,7 +494,11 @@ def main():
     for k in labels_no_plot[:20]:
         print(f"      {k}")
 
-    in_scope = {k: r for k, r in grounded.items() if inscope(k)}
+    in_scope = {k: r for k, r in grounded.items() if inscope(k) and ships(k)}
+    unshipped = sum(1 for k in grounded if inscope(k) and not ships(k))
+    if unshipped:
+        print(f"  {unshipped} grounded titles do not ship in this store (new, or held until classified): "
+              "their articles are not counted below")
     groups = shared_plot_articles(in_scope, same_item=same_item)
     shared_titles = report_shared_articles(groups, in_scope)
     provenance = plot_provenance(in_scope)
@@ -481,20 +522,6 @@ def main():
 
     # Checked before the ratchet's return: 2 has an override in the publisher and this has none.
     if args.store:
-        try:
-            shipped = store_plot_vectors(args.store)
-        except (OSError, ValueError, struct.error) as err:
-            print(f"\nerror: plot-vector gate: {err}. Nothing can say whether every title with a plot "
-                  f"has a vector.", file=sys.stderr)
-            return 3
-        claims = None
-        if args.corpus:
-            try:
-                claims = corpus_plot_claims(args.corpus)
-            except (OSError, ValueError, KeyError) as err:
-                print(f"\nerror: plot-vector gate: {args.corpus} cannot be read ({err}). Nothing can say "
-                      f"which titles the store ships with a plot.", file=sys.stderr)
-                return 3
         missing = plot_without_vector(has_plot, shipped, claims)
         held = sorted(set(plot_without_vector(has_plot, shipped)) - set(missing))
         if held:

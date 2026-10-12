@@ -478,6 +478,11 @@ else python3 "$(dirname "$0")/manifest_counts.py" --stamp "$meta" "$DIR"; fi
 # at which point the per-title provenance census, printed alongside, names the ~2,075 mis-grounded titles
 # directly instead of the 729 of them that happen to collide.
 #
+# With `--store` the census counts the titles the store SHIPS (and, with `--corpus`, whose row has a plot), not
+# every title in the enriched tree: a day that buys no labelling enriches new titles that stay out of the store,
+# and counting them regressed the gate against a dataset they are not in. A title is counted from the day it
+# ships, against the count the previous publish stamped.
+#
 # `--facts` is deliberately NOT passed. It would enable the one-item exemption (31 titles are one Wikidata
 # item behind several TMDB ids, which is why this can never ratchet to zero) but it also scopes the census
 # to the shipped keys, which moves the baseline for a reason that has nothing to do with the grounding.
