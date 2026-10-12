@@ -35,11 +35,13 @@ name: daily
 #                                               vector is written. Without it (and DEN_EMBED_URL) nothing is
 #                                               embedded
 #
-# IT KEEPS NOTHING BETWEEN RUNS but what it paid for. Each run starts in an empty out-dir from what the live
-# dataset's publish put beside it: the manifest on `data-latest` and the bundle on `corpus-<its version>`
+# IT KEEPS TWO THINGS BETWEEN RUNS: what it paid for, and `.cache`. Each run starts in an empty out-dir from what
+# the live dataset's publish put beside it: the manifest on `data-latest` and the bundle on `corpus-<its version>`
 # (`pipeline/published.py` says what that is and how a day is seeded from it). What it bought is kept in the
 # paid-answers ledger on the `paid-state` release, downloaded first and uploaded last whether or not the run
-# publishes (`pipeline/paid.py`), so a failed or unpublished day is never bought again.
+# publishes (`pipeline/paid.py`), so a failed or unpublished day is never bought again. `.cache` — Wikipedia and
+# Wikidata responses, and vectors by verified space and document — is kept in actions/cache the same way, so a
+# failed day is not fetched, scraped and embedded again either; it is re-derivable, so eviction only costs time.
 on:
   schedule:
     - cron: "23 3 * * *"
@@ -79,6 +81,8 @@ jobs:
     env:
       OUT: out
       DEN_CACHE_DIR: .cache
+      # Vectors by verified space and document, in the same `.cache` (pipeline/embed.py, `vector_cache`).
+      EMBED_CACHE: "1"
       # What a handed-off run is started with (pipeline/hand-off-day.sh), and what the day runs.
       ATTEMPT: ${{ inputs.host_attempt || '1' }}
       WEEKS: ${{ inputs.revisit_weeks || vars.DEN_REVISIT_WEEKS || '8' }}
@@ -178,6 +182,16 @@ jobs:
           fi
           gh release download paid-state -R "$GITHUB_REPOSITORY" -p "$newest" -O paid/paid-state.json.gz
           echo "read=$newest" >> "$GITHUB_OUTPUT"
+      # The response cache and the vector cache from the last run that got this far. Everything in it is keyed by
+      # what was asked — a request, or a verified space and a document — so a hit is the answer this run would
+      # get, and a run that failed late no longer repeats ~4 hours of fetching, scraping and embedding. Revisits
+      # and refreshes read through `refresh.Fresh`, which skips the cache, so keeping it does not make them stale.
+      - name: The kept cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache
+          key: den-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: den-cache-
       - name: The day
         id: day
         env:
@@ -213,6 +227,34 @@ jobs:
             [ "$SPEND_PREMISE" = "true" ] && args+=(--spend-premise) || args+=(--no-spend-premise)
           fi
           ./den daily "${args[@]}"
+      # Whether or not the day was ready: a late failure is exactly the run whose work the next one should not
+      # repeat. Entries past the caches' 180-day TTL (lib/cache.py) are read as misses, so they are dropped
+      # rather than carried.
+      - name: Drop expired cache entries
+        id: prune
+        if: always() && steps.day.outcome != 'skipped'
+        run: |
+          [ -d .cache ] || exit 0
+          find .cache -type f -mtime +180 -delete
+          du -sh .cache
+      - name: Keep the cache
+        id: keep-cache
+        if: always() && steps.prune.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: .cache
+          key: den-cache-${{ github.run_id }}-${{ github.run_attempt }}
+      # Each save is a new, immutable entry holding everything the previous one did, so only the newest is kept —
+      # once it is saved, so a failed save never leaves the next run with nothing.
+      - name: Drop older caches
+        if: always() && steps.keep-cache.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: den-cache-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          for key in $(gh cache list -R "$GITHUB_REPOSITORY" --key den-cache- --limit 100 --json key --jq '.[].key'); do
+            [ "$key" = "$KEEP" ] || gh cache delete "$key" -R "$GITHUB_REPOSITORY"
+          done
       - name: Report
         if: always()
         run: |
