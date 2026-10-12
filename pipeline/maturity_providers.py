@@ -3,7 +3,7 @@ import dataclasses
 import os
 
 from . import (artifacts, maturity_kavi, maturity_kmrb, maturity_norway, maturity_public,
-               maturity_singapore, maturity_taiwan)
+               maturity_quebec, maturity_singapore, maturity_taiwan)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -49,6 +49,8 @@ PROVIDERS = (
     Provider("IMDA", artifacts.MATURITY_SINGAPORE, maturity_singapore.records,
              maturity_singapore.API, maturity_singapore.manifest_entry,
              fetch=maturity_singapore.fetch),
+    Provider(maturity_quebec.AUTHORITY, artifacts.MATURITY_QUEBEC, maturity_quebec.records,
+             maturity_quebec.API, maturity_quebec.manifest_entry, fetch=maturity_quebec.fetch),
     Provider("KAVI", artifacts.MATURITY_KAVI, maturity_kavi.records,
              maturity_kavi.API, maturity_kavi.manifest_entry, acquisition="local"),
 )

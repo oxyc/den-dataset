@@ -10,7 +10,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from . import (maturity, maturity_decisions, maturity_kavi, maturity_kmrb, maturity_norway,
-               maturity_providers, maturity_public, maturity_singapore, maturity_taiwan)
+               maturity_providers, maturity_public, maturity_quebec, maturity_singapore,
+               maturity_taiwan)
 from .contract import Context, StageError
 from lib import cache, http
 
@@ -81,6 +82,24 @@ def kmrb_page(items, page_number=1, total=None, page_size=1000):
     ET.SubElement(body, "numOfRows").text = str(page_size)
     ET.SubElement(body, "totalCount").text = str(len(items) if total is None else total)
     return ET.tostring(response, encoding="utf-8", xml_declaration=True)
+
+
+def quebec_payload(first=()):
+    rows = list(first)
+    for number in range(len(rows) + 1, maturity_quebec.MIN_ROWS + 1):
+        rows.append({"NO_FILM": str(number), "TITRE": f"Fixture {number}",
+                     "TITRE_FRANCAIS": "", "TITRE_ANGLAIS": "",
+                     "REALISATEUR1": "DIRECTOR, FIXTURE", "REALISATEUR2": "",
+                     "REALISATEUR3": "", "NATION1": "CAN", "NATION2": "", "NATION3": "",
+                     "ANNEE": "2020", "CLASSEMENT": "G", "INDICATION_1": "",
+                     "INDICATION_2": "", "DATE_DECISION": "2025-01-01",
+                     "NO_FILM_1": str(number),
+                     "URL": f"https://repertoire.cinema.mcc.gouv.qc.ca/film/{number}"})
+    target = io.StringIO()
+    writer = csv.DictWriter(target, fieldnames=maturity_quebec.HEADERS, delimiter=";")
+    writer.writeheader()
+    writer.writerows(rows)
+    return target.getvalue().encode()
 
 
 def facts(*records):
@@ -445,6 +464,41 @@ class Stage(unittest.TestCase):
 
 
 class PublicAdapters(unittest.TestCase):
+    def test_quebec_maps_the_ladder_and_restores_catalogue_name_order(self):
+        rows = []
+        for number, rating in enumerate(("G", "13", "16", "18"), 1):
+            rows.append({name: "" for name in maturity_quebec.HEADERS})
+            rows[-1].update({"NO_FILM": str(number), "NO_FILM_1": str(number),
+                             "TITRE": "FILM, THE", "TITRE_FRANCAIS": "FILM, LE",
+                             "REALISATEUR1": "DIRECTOR, ALICE", "ANNEE": "2022",
+                             "CLASSEMENT": rating, "DATE_DECISION": "2025-01-01",
+                             "URL": f"https://repertoire.cinema.mcc.gouv.qc.ca/film/{number}"})
+        found = list(maturity_quebec.records(quebec_payload(rows)))
+        self.assertEqual([row["age"] for row in found[:4]], [0, 13, 16, 18])
+        self.assertEqual(found[0]["titles"], ["FILM, THE", "THE FILM", "FILM, LE", "LE FILM"])
+        self.assertEqual(found[0]["directors"], "ALICE DIRECTOR")
+        linked, audit = maturity.link_records(found[:1], facts(movie(1, "THE FILM")))
+        self.assertEqual(linked[0]["tmdbId"], 1)
+        self.assertEqual(audit["matchedRows"], 1)
+
+    def test_quebec_fetch_uses_only_the_catalogue_resource(self):
+        csv_body = quebec_payload()
+        download_path = maturity_quebec.DOWNLOAD_PREFIX + "fixture.csv"
+        metadata = json.dumps({"success": True, "result": {"resources": [{
+            "id": maturity_quebec.RESOURCE,
+            "url": f"https://{maturity_quebec.HOST}{download_path}"}]}}).encode()
+        asked = []
+
+        def request(host, path, params=None, headers=None):
+            asked.append((host, path, params))
+            return metadata if path == maturity_quebec.API_PATH else csv_body
+
+        body, source = maturity_quebec.fetch(request)
+        self.assertEqual((body, source), (csv_body, maturity_quebec.API))
+        self.assertEqual(asked, [(maturity_quebec.HOST, maturity_quebec.API_PATH,
+                                  {"id": maturity_quebec.DATASET}),
+                                 (maturity_quebec.HOST, download_path, None)])
+
     def test_singapore_maps_only_unambiguous_numeric_restrictions_and_requires_review(self):
         base = {name: "" for name in maturity_singapore.HEADERS}
         base.update({"Year": "2025", "Title": "Film", "Also_Known_As": "THE FILM",

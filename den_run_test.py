@@ -71,9 +71,11 @@ sys.path.insert(0, HERE)
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
 from pipeline import (artifacts, audit_combined, enrich, genres_moods, maturity_norway,
-                      maturity_public, maturity_singapore, maturity_taiwan, store)  # noqa: E402
+                      maturity_public, maturity_quebec, maturity_singapore, maturity_taiwan,
+                      store)  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
-from pipeline.maturity_test import payload as maturity_payload, source_row as maturity_source_row  # noqa: E402
+from pipeline.maturity_test import (payload as maturity_payload, quebec_payload as maturity_quebec_payload,
+                                    source_row as maturity_source_row)  # noqa: E402
 from store import vector_blob  # noqa: E402
 
 FIXTURE = os.path.join(HERE, "pipeline", "fixture-corpus")
@@ -481,6 +483,14 @@ class Upstreams:
             writer.writeheader()
             writer.writerows([row] * maturity_singapore.MIN_ROWS)
             return target.getvalue().encode()
+        if host == maturity_quebec.HOST and path == maturity_quebec.API_PATH:
+            assert params == {"id": maturity_quebec.DATASET}, params
+            url = f"https://{maturity_quebec.HOST}{maturity_quebec.DOWNLOAD_PREFIX}fixture.csv"
+            return json.dumps({"success": True, "result": {"resources": [
+                {"id": maturity_quebec.RESOURCE, "url": url}]}}).encode()
+        if (host == maturity_quebec.HOST
+                and path == maturity_quebec.DOWNLOAD_PREFIX + "fixture.csv"):
+            return maturity_quebec_payload()
         raise AssertionError(f"an upstream the fixture does not record was asked: {method} {host}{path}")
 
 
@@ -920,6 +930,7 @@ class DenRun(unittest.TestCase):
                                                 maturity_taiwan.INDEX_HOST, "file.moc.gov.tw",
                                                 maturity_singapore.API_HOST,
                                                 maturity_singapore.DOWNLOAD_HOST,
+                                                maturity_quebec.HOST,
                                                 "en.wikipedia.org", "fr.wikipedia.org", "ja.wikipedia.org"})
 
 
