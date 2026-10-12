@@ -8,7 +8,7 @@ import unittest
 import zipfile
 import xml.etree.ElementTree as ET
 
-from . import maturity, maturity_kavi, maturity_public
+from . import maturity, maturity_kavi, maturity_kmrb, maturity_public
 from .contract import Context, StageError
 from lib import cache, http
 
@@ -58,6 +58,27 @@ def source_row(title="The Film", original=None, rating="12 år", director="Alice
 
 def payload(*rows):
     return workbook([list(maturity.HEADERS), *rows])
+
+
+def kmrb_page(items, page_number=1, total=None, page_size=1000):
+    response = ET.Element("response")
+    header = ET.SubElement(response, "header")
+    ET.SubElement(header, "resultCode").text = "00"
+    ET.SubElement(header, "resultMsg").text = "NORMAL SERVICE"
+    body = ET.SubElement(response, "body")
+    rows = ET.SubElement(ET.SubElement(body, "items"), "rows")
+    for values in items:
+        item = ET.SubElement(rows, "item")
+        defaults = {"wrksNm": "The Film", "oriwkTtl": "", "fbctnYr": "2022",
+                    "rtNo": "2026-NFLX-1", "grdNm": "15세이상관람가",
+                    "direNm": "Alice Director", "screHr": "100", "PlotCn": "copyrighted plot"}
+        defaults.update(values)
+        for name, value in defaults.items():
+            ET.SubElement(item, name).text = value
+    ET.SubElement(body, "pageNo").text = str(page_number)
+    ET.SubElement(body, "numOfRows").text = str(page_size)
+    ET.SubElement(body, "totalCount").text = str(len(items) if total is None else total)
+    return ET.tostring(response, encoding="utf-8", xml_declaration=True)
 
 
 def facts(*records):
@@ -116,6 +137,14 @@ class Linker(unittest.TestCase):
         self.assertEqual(audit["ambiguousRows"], 1)
         self.assertEqual(audit["ambiguous"][0]["candidates"], ["movie:1", "movie:3"])
 
+    def test_a_rated_row_without_an_official_authority_id_remains_unknown(self):
+        rows = [{"authority": "KMRB", "authorityId": None, "titles": ["The Film"],
+                 "directors": "Alice Director", "year": 2022, "raw": "12세이상관람가", "age": 12,
+                 "matchedBy": "exact-title+year+director"}]
+        records, audit = maturity.link_records(rows, facts(movie(1)))
+        self.assertEqual(records, [])
+        self.assertEqual(audit["missingIdentityRows"], 1)
+
     def test_combines_authorities_by_the_highest_verified_age(self):
         norway, _ = maturity.link_records(
             maturity.norway_records(payload(source_row(rating="12 år"))), facts(movie(1)))
@@ -138,6 +167,31 @@ class Linker(unittest.TestCase):
 
 
 class Stage(unittest.TestCase):
+    def test_an_optional_kmrb_snapshot_uses_the_same_exact_public_evidence_path(self):
+        norway = payload(source_row(title="Other", director="Bob Director"))
+        cnc = b"Titre;R\xc3\xa9alisation;Date;N\xc2\xb0 de visa;D\xc3\xa9cision\n"
+        kmrb = maturity_kmrb._zip([kmrb_page([{}])])
+        with tempfile.TemporaryDirectory() as out:
+            with open(os.path.join(out, "dataset.meta.json"), "w", encoding="utf-8") as handle:
+                json.dump({"datasetVersion": "testver"}, handle)
+            with open(os.path.join(out, "facts-testver.json"), "w", encoding="utf-8") as handle:
+                json.dump(facts(movie(1)), handle)
+            maturity.run(Context(out_dir=out), fetch=lambda: norway,
+                         fetch_cnc=lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
+                         fetch_brazil=lambda: (_ for _ in ()).throw(
+                             http.HTTPError(0, "https://dados.mj.gov.br")),
+                         fetch_kmrb=lambda: (kmrb, maturity_kmrb.URL))
+            with open(os.path.join(out, "maturity-testver.json"), encoding="utf-8") as handle:
+                derived = json.load(handle)
+            with open(os.path.join(out, "maturity-sources.json"), encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            with open(os.path.join(out, "maturity-sources", "kmrb-self-ratings.zip"), "rb") as handle:
+                self.assertEqual(handle.read(), kmrb)
+        self.assertEqual(derived["records"][0]["minimumAge"], 15)
+        self.assertEqual(derived["records"][0]["observations"][0]["authority"], "KMRB")
+        self.assertEqual(next(row for row in manifest["sources"] if row["authority"] == "KMRB")
+                         ["sha256"], hashlib.sha256(kmrb).hexdigest())
+
     def test_writes_immutable_snapshot_manifest_and_derived_records(self):
         body = payload(source_row())
         with tempfile.TemporaryDirectory() as out:
@@ -294,6 +348,43 @@ class Stage(unittest.TestCase):
 
 
 class PublicAdapters(unittest.TestCase):
+    def test_kmrb_snapshot_keeps_raw_pages_but_emits_only_identity_and_age(self):
+        snapshot = maturity_kmrb._zip([kmrb_page([{}])])
+        [row] = list(maturity_kmrb.records(snapshot))
+        self.assertEqual((row["authorityId"], row["titles"], row["age"], row["year"]),
+                         ("kmrb:2026-NFLX-1", ["The Film"], 15, 2022))
+        self.assertNotIn("copyrighted plot", json.dumps(row))
+        with zipfile.ZipFile(io.BytesIO(snapshot)) as archive:
+            self.assertIn(b"copyrighted plot", archive.read("page-000001.xml"))
+
+    def test_kmrb_maps_only_stable_numeric_thresholds(self):
+        self.assertEqual(maturity_kmrb.age("전체관람가"), 0)
+        self.assertEqual(maturity_kmrb.age("12세 이상 관람가"), 12)
+        self.assertEqual(maturity_kmrb.age("15세이상관람가"), 15)
+        self.assertIsNone(maturity_kmrb.age("청소년관람불가"), "the threshold is now 19, not 18")
+        self.assertIsNone(maturity_kmrb.age("제한상영가"))
+
+    def test_kmrb_fetch_pages_to_the_advertised_end_without_leaking_the_key(self):
+        asked = []
+        bodies = [kmrb_page([{"rtNo": "one"}], 1, 2, 1),
+                  kmrb_page([{"rtNo": "two"}], 2, 2, 1)]
+
+        def request(host, path, params, headers):
+            asked.append((host, path, params, headers))
+            return bodies[len(asked) - 1]
+
+        snapshot, source_url = maturity_kmrb.fetch("secret", request=request)
+        self.assertEqual(len(list(maturity_kmrb.records(snapshot))), 2)
+        self.assertEqual([row[2]["pageNo"] for row in asked], [1, 2])
+        self.assertNotIn("secret", source_url)
+
+    def test_kmrb_refuses_schema_and_snapshot_gaps(self):
+        changed = kmrb_page([{}]).replace(b"<direNm>", b"<director>").replace(b"</direNm>", b"</director>")
+        with self.assertRaisesRegex(StageError, "schema changed"):
+            maturity_kmrb.page(changed)
+        with self.assertRaisesRegex(StageError, "advertised 2"):
+            list(maturity_kmrb.records(maturity_kmrb._zip([kmrb_page([{}], total=2)])))
+
     def test_kavi_keeps_movie_identity_and_official_age_only(self):
         body = (json.dumps({"id": 100235, "type": "movie", "name": "BIRDS, THE", "nameFi": "Linnut",
                             "nameSv": "Fåglarna", "year": 1963, "directors": ["Alfred Hitchcock"],
