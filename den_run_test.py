@@ -69,7 +69,8 @@ sys.path.insert(0, HERE)
 
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
-from pipeline import artifacts, audit_combined, enrich, genres_moods, maturity, maturity_public, store  # noqa: E402
+from pipeline import (artifacts, audit_combined, enrich, genres_moods, maturity, maturity_public,
+                      maturity_taiwan, store)  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 from pipeline.maturity_test import payload as maturity_payload, source_row as maturity_source_row  # noqa: E402
 from store import vector_blob  # noqa: E402
@@ -456,6 +457,14 @@ class Upstreams:
         if host == "dados.mj.gov.br" and path == "/fixture-classind.csv":
             return ("Código;Titulo no Brasil;Titulo original;Ano de produção;Diretores;"
                     "Classificação Atribuída\n1;No fixture title;;2020;No fixture director;Livre\n").encode()
+        if host == maturity_taiwan.INDEX_HOST and path == maturity_taiwan.INDEX_PATH:
+            assert params == maturity_taiwan.INDEX_PARAMS, params
+            attachments = " ".join(
+                f"{year}年(https://file.moc.gov.tw/fixture-bamid-{year}.csv)" for year in range(104, 114))
+            return json.dumps([{"相關檔案": attachments}]).encode()
+        if host == maturity_taiwan.FILE_HOST and re.fullmatch(r"/fixture-bamid-\d+\.csv", path):
+            return (",".join(maturity_taiwan.HEADERS) + "\n"
+                    "113,fixture-1,普,無相符測試片,NO FIXTURE TITLE,台灣,國語,Studio,90 分\n").encode()
         raise AssertionError(f"an upstream the fixture does not record was asked: {method} {host}{path}")
 
 
@@ -892,6 +901,7 @@ class DenRun(unittest.TestCase):
         self.assertEqual(self.upstreams.hosts, {"query.wikidata.org",
                                                 maturity.NORWAY_HOST,
                                                 "www.data.gouv.fr", "static.data.gouv.fr", "dados.mj.gov.br",
+                                                maturity_taiwan.INDEX_HOST, "file.moc.gov.tw",
                                                 "en.wikipedia.org", "fr.wikipedia.org", "ja.wikipedia.org"})
 
 
