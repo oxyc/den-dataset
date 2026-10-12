@@ -20,6 +20,16 @@ Every build manifest records the exact source URL, retrieval time, SHA-256, byte
 the factual-only scope. Raw authority snapshots stay in the build bundle; only matched factual observations
 enter the corpus.
 
+## Reviewed authority-ID links
+
+Exact title, year, and director remains the automatic path. When an official record has incomplete or
+ambiguous metadata, a human-reviewed mapping from its official authority ID to one movie may be checked
+into `data/maturity-authority-decisions.json`. The ledger cannot introduce an age: the current authority
+snapshot must still contain the ID and supplies the rating. Its target must exist in the current corpus,
+and a mapping that contradicts a now-unique exact identity fails the build instead of silently overriding
+new evidence. If an optional authority is unavailable, its mappings contribute nothing until a validated
+snapshot is available again. The ledger SHA-256 is recorded in every maturity derivation.
+
 ## Private runtime enhancement
 
 TMDB `release_dates` and `content_ratings` may fill a public-baseline unknown inside Atlas/edge only under

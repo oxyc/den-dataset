@@ -189,6 +189,13 @@ class MaturityEvidence(unittest.TestCase):
                 with self.subTest(record=record), self.assertRaises(SystemExit):
                     cc.maturity_rows(path)
 
+    def test_a_reviewed_authority_id_is_accepted_as_traceable_evidence(self):
+        record = {"mediaType": "movie", "tmdbId": 1, "minimumAge": 12,
+                  "observations": [{**self.OBSERVATION, "matchedBy": "authority-id-decision"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = maturity_for(os.path.join(directory, "facts.json"), [record])
+            self.assertEqual(cc.maturity_rows(path)["movie:1"]["minimumAge"], 12)
+
 
 class Joins(unittest.TestCase):
     def test_a_wrapper_with_no_known_rows_key_fails_instead_of_returning_itself(self):

@@ -19,7 +19,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from lib import cache, http
-from . import artifacts, finalize, maturity_kavi, maturity_kmrb, maturity_public
+from . import artifacts, finalize, maturity_decisions, maturity_kavi, maturity_kmrb, maturity_public
 from .contract import StageError, UpstreamError
 
 NAME = "maturity"
@@ -164,7 +164,8 @@ def _director_parts(value):
     return parts
 
 
-def link_records(source_records, facts_blob):
+def link_records(source_records, facts_blob, decisions=None):
+    decisions = decisions or {}
     entities = facts_blob.get("entities") or {}
     targets, index = {}, {}
     for fact in facts_blob.get("records") or ():
@@ -177,7 +178,8 @@ def link_records(source_records, facts_blob):
             index.setdefault((title, target["year"]), set()).add(key)
 
     observations, ambiguous = {}, []
-    counts = {"sourceRows": 0, "ratedRows": 0, "matchedRows": 0, "unmatchedRows": 0,
+    counts = {"sourceRows": 0, "ratedRows": 0, "matchedRows": 0, "decisionMatchedRows": 0,
+              "unmatchedRows": 0,
               "ambiguousRows": 0, "missingIdentityRows": 0, "unknownRatingRows": 0}
     for source in source_records:
         counts["sourceRows"] += 1
@@ -191,20 +193,36 @@ def link_records(source_records, facts_blob):
         title_keys = {(title, source["year"]) for raw in source["titles"] if (title := normalized(raw))}
         candidates = set().union(*(index.get(pair, set()) for pair in title_keys)) if title_keys else set()
         directors = _director_parts(source["directors"])
-        if source["year"] is None or not title_keys or not directors:
-            counts["missingIdentityRows"] += 1
-            continue
-        candidates = {key for key in candidates if targets[key]["directors"] & directors}
-        if len(candidates) != 1:
-            counts["ambiguousRows" if candidates else "unmatchedRows"] += 1
-            if candidates:
-                ambiguous.append({"authorityId": source["authorityId"], "candidates": sorted(candidates)})
-            continue
-        key = next(iter(candidates))
+        exact_candidates = ({key for key in candidates if targets[key]["directors"] & directors}
+                            if source["year"] is not None and title_keys and directors else set())
+        decision = decisions.get((source["authority"], source["authorityId"]))
+        if decision is not None:
+            if decision not in targets:
+                raise StageError(f"maturity: reviewed {source['authority']} {source['authorityId']} "
+                                 f"targets absent corpus key {decision}")
+            if exact_candidates and decision not in exact_candidates:
+                raise StageError(f"maturity: reviewed {source['authority']} {source['authorityId']} "
+                                 f"targets {decision}, but exact identity now excludes it "
+                                 f"({', '.join(sorted(exact_candidates))})")
+            key = decision
+            matched_by = "authority-id-decision"
+            counts["decisionMatchedRows"] += 1
+        else:
+            if source["year"] is None or not title_keys or not directors:
+                counts["missingIdentityRows"] += 1
+                continue
+            candidates = exact_candidates
+            if len(candidates) != 1:
+                counts["ambiguousRows" if candidates else "unmatchedRows"] += 1
+                if candidates:
+                    ambiguous.append({"authorityId": source["authorityId"], "candidates": sorted(candidates)})
+                continue
+            key = next(iter(candidates))
+            matched_by = source["matchedBy"]
         counts["matchedRows"] += 1
         observation = {name: source[name] for name in
                        ("authorityId", "raw", "age", "assessed", "runtimeMinutes") if source.get(name) is not None}
-        observation.update({"authority": source["authority"], "matchedBy": source["matchedBy"]})
+        observation.update({"authority": source["authority"], "matchedBy": matched_by})
         observations.setdefault(key, []).append(observation)
 
     records, conflicts = [], []
@@ -317,6 +335,8 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, fetch_kmrb=N
     ctx = dataclasses.replace(ctx, dataset_version=version)
     with open(ctx.require(artifacts.FACTS), encoding="utf-8") as handle:
         facts = json.load(handle)
+    decisions, decisions_sha = maturity_decisions.load()
+    maturity_decisions.validate_targets(decisions, facts)
     stamp = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(datetime.timezone.utc).isoformat()
     # Tests inject their fetchers and are hermetic by default. The real stage uses the persisted Actions
     # response-cache directory added in #233; callers can inject a temporary store to exercise fallback.
@@ -345,6 +365,7 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, fetch_kmrb=N
     if os.path.exists(kavi_path):
         with open(kavi_path, "rb") as handle:
             kavi = handle.read()
+    kavi_rows = list(maturity_kavi.records(kavi)) if kavi is not None else []
     snapshots = [(artifacts.MATURITY_NORWAY, norway)]
     snapshots += [(artifacts.MATURITY_CNC, cnc)] if cnc is not None else []
     snapshots += [(artifacts.MATURITY_BRAZIL, brazil)] if brazil is not None else []
@@ -387,14 +408,25 @@ def run(ctx, fetch=fetch_norway, fetch_cnc=None, fetch_brazil=None, fetch_kmrb=N
     failures = [row for row in (cnc_failure, brazil_failure, kmrb_failure) if row]
     _write_json(ctx.path(artifacts.MATURITY_SOURCES),
                 {"schema": 1, "sources": sources, "unavailable": failures})
-    norway_linked, norway_audit = link_records(norway_snapshot["rows"], facts)
-    cnc_linked, cnc_audit = link_records(cnc_snapshot["rows"] if cnc_snapshot else (), facts)
-    brazil_linked, brazil_audit = link_records(brazil_snapshot["rows"] if brazil_snapshot else (), facts)
-    kmrb_linked, kmrb_audit = link_records(kmrb_snapshot["rows"] if kmrb_snapshot else (), facts)
-    kavi_linked, kavi_audit = link_records(maturity_kavi.records(kavi) if kavi is not None else (), facts)
+    authority_rows = {
+        "Medietilsynet": norway_snapshot["rows"],
+        "CNC": cnc_snapshot["rows"] if cnc_snapshot else None,
+        "ClassInd": brazil_snapshot["rows"] if brazil_snapshot else None,
+        "KMRB": kmrb_snapshot["rows"] if kmrb_snapshot else None,
+        "KAVI": kavi_rows if kavi is not None else None,
+    }
+    for authority, rows in authority_rows.items():
+        if rows is not None:
+            maturity_decisions.validate_source(decisions, authority, rows)
+    norway_linked, norway_audit = link_records(authority_rows["Medietilsynet"], facts, decisions)
+    cnc_linked, cnc_audit = link_records(authority_rows["CNC"] or (), facts, decisions)
+    brazil_linked, brazil_audit = link_records(authority_rows["ClassInd"] or (), facts, decisions)
+    kmrb_linked, kmrb_audit = link_records(authority_rows["KMRB"] or (), facts, decisions)
+    kavi_linked, kavi_audit = link_records(authority_rows["KAVI"] or (), facts, decisions)
     records, conflicts = combine((norway_linked, cnc_linked, brazil_linked, kmrb_linked, kavi_linked))
     out = {"schema": 1, "datasetVersion": version, "records": records,
-           "derivation": {"rule": "highest verified age across authorities; exact identity only",
+           "derivation": {"rule": "highest verified age; exact identity or reviewed official ID only",
+                          "authorityDecisionsSha256": decisions_sha,
                           "sourceSha256": {row["authority"]: row["sha256"] for row in sources},
                           "audit": {"Medietilsynet": norway_audit, "CNC": cnc_audit,
                                     "ClassInd": brazil_audit, "KMRB": kmrb_audit, "KAVI": kavi_audit,
