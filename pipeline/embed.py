@@ -346,27 +346,67 @@ def inputs(ctx):
     return labels, enriched, doc_facts, translations
 
 
-def embed_into(stores, url, stamp, pause_ms, flushes):
+def vector_cache(env=None):
+    """The vectors already made, by space and document, or None unless `EMBED_CACHE=1`.
+
+    A vector is a function of the space and the document alone, so one made by an earlier run in the same
+    verified space is the vector this run would get. The daily job keeps `.cache` between runs; without
+    this a run that failed after embedding paid the embedding again — 112 minutes for 5,958 titles.
+
+    Opt-in, unlike the response caches: a test's fake den-embed is deterministic, so its space is the same
+    on every run, and a cache on by default would answer the next test run from `.cache` and hide the
+    requests the tests count."""
+    env = os.environ if env is None else env
+    if env.get("EMBED_CACHE") != "1":
+        return None
+    return caching.configured("embed", caching.TTL_DAYS, env)
+
+
+def cached_vectors(cache, space, shas):
+    """`{sha: vector}` for each document `cache` holds a vector for in `space`."""
+    found = {}
+    for sha in shas if cache is not None else ():
+        body = cache.read(cache.key(space, {"docSha256": sha}))
+        try:
+            vector = json.loads(body) if body else None
+        except ValueError:
+            vector = None
+        if isinstance(vector, list) and all(isinstance(x, int) and -128 <= x <= 127 for x in vector):
+            found[sha] = vector
+    return found
+
+
+def embed_into(stores, url, stamp, pause_ms, flushes, cache=None):
     """The writer. It takes the verified space as an argument, so no code path reaches a vector without
-    the canary having passed in this process."""
+    the canary having passed in this process. A vector `cache` holds for the same space and document is
+    used instead of asking den-embed; it was made by a service that passed this same canary."""
     if not stamp or not stamp.get("spaceId"):
         raise StageError("embed: no verified embedding space — the canary did not run, so nothing may be "
                          "written.")
+    space = stamp["spaceId"]
     labels_handle, vectors_handle = stores
     written = 0
     for buffer in flushes:
-        vectors = denembed.embed_many(url, [doc for _, _, doc in buffer])
-        if len(vectors) != len(buffer):
-            raise StageError(f"embed: den-embed returned {len(vectors)} vectors for {len(buffer)} documents")
-        for (_, record, document), vector in zip(buffer, vectors):
+        shas = [doc_sha(document) for _, _, document in buffer]
+        vectors = cached_vectors(cache, space, shas)
+        missing = [(sha, document) for sha, (_, _, document) in zip(shas, buffer) if sha not in vectors]
+        if missing:
+            made = denembed.embed_many(url, [document for _, document in missing])
+            if len(made) != len(missing):
+                raise StageError(f"embed: den-embed returned {len(made)} vectors for {len(missing)} documents")
+            for (sha, _), vector in zip(missing, made):
+                vectors[sha] = vector
+                if cache is not None:
+                    cache.write(cache.key(space, {"docSha256": sha}), jsonbytes.compact(vector).encode("utf-8"))
+        for (_, record, _), sha in zip(buffer, shas):
             # Label then vector, per title: a kill between the two is the tear `reconcile` repairs.
             labels_handle.write(jsonbytes.compact(record) + "\n")
             labels_handle.flush()
-            row = {"docSha256": doc_sha(document), "tmdbId": record["tmdbId"], "v": vector}
+            row = {"docSha256": sha, "tmdbId": record["tmdbId"], "v": vectors[sha]}
             vectors_handle.write(jsonbytes.compact(row) + "\n")
             vectors_handle.flush()
             written += 1
-        if pause_ms:
+        if pause_ms and missing:
             time.sleep(pause_ms / 1000)
     return written
 
@@ -458,7 +498,7 @@ def run(ctx):
         os.makedirs(os.path.dirname(os.path.abspath(labels_store)), exist_ok=True)
         with open(labels_store, "a", encoding="utf-8") as lh, open(vectors_store, "a", encoding="utf-8") as vh:
             try:
-                written = embed_into((lh, vh), url, stamp, ctx.pause_ms, groups)
+                written = embed_into((lh, vh), url, stamp, ctx.pause_ms, groups, vector_cache())
             except http.HTTPError as refused:
                 raise StageError(f"embed: den-embed refused a request ({refused}). Everything before it is "
                                  f"in the stores; re-run to continue from there.") from None

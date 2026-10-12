@@ -149,6 +149,31 @@ class Resume(Staged):
                          [], "only the canary was asked")
         self.assertEqual(self.store(), [])
 
+    def test_a_fresh_store_takes_the_vectors_an_earlier_run_cached(self):
+        """What the daily job's kept `.cache` buys: a run that starts in an empty out-dir asks den-embed only
+        for the canary, and writes the same rows."""
+        cache_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(cache_dir.cleanup)
+        env = {"EMBED_CACHE": "1", "DEN_CACHE_DIR": cache_dir.name}
+        for name, value in env.items():
+            previous = os.environ.get(name)
+            os.environ[name] = value
+            self.addCleanup(lambda n=name, p=previous: os.environ.pop(n) if p is None else
+                            os.environ.__setitem__(n, p))
+        self.run_stage()
+        first = self.store("vectors.jsonl")
+        for name in os.listdir(os.path.join(self.out, "index")):
+            os.remove(os.path.join(self.out, "index", name))
+        self.service.requests.clear()
+        _, summary = self.run_stage()
+        self.assertEqual(summary["written"], 3)
+        self.assertEqual([body for body in self.posts() if body["texts"][0] not in ("first text", "second text")],
+                         [], "only the canary was asked")
+        self.assertEqual(self.store("vectors.jsonl"), first)
+
+    def test_without_the_opt_in_nothing_is_cached(self):
+        self.assertIsNone(embed.vector_cache({"DEN_CACHE_DIR": self.out}))
+
     def test_a_label_written_without_its_vector_is_repaired(self):
         self.run_stage(limit=2)
         with open(os.path.join(self.out, "index", "labels.jsonl"), "a", encoding="utf-8") as fh:
