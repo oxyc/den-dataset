@@ -194,6 +194,16 @@ class MaturityEvidence(unittest.TestCase):
         self.assertIsNone(rows["movie:2"]["maturity"], "unknown must not become an all-ages zero")
         self.assertNotIn("reason", json.dumps(rows))
 
+    def test_display_only_official_rating_reaches_the_corpus_with_null_age(self):
+        observation = {**self.OBSERVATION, "raw": "Tillatt for alle", "age": None}
+        record = {"mediaType": "movie", "tmdbId": 1, "minimumAge": None,
+                  "observations": [observation]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = maturity_for(os.path.join(directory, "maturity.json"), [record])
+            found = cc.maturity_rows(path)["movie:1"]
+        self.assertIsNone(found["minimumAge"])
+        self.assertEqual(found["observations"], [observation])
+
     def test_untraceable_non_conservative_or_fuzzy_age_is_refused(self):
         valid = {"mediaType": "movie", "tmdbId": 1, "minimumAge": 12,
                  "observations": [self.OBSERVATION]}

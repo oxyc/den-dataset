@@ -95,6 +95,7 @@ def run(args, inputs, prose_check, provenance_check):
         score_columns.intern(r)
         card_columns.intern(strings, titles)
         fact_columns.intern(strings, row_facts, titles)
+        maturity_column.intern(strings, key, r)
     score_columns.freeze_vocabularies(strings)
     entities.intern(strings, entity_table)
 
@@ -159,7 +160,7 @@ def run(args, inputs, prose_check, provenance_check):
         facet_columns.add(strings, key, r)
         score_columns.add(key, r)
         fact_columns.add(strings, key, row_facts, titles, entity_index)
-        maturity_column.add(key, r)
+        maturity_column.add(strings, key, r)
 
     card_columns.put(sec, n)
     label_columns.put(sec, n)
@@ -227,7 +228,7 @@ def run(args, inputs, prose_check, provenance_check):
                       "withNames": card_columns.named, "unresolved": dict(sorted(unresolved.items())),
                       "plotVectors": plot_hits, "premiseVectors": premise_hits,
                       "premiseTagged": tag_columns.tagged, "otherVersions": version_columns.titles,
-                      "maturityTitles": maturity_column.known,
+                      "maturityTitles": maturity_column.known, "maturityObservations": maturity_column.evidence,
                       "jevMoreLike": jev_columns.anchors, "fanPicksAsked": fan_columns.anchors,
                       "entities": len(entity_index.qids), "iconicStudios": len(studio_list.kept),
                       "awardTitles": award_columns.titles, "ceremonies": len(award_columns.ceremonies),

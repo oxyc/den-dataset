@@ -360,8 +360,9 @@ def maturity_rows(path):
         media, ident, minimum = row["mediaType"], row["tmdbId"], row.get("minimumAge")
         observations = row.get("observations")
         if (media not in ("movie", "tv") or isinstance(ident, bool) or not isinstance(ident, int)
-                or ident <= 0 or isinstance(minimum, bool) or not isinstance(minimum, int)
-                or not 0 <= minimum <= 18 or not isinstance(observations, list) or not observations):
+                or ident <= 0 or isinstance(minimum, bool)
+                or (minimum is not None and (not isinstance(minimum, int) or not 0 <= minimum <= 18))
+                or not isinstance(observations, list) or not observations):
             sys.exit(f"maturity: {path} has a malformed record for {media}:{ident}")
         key = key_of(row)
         if key in out:
@@ -372,16 +373,20 @@ def maturity_rows(path):
                 sys.exit(f"maturity: {path} has a malformed observation for {key}")
             authority = observation.get("authority")
             authority_id = observation.get("authorityId")
+            raw = observation.get("raw")
             age = observation.get("age")
             method = observation.get("matchedBy")
             if (not isinstance(authority, str) or not authority
                     or not isinstance(authority_id, str) or not authority_id
-                    or isinstance(age, bool) or not isinstance(age, int) or not 0 <= age <= 18
+                    or not isinstance(raw, str) or not raw
+                    or isinstance(age, bool)
+                    or (age is not None and (not isinstance(age, int) or not 0 <= age <= 18))
                     or method not in MATURITY_MATCH_METHODS):
                 sys.exit(f"maturity: {path} has no accepted authority evidence for {key}")
             safe.append({name: observation[name] for name in MATURITY_OBSERVATION_FIELDS
-                         if observation.get(name) is not None})
-        if minimum != max(observation["age"] for observation in safe):
+                         if name == "age" or observation.get(name) is not None})
+        ages = [observation["age"] for observation in safe if observation.get("age") is not None]
+        if minimum != (max(ages) if ages else None):
             sys.exit(f"maturity: {path} minimumAge is not the highest observation for {key}")
         out[key] = {"mediaType": media, "tmdbId": ident, "minimumAge": minimum,
                     "observations": safe}
@@ -508,11 +513,13 @@ def main():
     print("reading maturity …", file=sys.stderr)
     maturity = maturity_rows(args.maturity)
     malformed = sorted(key for key, value in maturity.items()
-                       if not isinstance(value.get("minimumAge"), int)
-                       or isinstance(value.get("minimumAge"), bool)
-                       or not 0 <= value["minimumAge"] <= 18)
+                       if isinstance(value.get("minimumAge"), bool)
+                       or (value.get("minimumAge") is not None
+                           and (not isinstance(value["minimumAge"], int)
+                                or not 0 <= value["minimumAge"] <= 18)))
     if malformed:
-        sys.exit(f"maturity: {len(malformed)} records have no integer minimumAge from 0 through 18, "
+        sys.exit(f"maturity: {len(malformed)} records have neither null nor an integer minimumAge "
+                 f"from 0 through 18, "
                  f"e.g. {malformed[:4]}")
     outside = sorted(set(maturity) - set(facts))
     if outside:
