@@ -122,7 +122,12 @@ def sparql(query, fallback=False, env=None):
     `PREFER_VAR` says so). WDQS is then asked once: its retries wait out a `Retry-After` of up to two
     minutes each, which is the throttle QLever is there to avoid. It hands over only on a 429, a 5xx or a
     timeout — any other status is its answer about the query. QLever hands over on any failure, since a
-    query it cannot run is still one WDQS can."""
+    query it cannot run is still one WDQS can.
+
+    When QLever is throttling too (a 429 that is not its own timeout), WDQS is asked again with its retries:
+    waiting out its `Retry-After` is slow, but it is the only endpoint left, and giving up there threw away a
+    daily run at docfacts after 73 minutes (2026-10-12, run 38265391264). A QLever timeout or 5xx still
+    raises, so `_asked_batch` asks the batch as halves rather than waiting minutes on a query too large."""
     elsewhere = qlever_text(query) if fallback else None
     if elsewhere is None:
         return _ask("wdqs", query)
@@ -137,7 +142,12 @@ def sparql(query, fallback=False, env=None):
     except http.HTTPError as failure:
         if failure.status != 0 and not http.is_transient(failure.status):
             raise
-    return _ask("qlever", elsewhere)
+    try:
+        return _ask("qlever", elsewhere)
+    except http.HTTPError as failure:
+        if failure.status != 429 or _splittable(failure):
+            raise
+    return _ask("wdqs", query)
 
 #: Batches of one lookup in flight at once. WDQS allows five concurrent queries per client and answers 429
 #: beyond that; three is the doc-facts scrape's figure (`pipeline/docfacts.py`), kept well under the limit.
