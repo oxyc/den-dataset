@@ -9,7 +9,7 @@ import unittest
 import zipfile
 import xml.etree.ElementTree as ET
 
-from . import (maturity, maturity_decisions, maturity_kavi, maturity_kmrb, maturity_norway,
+from . import (maturity, maturity_decisions, maturity_italy, maturity_kavi, maturity_kmrb, maturity_norway,
                maturity_providers, maturity_public, maturity_quebec, maturity_singapore,
                maturity_taiwan)
 from .contract import Context, StageError
@@ -100,6 +100,30 @@ def quebec_payload(first=()):
     writer.writeheader()
     writer.writerows(rows)
     return target.getvalue().encode()
+
+
+def italy_csv(rows=()):
+    target = io.StringIO()
+    target.write("\nUltimo aggiornamento 12-10-2026;\n\n")
+    target.write("NB: export ufficiale;\n\n")
+    writer = csv.writer(target, delimiter=";", lineterminator="\n")
+    writer.writerow(maturity_italy.HEADERS)
+    for row in rows:
+        writer.writerow([row.get(name, "") for name in maturity_italy.HEADERS])
+    return target.getvalue().encode()
+
+
+def italy_snapshot(first=()):
+    rows = list(first)
+    for number in range(len(rows) + 1, maturity_italy.MIN_ROWS + 1):
+        rows.append({"ID": str(number), "TITOLO": f"Fixture {number}",
+                     "REGIA": "Fixture Director", "MINUTAGGIO": "90",
+                     "CLASSIFICAZIONE": "Opera per tutti. Adatta a qualsiasi pubblico.",
+                     "NUMERO_CLASSIFICAZIONE": f"C{number:014d}",
+                     "SIGLA_SETTORE": "CLOP", "DATA_CLASSIFICAZIONE": "2026-01-01"})
+    files = [("2021.csv", italy_csv(rows))]
+    files.extend((f"{year}.csv", italy_csv()) for year in range(2022, 2027))
+    return maturity_italy._zip(files)
 
 
 def facts(*records):
@@ -464,6 +488,56 @@ class Stage(unittest.TestCase):
 
 
 class PublicAdapters(unittest.TestCase):
+    def test_italy_maps_the_official_ladder_but_requires_reviewed_linking(self):
+        rows = []
+        labels = list(maturity_italy.RATINGS)
+        for number, label in enumerate(labels, 1):
+            rows.append({"ID": str(number), "TITOLO": "THE FILM",
+                         "TITOLO_ORIGINALE": "IL FILM", "REGIA": "Alice Director",
+                         "MINUTAGGIO": "101", "CLASSIFICAZIONE": label + ". Details omitted.",
+                         "NUMERO_CLASSIFICAZIONE": f"C{number:014d}",
+                         "SIGLA_SETTORE": "CLOP", "DATA_CLASSIFICAZIONE": "2026-01-02"})
+        found = list(maturity_italy.records(italy_snapshot(rows)))
+        self.assertEqual([row["age"] for row in found[:5]], [0, 6, 10, 14, 18])
+        self.assertEqual(found[0]["raw"], "T")
+        self.assertEqual(found[0]["runtimeMinutes"], 101)
+        self.assertTrue(all(row["year"] is None for row in found))
+        automatic, audit = maturity.link_records(found[:5], facts(movie(1, "THE FILM")))
+        self.assertEqual(automatic, [])
+        self.assertEqual(audit["missingIdentityRows"], 5)
+        reviewed, _ = maturity.link_records(
+            found[:1], facts(movie(1, "THE FILM")),
+            {(maturity_italy.AUTHORITY, found[0]["authorityId"]): "movie:1"})
+        self.assertEqual(reviewed[0]["observations"][0]["matchedBy"], "authority-id-decision")
+
+    def test_italy_fetch_retains_complete_yearly_exports(self):
+        index = b"".join(f'<a data-anno="{year}">'.encode() for year in range(2021, 2027))
+        snapshot = italy_snapshot()
+        with zipfile.ZipFile(io.BytesIO(snapshot)) as archive:
+            exports = {name: archive.read(name) for name in archive.namelist()}
+        asked = []
+
+        def request(host, path, headers):
+            asked.append((host, path))
+            if path == maturity_italy.INDEX_PATH:
+                return index
+            return exports[path.rsplit("-", 1)[-1]]
+
+        body, source = maturity_italy.fetch(request)
+        self.assertEqual(source, maturity_italy.INDEX)
+        self.assertEqual(len(list(maturity_italy.records(body))), maturity_italy.MIN_ROWS)
+        self.assertEqual(asked[0], (maturity_italy.HOST, maturity_italy.INDEX_PATH))
+        self.assertEqual(asked[-1], (maturity_italy.HOST,
+                                     maturity_italy.DOWNLOAD_PREFIX + "2026.csv"))
+
+    def test_italy_handles_the_live_mixed_encoding_and_refuses_schema_drift(self):
+        self.assertEqual(maturity_italy._text(b"Citt\xe0 " + "Niccolò".encode()), "Città Niccolò")
+        self.assertIsNone(maturity_italy.age("Categoria futura. Unknown"))
+        broken = maturity_italy._zip([
+            (f"{year}.csv", b"title;rating\nFilm;14\n") for year in range(2021, 2027)])
+        with self.assertRaisesRegex(StageError, "has no header"):
+            list(maturity_italy.records(broken))
+
     def test_quebec_maps_the_ladder_and_restores_catalogue_name_order(self):
         rows = []
         for number, rating in enumerate(("G", "13", "16", "18"), 1):
