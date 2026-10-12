@@ -24,6 +24,7 @@ from lib import cache, tmdb, wikidata  # noqa: E402
 
 COUNTRY_PROPERTY = {"US": ("P1657", "P2363"), "GB": ("P2629",), "DE": ("P1981",)}
 BANDS = ("littleKids", "family", "teen", "mature")
+BAND_RANK = {name: rank for rank, name in enumerate(BANDS)}
 RATINGS = {
     "US": {"G": "littleKids", "TV-Y": "littleKids", "TV-G": "littleKids",
            "PG": "family", "TV-Y7": "family", "TV-Y7-FV": "family", "TV-PG": "family",
@@ -182,18 +183,22 @@ def _groups(title, as_of):
 
 def _observed(values, region):
     countries = {country: set(raw) for country, raw in (values or {}).items() if raw}
-    mapped = {band(country, value) for country, raw in countries.items() for value in raw}
-    mapped.discard(None)
-    effective_country = region if countries.get(region) else "US"
-    effective = {band(effective_country, value) for value in countries.get(effective_country, ())}
-    effective.discard(None)
-    return {"any": bool(countries), "region": bool(countries.get(region)), "us": bool(countries.get("US")),
-            "bands": mapped, "onlyUnknown": bool(countries) and not mapped,
-            "familyEligible": bool(effective & {"littleKids", "family"})}
+    # A certification from another market is not evidence about this viewer. Presence in the requested
+    # region wins even when none of its values map; only absence permits the US fallback. That makes an
+    # unknown regional value fail closed instead of being silently replaced by a more permissive US one.
+    effective_country = region if countries.get(region) else "US" if countries.get("US") else None
+    raw = countries.get(effective_country, ()) if effective_country else ()
+    effective = {mapped for value in raw if (mapped := band(effective_country, value)) is not None}
+    maximum = max(effective, key=BAND_RANK.__getitem__) if effective else None
+    return {"any": bool(countries), "region": bool(countries.get(region)),
+            "usFallback": effective_country == "US" and region != "US", "bands": effective,
+            "onlyUnknown": bool(raw) and not effective, "maximumBand": maximum,
+            "familyEligible": maximum in {"littleKids", "family"}}
 
 
-def aggregate(titles, wikidata_values, tmdb_runtime_values, region="US", as_of=None):
+def aggregate(titles, wikidata_values, tmdb_runtime_values, region="US", as_of=None, generated_at=None):
     as_of = as_of or datetime.date.today()
+    generated_at = generated_at or datetime.datetime.now(datetime.timezone.utc)
     counters = {source: collections.defaultdict(collections.Counter) for source in ("wikidata", "tmdbRuntime")}
     overlap = collections.Counter()
     for title in titles:
@@ -206,7 +211,7 @@ def aggregate(titles, wikidata_values, tmdb_runtime_values, region="US", as_of=N
                 count["titles"] += 1
                 count["anyCertification"] += observed["any"]
                 count["viewerRegion"] += observed["region"]
-                count["usFallback"] += observed["us"]
+                count["usFallback"] += observed["usFallback"]
                 count["onlyUnknownOrUnmapped"] += observed["onlyUnknown"]
                 count["familyEligibleUnknownBlocked"] += observed["familyEligible"]
                 for name in observed["bands"]:
@@ -224,14 +229,14 @@ def aggregate(titles, wikidata_values, tmdb_runtime_values, region="US", as_of=N
 
     return {
         "schemaVersion": 1,
-        "generatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generatedAt": generated_at.astimezone(datetime.timezone.utc).isoformat(),
         "scope": {"titles": len(titles), "viewerRegion": region, "asOf": as_of.isoformat()},
         "definitions": {
             "licensingBoundary": "TMDB title-level certifications and derived values remain in memory; this report contains aggregate counts only.",
             "viewerRegion": "title has any raw certification stated for the requested country",
-            "usFallback": "title has any raw US certification",
-            "bandCounts": "a title is counted once in every normalized band it has",
-            "familyEligibleUnknownBlocked": "viewer-region certification, or US when the region is absent, maps to littleKids/family; unknown/unmapped is excluded",
+            "usFallback": "requested region has no certification and the title has a raw US certification",
+            "bandCounts": "a title is counted once in every band mapped from the selected viewer-region values, or US values only when the region is absent",
+            "familyEligibleUnknownBlocked": "the maximum mapped band selected from viewer-region values, or US values only when the region is absent, is littleKids/family; unknown/unmapped is excluded",
             "popularity": "percentile among corpus titles present in the supplied TMDB daily exports",
             "recency": "Wikidata release/start year relative to asOf",
         },
@@ -256,6 +261,8 @@ def parse_args(argv=None):
     parser.add_argument("--tv-export", help="TMDB daily TV export (.json or .json.gz), for popularity")
     parser.add_argument("--region", default="US", choices=sorted(COUNTRY_PROPERTY))
     parser.add_argument("--as-of", type=datetime.date.fromisoformat, default=datetime.date.today())
+    parser.add_argument("--generated-at", type=datetime.datetime.fromisoformat,
+                        help="report timestamp (ISO-8601); supply it to make the timestamp deterministic")
     parser.add_argument("--limit", type=int, help="safe smoke-test prefix; omit for the whole corpus")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--pause-ms", type=int, default=0)
@@ -267,11 +274,14 @@ def main(argv=None):
     args = parse_args(argv)
     if args.workers < 1 or args.pause_ms < 0 or (args.limit is not None and args.limit < 1):
         raise SystemExit("--workers and --limit must be positive; --pause-ms must not be negative")
+    if args.generated_at is not None and args.generated_at.tzinfo is None:
+        raise SystemExit("--generated-at must include a UTC offset")
     titles = load_titles(args.labels, args.facts, {"movie": args.movie_export, "tv": args.tv_export})
     if args.limit:
         titles = titles[:args.limit]
     report = aggregate(titles, fetch_wikidata(titles),
-                       fetch_tmdb(titles, workers=args.workers, pause_ms=args.pause_ms), args.region, args.as_of)
+                       fetch_tmdb(titles, workers=args.workers, pause_ms=args.pause_ms), args.region, args.as_of,
+                       args.generated_at)
     body = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

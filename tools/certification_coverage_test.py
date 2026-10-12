@@ -72,9 +72,34 @@ class Report(unittest.TestCase):
                                              "tmdbRuntimeOnly": 1, "neither": 0})
         self.assertEqual(report["sources"]["wikidata"]["all"]["anyCertification"], 2)
         self.assertEqual(report["sources"]["wikidata"]["all"]["viewerRegion"], 1)
-        self.assertEqual(report["sources"]["tmdbRuntime"]["all"]["band:family"], 1)
+        self.assertEqual(report["sources"]["tmdbRuntime"]["all"]["band:family"], 0)
         self.assertEqual(report["sources"]["wikidata"]["all"]["onlyUnknownOrUnmapped"], 1)
         self.assertEqual(report["sources"]["wikidata"]["recency:last5"]["titles"], 1)
+
+    def test_region_wins_and_only_absence_uses_us_fallback(self):
+        values = {
+            ("movie", 1): {"GB": {"PG"}, "US": {"R"}, "DE": {"FSK 0"}},
+            ("tv", 2): {"GB": {"unmapped"}, "US": {"TV-Y"}},
+            ("movie", 3): {"US": {"PG"}},
+        }
+        report = coverage.aggregate(self.titles, values, {}, "GB", datetime.date(2026, 1, 1))
+        counts = report["sources"]["wikidata"]["all"]
+        self.assertEqual(counts["viewerRegion"], 2)
+        self.assertEqual(counts["usFallback"], 1)
+        self.assertEqual(counts["band:littleKids"], 0)  # the US and DE values for regional rows do not leak in
+        self.assertEqual(counts["band:family"], 2)
+        self.assertEqual(counts["band:mature"], 0)
+        self.assertEqual(counts["onlyUnknownOrUnmapped"], 1)
+        self.assertEqual(counts["familyEligibleUnknownBlocked"], 2)
+
+    def test_maximum_effective_band_conservatively_decides_kid_eligibility(self):
+        values = {("movie", 1): {"US": {"G", "PG", "R"}}}
+        report = coverage.aggregate(self.titles, values, {}, "US", datetime.date(2026, 1, 1))
+        counts = report["sources"]["wikidata"]["all"]
+        self.assertEqual(counts["band:littleKids"], 1)
+        self.assertEqual(counts["band:family"], 1)
+        self.assertEqual(counts["band:mature"], 1)
+        self.assertEqual(counts["familyEligibleUnknownBlocked"], 0)
 
     def test_serialized_report_contains_no_title_identifier_or_raw_rating(self):
         report = coverage.aggregate(self.titles, {("movie", 1): {"US": {"secret-rating"}}}, {},
@@ -89,11 +114,23 @@ class Report(unittest.TestCase):
              mock.patch.object(coverage, "fetch_wikidata", return_value={}), \
              mock.patch.object(coverage, "fetch_tmdb", return_value={}):
             out = os.path.join(work, "aggregate.json")
-            self.assertEqual(coverage.main(["--labels", "l", "--facts", "f", "--out", out]), 0)
+            args = ["--labels", "l", "--facts", "f", "--out", out,
+                    "--generated-at", "2026-01-02T03:04:05+00:00"]
+            self.assertEqual(coverage.main(args), 0)
+            with open(out, "rb") as fh:
+                first = fh.read()
+            self.assertEqual(coverage.main(args), 0)
+            with open(out, "rb") as fh:
+                self.assertEqual(fh.read(), first)
             with open(out) as fh:
                 report = json.load(fh)
         self.assertEqual(report["scope"]["titles"], 3)
+        self.assertEqual(report["generatedAt"], "2026-01-02T03:04:05+00:00")
         self.assertNotIn("titles", report["sources"]["wikidata"])
+
+    def test_generated_at_requires_an_offset(self):
+        with self.assertRaisesRegex(SystemExit, "UTC offset"):
+            coverage.main(["--labels", "l", "--facts", "f", "--generated-at", "2026-01-02T03:04:05"])
 
 
 if __name__ == "__main__":
