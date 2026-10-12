@@ -9,7 +9,7 @@ from .contract import REPO, StageError
 
 PATH = os.path.join(REPO, "data", "maturity-authority-decisions.json")
 AUTHORITIES = frozenset(("Medietilsynet", "CNC", "ClassInd", "KMRB", "KAVI", "BAMID", "IMDA",
-                         "MCC-Québec", "DGCA-Italy"))
+                         "MCC-Québec", "DGCA-Italy", "DGCA-Italy-NullaOsta"))
 FIELDS = frozenset(("authority", "authorityId", "key"))
 KEY = re.compile(r"movie:[1-9]\d*\Z")
 

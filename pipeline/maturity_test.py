@@ -9,7 +9,8 @@ import unittest
 import zipfile
 import xml.etree.ElementTree as ET
 
-from . import (maturity, maturity_decisions, maturity_italy, maturity_kavi, maturity_kmrb, maturity_norway,
+from . import (maturity, maturity_decisions, maturity_italy, maturity_italy_historical, maturity_kavi,
+               maturity_kmrb, maturity_norway,
                maturity_providers, maturity_public, maturity_quebec, maturity_singapore,
                maturity_taiwan)
 from .contract import Context, StageError
@@ -124,6 +125,28 @@ def italy_snapshot(first=()):
     files = [("2021.csv", italy_csv(rows))]
     files.extend((f"{year}.csv", italy_csv()) for year in range(2022, 2027))
     return maturity_italy._zip(files)
+
+
+def italy_historical_payload(first=()):
+    rows = list(first)
+    protocols = {str(row.get("PROTOCOLLO", "")) for row in rows}
+    number = 10000
+    while len(protocols) < maturity_italy_historical.MIN_GROUPS:
+        protocol = str(number)
+        number += 1
+        if protocol in protocols:
+            continue
+        protocols.add(protocol)
+        rows.append({"PROTOCOLLO": protocol, "TITOLO": f"Historical fixture {protocol}",
+                     "DATA": "01-01-2000", "DIVIETO": "Per tutti"})
+    target = io.StringIO()
+    target.write('"MIC - Direzione generale Cinema e audiovisivo"\n')
+    target.write('"Database NULLA OSTA"\n\n')
+    writer = csv.writer(target, delimiter=";", lineterminator="\n")
+    writer.writerow(maturity_italy_historical.HEADERS)
+    for row in rows:
+        writer.writerow([row.get(name, "") for name in maturity_italy_historical.HEADERS])
+    return target.getvalue().encode()
 
 
 def facts(*records):
@@ -488,6 +511,52 @@ class Stage(unittest.TestCase):
 
 
 class PublicAdapters(unittest.TestCase):
+    def test_italy_historical_groups_protocol_revisions_conservatively_and_requires_review(self):
+        rows = [
+            {"PROTOCOLLO": "9999", "TITOLO": "THE FILM", "ORIGINALE": "IL FILM",
+             "DATA": "01-01-2001", "DIVIETO": "Per tutti"},
+            {"PROTOCOLLO": "9999", "TITOLO": "THE FILM CORRECTED", "ORIGINALE": "IL FILM",
+             "DATA": "02-01-2001", "DIVIETO": "14"},
+            {"PROTOCOLLO": "9998", "TITOLO": "CONDITIONAL", "DATA": "03-01-2001",
+             "DIVIETO": "cond."},
+        ]
+        found = list(maturity_italy_historical.records(italy_historical_payload(rows)))
+        revised = next(row for row in found if row["authorityId"] == "nulla-osta:9999")
+        conditional = next(row for row in found if row["authorityId"] == "nulla-osta:9998")
+        self.assertEqual(revised["titles"], ["THE FILM", "IL FILM", "THE FILM CORRECTED"])
+        self.assertEqual((revised["raw"], revised["age"], revised["assessed"]),
+                         ("14|Per tutti", 14, "2001-01-02"))
+        self.assertIsNone(conditional["age"])
+        automatic, audit = maturity.link_records([revised], facts(movie(1, "THE FILM")))
+        self.assertEqual(automatic, [])
+        self.assertEqual(audit["missingIdentityRows"], 1)
+        reviewed, _ = maturity.link_records(
+            [revised], facts(movie(1, "THE FILM")),
+            {(maturity_italy_historical.AUTHORITY, revised["authorityId"]): "movie:1"})
+        self.assertEqual(reviewed[0]["minimumAge"], 14)
+
+    def test_italy_historical_fetch_validates_the_generated_export(self):
+        payload = italy_historical_payload()
+        metadata = json.dumps({"recordsTotal": maturity_italy_historical.MIN_ROWS,
+                               "filename": (f"https://{maturity_italy_historical.HOST}"
+                                            f"{maturity_italy_historical.DOWNLOAD_PREFIX}fixture.csv")}).encode()
+        asked = []
+
+        def request(host, path, params=None, headers=None):
+            asked.append((host, path, params))
+            return metadata if path == maturity_italy_historical.API_PATH else payload
+
+        body, source = maturity_italy_historical.fetch(request)
+        self.assertEqual((body, source), (payload, maturity_italy_historical.API))
+        self.assertEqual(asked[0], (maturity_italy_historical.HOST,
+                                    maturity_italy_historical.API_PATH,
+                                    maturity_italy_historical.PARAMS))
+        self.assertEqual(asked[1][1], maturity_italy_historical.DOWNLOAD_PREFIX + "fixture.csv")
+
+    def test_italy_historical_refuses_schema_drift(self):
+        with self.assertRaisesRegex(StageError, "has no header"):
+            list(maturity_italy_historical.records(b"title;rating\nFilm;14\n"))
+
     def test_italy_maps_the_official_ladder_but_requires_reviewed_linking(self):
         rows = []
         labels = list(maturity_italy.RATINGS)

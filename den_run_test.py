@@ -70,11 +70,13 @@ sys.path.insert(0, HERE)
 
 import pipeline  # noqa: E402
 from lib import denembed, http, tmdb as tmdb_api, wikipedia  # noqa: E402
-from pipeline import (artifacts, audit_combined, enrich, genres_moods, maturity_italy, maturity_norway,
+from pipeline import (artifacts, audit_combined, enrich, genres_moods, maturity_italy,
+                      maturity_italy_historical, maturity_norway,
                       maturity_public, maturity_quebec, maturity_singapore, maturity_taiwan,
                       store)  # noqa: E402
 from pipeline.contract import bind  # noqa: E402
 from pipeline.maturity_test import (italy_csv as maturity_italy_csv,
+                                    italy_historical_payload as maturity_italy_historical_payload,
                                     payload as maturity_payload, quebec_payload as maturity_quebec_payload,
                                     source_row as maturity_source_row)  # noqa: E402
 from store import vector_blob  # noqa: E402
@@ -505,6 +507,14 @@ class Upstreams:
                      "DATA_CLASSIFICAZIONE": "2026-01-01"}
                     for number in range(1, maturity_italy.MIN_ROWS + 1)]
             return maturity_italy_csv(rows)
+        if host == maturity_italy_historical.HOST and path == maturity_italy_historical.API_PATH:
+            assert params == maturity_italy_historical.PARAMS, params
+            return json.dumps({"recordsTotal": maturity_italy_historical.MIN_ROWS,
+                "filename": (f"https://{maturity_italy_historical.HOST}"
+                             f"{maturity_italy_historical.DOWNLOAD_PREFIX}fixture.csv")}).encode()
+        if (host == maturity_italy_historical.HOST
+                and path == maturity_italy_historical.DOWNLOAD_PREFIX + "fixture.csv"):
+            return maturity_italy_historical_payload()
         raise AssertionError(f"an upstream the fixture does not record was asked: {method} {host}{path}")
 
 
