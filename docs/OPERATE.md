@@ -366,7 +366,8 @@ stays until it has a vector.
 "Boon" and "Bonn"). Every stage that asks Wikidata by TMDB id answers from ONE of them, chosen by
 `lib/wikidata.resolve`: first `data/wikidata-item-decisions.json`, then the item stating no other TMDB id,
 then the item with an English article. A title nothing chooses for ships with no Wikidata fields; the facts
-stage counts it (`ambiguousItems`), and the publish refuses until it is decided in that file. A decision for
+stage counts it (`ambiguousItems`), and the publish warns and the daily run lists it in the `data-review`
+issue until it is decided in that file. A decision for
 an id that is no longer contested is refused as stale.
 
 **The names table.** `names.json` holds Wikidata's name, original title and year for every film and series

@@ -13,7 +13,9 @@ never a log, and a verdict has URL queries and key=value secrets scrubbed before
 
 Title aliases the store held back for want of a keep/drop decision (store/aliases.py) are listed in one open
 issue labelled `alias-review`, rewritten by each run that built a store and closed by one that held none. They
-are Wikidata labels, which the published store carries anyway.
+are Wikidata labels, which the published store carries anyway. Likewise one `data-review` issue lists what
+the store's manifest records as waiting for a person without refusing the publish: titles several Wikidata
+items claim with none chosen (`wikidataItems.ambiguous`) and stale award ceremony merges (`awardMerges.stale`).
 
 pipeline/hand-off-day.sh writes the handoff file (key=value lines: state=handed|exhausted, why=, cpu=).
 """
@@ -28,6 +30,7 @@ import sys
 LABEL = "daily-failing"
 CPU_LABEL = "embed-cpu-blocklist"
 ALIAS_LABEL = "alias-review"
+REVIEW_LABEL = "data-review"
 MARKER = "daily-consecutive-failures"
 MAX_VERDICT = 400
 MAX_ALIAS_ROWS = 400
@@ -172,6 +175,45 @@ def plan_aliases(rows, issue, date, run_url):
     return []
 
 
+def read_review_items(meta_path):
+    """`(ambiguous, stale)` from the store's manifest, or None when this run stamped no store."""
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError, TypeError):
+        return None
+    items, merges = meta.get("wikidataItems"), meta.get("awardMerges")
+    if not (isinstance(items, dict) and isinstance(merges, dict)):
+        return None
+    return [scrub(k) for k in items.get("ambiguous") or []], [scrub(q) for q in merges.get("stale") or []]
+
+
+def plan_review(found, issue, date, run_url):
+    """The data-review issue's calls. `found` is None when no store was stamped, which says nothing."""
+    if found is None:
+        return []
+    ambiguous, stale = found
+    if not (ambiguous or stale):
+        return [{"do": "close", "number": issue["number"],
+                 "body": f"Nothing waits for a decision: {date}, {run_url}"}] if issue else []
+    lines = ["The latest store published with these waiting for a person. Each is small; none stops a day.", "",
+             f"Latest: {date}, {run_url}", ""]
+    if ambiguous:
+        lines += [f"**{len(ambiguous)} title(s) with no Wikidata item chosen** ship with no card. Several items "
+                  "claim each one's TMDB id: pick one in data/wikidata-item-decisions.json "
+                  "(`pipeline/check_wikidata_items.py` says how).", "", ", ".join(ambiguous), ""]
+    if stale:
+        lines += [f"**{len(stale)} stale award ceremony merge(s)** in data/award-ceremony-merges.json name a "
+                  "ceremony no title does any more: delete each or point it at where the prizes file now.", "",
+                  ", ".join(stale), ""]
+    lines.append("A run that finds none closes this issue.")
+    body = "\n".join(lines)
+    if issue:
+        return [{"do": "edit", "number": issue["number"], "body": body}]
+    return [{"do": "create", "label": REVIEW_LABEL, "body": body,
+             "title": "Dataset items waiting for a decision"}]
+
+
 def gh(args, repo, stdin=None):
     done = subprocess.run(["gh", *args, "-R", repo], input=stdin, capture_output=True, text=True)
     if done.returncode:
@@ -211,6 +253,7 @@ def main(argv=None):
     ap.add_argument("--report", default="out/daily-report.json")
     ap.add_argument("--handoff", required=True)
     ap.add_argument("--alias-review", help="check_alias_collisions.py --review output, when a store was built")
+    ap.add_argument("--meta", help="the dataset.meta.json the store build stamped, when it did")
     ap.add_argument("--dry-run", action="store_true", help="print the calls instead of making them")
     args = ap.parse_args(argv)
 
@@ -225,6 +268,14 @@ def main(argv=None):
             print(json.dumps(alias_actions, indent=2, ensure_ascii=False))
         else:
             apply(alias_actions, args.repo)
+    found = read_review_items(args.meta) if args.meta else None
+    if found is not None:
+        review_issues = open_issues(args.repo, REVIEW_LABEL)
+        review_actions = plan_review(found, review_issues[0] if review_issues else None, date, args.run_url)
+        if args.dry_run:
+            print(json.dumps(review_actions, indent=2, ensure_ascii=False))
+        else:
+            apply(review_actions, args.repo)
     if out["kind"] == "handed" and not out["cpu"]:
         print("daily_issue: handed to another attempt; nothing to report")
         return 0
