@@ -268,14 +268,15 @@ jobs:
           print("store=" + (json.load(open(path))["storeFile"] if os.path.exists(path) else ""))
           PY
         id: report
-      # The alias gate refuses a store by its count of undecided aliases alone. This lists them from the facts
-      # file the store was built on, so they can be decided without rebuilding it: Wikidata's own labels, which
-      # the published store carries anyway.
+      # The store holds back every alias that is another title's name with no keep/drop decision. This lists
+      # them from the facts file the store was built on, for the `alias-review` issue the last step keeps:
+      # Wikidata's own labels, which the published store carries anyway. `[]` when it held none.
       - name: List undecided aliases
         if: always()
         run: |
           facts="$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(next((e["path"] for e in m.get("storeInputs") or [] if e.get("arg") == "facts"), ""))' "$OUT/dataset.meta.json" 2>/dev/null || true)"
           [ -n "$facts" ] && [ -f "$facts" ] || exit 0
+          echo '[]' > "$OUT/alias-review.json"
           python3 pipeline/check_alias_collisions.py "$facts" --review "$OUT/alias-review.json" || true
       # A public repo's artifacts are downloadable by anyone signed in, so this carries no article text and no
       # classify-row title: of the premise worklist, only its manifests (keys, counts, digests, why a title was
@@ -398,4 +399,4 @@ jobs:
           python3 pipeline/daily_issue.py --repo "$GITHUB_REPOSITORY" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --ready "$READY" --cancelled "$CANCELLED" --report "$OUT/daily-report.json" \
-            --handoff "${RUNNER_TEMP}/day-handoff"
+            --handoff "${RUNNER_TEMP}/day-handoff" --alias-review "$OUT/alias-review.json"
