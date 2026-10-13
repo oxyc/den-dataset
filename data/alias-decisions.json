@@ -369,7 +369,7 @@
       "mediaType": "movie",
       "tmdbId": 39062,
       "alias": "Wild Boys",
-      "why": "no evidence Coupe de Ville was released under this name; TMDB lists none"
+      "why": "no evidence Coupe de Ville was released under this name"
     },
     {
       "mediaType": "movie",
@@ -387,7 +387,7 @@
       "mediaType": "movie",
       "tmdbId": 107592,
       "alias": "The Wedding Party",
-      "why": "The Catered Affair was released in the UK as Wedding Breakfast, not The Wedding Party; TMDB lists no such title"
+      "why": "The Catered Affair was released in the UK as Wedding Breakfast, not The Wedding Party"
     },
     {
       "mediaType": "movie",
@@ -405,7 +405,7 @@
       "mediaType": "movie",
       "tmdbId": 174311,
       "alias": "Lucky Dog",
-      "why": "All Is Bright was shot as Almost Christmas; Lucky Dog is no release title of it, and TMDB lists none"
+      "why": "All Is Bright was shot as Almost Christmas; Lucky Dog is no release title of it"
     },
     {
       "mediaType": "movie",
@@ -417,7 +417,7 @@
       "mediaType": "movie",
       "tmdbId": 256908,
       "alias": "The Perfect Stranger",
-      "why": "no evidence it was ever released under this name; TMDB lists none, and it collides with a better-known film"
+      "why": "no evidence it was ever released under this name, and it collides with a better-known film"
     },
     {
       "mediaType": "movie",
@@ -435,7 +435,7 @@
       "mediaType": "movie",
       "tmdbId": 451765,
       "alias": "The Scandal",
-      "why": "no release title of Anna Karenina: Vronsky's Story; TMDB lists none"
+      "why": "no release title of Anna Karenina: Vronsky's Story"
     },
     {
       "mediaType": "movie",
@@ -453,13 +453,13 @@
       "mediaType": "movie",
       "tmdbId": 1290206,
       "alias": "The Marriage",
-      "why": "not a release title of The Paradise of Thorns; TMDB lists none"
+      "why": "not a release title of The Paradise of Thorns"
     },
     {
       "mediaType": "movie",
       "tmdbId": 1373198,
       "alias": "The Monster",
-      "why": "no evidence it was released under this name; TMDB lists none, and the name is several other films'"
+      "why": "no evidence it was released under this name, and the name is several other films'"
     },
     {
       "mediaType": "tv",
@@ -471,13 +471,13 @@
       "mediaType": "tv",
       "tmdbId": 69692,
       "alias": "The Web",
-      "why": "Ouro Verde's English title is Green Gold; The Web is no title of it, and TMDB lists none"
+      "why": "Ouro Verde's English title is Green Gold; The Web is no title of it"
     },
     {
       "mediaType": "tv",
       "tmdbId": 82130,
       "alias": "The goddess",
-      "why": "no release title of Tarde lo conocí; TMDB lists none"
+      "why": "no release title of Tarde lo conocí"
     },
     {
       "mediaType": "tv",
@@ -502,6 +502,24 @@
       "tmdbId": 215780,
       "alias": "Boon",
       "why": "Boon is the British series (tv:2559); the Bonn/Boon confusion between the two Wikidata items, not a title of this one"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 14482,
+      "alias": "Baba Yaga",
+      "why": "Baba Yaga is the folk character in The Golden Horns and the title of another film (movie:55689), not a release title of this one"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 54982,
+      "alias": "Face of an Angel",
+      "why": "no evidence Introducing Dorothy Dandridge was released under this name; it is another film's title (movie:254024)"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 462920,
+      "alias": "Puberty",
+      "why": "no evidence Perfect (2018) was released under this name"
     }
   ],
   "keep": [
@@ -5433,15 +5451,9 @@
     },
     {
       "mediaType": "movie",
-      "tmdbId": 14482,
-      "alias": "Baba Yaga",
-      "why": "TMDB records it as an alternative title"
-    },
-    {
-      "mediaType": "movie",
       "tmdbId": 15719,
       "alias": "Silent Witness",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5453,13 +5465,13 @@
       "mediaType": "movie",
       "tmdbId": 22885,
       "alias": "The Pest",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 22892,
       "alias": "The Dentist",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5471,7 +5483,7 @@
       "mediaType": "movie",
       "tmdbId": 26937,
       "alias": "Last Ride",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5483,13 +5495,13 @@
       "mediaType": "movie",
       "tmdbId": 30959,
       "alias": "Kaidan",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 36922,
       "alias": "Man of Straw",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5507,13 +5519,13 @@
       "mediaType": "movie",
       "tmdbId": 42498,
       "alias": "The Adversary",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 46978,
       "alias": "Mistress",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5525,7 +5537,7 @@
       "mediaType": "movie",
       "tmdbId": 47203,
       "alias": "Daddy",
-      "why": "TMDB records it as an alternative title"
+      "why": "unsure: a plausible release or translated title, kept because a wrong keep only adds a search result"
     },
     {
       "mediaType": "movie",
@@ -5537,7 +5549,7 @@
       "mediaType": "movie",
       "tmdbId": 49044,
       "alias": "Frontier",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5553,12 +5565,6 @@
     },
     {
       "mediaType": "movie",
-      "tmdbId": 54982,
-      "alias": "Face of an Angel",
-      "why": "TMDB records it as an alternative title"
-    },
-    {
-      "mediaType": "movie",
       "tmdbId": 67605,
       "alias": "Destiny",
       "why": "reviewed: a real release, international or literal translated title of this work"
@@ -5567,7 +5573,7 @@
       "mediaType": "movie",
       "tmdbId": 68837,
       "alias": "Railroad Man",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5585,7 +5591,7 @@
       "mediaType": "movie",
       "tmdbId": 76721,
       "alias": "Journey to the West",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5597,7 +5603,7 @@
       "mediaType": "movie",
       "tmdbId": 83620,
       "alias": "Relatives",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5609,25 +5615,25 @@
       "mediaType": "movie",
       "tmdbId": 86743,
       "alias": "The Seducers",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 89791,
       "alias": "The Last Warrior",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 94638,
       "alias": "Patriots",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 119806,
       "alias": "The Other One",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5645,19 +5651,19 @@
       "mediaType": "movie",
       "tmdbId": 139662,
       "alias": "Brothers",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 143844,
       "alias": "Friendship",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 148822,
       "alias": "Long Goodbye",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5669,7 +5675,7 @@
       "mediaType": "movie",
       "tmdbId": 193385,
       "alias": "Iron Heart",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5681,7 +5687,7 @@
       "mediaType": "movie",
       "tmdbId": 276518,
       "alias": "Riviera",
-      "why": "TMDB records it as an alternative title"
+      "why": "unsure: a plausible release or translated title, kept because a wrong keep only adds a search result"
     },
     {
       "mediaType": "movie",
@@ -5693,13 +5699,13 @@
       "mediaType": "movie",
       "tmdbId": 306943,
       "alias": "Outskirts",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 306943,
       "alias": "The Outskirts",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5717,19 +5723,13 @@
       "mediaType": "movie",
       "tmdbId": 428045,
       "alias": "Iron Mask",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 428045,
       "alias": "The Iron Mask",
-      "why": "TMDB records it as an alternative title"
-    },
-    {
-      "mediaType": "movie",
-      "tmdbId": 462920,
-      "alias": "Puberty",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5765,7 +5765,7 @@
       "mediaType": "movie",
       "tmdbId": 745625,
       "alias": "The Enemy",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
@@ -5777,61 +5777,61 @@
       "mediaType": "movie",
       "tmdbId": 985602,
       "alias": "North Star",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 991708,
       "alias": "The Count",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "movie",
       "tmdbId": 1340076,
       "alias": "Getaway",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 5904,
       "alias": "Visitor from the Future",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 14807,
       "alias": "Autumn Tale",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 39892,
       "alias": "As Time Goes By",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 39892,
       "alias": "Time Goes By",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 40345,
       "alias": "The Secretary",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 46002,
       "alias": "I Miss You",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 51773,
       "alias": "50-50",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
@@ -5849,19 +5849,19 @@
       "mediaType": "tv",
       "tmdbId": 65860,
       "alias": "Jackpot",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 67915,
       "alias": "Goblin",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 68388,
       "alias": "Insider",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
@@ -5879,19 +5879,19 @@
       "mediaType": "tv",
       "tmdbId": 86546,
       "alias": "Radiant",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 105052,
       "alias": "Mr. Wrong",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 112486,
       "alias": "Casino",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
@@ -5903,31 +5903,31 @@
       "mediaType": "tv",
       "tmdbId": 124124,
       "alias": "The Scent of Passion",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 124601,
       "alias": "White Sands",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 127356,
       "alias": "Police Academy",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
       "tmdbId": 136135,
       "alias": "Mauvaise Pioche",
-      "why": "TMDB records it as an alternative title"
+      "why": "unsure: a plausible release or translated title, kept because a wrong keep only adds a search result"
     },
     {
       "mediaType": "tv",
       "tmdbId": 158479,
       "alias": "The King",
-      "why": "TMDB records it as an alternative title"
+      "why": "reviewed: a real release, international or literal translated title of this work"
     },
     {
       "mediaType": "tv",
