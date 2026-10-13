@@ -24,7 +24,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from store import vector_blob  # noqa: E402
+from store import aliases as store_aliases, vector_blob  # noqa: E402
 
 BUILD_STORE = os.path.join(HERE, "build_store.py")
 MIGRATE = os.path.join(HERE, "migrate_vector_blob.py")
@@ -1742,8 +1742,26 @@ class TheAliasDecisionsAreApplied(StoreFixture, unittest.TestCase):
 
         self.assertEqual(names("movie:103"), ["Taxi Driver"], "the dropped alias reached alias_titles")
         self.assertEqual(names("movie:9"), ["Gamma"], "an undecided alias is held until decided")
-        self.assertEqual(record, {"sha256": sha256(self.DECISIONS), "dropped": 1, "withheld": 1,
-                                  "undecided": 0, "entityDropped": 0})
+        self.assertEqual(record, {"sha256": sha256(self.DECISIONS), "dropped": 1, "autoDropped": 0,
+                                  "withheld": 1, "undecided": 0, "entityDropped": 0})
+
+    def test_another_versions_name_and_a_malformed_label_drop_without_a_decision(self):
+        """`aliases.automatic` settles two cases from the data alone; everything else is still held."""
+        rows = [
+            {"key": "movie:1", "facts": {"titles": {"en": "A Song to the Sun", "aliases": ["Midnight Sun"]},
+                                         "otherVersions": [{"key": "movie:2", "kind": "remake"}]}},
+            {"key": "movie:2", "facts": {"titles": {"en": "Midnight Sun"},
+                                         "otherVersions": [{"key": "movie:1", "kind": "remake"}]}},
+            {"key": "movie:3", "facts": {"titles": {"en": "Judwaa", "aliases": ["Twin'"]}}},
+            {"key": "movie:4", "facts": {"titles": {"en": "Twin"}}},
+            {"key": "movie:5", "facts": {"titles": {"en": "Gamma", "aliases": ["Twin"]}}},
+        ]
+        record = store_aliases.apply(rows, self.DECISIONS)
+        self.assertEqual(rows[0]["facts"]["titles"]["aliases"], [], "the remake's name stayed on the original")
+        self.assertEqual(rows[2]["facts"]["titles"]["aliases"], [], "the malformed label stayed")
+        self.assertEqual(rows[4]["facts"]["titles"]["aliases"], [], "an unlinked collision shipped undecided")
+        self.assertEqual((record["autoDropped"], record["withheld"]), (2, 1))
+        self.assertIsNone(store_aliases.automatic({}, "Rock 'n' Roll", [("movie", 9)]), "a balanced quote is a name")
 
     def test_a_dropped_entity_alias_does_not_ship(self):
         """The committed `entities.drop` takes a Hindi sentence off Q16325985's aliases. Left in, it is over

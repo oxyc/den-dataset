@@ -67,7 +67,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from store.aliases import (DECISIONS, collisions, decision_key, hard_fold,  # noqa: E402
+from store.aliases import (DECISIONS, automatic, collisions, decision_key, hard_fold,  # noqa: E402
                            load_decisions, own_names)
 
 
@@ -194,13 +194,16 @@ def main():
 
     counts, colliding = collisions(
         (r.get("mediaType"), r.get("tmdbId"), r.get("titles") or {}) for r in records)
+    facts = {(r.get("mediaType"), r.get("tmdbId")): r for r in records}
+    # The store build drops what `automatic` settles, so only the rest wait for a person.
     residue = [{
         "mediaType": media, "tmdbId": tmdb_id,
         "title": (own_names(titles) or [None])[0],
         "alias": alias,
         "claimedBy": [{"mediaType": m, "tmdbId": i} for m, i in owners[:4]],
     } for media, tmdb_id, titles, alias, owners in colliding
-        if decision_key(media, tmdb_id, alias) not in decided]
+        if decision_key(media, tmdb_id, alias) not in decided
+        and not automatic(facts[(media, tmdb_id)], alias, owners)]
 
     for name in sorted(counts):
         print(f"{counts[name]:>7}  {name}")
