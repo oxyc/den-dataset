@@ -364,6 +364,162 @@
       "tmdbId": 278877,
       "alias": "ACAB – All Cops Are Bastards",
       "why": "the 2012 Sollima film the series follows on from; not the series' title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 39062,
+      "alias": "Wild Boys",
+      "why": "no evidence Coupe de Ville was released under this name"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 62691,
+      "alias": "Midnight Sun",
+      "why": "Midnight Sun is the 2018 US remake (movie:419478); this 2006 film's English title is A Song to the Sun"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 94047,
+      "alias": "Prisoners of War",
+      "why": "not a release title of My Way (2011); Prisoners of War is the English title of the Israeli series Hatufim (tv:51157)"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 107592,
+      "alias": "The Wedding Party",
+      "why": "The Catered Affair was released in the UK as Wedding Breakfast, not The Wedding Party"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 128395,
+      "alias": "The Gods",
+      "why": "not a known release title of Emitaï (its English renderings are Emitai / Lord of the Sky); a generic name other works carry"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 161238,
+      "alias": "Twin'",
+      "why": "malformed label (trailing apostrophe), not a title"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 174311,
+      "alias": "Lucky Dog",
+      "why": "All Is Bright was shot as Almost Christmas; Lucky Dog is no release title of it"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 243753,
+      "alias": "In Search of the Castaways",
+      "why": "the title of the 1962 Disney adaptation (movie:34774); this 1936 Soviet film is Captain Grant's Children"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 256908,
+      "alias": "The Perfect Stranger",
+      "why": "no evidence it was ever released under this name, and it collides with a better-known film"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 372942,
+      "alias": "La usurpadora",
+      "why": "names the telenovela this film adapts (tv:4184), a different work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 451172,
+      "alias": "Ilya Muromets",
+      "why": "names the 1956 film Ilya Muromets (movie:118153); this is the 2007 animated film"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 451765,
+      "alias": "The Scandal",
+      "why": "no release title of Anna Karenina: Vronsky's Story"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 458027,
+      "alias": "The Last Warrior",
+      "why": "the English title of Posledniy bogatyr (movie:471968); this film is Scythian"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 607091,
+      "alias": "Miss Granny",
+      "why": "names the Korean film this Telugu remake is based on (movie:253065)"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1290206,
+      "alias": "The Marriage",
+      "why": "not a release title of The Paradise of Thorns"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1373198,
+      "alias": "The Monster",
+      "why": "no evidence it was released under this name, and the name is several other films'"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 60580,
+      "alias": "Jodhaa Akbar",
+      "why": "the title of the 2008 film (movie:14073), not of this series, Jodha Akbar"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 69692,
+      "alias": "The Web",
+      "why": "Ouro Verde's English title is Green Gold; The Web is no title of it"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 82130,
+      "alias": "The goddess",
+      "why": "no release title of Tarde lo conocí"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 116041,
+      "alias": "Marriage Story",
+      "why": "names Noah Baumbach's film (movie:492188); this series is Love (ft. Marriage and Divorce)"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 203344,
+      "alias": "First Lady",
+      "why": "no release title of Pandora: Beneath the Paradise; names another series (tv:99070)"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 203344,
+      "alias": "Lady",
+      "why": "no release title of Pandora: Beneath the Paradise; a fragment of a wrong alias"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 215780,
+      "alias": "Boon",
+      "why": "Boon is the British series (tv:2559); the Bonn/Boon confusion between the two Wikidata items, not a title of this one"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 14482,
+      "alias": "Baba Yaga",
+      "why": "Baba Yaga is the folk character in The Golden Horns and the title of another film (movie:55689), not a release title of this one"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 54982,
+      "alias": "Face of an Angel",
+      "why": "no evidence Introducing Dorothy Dandridge was released under this name; it is another film's title (movie:254024)"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 462920,
+      "alias": "Puberty",
+      "why": "no evidence Perfect (2018) was released under this name"
     }
   ],
   "keep": [
@@ -5286,6 +5442,516 @@
       "tmdbId": 331033,
       "alias": "Collision",
       "why": "the English rendering of Colisión"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 4689,
+      "alias": "Revenge Is Mine",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 15719,
+      "alias": "Silent Witness",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 20971,
+      "alias": "Alive",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 22885,
+      "alias": "The Pest",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 22892,
+      "alias": "The Dentist",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 25651,
+      "alias": "State of Reality",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 26937,
+      "alias": "Last Ride",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 29866,
+      "alias": "Making Love",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 30959,
+      "alias": "Kaidan",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 36922,
+      "alias": "Man of Straw",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 39196,
+      "alias": "Go!",
+      "why": "unsure: a plausible translation of the original title, kept because a wrong keep only adds a search result"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 41648,
+      "alias": "Wild Flower",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 42498,
+      "alias": "The Adversary",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 46978,
+      "alias": "Mistress",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 47144,
+      "alias": "The Powder Keg",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 47203,
+      "alias": "Daddy",
+      "why": "unsure: a plausible release or translated title, kept because a wrong keep only adds a search result"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 48882,
+      "alias": "The Orphans",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 49044,
+      "alias": "Frontier",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 53960,
+      "alias": "Trespasser",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 54880,
+      "alias": "The Hunchback",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 67605,
+      "alias": "Destiny",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 68837,
+      "alias": "Railroad Man",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 68865,
+      "alias": "The Amazons",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 72806,
+      "alias": "Angel of Death",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 76721,
+      "alias": "Journey to the West",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 80440,
+      "alias": "That Summer",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 83620,
+      "alias": "Relatives",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 85746,
+      "alias": "The Iron Mask",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 86743,
+      "alias": "The Seducers",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 89791,
+      "alias": "The Last Warrior",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 94638,
+      "alias": "Patriots",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 119806,
+      "alias": "The Other One",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 128412,
+      "alias": "November",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 136403,
+      "alias": "Popular",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 139662,
+      "alias": "Brothers",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 143844,
+      "alias": "Friendship",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 148822,
+      "alias": "Long Goodbye",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 154718,
+      "alias": "Wild Life",
+      "why": "unsure: a plausible translation of the original title, kept because a wrong keep only adds a search result"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 193385,
+      "alias": "Iron Heart",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 270909,
+      "alias": "Refugee",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 276518,
+      "alias": "Riviera",
+      "why": "unsure: a plausible release or translated title, kept because a wrong keep only adds a search result"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 278258,
+      "alias": "Fearless",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 306943,
+      "alias": "Outskirts",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 306943,
+      "alias": "The Outskirts",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 341261,
+      "alias": "Punishment",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 341261,
+      "alias": "The Punishment",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 428045,
+      "alias": "Iron Mask",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 428045,
+      "alias": "The Iron Mask",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 463116,
+      "alias": "Ruslan and Ludmila",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 471968,
+      "alias": "Last Warrior",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 512732,
+      "alias": "Brother & Sister",
+      "why": "unsure: a plausible translation of the original title, kept because a wrong keep only adds a search result"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 512732,
+      "alias": "Brother and Sister",
+      "why": "unsure: a plausible translation of the original title, kept because a wrong keep only adds a search result"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 575554,
+      "alias": "Faithful",
+      "why": "unsure: a plausible translation of the original title, kept because a wrong keep only adds a search result"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 745625,
+      "alias": "The Enemy",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 880313,
+      "alias": "The Wrath of God",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 985602,
+      "alias": "North Star",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 991708,
+      "alias": "The Count",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1340076,
+      "alias": "Getaway",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 5904,
+      "alias": "Visitor from the Future",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 14807,
+      "alias": "Autumn Tale",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 39892,
+      "alias": "As Time Goes By",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 39892,
+      "alias": "Time Goes By",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 40345,
+      "alias": "The Secretary",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 46002,
+      "alias": "I Miss You",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 51773,
+      "alias": "50-50",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 63817,
+      "alias": "Rules of the Game",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 65063,
+      "alias": "Merciless",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 65860,
+      "alias": "Jackpot",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 67915,
+      "alias": "Goblin",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 68388,
+      "alias": "Insider",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 71152,
+      "alias": "Catherine the Great",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 79176,
+      "alias": "Proud",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 86546,
+      "alias": "Radiant",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 105052,
+      "alias": "Mr. Wrong",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 112486,
+      "alias": "Casino",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 114511,
+      "alias": "La Promesse",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 124124,
+      "alias": "The Scent of Passion",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 124601,
+      "alias": "White Sands",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 127356,
+      "alias": "Police Academy",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 136135,
+      "alias": "Mauvaise Pioche",
+      "why": "unsure: a plausible release or translated title, kept because a wrong keep only adds a search result"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 158479,
+      "alias": "The King",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 208920,
+      "alias": "Tout va bien",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 219446,
+      "alias": "Family",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 219446,
+      "alias": "The Family",
+      "why": "reviewed: a real release, international or literal translated title of this work"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 274556,
+      "alias": "Faraway",
+      "why": "unsure: a plausible translation of the original title, kept because a wrong keep only adds a search result"
     }
   ]
 }
