@@ -28,8 +28,9 @@ scan in seconds; WDQS caps a query at 60 s and would have to be paged by thousan
 scans are paged (`PAGE` rows, ordered), sent with the pipeline's User-Agent and retried with backoff by
 `lib/http.py`. A failed page fails the table: a partial names table would quietly name fewer titles.
 
-The daily job refreshes it when a new generation is built and otherwise carries the live generation's copy
-(`refresh`), so a day that rebuilds the same generation rebuilds the same store.
+The daily job refreshes it when a new generation is built and the carried copy is a week old, and otherwise
+carries the live generation's copy (`refresh`), so a day that rebuilds the same generation rebuilds the same
+store.
 """
 import argparse
 import datetime
@@ -55,6 +56,8 @@ MEDIA = ("movie", "tv")
 #: time (P580); many state only a publication date.
 DATES = {"movie": ("P577",), "tv": ("P580", "P577")}
 XSD_DATETIME = "http://www.w3.org/2001/XMLSchema#dateTime"
+#: How old a carried table may be before a new generation rebuilds it (`refresh`).
+MAX_AGE_DAYS = 7
 
 
 class NamesError(RuntimeError):
@@ -260,16 +263,32 @@ def write(table, path):
     caching.write_atomically(path, body.encode("utf-8"))
 
 
-def refresh(path, new_generation, build_table=build):
-    """The daily step: rebuild the table at `path` when the day builds a new generation, else keep the copy
-    the live generation's bundle laid there. Returns `(what happened, why)`; a failed fetch keeps the carried
-    copy, and the store stage refuses a day that would drop a table the live store carried.
+def fetched_days_ago(path, today=None):
+    """How many days ago the table at `path` was read from Wikidata (`source.fetched`), or None."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            fetched = datetime.date.fromisoformat(json.load(fh)["source"]["fetched"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return ((today or datetime.datetime.now(datetime.timezone.utc).date()) - fetched).days
+
+
+def refresh(path, new_generation, build_table=build, today=None):
+    """The daily step: rebuild the table at `path` when the day builds a new generation and the carried copy
+    is a week old or more, else keep the copy the live generation's bundle laid there. Returns `(what
+    happened, why)`; a failed fetch keeps the carried copy, and the store stage refuses a day that would
+    drop a table the live store carried.
 
     Only a new generation gets a new table: `publish-dataset.sh` refuses a store that changed under an
     unchanged `datasetVersion`, so a table refreshed on a day that rebuilt the live generation would refuse
-    that day's publish."""
+    that day's publish. A new generation keeps a copy younger than `MAX_AGE_DAYS` too: the scan is the
+    stage's 2.5 minutes, and Wikidata's names of films and series barely move in a week, while the titles
+    the table exists for (ones with no store row) are not the ones a day adds."""
     if not new_generation:
         return "kept", "the live generation is rebuilt as it was, so its names table is too"
+    age = fetched_days_ago(path, today)
+    if age is not None and age < MAX_AGE_DAYS:
+        return "kept", f"the carried table was read from Wikidata {age} day(s) ago; it is rebuilt weekly"
     try:
         table = build_table()
     except (NamesError, wikidata.WikidataError) as failure:

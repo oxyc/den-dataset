@@ -178,6 +178,25 @@ class Refresh(unittest.TestCase):
             with open(path) as fh:
                 self.assertEqual(fh.read(), "carried")
 
+    def test_a_new_generation_keeps_a_copy_younger_than_a_week(self):
+        """The scan is the stage's whole cost, and a week-old names table is as good as today's."""
+        today = datetime.date(2026, 10, 13)
+
+        def carried(fetched):
+            with open(path, "w") as fh:
+                json.dump({"source": {"fetched": fetched}, "rows": []}, fh)
+
+        def refuse():
+            raise AssertionError("a young carried table was rebuilt")
+        with tempfile.TemporaryDirectory() as out:
+            path = os.path.join(out, "names.json")
+            carried("2026-10-07")
+            what, why = names.refresh(path, True, build_table=refuse, today=today)
+            self.assertEqual(what, "kept")
+            self.assertIn("6 day(s) ago", why)
+            carried("2026-10-06")
+            self.assertEqual(names.refresh(path, True, build_table=table, today=today)[0], "refreshed")
+
     def test_a_failed_fetch_keeps_the_carried_copy_and_says_so(self):
         def fail():
             raise names.NamesError("names: QLever failed: HTTP 503")
