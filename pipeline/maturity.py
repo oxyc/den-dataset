@@ -93,7 +93,7 @@ def link_records(source_records, facts_blob, decisions=None):
     observations, ambiguous = {}, []
     counts = {"sourceRows": 0, "ratedRows": 0, "matchedRows": 0, "decisionMatchedRows": 0,
               "unmatchedRows": 0,
-              "ambiguousRows": 0, "missingIdentityRows": 0, "unknownRatingRows": 0}
+              "ambiguousRows": 0, "missingIdentityRows": 0, "unknownRatingRows": 0, "noRatingRows": 0}
     for source in source_records:
         counts["sourceRows"] += 1
         if source["age"] is None:
@@ -102,6 +102,13 @@ def link_records(source_records, facts_blob, decisions=None):
             counts["ratedRows"] += 1
         if not source.get("authorityId"):
             counts["missingIdentityRows"] += 1
+            continue
+        # A register row with no classification at all (Medietilsynet, IMDA and the nulla-osta list carry a
+        # few hundred each) says nothing about the title, and the corpus refuses an observation without its
+        # raw rating (consolidate_corpus.maturity_rows): one such row matching a title stopped daily run
+        # 38319475465. A row with rating text and no numeric age is still kept.
+        if not isinstance(source.get("raw"), str) or not source["raw"].strip():
+            counts["noRatingRows"] += 1
             continue
         title_keys = {(title, source["year"]) for raw in source["titles"] if (title := normalized(raw))}
         candidates = set().union(*(index.get(pair, set()) for pair in title_keys)) if title_keys else set()

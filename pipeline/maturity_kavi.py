@@ -31,7 +31,9 @@ def records(payload):
         yield {"authority": AUTHORITY, "authorityId": f"iklu:{row['id']}", "titles": titles,
                "directors": "; ".join(name for name in directors if isinstance(name, str)),
                "year": row["year"] if isinstance(row["year"], int) else None,
-               "raw": row["agelimit"], "age": age, "assessed": row.get("registrationDate"),
+               # The corpus keeps `raw` as the authority's own text (consolidate_corpus.maturity_rows).
+               "raw": None if row["agelimit"] is None else str(row["agelimit"]), "age": age,
+               "assessed": row.get("registrationDate"),
                "runtimeMinutes": (row.get("durationInSeconds") // 60
                                   if isinstance(row.get("durationInSeconds"), int) else None),
                "matchedBy": "exact-title+year+director"}
