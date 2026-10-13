@@ -52,12 +52,13 @@ class FakeTMDB:
     def __init__(self, pages, regional=None):
         self.pages = pages
         self.regional = regional or {}
-        self.asked = []
+        self.asked, self.ages = [], []
 
-    def discover(self, media, params, page=1):
+    def discover(self, media, params, page=1, max_age=0):
         """A scripted page is a list of ids, or of `(id, vote_count)` pairs where the count matters. A query
         narrowed by origin is answered from `regional`, which names nothing unless a test scripts it."""
         self.asked.append((media, dict(params), page))
+        self.ages.append(max_age)
         pages = (self.regional if "with_origin_country" in params else self.pages).get(media, [[]])
         rows = pages[page - 1] if page - 1 < len(pages) else []
         return ([{"id": value} if isinstance(value, int) else {"id": value[0], "vote_count": value[1]}
@@ -355,6 +356,22 @@ class Catalogue(Staged):
         with mock.patch.object(worklist, "catalogue_windows", return_value=self.WINDOWS):
             with self.assertRaisesRegex(StageError, "empty upstream catalogue"):
                 worklist.universe(context(self.out, mode="catalogue"), "movie", FakeTMDB({"movie": [[]]}))
+
+    def test_settled_years_may_be_a_week_old_and_recent_ones_half_a_day(self):
+        """Most of the sweep is long-past years whose pages barely move; last year and this one are where
+        new titles appear."""
+        today = datetime.date(2026, 10, 13)
+        windows = (("1999-01-01", "1999-12-31"), ("2024-01-01", "2024-12-31"),
+                   ("2025-01-01", "2025-12-31"), ("2026-01-01", "2026-12-31"))
+        client = FakeTMDB({"movie": [[(12, 55)]]})
+        worklist.full_catalogue(client, "movie", windows, today)
+        settled, recent = worklist.SETTLED_MAX_AGE, worklist.RECENT_MAX_AGE
+        self.assertEqual(client.ages, [settled, settled, settled, settled, recent, recent, recent, recent])
+
+    def test_the_delta_reuses_a_page_only_within_the_day(self):
+        client = FakeTMDB({"movie": [[12]]})
+        worklist.universe(context(self.out, mode="delta", since="2026-10-01"), "movie", client)
+        self.assertEqual(set(client.ages), {worklist.RECENT_MAX_AGE})
 
     def test_a_slice_over_tmdbs_page_ceiling_is_refused_not_truncated(self):
         client = FakeTMDB({"movie": [[] for _ in range(worklist.tmdb_api.MAX_PAGES)]})

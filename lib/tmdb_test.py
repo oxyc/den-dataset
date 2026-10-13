@@ -6,10 +6,13 @@ stops after page one and a delta reports "0 new titles" instead of failing — s
 """
 import json
 import os
+import shutil
+import tempfile
+import time
 import unittest
 from unittest import mock
 
-from . import tmdb as tmdb_api
+from . import cache as caching, tmdb as tmdb_api
 
 
 class FakeHTTP:
@@ -79,12 +82,54 @@ class Paging(unittest.TestCase):
         (rows, page, total), _fake = self.drive({"results": []})
         self.assertEqual((rows, page, total), ([], 1, 1))
 
-    def test_the_key_rides_in_the_query_and_nothing_is_cached(self):
-        """`/discover` answers a question that changes daily; served from disk it would hide the new titles
-        it exists to find."""
+    def test_the_key_rides_in_the_query_and_nothing_is_cached_without_a_cache(self):
         for _ in range(2):
             _answer, fake = self.drive({"results": []})
             self.assertEqual(fake.requests[0][2]["api_key"], "test")
+
+
+class Cached(unittest.TestCase):
+    """A page is served from disk only while it is younger than the age the caller allows, an error body is
+    never written, and the key never reaches the cache."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.cache = caching.ResponseCache(tmdb_api.DISCOVER_NAMESPACE, self.dir, 7 * caching.DAY_SECONDS)
+        self.clock = [1_000_000.0]
+        self.client = tmdb_api.TMDB(key="secret-key", cache=self.cache, now=lambda: self.clock[0])
+
+    def ask(self, body, max_age):
+        fake = FakeHTTP(body)
+        with mock.patch.object(tmdb_api.http, "request", fake):
+            rows, _page, _total = self.client.discover("movie", {"sort_by": "vote_count.desc"}, max_age=max_age)
+        return [row["id"] for row in rows], len(fake.requests)
+
+    def written(self):
+        path = os.path.join(self.dir, tmdb_api.DISCOVER_NAMESPACE)
+        return [os.path.join(root, name) for root, _dirs, names in os.walk(path) for name in names]
+
+    def test_a_young_page_is_reused_and_an_old_one_asked_again(self):
+        self.clock[0] = time.time()
+        self.assertEqual(self.ask({"results": [{"id": 1}]}, 3600), ([1], 1))
+        self.assertEqual(self.ask({"results": [{"id": 2}]}, 3600), ([1], 0), "a fresh page was asked again")
+        self.clock[0] += 7200
+        self.assertEqual(self.ask({"results": [{"id": 3}]}, 3600), ([3], 1), "a stale page was reused")
+
+    def test_no_age_means_ask(self):
+        self.clock[0] = time.time()
+        self.ask({"results": [{"id": 1}]}, 3600)
+        self.assertEqual(self.ask({"results": [{"id": 2}]}, 0), ([2], 1))
+
+    def test_an_error_body_is_not_cached_and_the_key_is_never_written(self):
+        with self.assertRaises(tmdb_api.TMDBError):
+            self.ask({"status_message": "Invalid API key"}, 3600)
+        self.assertEqual(self.written(), [])
+        self.clock[0] = time.time()
+        self.ask({"results": [{"id": 1}]}, 3600)
+        for path in self.written():
+            with open(path, encoding="utf-8") as fh:
+                self.assertNotIn("secret-key", path + fh.read())
 
     def test_no_key_is_a_refusal(self):
         with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(tmdb_api.TMDBError):

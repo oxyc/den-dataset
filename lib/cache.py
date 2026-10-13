@@ -165,9 +165,9 @@ def configured(namespace, default_ttl_days, env=None):
 #: re-reads everything, and each grounded title stores the revision it was read from so a refresh can ask
 #: for current revids in bulk.
 #:
-#: TMDB has no namespace any more: nothing in the pipeline asks it for a title (oxyc/den-dataset#53), and
-#: `/discover`, the one call left, is never cached. The `.cache/tmdb` bodies earlier passes wrote are read
-#: by nothing and age out.
+#: TMDB keeps one namespace: nothing in the pipeline asks it for a title (oxyc/den-dataset#53), and
+#: `/discover`, the one call left, is cached under `tmdb_discover` with an age the caller sets per query
+#: (`lib/tmdb.py`). The `.cache/tmdb` bodies earlier passes wrote are read by nothing and age out.
 TTL_DAYS = 180
 
 WIKI_NAMESPACE = "wiki"

@@ -239,6 +239,8 @@ jobs:
         run: |
           [ -d .cache ] || exit 0
           find .cache -type f -mtime +180 -delete
+          # /discover pages are reused for a week at most (pipeline/worklist.py), so older ones are dead weight.
+          [ -d .cache/tmdb_discover ] && find .cache/tmdb_discover -type f -mtime +7 -delete
           du -sh .cache
       - name: Keep the cache
         id: keep-cache
