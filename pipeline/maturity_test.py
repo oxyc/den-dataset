@@ -234,6 +234,16 @@ class Linker(unittest.TestCase):
         self.assertEqual(records, [])
         self.assertEqual(audit["missingIdentityRows"], 1)
 
+    def test_a_row_with_no_classification_is_not_linked(self):
+        """The corpus refuses an observation with no raw rating, so linking one would stop the day."""
+        for raw in (None, "", "  "):
+            rows = [{"authority": "IMDA", "authorityId": "imda:1", "titles": ["The Film"],
+                     "directors": "Alice Director", "year": 2022, "raw": raw, "age": None,
+                     "matchedBy": "exact-title+year+director"}]
+            records, audit = maturity.link_records(rows, facts(movie(1)))
+            self.assertEqual(records, [], raw)
+            self.assertEqual(audit["noRatingRows"], 1)
+
     def test_combines_authorities_by_the_highest_verified_age(self):
         norway, _ = maturity.link_records(
             maturity_norway.records(payload(source_row(rating="12 år"))), facts(movie(1)))
