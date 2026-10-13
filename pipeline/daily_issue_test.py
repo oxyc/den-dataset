@@ -101,6 +101,28 @@ class Plan(unittest.TestCase):
         self.assertEqual([a.get("label") for a in self.plan(out)], [daily_issue.CPU_LABEL, daily_issue.LABEL])
 
 
+class AliasReview(unittest.TestCase):
+    ROW = {"mediaType": "movie", "tmdbId": 9, "title": "Gamma", "alias": "Be|ta",
+           "claimedBy": [{"mediaType": "movie", "tmdbId": 2}]}
+
+    def plan(self, rows, issue=None):
+        return daily_issue.plan_aliases(rows, issue, "2026-10-13", "https://example/run/1")
+
+    def test_held_aliases_open_the_issue_with_a_row_each(self):
+        [a] = self.plan([self.ROW])
+        self.assertEqual((a["do"], a["label"]), ("create", daily_issue.ALIAS_LABEL))
+        self.assertIn("| movie:9 Gamma | Be\\|ta | movie:2 |", a["body"])
+
+    def test_an_open_issue_is_rewritten_not_duplicated(self):
+        [a] = self.plan([self.ROW], {"number": 7, "body": ""})
+        self.assertEqual((a["do"], a["number"]), ("edit", 7))
+
+    def test_none_held_closes_it_and_no_store_says_nothing(self):
+        self.assertEqual([a["do"] for a in self.plan([], {"number": 7, "body": ""})], ["close"])
+        self.assertEqual(self.plan([]), [])
+        self.assertEqual(self.plan(None, {"number": 7, "body": ""}), [])
+
+
 class HandOffScript(unittest.TestCase):
     """pipeline/hand-off-day.sh against a stub `gh` that records its calls."""
 

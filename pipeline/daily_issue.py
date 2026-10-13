@@ -11,6 +11,10 @@ data/embed-cpu-blocklist.txt gets its own small issue (`embed-cpu-blocklist`), s
 The repo is public, so an issue carries only the verdict line, the run link, a count and a CPU model name:
 never a log, and a verdict has URL queries and key=value secrets scrubbed before it is posted.
 
+Title aliases the store held back for want of a keep/drop decision (store/aliases.py) are listed in one open
+issue labelled `alias-review`, rewritten by each run that built a store and closed by one that held none. They
+are Wikidata labels, which the published store carries anyway.
+
 pipeline/hand-off-day.sh writes the handoff file (key=value lines: state=handed|exhausted, why=, cpu=).
 """
 import argparse
@@ -23,8 +27,10 @@ import sys
 
 LABEL = "daily-failing"
 CPU_LABEL = "embed-cpu-blocklist"
+ALIAS_LABEL = "alias-review"
 MARKER = "daily-consecutive-failures"
 MAX_VERDICT = 400
+MAX_ALIAS_ROWS = 400
 
 
 def read_handoff(path):
@@ -120,6 +126,52 @@ def plan(out, issue, cpu_issue_titles, date, run_url):
     return actions
 
 
+def read_alias_review(path):
+    """The rows check_alias_collisions.py --review wrote, or None when this run wrote no review file."""
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            rows = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return rows if isinstance(rows, list) else None
+
+
+def alias_body(rows, date, run_url):
+    lines = [f"The store holds back {len(rows)} title alias(es) that are another title's name, until each has a "
+             "keep or drop decision in data/alias-decisions.json. The titles ship; only these search names wait.",
+             "", f"Latest: {date}, {run_url}", "",
+             "Keep a real release, translated or working title; drop an alias that names a different work. "
+             "`pipeline/check_alias_collisions.py <facts> --tmdb --review alias-review.json` sorts them by "
+             "whether TMDB records the alias. A run that holds none closes this issue.", "",
+             "| Title | Alias | Also the name of |", "|---|---|---|"]
+    for r in rows[:MAX_ALIAS_ROWS]:
+        cell = lambda s: scrub(s).replace("|", "\\|")
+        owners = ", ".join(f"{o['mediaType']}:{o['tmdbId']}" for o in r.get("claimedBy") or [])
+        lines.append(f"| {r['mediaType']}:{r['tmdbId']} {cell(r.get('title') or '')} | {cell(r['alias'])} "
+                     f"| {owners} |")
+    if len(rows) > MAX_ALIAS_ROWS:
+        lines.append(f"\n… and {len(rows) - MAX_ALIAS_ROWS} more in the run's `alias-review.json` artifact.")
+    return "\n".join(lines)
+
+
+def plan_aliases(rows, issue, date, run_url):
+    """The alias-review issue's calls. `rows` is None when no store was built, which says nothing."""
+    if rows is None:
+        return []
+    if rows:
+        body = alias_body(rows, date, run_url)
+        if issue:
+            return [{"do": "edit", "number": issue["number"], "body": body}]
+        return [{"do": "create", "label": ALIAS_LABEL, "body": body,
+                 "title": "Title aliases waiting for a keep/drop decision"}]
+    if issue:
+        return [{"do": "close", "number": issue["number"],
+                 "body": f"Every colliding alias has a decision: {date}, {run_url}"}]
+    return []
+
+
 def gh(args, repo, stdin=None):
     done = subprocess.run(["gh", *args, "-R", repo], input=stdin, capture_output=True, text=True)
     if done.returncode:
@@ -158,12 +210,21 @@ def main(argv=None):
     ap.add_argument("--cancelled", choices=("true", "false"), default="false")
     ap.add_argument("--report", default="out/daily-report.json")
     ap.add_argument("--handoff", required=True)
+    ap.add_argument("--alias-review", help="check_alias_collisions.py --review output, when a store was built")
     ap.add_argument("--dry-run", action="store_true", help="print the calls instead of making them")
     args = ap.parse_args(argv)
 
     report = read_report(args.report)
     out = outcome(args.ready == "true", args.cancelled == "true", report, read_handoff(args.handoff))
     date = report.get("date") or datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    review = read_alias_review(args.alias_review)
+    if review is not None:
+        alias_issues = open_issues(args.repo, ALIAS_LABEL)
+        alias_actions = plan_aliases(review, alias_issues[0] if alias_issues else None, date, args.run_url)
+        if args.dry_run:
+            print(json.dumps(alias_actions, indent=2, ensure_ascii=False))
+        else:
+            apply(alias_actions, args.repo)
     if out["kind"] == "handed" and not out["cpu"]:
         print("daily_issue: handed to another attempt; nothing to report")
         return 0

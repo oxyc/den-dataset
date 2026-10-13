@@ -123,11 +123,15 @@ def collisions(titled):
 
 
 def apply(rows, path=DECISIONS):
-    """Remove every `drop` alias from the corpus rows, in place, and return the `aliasDecisions` record.
+    """Remove every `drop` alias, and hold back every colliding alias nobody has decided, from the corpus
+    rows, in place. Return the `aliasDecisions` record.
 
-    The record is the decisions file's sha256, how many aliases were dropped, and how many colliding
-    aliases have no decision. The undecided count is taken BEFORE the drops come out, over every row the
-    store is built from, so it is the number the publisher has to see as zero.
+    An undecided collision is held rather than shipped: a held alias only costs its title one search name
+    until a person decides it, while a shipped one may be junk that tops another title's search. So one new
+    Wikidata altLabel never stops a publish — the title ships without it, and `--review` lists it for a
+    decision. The record is the decisions file's sha256, how many aliases were dropped, how many were held
+    (`withheld`), and how many colliding aliases ship undecided (`undecided`), which is now always 0 and
+    which the publisher still checks.
     """
     decided, _ = load_decisions(path)
     titled = []
@@ -136,23 +140,30 @@ def apply(rows, path=DECISIONS):
         titled.append((media, int(tmdb_id), (row.get("facts") or {}).get("titles") or {}))
 
     _, colliding = collisions(titled)
-    undecided = sum(1 for media, tmdb_id, _, alias, _ in colliding
-                    if decision_key(media, tmdb_id, alias) not in decided)
+    held = {decision_key(media, tmdb_id, alias) for media, tmdb_id, _, alias, _ in colliding
+            if decision_key(media, tmdb_id, alias) not in decided}
 
     drops = {key for key, verdict in decided.items() if verdict == "drop"}
-    dropped = 0
+    dropped = withheld = 0
     for media, tmdb_id, titles in titled:
         aliases = titles.get("aliases")
         if not aliases:
             continue
-        kept = [a for a in aliases if decision_key(media, tmdb_id, a) not in drops]
+        kept = []
+        for a in aliases:
+            key = decision_key(media, tmdb_id, a)
+            if key in drops:
+                dropped += 1
+            elif key in held:
+                withheld += 1
+            else:
+                kept.append(a)
         if len(kept) != len(aliases):
-            dropped += len(aliases) - len(kept)
             titles["aliases"] = kept
 
     with open(path, "rb") as fh:
         sha = hashlib.sha256(fh.read()).hexdigest()
-    return {"sha256": sha, "dropped": dropped, "undecided": undecided}
+    return {"sha256": sha, "dropped": dropped, "withheld": withheld, "undecided": 0}
 
 
 def apply_entities(table, path=DECISIONS):

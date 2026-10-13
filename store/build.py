@@ -39,7 +39,7 @@ def run(args, inputs, prose_check, provenance_check):
     # card's name fallback. See `store/aliases.py`.
     alias_record = aliases.apply(rows.values())
     print(f"  aliases: {alias_record['dropped']} dropped by data/alias-decisions.json, "
-          f"{alias_record['undecided']} naming another title with no decision", file=sys.stderr)
+          f"{alias_record['withheld']} naming another title held until decided", file=sys.stderr)
     # Titles several Wikidata items claim with nothing chosen between them: the facts stage wrote them
     # with no Wikidata fields rather than mixing two works, so they have no card.
     # `check_wikidata_items.py --gate` refuses the publish while any is listed.

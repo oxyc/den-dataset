@@ -1703,8 +1703,9 @@ class TheCardReadsBackFromTheCorpus(StoreFixture, unittest.TestCase):
 
 
 class TheAliasDecisionsAreApplied(StoreFixture, unittest.TestCase):
-    """`data/alias-decisions.json` takes effect in the store, and the store records how many colliding
-    aliases it ships undecided — the number `check_alias_collisions.py --gate` refuses a publish on.
+    """`data/alias-decisions.json` takes effect in the store, a colliding alias nobody has decided is held
+    back, and the store records how many it held and how many it ships undecided — the number
+    `check_alias_collisions.py --gate` refuses a publish on.
 
     Run against the committed file, whose `drop` list takes "Alien" off Taxi Driver (movie:103). Wikidata
     still carries that altLabel, so a fresh scrape brings it back; the store is where every path ends.
@@ -1724,7 +1725,7 @@ class TheAliasDecisionsAreApplied(StoreFixture, unittest.TestCase):
             titled("movie:9", {"en": "Gamma", "aliases": ["Beta"]}),
         ]
 
-    def test_a_dropped_alias_does_not_ship_and_an_undecided_one_is_counted(self):
+    def test_a_dropped_alias_does_not_ship_and_an_undecided_one_is_held(self):
         with tempfile.TemporaryDirectory() as out:
             meta = os.path.join(out, "dataset.meta.json")
             with open(meta, "w") as fh:
@@ -1740,9 +1741,9 @@ class TheAliasDecisionsAreApplied(StoreFixture, unittest.TestCase):
             return [store.text(i) for i in ids[offsets[row]:offsets[row + 1]]]
 
         self.assertEqual(names("movie:103"), ["Taxi Driver"], "the dropped alias reached alias_titles")
-        self.assertEqual(names("movie:9"), ["Gamma", "Beta"], "an undecided alias still ships until decided")
-        self.assertEqual(record, {"sha256": sha256(self.DECISIONS), "dropped": 1, "undecided": 1,
-                                  "entityDropped": 0})
+        self.assertEqual(names("movie:9"), ["Gamma"], "an undecided alias is held until decided")
+        self.assertEqual(record, {"sha256": sha256(self.DECISIONS), "dropped": 1, "withheld": 1,
+                                  "undecided": 0, "entityDropped": 0})
 
     def test_a_dropped_entity_alias_does_not_ship(self):
         """The committed `entities.drop` takes a Hindi sentence off Q16325985's aliases. Left in, it is over
