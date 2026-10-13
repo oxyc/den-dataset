@@ -399,4 +399,5 @@ jobs:
           python3 pipeline/daily_issue.py --repo "$GITHUB_REPOSITORY" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --ready "$READY" --cancelled "$CANCELLED" --report "$OUT/daily-report.json" \
-            --handoff "${RUNNER_TEMP}/day-handoff" --alias-review "$OUT/alias-review.json"
+            --handoff "${RUNNER_TEMP}/day-handoff" --alias-review "$OUT/alias-review.json" \
+            --meta "$OUT/dataset.meta.json"

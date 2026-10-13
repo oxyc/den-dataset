@@ -101,6 +101,31 @@ class Plan(unittest.TestCase):
         self.assertEqual([a.get("label") for a in self.plan(out)], [daily_issue.CPU_LABEL, daily_issue.LABEL])
 
 
+class DataReview(unittest.TestCase):
+    def plan(self, found, issue=None):
+        return daily_issue.plan_review(found, issue, "2026-10-13", "https://example/run/1")
+
+    def test_contested_titles_and_stale_merges_open_one_issue(self):
+        [a] = self.plan((["tv:6618"], ["Q81565646"]))
+        self.assertEqual((a["do"], a["label"]), ("create", daily_issue.REVIEW_LABEL))
+        self.assertIn("tv:6618", a["body"])
+        self.assertIn("Q81565646", a["body"])
+
+    def test_an_open_issue_is_rewritten_and_closed_when_clear(self):
+        self.assertEqual(self.plan((["tv:1"], []), {"number": 4})[0]["do"], "edit")
+        self.assertEqual(self.plan(([], []), {"number": 4})[0]["do"], "close")
+        self.assertEqual(self.plan(([], [])), [])
+        self.assertEqual(self.plan(None, {"number": 4}), [])
+
+    def test_reads_both_lists_off_the_manifest(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "dataset.meta.json")
+            with open(path, "w") as fh:
+                json.dump({"wikidataItems": {"ambiguous": ["tv:2"]}, "awardMerges": {"stale": []}}, fh)
+            self.assertEqual(daily_issue.read_review_items(path), (["tv:2"], []))
+            self.assertIsNone(daily_issue.read_review_items(os.path.join(d, "missing.json")))
+
+
 class AliasReview(unittest.TestCase):
     ROW = {"mediaType": "movie", "tmdbId": 9, "title": "Gamma", "alias": "Be|ta",
            "claimedBy": [{"mediaType": "movie", "tmdbId": 2}]}

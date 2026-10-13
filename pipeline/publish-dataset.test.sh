@@ -1064,16 +1064,15 @@ write_meta
 publish_baseline
 set_item_record '{"ambiguous": ["tv:6618", "tv:70837"]}'
 if run_publish; then
-  bad "a store shipping titles with no Wikidata item chosen published anyway"
-else
-  grep -q "2 title(s) ship with no Wikidata fields" "$WORK/err.log" && grep -q "tv:6618, tv:70837" "$WORK/err.log" \
-    && ok "a store shipping a contested title with no item chosen is refused, naming it" \
-    || bad "refused, but not for the items: $(tail -3 "$WORK/err.log")"
+  grep -q "warning: 2 title(s) ship with no Wikidata fields" "$WORK/err.log" && grep -q "tv:6618, tv:70837" "$WORK/err.log" \
+    && ok "a store shipping a contested title with no item chosen publishes, warning and naming it" \
+    || bad "published without warning about the items: $(tail -3 "$WORK/err.log")"
   grep -q "data/wikidata-item-decisions.json" "$WORK/err.log" \
-    && ok "and the refusal points at the decisions file" \
-    || bad "the item refusal did not name the decisions file"
+    && ok "and the warning points at the decisions file" \
+    || bad "the item warning did not name the decisions file"
+else
+  bad "a contested title with no item chosen refused the whole publish: $(tail -3 "$WORK/err.log")"
 fi
-[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
 teardown
 
 setup
@@ -1113,14 +1112,13 @@ write_meta
 publish_baseline
 set_merge_record '{"stale": ["Q81565646"]}'
 if run_publish; then
-  bad "a store with a stale award ceremony merge published anyway"
-else
-  grep -q "1 merge(s) in .*award-ceremony-merges.json name a ceremony no title does" "$WORK/err.log" \
+  grep -q "warning: 1 merge(s) in .*award-ceremony-merges.json name a ceremony no title does" "$WORK/err.log" \
     && grep -q "Q81565646" "$WORK/err.log" \
-    && ok "a stale award ceremony merge is refused, naming it" \
-    || bad "refused, but not for the stale merge: $(tail -3 "$WORK/err.log")"
+    && ok "a stale award ceremony merge publishes, warning and naming it" \
+    || bad "published without warning about the stale merge: $(tail -3 "$WORK/err.log")"
+else
+  bad "a stale award ceremony merge refused the whole publish: $(tail -3 "$WORK/err.log")"
 fi
-[ ! -s "$UPLOADS" ] && ok "…and nothing was uploaded" || bad "it uploaded $(wc -l < "$UPLOADS") asset(s) first"
 teardown
 
 setup

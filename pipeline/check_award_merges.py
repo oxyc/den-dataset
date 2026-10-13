@@ -5,7 +5,9 @@ Wikidata files some awarding bodies' prizes half under the organisation and half
 so the store build merges each listed pair into one ceremony (`store/awards.py`). An entry whose `from` no
 title names any more is stale: the facts moved on, and whatever split it fixed may now be split another way.
 The build records `awardMerges` in the manifest — the list's sha256, how many merges applied, which are
-stale — and this refuses a store built from another list, or with a stale entry.
+stale — and this refuses a store built from another list. A stale entry only warns, and the daily run lists
+it in the `data-review` issue (`pipeline/daily_issue.py`): it merges nothing, so the store is no worse for
+it, and fixing it is worth a person's look but not a day's refresh.
 
     pipeline/check_award_merges.py --gate out/dataset.meta.json
 """
@@ -37,12 +39,12 @@ def gate(meta_path, merges_path=MERGES):
               f"the store with {rebuild}.", file=sys.stderr)
         return 1
     if record["stale"]:
-        print(f"error: {len(record['stale'])} merge(s) in {merges} name a ceremony no title does any more: "
+        print(f"warning: {len(record['stale'])} merge(s) in {merges} name a ceremony no title does any more: "
               f"{', '.join(record['stale'])}\n"
               f"       The facts no longer file any award under it, so the split it fixed has moved. Look at\n"
               f"       the body on Wikidata, then delete the entry or point it at the item its prizes file\n"
               f"       under now, and rebuild the store with {rebuild}", file=sys.stderr)
-        return 1
+        return 0
     print(f"award merge gate: {record.get('applied')} merges applied, none stale")
     return 0
 
