@@ -66,6 +66,13 @@ DISCOVER, EXPORT, DELTA, CATALOGUE = "discover", "export", "delta", "catalogue"
 #: In the order the stage's own refusal lists them.
 MODES = (DISCOVER, EXPORT, DELTA, CATALOGUE)
 
+#: How old a cached `/discover` page may be (`lib/tmdb.py`). A release year that ended before last year
+#: barely moves: a title crossing the vote floor there is rare and a week late is harmless, and those years
+#: are most of the catalogue sweep. A recent year, and the delta, is where new titles appear, so a page is
+#: reused only within the day — which is what a retry needs.
+SETTLED_MAX_AGE = 7 * 24 * 60 * 60
+RECENT_MAX_AGE = 12 * 60 * 60
+
 #: Motion pictures predate this only as experiments that TMDB does not catalogue as released screen works.
 #: One year per query keeps each answer below TMDB's 500-page ceiling; a year that does not fit is refused.
 CATALOGUE_FIRST_YEAR = 1870
@@ -172,7 +179,7 @@ def known_ids(path, media):
     return {record["tmdbId"] for record in records.values() if record["mediaType"] == media}
 
 
-def collect(client, media, params, limit=None):
+def collect(client, media, params, limit=None, max_age=0):
     """Page a `/discover` query, newest page last, de-duped, in the order TMDB returned them.
 
     Stops at TMDB's 500-page ceiling or at `limit`. A page whose body carries no `results` is a refusal
@@ -183,7 +190,7 @@ def collect(client, media, params, limit=None):
     """
     rows, seen, page = [], set(), 1
     while page <= tmdb_api.MAX_PAGES and (limit is None or len(rows) < limit):
-        items, _page, total = client.discover(media, params, page)
+        items, _page, total = client.discover(media, params, page, max_age=max_age)
         if limit is None and total >= tmdb_api.MAX_PAGES:
             raise StageError(
                 f"worklist: /discover/{media} reports {total} pages, at TMDB's "
@@ -202,7 +209,7 @@ def collect(client, media, params, limit=None):
     return rows[:limit] if limit is not None else rows
 
 
-def discovered(client, media, limit=None, **query):
+def discovered(client, media, limit=None, max_age=0, **query):
     """`collect` over `discover_params(media, **query)`, each row marked with whether the same query
     narrowed to `floors.REGIONAL_ORIGINS` names it.
 
@@ -210,9 +217,9 @@ def discovered(client, media, limit=None, **query):
     returns ranks inside it too. TMDB's `origin_country` on a series' row would answer it as well, but a
     film's row carries none, and one rule for both media is one rule to get right.
     """
-    rows = collect(client, media, tmdb_api.discover_params(media, **query), limit)
+    rows = collect(client, media, tmdb_api.discover_params(media, **query), limit, max_age)
     narrowed = tmdb_api.discover_params(media, origin_countries=floor_rules.REGIONAL_ORIGINS, **query)
-    regional = {row["tmdbId"] for row in collect(client, media, narrowed, limit)}
+    regional = {row["tmdbId"] for row in collect(client, media, narrowed, limit, max_age)}
     return [dict(row, regional=row["tmdbId"] in regional) for row in rows]
 
 
@@ -227,12 +234,19 @@ def catalogue_windows(today=None):
             for year in range(CATALOGUE_FIRST_YEAR, final + 1)]
 
 
-def full_catalogue(client, media, windows=None):
+def max_age(end, today=None):
+    """How old a cached page for a slice ending on `end` may be: `SETTLED_MAX_AGE` once its year ended
+    before last year, else `RECENT_MAX_AGE`."""
+    year = (today or datetime.datetime.now(datetime.timezone.utc).date()).year
+    return SETTLED_MAX_AGE if int(end[:4]) < year - 1 else RECENT_MAX_AGE
+
+
+def full_catalogue(client, media, windows=None, today=None):
     """Every row currently discoverable at the lowest admission floor, across bounded date slices."""
     found = {}
-    for start, end in windows or catalogue_windows():
-        rows = discovered(client, media, vote_count_gte=VOTE_FLOOR, release_date_gte=start,
-                          release_date_lte=end, sort_by=SORT_BY)
+    for start, end in windows or catalogue_windows(today):
+        rows = discovered(client, media, max_age=max_age(end, today), vote_count_gte=VOTE_FLOOR,
+                          release_date_gte=start, release_date_lte=end, sort_by=SORT_BY)
         for row in rows:
             previous = found.get(row["tmdbId"])
             if previous is None:
@@ -264,7 +278,8 @@ def universe(ctx, media, client=None):
     # and an operator reading a stack trace from inside an HTTP client learns nothing about which stage
     # could not run.
     try:
-        client = client or tmdb_api.TMDB()
+        client = client or tmdb_api.TMDB(cache=caching.configured(tmdb_api.DISCOVER_NAMESPACE,
+                                                                  SETTLED_MAX_AGE / caching.DAY_SECONDS))
     except tmdb_api.TMDBError as refusal:
         raise StageError(f"worklist: {refusal}") from None
     if chosen == DISCOVER:
@@ -287,8 +302,8 @@ def universe(ctx, media, client=None):
     # of them are below the floor. A dated `vote_count.desc` slice selects the same titles in a few paged
     # calls. The trade: a re-release or a late metadata fix on an OLD title is not picked up — acceptable,
     # because a periodic full pass covers drift and paying per id daily does not scale.
-    return [row for row in discovered(client, media, vote_count_gte=VOTE_FLOOR, release_date_gte=ctx.since,
-                                      sort_by=SORT_BY)
+    return [row for row in discovered(client, media, max_age=RECENT_MAX_AGE, vote_count_gte=VOTE_FLOOR,
+                                      release_date_gte=ctx.since, sort_by=SORT_BY)
             if row["tmdbId"] not in known]
 
 

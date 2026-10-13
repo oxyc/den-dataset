@@ -10,13 +10,22 @@ Two rules are load-bearing and neither is obvious from the endpoint:
   * **`results` is required.** Defaulting it to an empty list turns every unexpected shape — an auth error
     body, a schema change, a maintenance page — into a valid empty page. The worklist's paging loop then
     stops after page one and the delta pass reports "0 new titles" instead of failing, silently, daily.
-  * **`/discover` is never cached.** Its whole job is to surface titles that are new or have newly crossed
-    the vote floor, so serving it from disk hides exactly what it was asked for.
+  * **`/discover` is cached only for as long as its answer cannot have moved enough to matter.** Its whole
+    job is to surface titles that are new or have newly crossed the vote floor, so a page served from disk
+    hides whatever changed since it was written. The caller says how old a page may be (`max_age`): the
+    worklist allows a week for release years that ended before last year, where a title crossing the floor
+    is rare and can wait, and half a day for recent years, so a retry the same day re-reads none of it.
+    The catalogue sweep through every release year took 11 minutes of every attempt before this.
 """
 import json
 import os
+import time
 
 from . import http
+
+#: The response cache namespace for `/discover` pages (`lib/cache.configured`). Pages carry TMDB's ids and
+#: vote counts; they are read by the worklist and nothing is published from them.
+DISCOVER_NAMESPACE = "tmdb_discover"
 
 HOST = "api.themoviedb.org"
 BASE = "/3"
@@ -63,20 +72,44 @@ def discover_params(media, vote_count_gte=None, release_date_gte=None, release_d
 class TMDB:
     """A thin client over `lib/http`."""
 
-    def __init__(self, key=None):
+    def __init__(self, key=None, cache=None, now=time.time):
         self._key = key or api_key()
+        self.cache, self.now = cache, now
 
     def get(self, path, params=None):
         """One TMDB call."""
         payload = http.request(HOST, BASE + path, dict(params or {}, api_key=self._key))
         return json.loads(payload.decode("utf-8"))
 
-    def discover(self, media, params, page=1):
-        """One page of `/discover/{media}` as `(rows, page, total_pages)`.
+    def cached(self, path, query, max_age):
+        """The page on disk for this request when it is younger than `max_age` seconds, else None."""
+        if self.cache is None or max_age <= 0:
+            return None
+        key = self.cache.key(path, query)
+        try:
+            if self.now() - os.path.getmtime(self.cache.path_for(key)) >= max_age:
+                return None
+        except OSError:
+            return None
+        body = self.cache.read(key)
+        try:
+            return json.loads(body.decode("utf-8")) if body else None
+        except ValueError:
+            return None
 
-        `results` missing is a refusal rather than an empty page — see the module docstring.
+    def discover(self, media, params, page=1, max_age=0):
+        """One page of `/discover/{media}` as `(rows, page, total_pages)`, from disk when the cache holds
+        one younger than `max_age` seconds.
+
+        `results` missing is a refusal rather than an empty page — see the module docstring — and only a
+        page that has them is written to the cache.
         """
-        body = self.get(f"/discover/{media}", dict(params, page=str(page)))
+        path, query = f"/discover/{media}", dict(params, page=str(page))
+        body = self.cached(path, query, max_age)
+        if body is None:
+            body = self.get(path, query)
+            if self.cache is not None and isinstance(body.get("results"), list):
+                self.cache.write(self.cache.key(path, query), json.dumps(body).encode("utf-8"))
         rows = body.get("results")
         if not isinstance(rows, list):
             raise TMDBError(
