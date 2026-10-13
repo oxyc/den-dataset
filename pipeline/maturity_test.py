@@ -470,7 +470,7 @@ class Stage(unittest.TestCase):
                     "Medietilsynet": lambda: body,
                     "CNC": lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
                     "ClassInd": unavailable,
-                }, now=first + datetime.timedelta(days=1), snapshot_cache=snapshots)
+                }, now=first + datetime.timedelta(days=8), snapshot_cache=snapshots)
                 with open(os.path.join(out, "maturity-sources.json"), encoding="utf-8") as handle:
                     manifest = json.load(handle)
                 with open(os.path.join(out, "maturity-sources", "classind-audiovisual.csv"), "rb") as handle:
@@ -479,6 +479,36 @@ class Stage(unittest.TestCase):
         self.assertEqual(source["retrievedAt"], first.isoformat())
         self.assertIn("HTTP 0", source["fallbackAfter"])
         self.assertEqual(manifest["unavailable"], [])
+
+    def test_a_snapshot_under_a_week_old_is_used_without_downloading(self):
+        brazil = ("Código;Titulo no Brasil;Titulo original;Ano de produção;Diretores;"
+                  "Classificação Atribuída\n9;The Film;;2022;Alice Director;14 anos\n").encode()
+        with tempfile.TemporaryDirectory() as root:
+            snapshots = cache.ResponseCache("test_maturity", root, 30 * cache.DAY_SECONDS)
+            maturity._remember_snapshot(snapshots, "ClassInd", {
+                "payload": brazil, "sourceUrl": "https://dados.mj.gov.br/file.csv",
+                "retrievedAt": "2026-10-01T00:00:00+00:00"})
+
+            def refuse():
+                raise AssertionError("a week-fresh register was downloaded again")
+            snapshot, failure = maturity._source_snapshot(
+                refuse, maturity_public.brazil_records, "ClassInd", maturity_public.BRAZIL_PAGE,
+                "2026-10-07T23:00:00+00:00", snapshots)
+            self.assertIsNone(failure)
+            self.assertEqual(snapshot["retrievedAt"], "2026-10-01T00:00:00+00:00")
+            self.assertNotIn("fallbackAfter", snapshot)
+            self.assertEqual(len(snapshot["rows"]), 1)
+
+            fetched = []
+
+            def fetch():
+                fetched.append(True)
+                return brazil
+            snapshot, _ = maturity._source_snapshot(
+                fetch, maturity_public.brazil_records, "ClassInd", maturity_public.BRAZIL_PAGE,
+                "2026-10-08T00:00:00+00:00", snapshots)
+        self.assertEqual(fetched, [True], "a week-old register was not downloaded again")
+        self.assertEqual(snapshot["retrievedAt"], "2026-10-08T00:00:00+00:00")
 
     def test_a_corrupt_cached_pair_is_not_used_as_authority_evidence(self):
         with tempfile.TemporaryDirectory() as root:
