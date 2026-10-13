@@ -32,6 +32,10 @@ OUTPUTS = (artifacts.MATURITY_NORWAY, artifacts.MATURITY_CNC, artifacts.MATURITY
 
 SOURCE_CACHE_NAMESPACE = "maturity_source"
 SOURCE_CACHE_DAYS = 30
+#: A validated snapshot retrieved less than this long ago is used without downloading the register again.
+#: Classification registers change slowly, a rating a week late is harmless, and the downloads are most of
+#: this stage's minute on every daily run. Older snapshots are still the fallback when a download fails.
+SOURCE_FRESH = datetime.timedelta(days=7)
 
 
 def normalized(value):
@@ -227,8 +231,24 @@ def _remember_snapshot(store, authority, snapshot):
     store.write(store.key(f"{authority}/metadata"), json.dumps(metadata, sort_keys=True).encode())
 
 
+def _fresh(snapshot, stamp):
+    """Whether a cached snapshot was retrieved within `SOURCE_FRESH` of this run's `stamp`."""
+    try:
+        age = (datetime.datetime.fromisoformat(stamp)
+               - datetime.datetime.fromisoformat(snapshot["retrievedAt"]))
+    except (TypeError, ValueError):
+        return False
+    return datetime.timedelta(0) <= age < SOURCE_FRESH
+
+
 def _source_snapshot(fetcher, parser, authority, default_url, stamp, store=None, required=False):
-    """Fetch and validate one source, falling back only to a recent validated last-known-good body."""
+    """A source's validated snapshot: the cached one when it is under `SOURCE_FRESH` old, else a fresh
+    download, falling back only to a recent validated last-known-good body when the download fails. A
+    reused snapshot keeps its own `retrievedAt`, so the manifest says when the bytes were read."""
+    cached = _cached_snapshot(store, authority)
+    if cached is not None and _fresh(cached, stamp):
+        cached["rows"] = list(parser(cached["payload"]))
+        return cached, None
     try:
         fetched = fetcher()
     except http.HTTPError as refusal:
