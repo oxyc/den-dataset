@@ -122,6 +122,25 @@ def collisions(titled):
     return counts, colliding
 
 
+def automatic(facts, alias, owners):
+    """Why an undecided colliding alias needs no person to drop it, or None when it does.
+
+    Two cases are certain from the data alone:
+      - it names another version of this work: a remake, or another adaptation of the same source, which
+        the facts already link (`otherVersions`). Midnight Sun on the 2006 film it was remade from, Miss
+        Granny on its Telugu remake.
+      - it is not a well-formed name: a lone trailing quote ("Twin'"), or an unclosed bracket.
+    Anything else still waits for a keep or drop in the decisions file.
+    """
+    versions = {(v or {}).get("key") for v in (facts or {}).get("otherVersions") or []}
+    if any(f"{media}:{tmdb_id}" in versions for media, tmdb_id in owners):
+        return "names another version of this work"
+    text = alias.strip()
+    if (text[-1:] in "'\"" and text.count(text[-1]) % 2) or text.count("(") != text.count(")"):
+        return "a malformed label"
+    return None
+
+
 def apply(rows, path=DECISIONS):
     """Remove every `drop` alias, and hold back every colliding alias nobody has decided, from the corpus
     rows, in place. Return the `aliasDecisions` record.
@@ -129,22 +148,26 @@ def apply(rows, path=DECISIONS):
     An undecided collision is held rather than shipped: a held alias only costs its title one search name
     until a person decides it, while a shipped one may be junk that tops another title's search. So one new
     Wikidata altLabel never stops a publish — the title ships without it, and `--review` lists it for a
-    decision. The record is the decisions file's sha256, how many aliases were dropped, how many were held
-    (`withheld`), and how many colliding aliases ship undecided (`undecided`), which is now always 0 and
-    which the publisher still checks.
+    decision. One that `automatic` can settle is dropped without waiting (`autoDropped`). The record is the
+    decisions file's sha256, how many aliases were dropped, auto-dropped and held (`withheld`), and how many
+    colliding aliases ship undecided (`undecided`), which is now always 0 and which the publisher still checks.
     """
     decided, _ = load_decisions(path)
-    titled = []
+    titled, facts = [], {}
     for row in rows:
         media, _, tmdb_id = row["key"].partition(":")
-        titled.append((media, int(tmdb_id), (row.get("facts") or {}).get("titles") or {}))
+        facts[(media, int(tmdb_id))] = row.get("facts") or {}
+        titled.append((media, int(tmdb_id), facts[(media, int(tmdb_id))].get("titles") or {}))
 
     _, colliding = collisions(titled)
-    held = {decision_key(media, tmdb_id, alias) for media, tmdb_id, _, alias, _ in colliding
-            if decision_key(media, tmdb_id, alias) not in decided}
+    held, auto = set(), set()
+    for media, tmdb_id, _, alias, owners in colliding:
+        key = decision_key(media, tmdb_id, alias)
+        if key not in decided:
+            (auto if automatic(facts[(media, tmdb_id)], alias, owners) else held).add(key)
 
     drops = {key for key, verdict in decided.items() if verdict == "drop"}
-    dropped = withheld = 0
+    dropped = auto_dropped = withheld = 0
     for media, tmdb_id, titles in titled:
         aliases = titles.get("aliases")
         if not aliases:
@@ -154,6 +177,8 @@ def apply(rows, path=DECISIONS):
             key = decision_key(media, tmdb_id, a)
             if key in drops:
                 dropped += 1
+            elif key in auto:
+                auto_dropped += 1
             elif key in held:
                 withheld += 1
             else:
@@ -163,7 +188,8 @@ def apply(rows, path=DECISIONS):
 
     with open(path, "rb") as fh:
         sha = hashlib.sha256(fh.read()).hexdigest()
-    return {"sha256": sha, "dropped": dropped, "withheld": withheld, "undecided": 0}
+    return {"sha256": sha, "dropped": dropped, "autoDropped": auto_dropped, "withheld": withheld,
+            "undecided": 0}
 
 
 def apply_entities(table, path=DECISIONS):
