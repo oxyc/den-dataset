@@ -14,13 +14,11 @@ FIELDS = frozenset(("authority", "authorityId", "key"))
 KEY = re.compile(r"movie:[1-9]\d*\Z")
 
 
-def load(path=PATH):
-    """Return the strictly validated ``(authority, id) -> corpus key`` review ledger and its digest."""
+def load_payload(payload):
+    """Return the validated ledger and digest for the exact supplied bytes."""
     try:
-        with open(path, "rb") as handle:
-            payload = handle.read()
         blob = json.loads(payload)
-    except (OSError, UnicodeDecodeError, ValueError) as broken:
+    except (UnicodeDecodeError, ValueError) as broken:
         raise StageError(f"maturity: authority decisions are unreadable: {broken}") from None
     if (not isinstance(blob, dict) or set(blob) != {"schema", "decisions"}
             or type(blob.get("schema")) is not int or blob["schema"] != 1
@@ -43,6 +41,16 @@ def load(path=PATH):
             raise StageError(f"maturity: duplicate authority decision for {authority} {authority_id}")
         decisions[identity] = key
     return decisions, hashlib.sha256(payload).hexdigest()
+
+
+def load(path=PATH):
+    """Return the strictly validated ``(authority, id) -> corpus key`` review ledger and its digest."""
+    try:
+        with open(path, "rb") as handle:
+            payload = handle.read()
+    except OSError as broken:
+        raise StageError(f"maturity: authority decisions are unreadable: {broken}") from None
+    return load_payload(payload)
 
 
 def validate_targets(decisions, facts_blob):

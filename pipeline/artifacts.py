@@ -444,8 +444,9 @@ FACTS = Artifact(
     manifest_key="factsFile",
 )
 
-#: The immutable authority snapshot and its manifest used by the numeric maturity stage. They stay in the
-#: build bundle, not the public release; the corpus carries only the matched factual observations. The
+#: The immutable authority snapshot and its manifest used by the numeric maturity stage. They stay out of
+#: the served dataset; a publish keeps them compressed in one versioned audit asset beside the corpus bundle.
+#: The corpus itself carries only the matched factual observations. The
 #: Norwegian source deliberately excludes no rows at download time, so its digest can be checked against
 #: the authority's complete workbook before the adapter discards synopsis and classification-reason prose.
 MATURITY_NORWAY = Artifact(

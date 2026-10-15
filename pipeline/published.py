@@ -8,8 +8,10 @@ The daily job (oxyc/den-dataset#27) runs on a machine that keeps nothing between
 the last publish put on the `corpus-<ver>` release: the store's own inputs, and the few records the stages
 resume from, all of them derived and none of them prose — the corpus rows (every judgement, each title's
 `source`), the facts and their Wikidata checkpoints, both vector blobs and their titles, the genres & moods,
-the doc facts, and which embedder, space and document shape the vectors were made in. `bundle` gathers them
-for the publish; `seed` lays them back out as an out-dir the stages run over as if they had built it:
+the doc facts, and which embedder, space and document shape the vectors were made in. The same release keeps
+one compressed maturity audit asset containing the exact public inputs, derived observations and decision
+ledger; it is evidence, not a seed or served artifact. `bundle` gathers everything for the publish; `seed`
+lays the operational inputs back out as an out-dir the stages run over as if they had built it:
 
   * `enriched/batch-<maxBatchId>.json` — one record per title with a `source`, its fields and its plot's
     digest in place of the plot. The change set diffs today's batches against it (`pipeline/changes.py`
@@ -38,7 +40,7 @@ if not __package__:
     sys.path[0] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from lib import cache as caching  # noqa: E402
-from pipeline import artifacts, consolidate_corpus, enrich, jsonbytes  # noqa: E402
+from pipeline import artifacts, consolidate_corpus, enrich, jsonbytes, maturity_audit  # noqa: E402
 from pipeline.contract import StageError  # noqa: E402
 from store import vector_blob  # noqa: E402
 
@@ -142,6 +144,15 @@ def bundle(out_dir, dest):
     if transformed and absent:
         raise StageError(f"published: transformed plot vectors require {', '.join(absent)} in the corpus "
                          "bundle; without the raw rows the next daily run would project old rows again")
+    # One compressed asset keeps exact public-authority evidence durable without putting ten raw source
+    # files on the release page or in the served dataset. Absence is allowed only for the generation before
+    # the audit bundle exists; a partial maturity stage is refused by `maturity_audit.build`.
+    maturity_paths = (artifacts.MATURITY_SOURCES.filename,
+                      artifacts.MATURITY.filename.format(version=version))
+    if any(os.path.exists(os.path.join(out_dir, path)) for path in maturity_paths):
+        target = os.path.join(dest, maturity_audit.ASSET)
+        maturity_audit.build(out_dir, target, version)
+        files[maturity_audit.ASSET] = sha256(target)
     record = {"datasetVersion": version, "files": files}
     with open(os.path.join(dest, RECORD), "w", encoding="utf-8") as fh:
         json.dump(record, fh, indent=1, sort_keys=True)
