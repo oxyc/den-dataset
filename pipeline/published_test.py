@@ -5,6 +5,7 @@
 rules around it, on a hand-made generation: what a bundle refuses to be made without, what a seed refuses to
 start from, and the records it writes for the stages to resume from.
 """
+import datetime
 import gzip
 import json
 import os
@@ -16,8 +17,9 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
-from pipeline import artifacts, enrich, published  # noqa: E402
-from pipeline.contract import StageError  # noqa: E402
+from pipeline import artifacts, enrich, maturity, maturity_audit, published  # noqa: E402
+from pipeline.contract import Context, StageError  # noqa: E402
+from pipeline.maturity_test import facts, movie, payload, source_row  # noqa: E402
 from store import vector_blob  # noqa: E402
 
 VERSION = "0123456789ab"
@@ -83,6 +85,22 @@ class Published(unittest.TestCase):
         self.assertNotIn("vectors-premise.bin", self.record["files"], "optional, and not there")
         for asset, digest in self.record["files"].items():
             self.assertEqual(published.sha256(os.path.join(self.fresh, "published", asset)), digest)
+
+    def test_maturity_evidence_is_one_verified_release_asset(self):
+        facts_blob = facts(movie(1))
+        facts_path = os.path.join(self.out, artifacts.FACTS.filename.format(version=VERSION))
+        write(facts_path, json.dumps(facts_blob))
+        maturity.run(Context(out_dir=self.out),
+                     fetchers={"Medietilsynet": lambda: payload(source_row())},
+                     now=datetime.datetime(2026, 10, 15, tzinfo=datetime.timezone.utc))
+        destination = os.path.join(self.tmp, "maturity-publish")
+        record = published.bundle(self.out, destination)
+        self.assertIn(maturity_audit.ASSET, record["files"])
+        self.assertFalse(any(name.startswith("maturity-sources.") for name in record["files"]))
+        with open(facts_path, "rb") as handle:
+            audit = maturity_audit.verify(os.path.join(destination, maturity_audit.ASSET),
+                                          handle.read(), VERSION)
+        self.assertEqual(audit["datasetVersion"], VERSION)
 
     def test_a_seed_lays_the_generation_out_under_the_names_the_stages_read(self):
         said = published.seed(self.fresh)
