@@ -52,6 +52,37 @@ class Inputs(unittest.TestCase):
         self.assertEqual(audit, {"crossAuthorityConflicts": 1, "ambiguousRows": 2})
         self.assertNotIn("secret", repr(values))
 
+    def test_keeps_official_but_unmapped_evidence_unknown(self):
+        body = {"records": [
+            {"mediaType": "movie", "tmdbId": 1, "minimumAge": None,
+             "observations": [{"authority": "CNC", "age": None, "raw": "Tout public",
+                               "matchedBy": "exact-title+year+director"}]},
+            {"mediaType": "movie", "tmdbId": 2, "minimumAge": 13,
+             "observations": [{"authority": "MCC-Quebec", "age": 13,
+                               "matchedBy": "exact-title+year+director"},
+                              {"authority": "CNC", "age": None,
+                               "matchedBy": "exact-title+year+director"}]},
+        ]}
+        with tempfile.TemporaryDirectory() as work:
+            path = os.path.join(work, "maturity.json")
+            with open(path, "w") as fh:
+                json.dump(body, fh)
+            values, _ = coverage.load_public_maturity(path)
+        self.assertNotIn(("movie", 1), values)
+        self.assertEqual(values[("movie", 2)]["minimumAge"], 13)
+        self.assertEqual(set(values[("movie", 2)]["authorities"]), {"MCC-Quebec"})
+
+    def test_rejects_duplicate_unknown_maturity_records(self):
+        row = {"mediaType": "movie", "tmdbId": 1, "minimumAge": None,
+               "observations": [{"authority": "CNC", "age": None,
+                                 "matchedBy": "exact-title+year+director"}]}
+        with tempfile.TemporaryDirectory() as work:
+            path = os.path.join(work, "maturity.json")
+            with open(path, "w") as fh:
+                json.dump({"records": [row, row]}, fh)
+            with self.assertRaisesRegex(ValueError, "duplicate maturity record"):
+                coverage.load_public_maturity(path)
+
 
 class Sources(unittest.TestCase):
     def test_tmdb_movie_and_tv_shapes_are_normalized_only_in_memory(self):

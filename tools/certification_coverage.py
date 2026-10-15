@@ -92,31 +92,41 @@ def load_public_maturity(path):
             raise ValueError(f"{path}: expected a maturity records list") from None
     if not isinstance(rows, list):
         raise ValueError(f"{path}: expected a maturity records list")
-    found = {}
+    found, seen = {}, set()
     for row in rows:
         media, ident, age = row.get("mediaType"), row.get("tmdbId"), row.get("minimumAge")
         observations = row.get("observations")
         if (media not in ("movie", "tv") or not isinstance(ident, int) or isinstance(age, bool)
-                or not isinstance(age, int) or not 0 <= age <= 18 or not isinstance(observations, list)
-                or not observations):
+                or (age is not None and (not isinstance(age, int) or not 0 <= age <= 18))
+                or not isinstance(observations, list) or not observations):
             raise ValueError(f"{path}: malformed maturity record")
         key = (media, ident)
-        if key in found:
+        if key in seen:
             raise ValueError(f"{path}: duplicate maturity record {media}:{ident}")
+        seen.add(key)
         authorities = collections.defaultdict(lambda: {"ages": set(), "methods": set()})
         for observation in observations:
             authority = observation.get("authority")
             observed_age = observation.get("age")
             method = observation.get("matchedBy")
             if (not isinstance(authority, str) or not authority or isinstance(observed_age, bool)
-                    or not isinstance(observed_age, int) or not 0 <= observed_age <= 18
+                    or (observed_age is not None and
+                        (not isinstance(observed_age, int) or not 0 <= observed_age <= 18))
                     or not isinstance(method, str) or not method):
                 raise ValueError(f"{path}: malformed maturity observation")
-            authorities[authority]["ages"].add(observed_age)
-            authorities[authority]["methods"].add(method)
-        if age != max(value for authority in authorities.values() for value in authority["ages"]):
+            if observed_age is not None:
+                authorities[authority]["ages"].add(observed_age)
+                authorities[authority]["methods"].add(method)
+        observed_ages = [value for authority in authorities.values() for value in authority["ages"]]
+        if age is None:
+            if observed_ages:
+                raise ValueError(f"{path}: missing minimumAge despite numeric observations for {media}:{ident}")
+            continue
+        if not observed_ages or age != max(observed_ages):
             raise ValueError(f"{path}: minimumAge is not the highest observation for {media}:{ident}")
-        found[key] = {"minimumAge": age, "authorities": dict(authorities)}
+        found[key] = {"minimumAge": age,
+                      "authorities": {name: evidence for name, evidence in authorities.items()
+                                      if evidence["ages"]}}
     audit = ((root.get("derivation") or {}).get("audit") or {})
     return found, {
         "crossAuthorityConflicts": len(audit.get("crossAuthorityConflicts") or []),
