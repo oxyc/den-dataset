@@ -63,7 +63,10 @@ MAX_TOKENS="${MAX_TOKENS:-1024}"
 # is not the CC0 shape at all.
 DOC_FACTS="${DOC_FACTS:-out-t02-cc0/doc-facts.json}"
 SEGMENT="${SEGMENT:-5000}"            # titles per den-embed lifetime, then restart it fresh
-IMAGE="${DEN_EMBED_IMAGE:-ghcr.io/oxyc/den-embed:latest}"
+# The compatibility service is owned and released by den-atlas now. Keep the fallback immutable: this
+# script exists for deliberate whole-corpus work, where silently following `latest` could mix spaces across
+# a resumed run. Change the digest only after the native x86 parity workflow in docs/OPERATE.md passes.
+IMAGE="${DEN_EMBED_IMAGE:-ghcr.io/oxyc/den-atlas-embed@sha256:34d389cd3b1ac163172557118fe1c40db6ea56b06d1ef60afec4fc3fb2635bbe}"
 RUNTIME="${DEN_EMBED_RUNTIME:-podman}"
 PORT="${DEN_EMBED_PORT:-8791}"
 NAME="den-embed-corpus-$$"
