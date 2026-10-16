@@ -3,6 +3,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import urllib.parse
 
 from lib import http
@@ -36,7 +37,26 @@ def _clean(value):
 
 def _runtime(value):
     value = str(value or "").strip()
-    return int(value) // 60 if value.isdigit() else None
+    # IMDA publishes Total_Running_Time_Actual in minutes (a season package can therefore be several
+    # hundred). Treating it as seconds made an ordinary feature film appear one or two minutes long.
+    return int(value) if value.isdigit() else None
+
+
+def _tv_identity(titles, row):
+    """Production year and base titles encoded by IMDA in episode-package title fields."""
+    found, years = [], set()
+    for title in titles:
+        match = re.fullmatch(r"(.+?)\s+\(((?:19|20)\d{2})\)", title)
+        if match:
+            found.append(match.group(1).strip())
+            years.add(int(match.group(2)))
+        else:
+            found.append(title)
+    year = next(iter(years)) if len(years) == 1 else None
+    credits = [_clean(row[name]) for name in ("Directors", "Producers", "Actors")]
+    people = "; ".join(re.sub(r"\s*\((?:creator|director|producer)\)\s*$", "", value,
+                              flags=re.I) for value in credits if value)
+    return list(dict.fromkeys(found)), year, people
 
 
 def records(payload):
@@ -64,11 +84,19 @@ def records(payload):
             continue
         seen.add(authority_id)
         rating = row["Rating"].strip()
+        episode = _clean(row["Episode_No"])
+        media_types = ("tv",) if episode else ("movie",)
+        year, people = None, _clean(row["Directors"])
+        if episode:
+            titles, year, people = _tv_identity(titles, row)
         yield {"authority": "IMDA", "authorityId": authority_id, "titles": titles,
-               "directors": _clean(row["Directors"]), "year": None, "raw": rating,
+               "directors": _clean(row["Directors"]), "people": people, "year": year, "raw": rating,
                "age": age(rating), "assessed": row["Decision_Date"].strip(),
                "runtimeMinutes": _runtime(row["Total_Running_Time_Actual"]),
-               "matchedBy": "exact-title+year+director"}
+               "matchedBy": "exact-title+year+credited-person",
+               # IMDA's Year is the classification year, not a production year. Only episode packages
+               # whose official title itself ends in an unambiguous production year can link automatically.
+               "mediaTypes": media_types}
 
 
 def fetch(request=None):

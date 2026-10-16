@@ -3,9 +3,9 @@
 
 Raw public-authority snapshots are kept byte-for-byte beside a manifest; only factual identity and
 classification fields enter the derived JSON. Synopsis and classification-reason prose are never copied.
-A source row is accepted only when exact normalized title, production year, and an exact director name
-identify one corpus movie. Everything else stays unknown; there is intentionally no fuzzy or
-model-assisted path.
+A source row is accepted only when exact normalized title, production year, and an exact credited person
+identify one corpus work within the authority dataset's declared media scope. Everything else stays
+unknown; there is intentionally no fuzzy or model-assisted path.
 """
 import dataclasses
 import datetime
@@ -26,7 +26,7 @@ PUBLISHES = False
 SPENDS = False
 INPUTS = (artifacts.MANIFEST, artifacts.FACTS, artifacts.MATURITY_KAVI)
 OUTPUTS = (artifacts.MATURITY_NORWAY, artifacts.MATURITY_CNC, artifacts.MATURITY_BRAZIL,
-           artifacts.MATURITY_KMRB, artifacts.MATURITY_TAIWAN, artifacts.MATURITY_SINGAPORE,
+           artifacts.MATURITY_TAIWAN, artifacts.MATURITY_SINGAPORE,
            artifacts.MATURITY_QUEBEC, artifacts.MATURITY_ITALY, artifacts.MATURITY_ITALY_HISTORICAL,
            artifacts.MATURITY_SOURCES, artifacts.MATURITY)
 
@@ -86,10 +86,15 @@ def link_records(source_records, facts_blob, decisions=None):
     entities = facts_blob.get("entities") or {}
     targets, index = {}, {}
     for fact in facts_blob.get("records") or ():
-        if fact.get("mediaType") != "movie" or not isinstance(fact.get("tmdbId"), int):
+        media = fact.get("mediaType")
+        if media not in {"movie", "tv"} or not isinstance(fact.get("tmdbId"), int):
             continue
-        key = f"movie:{fact['tmdbId']}"
-        target = {"key": key, "year": _year(fact), "directors": _entity_names(fact.get("directors"), entities)}
+        key = f"{media}:{fact['tmdbId']}"
+        people = _entity_names(fact.get("directors"), entities)
+        if media == "tv":
+            people |= _entity_names(fact.get("creators"), entities)
+            people |= _entity_names(fact.get("cast"), entities)
+        target = {"key": key, "mediaType": media, "year": _year(fact), "people": people}
         targets[key] = target
         for title in _aliases(fact):
             index.setdefault((title, target["year"]), set()).add(key)
@@ -100,6 +105,12 @@ def link_records(source_records, facts_blob, decisions=None):
               "ambiguousRows": 0, "missingIdentityRows": 0, "unknownRatingRows": 0, "noRatingRows": 0}
     for source in source_records:
         counts["sourceRows"] += 1
+        media_types = source.get("mediaTypes", ("movie",))
+        if (not isinstance(media_types, (list, tuple)) or not media_types
+                or any(media not in {"movie", "tv"} for media in media_types)):
+            raise StageError(f"maturity: {source.get('authority')} {source.get('authorityId')} "
+                             "has an invalid media scope")
+        media_types = set(media_types)
         if source["age"] is None:
             counts["unknownRatingRows"] += 1
         else:
@@ -115,15 +126,20 @@ def link_records(source_records, facts_blob, decisions=None):
             counts["noRatingRows"] += 1
             continue
         title_keys = {(title, source["year"]) for raw in source["titles"] if (title := normalized(raw))}
-        candidates = set().union(*(index.get(pair, set()) for pair in title_keys)) if title_keys else set()
-        directors = _director_parts(source["directors"])
-        exact_candidates = ({key for key in candidates if targets[key]["directors"] & directors}
-                            if source["year"] is not None and title_keys and directors else set())
+        candidates = (set().union(*(index.get(pair, set()) for pair in title_keys))
+                      if title_keys else set())
+        candidates = {key for key in candidates if targets[key]["mediaType"] in media_types}
+        people = _director_parts(source.get("people", source["directors"]))
+        exact_candidates = ({key for key in candidates if targets[key]["people"] & people}
+                            if source["year"] is not None and title_keys and people else set())
         decision = decisions.get((source["authority"], source["authorityId"]))
         if decision is not None:
             if decision not in targets:
                 raise StageError(f"maturity: reviewed {source['authority']} {source['authorityId']} "
                                  f"targets absent corpus key {decision}")
+            if targets[decision]["mediaType"] not in media_types:
+                raise StageError(f"maturity: reviewed {source['authority']} {source['authorityId']} "
+                                 f"targets {decision} outside its declared media scope")
             if exact_candidates and decision not in exact_candidates:
                 raise StageError(f"maturity: reviewed {source['authority']} {source['authorityId']} "
                                  f"targets {decision}, but exact identity now excludes it "
@@ -132,7 +148,7 @@ def link_records(source_records, facts_blob, decisions=None):
             matched_by = "authority-id-decision"
             counts["decisionMatchedRows"] += 1
         else:
-            if source["year"] is None or not title_keys or not directors:
+            if source["year"] is None or not title_keys or not people:
                 counts["missingIdentityRows"] += 1
                 continue
             candidates = exact_candidates
