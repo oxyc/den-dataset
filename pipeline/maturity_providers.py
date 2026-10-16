@@ -1,8 +1,6 @@
 """Registry describing every maturity authority and its acquisition boundary."""
 import dataclasses
-import os
-
-from . import (artifacts, maturity_italy, maturity_italy_historical, maturity_kavi, maturity_kmrb,
+from . import (artifacts, maturity_italy, maturity_italy_historical, maturity_kavi,
                maturity_norway, maturity_public,
                maturity_quebec, maturity_singapore, maturity_taiwan)
 
@@ -42,9 +40,6 @@ PROVIDERS = (
              maturity_public.BRAZIL_PAGE,
              _manifest("ClassInd", "Obras Audiovisuais", maturity_public.BRAZIL_PAGE,
                        maturity_public.BRAZIL_LICENSE), fetch=maturity_public.fetch_brazil),
-    Provider("KMRB", artifacts.MATURITY_KMRB, maturity_kmrb.records,
-             maturity_kmrb.URL, maturity_kmrb.manifest_entry, fetch=maturity_kmrb.fetch,
-             configured=lambda: bool(os.environ.get("KMRB_API_KEY"))),
     Provider("BAMID", artifacts.MATURITY_TAIWAN, maturity_taiwan.records,
              maturity_taiwan.INDEX, maturity_taiwan.manifest_entry, fetch=maturity_taiwan.fetch),
     Provider("IMDA", artifacts.MATURITY_SINGAPORE, maturity_singapore.records,

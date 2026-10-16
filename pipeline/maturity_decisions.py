@@ -8,10 +8,10 @@ from .contract import REPO, StageError
 
 
 PATH = os.path.join(REPO, "data", "maturity-authority-decisions.json")
-AUTHORITIES = frozenset(("Medietilsynet", "CNC", "ClassInd", "KMRB", "KAVI", "BAMID", "IMDA",
+AUTHORITIES = frozenset(("Medietilsynet", "CNC", "ClassInd", "KAVI", "BAMID", "IMDA",
                          "MCC-Québec", "DGCA-Italy", "DGCA-Italy-NullaOsta"))
 FIELDS = frozenset(("authority", "authorityId", "key"))
-KEY = re.compile(r"movie:[1-9]\d*\Z")
+KEY = re.compile(r"(?:movie|tv):[1-9]\d*\Z")
 
 
 def load_payload(payload):
@@ -35,7 +35,7 @@ def load_payload(payload):
                 or authority_id != authority_id.strip()):
             raise StageError(f"maturity: authority decision {number} has an invalid authorityId")
         if not isinstance(key, str) or not KEY.fullmatch(key):
-            raise StageError(f"maturity: authority decision {number} has an invalid movie key")
+            raise StageError(f"maturity: authority decision {number} has an invalid corpus key")
         identity = (authority, authority_id)
         if identity in decisions:
             raise StageError(f"maturity: duplicate authority decision for {authority} {authority_id}")
@@ -54,8 +54,8 @@ def load(path=PATH):
 
 
 def validate_targets(decisions, facts_blob):
-    targets = {f"movie:{row['tmdbId']}" for row in facts_blob.get("records") or ()
-               if row.get("mediaType") == "movie" and isinstance(row.get("tmdbId"), int)
+    targets = {f"{row['mediaType']}:{row['tmdbId']}" for row in facts_blob.get("records") or ()
+               if row.get("mediaType") in {"movie", "tv"} and isinstance(row.get("tmdbId"), int)
                and not isinstance(row.get("tmdbId"), bool) and row["tmdbId"] > 0}
     missing = sorted({key for key in decisions.values() if key not in targets})
     if missing:

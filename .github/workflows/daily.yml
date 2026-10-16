@@ -17,7 +17,6 @@ name: daily
 #            ANTHROPIC_API_KEY                  the fallback for a title those models refuse
 #            (which model answers each step is data/models.json; docs/OPERATE.md, "Switching a model")
 #            WIKIMEDIA_ENTERPRISE_USERNAME/_PASSWORD   optional plot source
-#            KMRB_API_KEY                       optional South Korean official maturity source
 #            DEN_EMBED_URL                      fallback den-embed when DEN_EMBED_IMAGE is not configured
 #   vars     DEN_DAILY_ENABLED                  `true` to run on the schedule
 #            DEN_DAILY_SPEND                    `true` to let the scheduled run buy the day's answers
@@ -204,7 +203,6 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WIKIMEDIA_ENTERPRISE_USERNAME: ${{ secrets.WIKIMEDIA_ENTERPRISE_USERNAME }}
           WIKIMEDIA_ENTERPRISE_PASSWORD: ${{ secrets.WIKIMEDIA_ENTERPRISE_PASSWORD }}
-          KMRB_API_KEY: ${{ secrets.KMRB_API_KEY }}
           # When the workflow started its pinned image, use that exact service. Preferring the fallback secret
           # here left the local canary-proved image idle and could send writes to a different CPU/runtime build.
           DEN_EMBED_URL: ${{ (vars.DEN_EMBED_IMAGE != '' && 'http://127.0.0.1:8080') || secrets.DEN_EMBED_URL || '' }}

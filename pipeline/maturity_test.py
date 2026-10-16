@@ -10,7 +10,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from . import (maturity, maturity_decisions, maturity_italy, maturity_italy_historical, maturity_kavi,
-               maturity_kmrb, maturity_norway,
+               maturity_norway,
                maturity_providers, maturity_public, maturity_quebec, maturity_singapore,
                maturity_taiwan)
 from .contract import Context, StageError
@@ -62,27 +62,6 @@ def source_row(title="The Film", original=None, rating="12 år", director="Alice
 
 def payload(*rows):
     return workbook([list(maturity_norway.HEADERS), *rows])
-
-
-def kmrb_page(items, page_number=1, total=None, page_size=1000):
-    response = ET.Element("response")
-    header = ET.SubElement(response, "header")
-    ET.SubElement(header, "resultCode").text = "00"
-    ET.SubElement(header, "resultMsg").text = "NORMAL SERVICE"
-    body = ET.SubElement(response, "body")
-    rows = ET.SubElement(ET.SubElement(body, "items"), "rows")
-    for values in items:
-        item = ET.SubElement(rows, "item")
-        defaults = {"wrksNm": "The Film", "oriwkTtl": "", "fbctnYr": "2022",
-                    "rtNo": "2026-NFLX-1", "grdNm": "15세이상관람가",
-                    "direNm": "Alice Director", "screHr": "100", "PlotCn": "copyrighted plot"}
-        defaults.update(values)
-        for name, value in defaults.items():
-            ET.SubElement(item, name).text = value
-    ET.SubElement(body, "pageNo").text = str(page_number)
-    ET.SubElement(body, "numOfRows").text = str(page_size)
-    ET.SubElement(body, "totalCount").text = str(len(items) if total is None else total)
-    return ET.tostring(response, encoding="utf-8", xml_declaration=True)
 
 
 def quebec_payload(first=()):
@@ -160,6 +139,11 @@ def movie(ident, title="The Film", year=2022, director="Qalice"):
             "released": {"date": str(year), "precision": "year"}, "directors": [director]}
 
 
+def series(ident, title="The Series", year=2022, creator="Qalice"):
+    return {"mediaType": "tv", "tmdbId": ident, "titles": {"en": title},
+            "started": {"date": str(year), "precision": "year"}, "creators": [creator]}
+
+
 class NorwayAdapter(unittest.TestCase):
     def test_reads_blank_cells_and_keeps_only_factual_fields(self):
         [record] = list(maturity_norway.records(payload(source_row(original=None))))
@@ -227,7 +211,7 @@ class Linker(unittest.TestCase):
         self.assertEqual(audit["ambiguous"][0]["candidates"], ["movie:1", "movie:3"])
 
     def test_a_rated_row_without_an_official_authority_id_remains_unknown(self):
-        rows = [{"authority": "KMRB", "authorityId": None, "titles": ["The Film"],
+        rows = [{"authority": "ClassInd", "authorityId": None, "titles": ["The Film"],
                  "directors": "Alice Director", "year": 2022, "raw": "12세이상관람가", "age": 12,
                  "matchedBy": "exact-title+year+director"}]
         records, audit = maturity.link_records(rows, facts(movie(1)))
@@ -264,6 +248,31 @@ class Linker(unittest.TestCase):
         self.assertEqual(records, [])
         self.assertEqual(audit["unmatchedRows"], 1)
 
+    def test_a_dual_scope_authority_can_match_a_series_by_creator(self):
+        rows = [{"authority": "ClassInd", "authorityId": "classind:1", "titles": ["The Series"],
+                 "directors": "Alice Director", "year": 2022, "raw": "15세이상관람가", "age": 15,
+                 "matchedBy": "exact-title+year+credited-person", "mediaTypes": ("movie", "tv")}]
+        records, audit = maturity.link_records(rows, facts(series(8)))
+        self.assertEqual([(row["mediaType"], row["tmdbId"], row["minimumAge"])
+                          for row in records], [("tv", 8, 15)])
+        self.assertEqual(audit["matchedRows"], 1)
+
+    def test_a_dual_scope_row_ambiguous_between_film_and_series_stays_unknown(self):
+        rows = [{"authority": "ClassInd", "authorityId": "classind:1", "titles": ["The Film"],
+                 "directors": "Alice Director", "year": 2022, "raw": "14 anos", "age": 14,
+                 "matchedBy": "exact-title+year+credited-person", "mediaTypes": ("movie", "tv")}]
+        records, audit = maturity.link_records(rows, facts(movie(1), series(8, "The Film")))
+        self.assertEqual(records, [])
+        self.assertEqual(audit["ambiguousRows"], 1)
+        self.assertEqual(audit["ambiguous"][0]["candidates"], ["movie:1", "tv:8"])
+
+    def test_an_invalid_source_media_scope_is_refused(self):
+        rows = [{"authority": "ClassInd", "authorityId": "classind:1", "titles": ["The Film"],
+                 "directors": "Alice Director", "year": 2022, "raw": "14 anos", "age": 14,
+                 "matchedBy": "exact-title", "mediaTypes": ("game",)}]
+        with self.assertRaisesRegex(StageError, "invalid media scope"):
+            maturity.link_records(rows, facts(movie(1)))
+
     def test_a_reviewed_official_id_can_resolve_incomplete_or_ambiguous_metadata(self):
         rows = [{"authority": "CNC", "authorityId": "visa:44", "titles": ["The Film"],
                  "directors": None, "year": 2022, "raw": "Interdit -12 ans", "age": 12,
@@ -289,6 +298,13 @@ class Linker(unittest.TestCase):
         with self.assertRaisesRegex(StageError, "absent corpus key movie:9"):
             maturity.link_records(rows, facts(movie(1)), {("CNC", "visa:44"): "movie:9"})
 
+    def test_a_review_cannot_cross_the_source_media_scope(self):
+        rows = [{"authority": "IMDA", "authorityId": "imda:1", "titles": [],
+                 "directors": None, "year": None, "raw": "NC16", "age": 16,
+                 "matchedBy": "exact-title+year+credited-person", "mediaTypes": ("tv",)}]
+        with self.assertRaisesRegex(StageError, "outside its declared media scope"):
+            maturity.link_records(rows, facts(movie(1)), {("IMDA", "imda:1"): "movie:1"})
+
 
 class AuthorityDecisions(unittest.TestCase):
     def load(self, blob):
@@ -307,7 +323,7 @@ class AuthorityDecisions(unittest.TestCase):
         self.assertRegex(digest, r"^[0-9a-f]{64}$")
         malformed = [
             {"schema": 1, "decisions": [{"authority": "Other", "authorityId": "x", "key": "movie:1"}]},
-            {"schema": 1, "decisions": [{"authority": "KAVI", "authorityId": "x", "key": "tv:1"}]},
+            {"schema": 1, "decisions": [{"authority": "KAVI", "authorityId": "x", "key": "episode:1"}]},
             {"schema": 1, "decisions": [{"authority": "KAVI", "authorityId": "x",
                                            "key": "movie:1", "note": "bypass"}]},
             {"schema": 1, "decisions": [
@@ -324,6 +340,11 @@ class AuthorityDecisions(unittest.TestCase):
             maturity_decisions.validate_source(decisions, "KAVI", [{"authorityId": "iklu:8"}])
         with self.assertRaisesRegex(StageError, "absent corpus keys: movie:1"):
             maturity_decisions.validate_targets(decisions, facts())
+
+    def test_a_review_can_target_a_series(self):
+        decisions, _digest = self.load({"schema": 1, "decisions": [
+            {"authority": "ClassInd", "authorityId": "classind:7", "key": "tv:8"}]})
+        maturity_decisions.validate_targets(decisions, facts(series(8)))
 
 
 class ProviderRegistry(unittest.TestCase):
@@ -348,33 +369,6 @@ class ProviderRegistry(unittest.TestCase):
 
 
 class Stage(unittest.TestCase):
-    def test_an_optional_kmrb_snapshot_uses_the_same_exact_public_evidence_path(self):
-        norway = payload(source_row(title="Other", director="Bob Director"))
-        cnc = b"Titre;R\xc3\xa9alisation;Date;N\xc2\xb0 de visa;D\xc3\xa9cision\n"
-        kmrb = maturity_kmrb._zip([kmrb_page([{}])])
-        with tempfile.TemporaryDirectory() as out:
-            with open(os.path.join(out, "dataset.meta.json"), "w", encoding="utf-8") as handle:
-                json.dump({"datasetVersion": "testver"}, handle)
-            with open(os.path.join(out, "facts-testver.json"), "w", encoding="utf-8") as handle:
-                json.dump(facts(movie(1)), handle)
-            maturity.run(Context(out_dir=out), fetchers={
-                "Medietilsynet": lambda: norway,
-                "CNC": lambda: (cnc, "https://static.data.gouv.fr/cnc.csv"),
-                "ClassInd": lambda: (_ for _ in ()).throw(
-                    http.HTTPError(0, "https://dados.mj.gov.br")),
-                "KMRB": lambda: (kmrb, maturity_kmrb.URL),
-            })
-            with open(os.path.join(out, "maturity-testver.json"), encoding="utf-8") as handle:
-                derived = json.load(handle)
-            with open(os.path.join(out, "maturity-sources.json"), encoding="utf-8") as handle:
-                manifest = json.load(handle)
-            with open(os.path.join(out, "maturity-sources", "kmrb-self-ratings.zip"), "rb") as handle:
-                self.assertEqual(handle.read(), kmrb)
-        self.assertEqual(derived["records"][0]["minimumAge"], 15)
-        self.assertEqual(derived["records"][0]["observations"][0]["authority"], "KMRB")
-        self.assertEqual(next(row for row in manifest["sources"] if row["authority"] == "KMRB")
-                         ["sha256"], hashlib.sha256(kmrb).hexdigest())
-
     def test_writes_immutable_snapshot_manifest_and_derived_records(self):
         body = payload(source_row())
         with tempfile.TemporaryDirectory() as out:
@@ -712,7 +706,7 @@ class PublicAdapters(unittest.TestCase):
         base.update({"Year": "2025", "Title": "Film", "Also_Known_As": "THE FILM",
                      "Directors": "Alice Director", "Format": "Digital",
                      "Decision": "Passed Clean", "Decision_Date": "1/2/2025",
-                     "Total_Running_Time_Actual": "7200", "Classified_By": "IMDA"})
+                     "Total_Running_Time_Actual": "120", "Classified_By": "IMDA"})
         rows = []
         for rating in ("G - General", "PG - Parental Guidance", "PG13 - Parental Guidance 13",
                        "NC16 - No Children Below 16", "M18 - Mature 18", "R21 - Restricted 21"):
@@ -729,9 +723,30 @@ class PublicAdapters(unittest.TestCase):
         self.assertEqual(sum(row["age"] is None for row in found), 3)
         self.assertEqual(found[0]["runtimeMinutes"], 120)
         self.assertTrue(all(row["year"] is None for row in found))
+        self.assertTrue(all(row["mediaTypes"] == ("tv",) for row in found[:6]))
+        self.assertEqual(found[-1]["mediaTypes"], ("movie",))
         automatic, audit = maturity.link_records(found, facts(movie(1, "THE FILM")))
         self.assertEqual(automatic, [])
         self.assertEqual(audit["missingIdentityRows"], 7)
+
+    def test_singapore_episode_package_uses_only_year_in_title_and_exact_credits(self):
+        episode = {name: "" for name in maturity_singapore.HEADERS}
+        episode.update({"Year": "2025", "Title": "THE SERIES (2022)",
+                        "Producers": "Alice Director", "Directors": "Various",
+                        "Rating": "NC16 - No Children Below 16", "Episode_No": "1 TO 10, SEASON 2",
+                        "Decision_Date": "1/2/2025", "Classified_By": "IMDA"})
+        filler = {**episode, "Title": "FIXTURE", "Episode_No": "", "Producers": ""}
+        target = io.StringIO()
+        writer = csv.DictWriter(target, fieldnames=maturity_singapore.HEADERS)
+        writer.writeheader()
+        writer.writerows([episode, *([filler] * (maturity_singapore.MIN_ROWS - 1))])
+        found = list(maturity_singapore.records(target.getvalue().encode()))
+        self.assertEqual((found[0]["titles"], found[0]["year"], found[0]["mediaTypes"]),
+                         (["THE SERIES"], 2022, ("tv",)))
+        linked, audit = maturity.link_records(found, facts(series(8)))
+        self.assertEqual([(row["mediaType"], row["tmdbId"], row["minimumAge"])
+                          for row in linked], [("tv", 8, 16)])
+        self.assertEqual(audit["matchedRows"], 1)
 
     def test_singapore_fetch_validates_the_catalogue_download(self):
         base = {name: "" for name in maturity_singapore.HEADERS}
@@ -816,43 +831,6 @@ class PublicAdapters(unittest.TestCase):
         self.assertTrue(list(maturity_taiwan.records(first))[0]["authorityId"].startswith("bamid:113:cert-1:"))
         self.assertEqual(asked[1][:2], (maturity_taiwan.FILE_HOST, "/archive/104.csv"))
 
-    def test_kmrb_snapshot_keeps_raw_pages_but_emits_only_identity_and_age(self):
-        snapshot = maturity_kmrb._zip([kmrb_page([{}])])
-        [row] = list(maturity_kmrb.records(snapshot))
-        self.assertEqual((row["authorityId"], row["titles"], row["age"], row["year"]),
-                         ("kmrb:2026-NFLX-1", ["The Film"], 15, 2022))
-        self.assertNotIn("copyrighted plot", json.dumps(row))
-        with zipfile.ZipFile(io.BytesIO(snapshot)) as archive:
-            self.assertIn(b"copyrighted plot", archive.read("page-000001.xml"))
-
-    def test_kmrb_maps_only_stable_numeric_thresholds(self):
-        self.assertEqual(maturity_kmrb.age("전체관람가"), 0)
-        self.assertEqual(maturity_kmrb.age("12세 이상 관람가"), 12)
-        self.assertEqual(maturity_kmrb.age("15세이상관람가"), 15)
-        self.assertIsNone(maturity_kmrb.age("청소년관람불가"), "the threshold is now 19, not 18")
-        self.assertIsNone(maturity_kmrb.age("제한상영가"))
-
-    def test_kmrb_fetch_pages_to_the_advertised_end_without_leaking_the_key(self):
-        asked = []
-        bodies = [kmrb_page([{"rtNo": "one"}], 1, 2, 1),
-                  kmrb_page([{"rtNo": "two"}], 2, 2, 1)]
-
-        def request(host, path, params, headers):
-            asked.append((host, path, params, headers))
-            return bodies[len(asked) - 1]
-
-        snapshot, source_url = maturity_kmrb.fetch("secret", request=request)
-        self.assertEqual(len(list(maturity_kmrb.records(snapshot))), 2)
-        self.assertEqual([row[2]["pageNo"] for row in asked], [1, 2])
-        self.assertNotIn("secret", source_url)
-
-    def test_kmrb_refuses_schema_and_snapshot_gaps(self):
-        changed = kmrb_page([{}]).replace(b"<direNm>", b"<director>").replace(b"</direNm>", b"</director>")
-        with self.assertRaisesRegex(StageError, "schema changed"):
-            maturity_kmrb.page(changed)
-        with self.assertRaisesRegex(StageError, "advertised 2"):
-            list(maturity_kmrb.records(maturity_kmrb._zip([kmrb_page([{}], total=2)])))
-
     def test_kavi_keeps_movie_identity_and_official_age_only(self):
         body = (json.dumps({"id": 100235, "type": "movie", "name": "BIRDS, THE", "nameFi": "Linnut",
                             "nameSv": "Fåglarna", "year": 1963, "directors": ["Alfred Hitchcock"],
@@ -897,6 +875,7 @@ class PublicAdapters(unittest.TestCase):
         [row] = list(maturity_public.brazil_records(body))
         self.assertEqual((row["authorityId"], row["titles"], row["age"]),
                          ("classind:9", ["O Filme", "The Film"], 14))
+        self.assertEqual(row["mediaTypes"], ("movie", "tv"))
         self.assertNotIn("copyrighted", json.dumps(row))
         self.assertEqual(maturity_public.brazil_age("Livre"), 0)
         self.assertIsNone(maturity_public.brazil_age("Especialmente recomendado"))

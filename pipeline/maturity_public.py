@@ -101,7 +101,10 @@ def brazil_records(payload):
         yield {"authority": "ClassInd", "authorityId": f"classind:{code}" if code else f"row:{number}",
                "titles": titles, "directors": row[_key("Diretores")],
                "year": _integer(row[_key("Ano de produção")]), "raw": rating,
-               "age": brazil_age(rating), "matchedBy": "exact-title+year+director"}
+               "age": brazil_age(rating), "matchedBy": "exact-title+year+credited-person",
+               # ClassInd explicitly covers cinema, television and VOD, but its bulk export has no
+               # media-kind column. The linker therefore requires identity to be unique across both.
+               "mediaTypes": ("movie", "tv")}
 
 
 def _download(host, url):

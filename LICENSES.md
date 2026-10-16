@@ -13,6 +13,16 @@ derived from sources with their own terms. A single repository licence would mis
 | release `data-latest` — the store and its manifest | MIT for the derivations; see below | derived signals, not redistributed source text |
 | release `corpus-<ver>` | MIT | same |
 | Wikipedia article text | **CC BY-SA 4.0** | not currently published; see below |
+| release `maturity-audit-<ver>.tar.gz` — Brazil ClassInd snapshot | **Creative Commons Attribution (`cc-by`, version unspecified by MJSP)** | official ClassInd open-data export; source and retrieval date are in `maturity-sources.json` |
+| release `maturity-audit-<ver>.tar.gz` — Singapore IMDA snapshot | **Singapore Open Data Licence 1.0** | the licence expressly permits copying and distribution; source and retrieval date are in `maturity-sources.json` |
+
+The ClassInd dataset is provided by Brazil's Ministry of Justice and Public Security at
+https://dados.mj.gov.br/dataset/classind-sistema-gerencial-da-classificacao-indicativa under the portal's
+`cc-by` licence designation. The IMDA Film Classification Database is provided by Singapore's
+Info-communications Media Development Authority at
+https://data.gov.sg/datasets/d_ee0231c767e05c37f61e01923df2e461/view under the Singapore Open Data
+Licence 1.0: https://data.gov.sg/open-data-licence. Each audit archive's source manifest records its exact
+access date, source URL, licence URL and byte hash.
 
 ## The Wikipedia text
 
