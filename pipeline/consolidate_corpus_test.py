@@ -227,6 +227,14 @@ class MaturityEvidence(unittest.TestCase):
             path = maturity_for(os.path.join(directory, "facts.json"), [record])
             self.assertEqual(cc.maturity_rows(path)["movie:1"]["minimumAge"], 12)
 
+    def test_an_exact_credited_person_match_is_accepted_as_traceable_evidence(self):
+        record = {"mediaType": "tv", "tmdbId": 1, "minimumAge": 12,
+                  "observations": [{**self.OBSERVATION,
+                                    "matchedBy": "exact-title+year+credited-person"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = maturity_for(os.path.join(directory, "facts.json"), [record])
+            self.assertEqual(cc.maturity_rows(path)["tv:1"]["minimumAge"], 12)
+
 
 class Joins(unittest.TestCase):
     def test_a_wrapper_with_no_known_rows_key_fails_instead_of_returning_itself(self):
