@@ -29,6 +29,7 @@ LIVE = {
     "dims": 1024,
     "embedderMaxTokens": 1024,
     "embedderRuntime": "den-embed/5.1.2",
+    "embedderVectorEpoch": 1,
     "embeddingModel": "bge-m3",
     "facetsBytes": 577988,
     "facetsFile": "facets.bin",
@@ -77,7 +78,7 @@ LIVE = {
 # `premiseCount` was retired for describing nothing; keeping the plot one would reinstate the same unowned
 # number on the other side. `storeRecords` is the row count, and unlike `count` it is checked.
 KEPT = {
-    "builtAt", "datasetVersion", "dims", "embedderMaxTokens", "embedderRuntime",
+    "builtAt", "datasetVersion", "dims", "embedderMaxTokens", "embedderRuntime", "embedderVectorEpoch",
     "embeddingModel", "lastModifiedHttp", "maxBatchId", "quantization", "storeBytes", "storeFile",
     "storeRecords", "storeSections", "storeSha256", "taxonomyVersion",
     "plotVectorTransformSha256",
