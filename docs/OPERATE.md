@@ -250,6 +250,13 @@ Apple Silicon Mac at all: ONNX Runtime needs AVX2, which emulation lacks, so `/h
 embed dies with an illegal instruction ("connection refused" from the client). Whatever the host, the canary
 (2.) is what decides.
 
+**A Mac result is not a release gate.** Do not interpret an amd64 image run through Docker's Apple Silicon
+emulation as a corpus-space comparison, whether it passes or fails. Before changing `DEN_EMBED_IMAGE`, run
+the `embed image parity` workflow with the candidate's full `ghcr.io/...@sha256:...` reference. It rejects
+known incompatible runner CPUs and runs this repository's byte-exact canary on the native x86_64 GitHub
+runner class that performs daily embedding. A failure keeps the existing digest in place; it does not
+authorize regenerating the canary.
+
 **2. The canary, not a version string, says which space a service is in.** `embeddingModel`, `dims`,
 `vectorEpoch` and `embedderRuntime` have all stayed the same across builds whose output moved.
 `data/embed-canary.json` holds fixed texts and the exact int8 vectors the service must return; every path
