@@ -100,7 +100,7 @@ OWNED = frozenset((
     "datasetVersion", "taxonomyVersion", "embeddingModel", "dims", "count", "quantization", "labelsFile",
     "vectorsFile", "labelsGzFile", "labelsSha256", "labelsBytes", "vectorsSha256", "vectorsBytes",
     "builtAt", "lastModifiedHttp", "metadataFile", "metadataSha256", "metadataBytes", "embedderRuntime",
-    "embedderMaxTokens", "embeddingSpace", "plotVectorTransform", "plotVectorTransformSha256",
+    "embedderMaxTokens", "embedderVectorEpoch", "embeddingSpace", "plotVectorTransform", "plotVectorTransformSha256",
     "corpusSnapshotSha256"))
 
 
@@ -342,11 +342,12 @@ def run(ctx, now=None):
         raise StageError(f"finalize: {EMBEDDING_MODEL} implies dim {DIMS} but the vectors are {dim}-dim — "
                          f"a mislabelled artifact; refusing to ship.")
     embedder = read_identity(ctx.path(artifacts.EMBEDDER),
-                             (("model", str), ("dims", int), ("runtime", str), ("maxTokens", int)))
-    if embedder and embedder["dims"] > 0 and embedder["dims"] != dim:
+                             (("model", str), ("dims", int), ("runtime", str), ("maxTokens", int),
+                              ("vectorEpoch", int)))
+    if embedder and (embedder["model"] != EMBEDDING_MODEL or embedder["dims"] != dim):
         raise StageError(f"finalize: the store was embedded by {embedder['model']}/{embedder['dims']} "
-                         f"({embedder['runtime']}) but its vectors are {dim}-dim — refusing to ship a "
-                         f"manifest that would misdescribe them.")
+                         f"({embedder['runtime']}) but the manifest would claim {EMBEDDING_MODEL}/{dim} — "
+                         f"refusing to ship a manifest that would misdescribe the vector identity.")
     space = read_identity(ctx.path(artifacts.EMBEDDING_SPACE), (("spaceId", str),))
     transform_path = ctx.require(artifacts.PLOT_LENGTH_TRANSFORM)
     transform, transform_artifact_sha = plot_length.read(
@@ -398,6 +399,7 @@ def run(ctx, now=None):
     if embedder:
         meta["embedderRuntime"] = embedder["runtime"]
         meta["embedderMaxTokens"] = embedder["maxTokens"]
+        meta["embedderVectorEpoch"] = embedder["vectorEpoch"]
     if space:
         meta["embeddingSpace"] = space["spaceId"]
     if snapshot_sha:

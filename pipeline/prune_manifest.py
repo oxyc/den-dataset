@@ -22,6 +22,7 @@ nobody has thought of yet is dropped by default, and the publisher prints every 
 
 Keys that are not blob claims are left alone: `datasetVersion`, `taxonomyVersion`, `embeddingModel`,
 `dims`, `count`, `quantization`, `builtAt`, `lastModifiedHttp`, `embedderRuntime`, `embedderMaxTokens`,
+`embedderVectorEpoch`,
 `maxBatchId`, `signature`, `storeInputs`. They describe the dataset, not a file.
 
 `storeInputs` is the one to be careful with: it is `build_store.py`'s record of what it read, and it is

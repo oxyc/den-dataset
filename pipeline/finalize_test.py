@@ -74,6 +74,7 @@ GOLDEN_MANIFEST = """{
   "dims" : 1024,
   "embedderMaxTokens" : 1024,
   "embedderRuntime" : "den-embed\\/5.1.2",
+  "embedderVectorEpoch" : 1,
   "embeddingModel" : "bge-m3",
   "embeddingSpace" : "canary-v1:abc",
   "empty" : [
@@ -164,7 +165,8 @@ def lay_down(out, records=RECORDS, vectors=None, previous=PREVIOUS, embedder=Tru
             fh.write(json.dumps({"tmdbId": rec["tmdbId"], "v": v}) + "\n")
     if embedder:
         with open(os.path.join(index, "embedder.json"), "w", encoding="utf-8") as fh:
-            json.dump({"model": "bge-m3", "dims": 1024, "runtime": "den-embed/5.1.2", "maxTokens": 1024}, fh)
+            json.dump({"model": "bge-m3", "dims": 1024, "runtime": "den-embed/5.1.2", "maxTokens": 1024,
+                       "vectorEpoch": 1}, fh)
     if space:
         with open(os.path.join(index, "embedding-space.json"), "w", encoding="utf-8") as fh:
             json.dump({"spaceId": "canary-v1:abc", "canarySet": "canary-v1"}, fh)
@@ -397,8 +399,16 @@ class Identity(Staged):
     def test_an_embedder_that_disagrees_with_the_vectors_is_refused(self):
         lay_down(self.out)
         with open(os.path.join(self.out, "index", "embedder.json"), "w", encoding="utf-8") as fh:
-            json.dump({"model": "bge-m3", "dims": 384, "runtime": "x", "maxTokens": 512}, fh)
-        self.assertIn("vectors are 1024-dim", self.refused())
+            json.dump({"model": "bge-m3", "dims": 384, "runtime": "x", "maxTokens": 512,
+                       "vectorEpoch": 1}, fh)
+        self.assertIn("manifest would claim bge-m3/1024", self.refused())
+
+    def test_an_embedder_model_that_disagrees_with_the_manifest_is_refused(self):
+        lay_down(self.out)
+        with open(os.path.join(self.out, "index", "embedder.json"), "w", encoding="utf-8") as fh:
+            json.dump({"model": "another-model", "dims": 1024, "runtime": "x", "maxTokens": 1024,
+                       "vectorEpoch": 1}, fh)
+        self.assertIn("manifest would claim bge-m3/1024", self.refused())
 
     def test_an_unreadable_identity_is_refused_rather_than_skipped(self):
         """Skipped, it drops the identity from the manifest and looks like a store that never had one."""
@@ -415,12 +425,14 @@ class Identity(Staged):
         """The manifest OWNS these keys: a rewrite that has no space must not keep the last run's."""
         lay_down(self.out, embedder=False, space=False,
                  previous={"embeddingSpace": "canary-v1:stale", "embedderRuntime": "old", "embedderMaxTokens": 512,
+                           "embedderVectorEpoch": 2,
                            "storeFile": "s"})
         self.run_stage()
         meta = json.loads(read(os.path.join(self.out, "dataset.meta.json")))
         self.assertNotIn("embeddingSpace", meta)
         self.assertNotIn("embedderRuntime", meta)
         self.assertNotIn("embedderMaxTokens", meta)
+        self.assertNotIn("embedderVectorEpoch", meta)
         self.assertEqual(meta["storeFile"], "s")
 
 
