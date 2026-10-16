@@ -17,6 +17,7 @@ prose somewhere that can go stale without anything failing.
 | What has the daily job already paid for? | `pipeline/paid.py` — the paid-answers ledger on the `paid-state` release. |
 | Where does a daily run start, with nothing kept? | `pipeline/published.py` — the bundle a publish puts on `corpus-<ver>`, and the out-dir seeded from it. |
 | How do I run it? | `./den daily` is the scheduled job (`pipeline/daily.py`). `./den run` runs every stage; it skips the paid classify and critique passes without `--spend` and stops before publishing without `--publish`. `./den stage <name>` runs one. `docs/OPERATE.md` is publishing a ready run and recovering one that is not. |
+| May a new embed image replace the current one? | Only after `.github/workflows/embed-image-check.yml` passes for its exact digest on a non-blocklisted native x86_64 GitHub runner. Never use amd64-on-Apple-Silicon emulation as parity evidence, and never regenerate the canary merely to make a candidate pass. |
 
 ## The part that is still being rebuilt
 

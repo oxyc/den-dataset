@@ -1,0 +1,66 @@
+name: embed image parity
+
+# The dataset is embedded on GitHub's native x86_64 runners. An amd64 container run through Apple Silicon
+# emulation is not evidence for or against byte parity: the canary must run where production vectors are made.
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Exact den-embed image digest to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE: ${{ inputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require an immutable first-party image and a usable CPU
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE" =~ ^ghcr\.io/oxyc/(den-embed|den-atlas-embed)@sha256:[0-9a-f]{64}$ ]] || {
+            echo "::error::image must be an exact oxyc den-embed digest, got $IMAGE"
+            exit 1
+          }
+          cpu="$(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | xargs)"
+          echo "Runner CPU: $cpu"
+          if grep -vE '^(#|$)' data/embed-cpu-blocklist.txt | grep -qxF "$cpu"; then
+            echo "::error::runner CPU is known to produce another embedding space; re-run this workflow"
+            exit 1
+          fi
+      - name: Run the published image
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE"
+          docker run --rm -d --name embed-image-check -p 127.0.0.1:8080:8080 \
+            -e MAX_TOKENS=1024 "$IMAGE"
+      - name: Prove the corpus embedding space
+        run: |
+          set -euo pipefail
+          trap 'docker logs embed-image-check >&2 || true; docker rm -f embed-image-check >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8080/health > embed-health.json && break
+            sleep 2
+          done
+          jq -e '.status == "ok" and .model == "bge-m3" and .dims == 1024 and
+                 .vector_epoch == 1 and .max_tokens == 1024' embed-health.json
+          python3 pipeline/embed_canary.py --url http://127.0.0.1:8080 2>&1 | tee embed-canary-report.txt
+          cat embed-canary-report.txt >> "$GITHUB_STEP_SUMMARY"
+          docker rm -f embed-image-check >/dev/null
+          trap - EXIT
+      - name: Save the parity report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: embed-image-parity-${{ github.run_id }}
+          path: |
+            embed-health.json
+            embed-canary-report.txt
+          if-no-files-found: warn
+          retention-days: 30
