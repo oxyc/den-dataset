@@ -5,8 +5,8 @@
 # bump would break the reproduction it exists for, and tools/rulers pins nothing to bump.
 #
 # The artifacts this repo consumes and produces are pinned by other means and dependabot has no
-# ecosystem for them: the corpus is embedded through den-embed (whose ONNX Runtime version changes
-# vector output — see den-embed's CLAUDE.md), and the published release is consumed by den-atlas's
+# ecosystem for them: the corpus is embedded through the Atlas-owned den-embed compatibility image (whose
+# ONNX Runtime and CPU kernels can change vector output — see docs/OPERATE.md), and the published release is consumed by den-atlas's
 # sync. Those couplings are documented in docs/, not here, because nothing can automate them.
 version: 2
 updates:
