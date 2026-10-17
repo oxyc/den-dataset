@@ -25,6 +25,24 @@
   "drop": [
     {
       "mediaType": "movie",
+      "tmdbId": 793058,
+      "alias": "Hi.5",
+      "why": "Hi-Five (2025, 하이파이브) is not listed under it: TMDB's 8 alternative titles are High Five, Hi-Five, Haipaibeu and translations. 'Hi.5' matches the Australian children's series Hi-5 (tv:42422) instead."
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 35872,
+      "alias": "PK",
+      "why": "A fans' abbreviation of Die Pfefferkörner, not a release title: TMDB lists no alternative titles for it. As a search name it is the Hindi film PK (movie:297222)."
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 93530,
+      "alias": "The Voice Kids",
+      "why": "La Voz Kids (Spain) was never released as The Voice Kids, and TMDB lists no alternative title for it. That is the format's name, and other versions carry it as their own title (tv:60823, tv:65866)."
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 103,
       "alias": "Alien",
       "why": "Taxi Driver has never carried this title in any market. Wikidata Q47221 (confirmed as Taxi Driver by P4947 103 and P345 tt0075314) holds it as an en skos:altLabel; TMDB lists no such alternative title. It put Taxi Driver SECOND for q=alien, above Aliens, Alien3 and Alienoid."
@@ -523,6 +541,24 @@
     }
   ],
   "keep": [
+    {
+      "mediaType": "movie",
+      "tmdbId": 27390,
+      "alias": "The Imp",
+      "why": "TMDB records it as an alternative title (GB)"
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 40249,
+      "alias": "Creepy Crawlers",
+      "why": "TMDB records it as an alternative title (US)"
+    },
+    {
+      "mediaType": "tv",
+      "tmdbId": 105348,
+      "alias": "Where's Wally?",
+      "why": "TMDB records it as an alternative title (GB): the series' British name, as the books'"
+    },
     {
       "mediaType": "movie",
       "tmdbId": 161,
