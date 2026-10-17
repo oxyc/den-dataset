@@ -600,6 +600,9 @@ def register(commands):
     sub.add_argument("--spend", action="store_true",
                      help="buy the classify, critique, genres & moods, and new-title fan-picks answers "
                           "(needs the corresponding provider keys and a live baseline)")
+    sub.add_argument("--weekly-now", action="store_true",
+                     help="submit the weekly Batch steps (data/models.json) today rather than on their day, "
+                          "within the same caps")
     sub.add_argument("--spend-typesafe", action=argparse.BooleanOptionalAction, default=None)
     sub.add_argument("--spend-fan-picks", action=argparse.BooleanOptionalAction, default=None)
     sub.add_argument("--spend-premise", action=argparse.BooleanOptionalAction, default=False)

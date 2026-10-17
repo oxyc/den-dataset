@@ -69,9 +69,10 @@ def weekly(cfg):
     return cfg.get("cadence") == "weekly"
 
 
-def due(cfg, today, last):
-    """Whether a step is due on `today`: always when daily; when weekly, once its day has come since `last`."""
-    if not weekly(cfg):
+def due(cfg, today, last, now=False):
+    """Whether a step is due on `today`: always when daily; when weekly, once its day has come since `last`, or
+    whenever an operator asked for it `now` (`den daily --weekly-now`), as after a backlog was published."""
+    if not weekly(cfg) or now:
         return True
     latest = today - datetime.timedelta(days=(today.weekday() - DAYS.index(cfg["day"])) % 7)
     return last is None or last < latest.isoformat()
@@ -266,7 +267,7 @@ def fan_picks_step(day):
         collect(day, "fan_picks", cfg, task, lambda job: {k: titles[k] for k in job_keys(job) if k in titles},
                 cap, record, done, day.can_buy_fan_picks)
         schedule_reasks(day, rows)
-        report["due"] = due(cfg, day.now.date(), st.get("lastSubmit"))
+        report["due"] = due(cfg, day.now.date(), st.get("lastSubmit"), getattr(day.args, "weekly_now", False))
         ready = [key for key in titles if fan_picks.reusable(kept.get(key), fan_picks.fingerprint(key))]
         held = pending_keys(day, "fan_picks")
         ask = [titles[key] for key in waiting if key not in ready and key not in held]
@@ -375,7 +376,7 @@ def premise_step(day):
     reconcile(day, "premise_tags", cfg)
     held = pending_keys(day, "premise_tags")
     waiting = set(day.waiting.get("premise_tags", []))
-    report["due"] = due(cfg, day.now.date(), st.get("lastSubmit"))
+    report["due"] = due(cfg, day.now.date(), st.get("lastSubmit"), getattr(day.args, "weekly_now", False))
     answered_before = {key for key in waiting if (kept.get(key) or {}).get("tags")}
     if not held and not answered_before and not (report["due"] and waiting and day.can_buy_premise):
         report["waiting"] = len(waiting)

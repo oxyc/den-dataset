@@ -39,6 +39,10 @@ class Due(unittest.TestCase):
         self.assertTrue(due(self.weekly, TUESDAY.date(), "2026-09-28"), "a failed Monday is caught up on Tuesday")
         self.assertTrue(due(self.weekly, MONDAY.date() + datetime.timedelta(days=7), "2026-10-05"))
 
+    def test_an_operator_can_submit_a_weekly_step_today(self):
+        """`--weekly-now`, after a backlog was published midweek: its titles need not wait for Monday."""
+        self.assertTrue(model_steps.due(self.weekly, TUESDAY.date(), "2026-10-05", now=True))
+
 
 class Batch:
     """A provider whose Batch job answers what it was sent once `state` says so; online answers too. It
