@@ -24,6 +24,12 @@ class Tiers(unittest.TestCase):
         self.assertEqual(floors.DEFAULT.of({"regional": False, "originCountry": ["FR"]}), (50, 10))
         self.assertEqual(floors.DEFAULT.of({"regional": None, "originCountry": ["FR"]}), (15, 3))
 
+    def test_a_childrens_series_is_judged_by_the_lowest_floors_whatever_its_origin(self):
+        self.assertEqual(floors.DEFAULT.of({"kids": True, "regional": False, "originCountry": ["US"]}), (15, 3))
+        self.assertEqual(floors.DEFAULT.children, floors.Floors(15, 15, 3, 3))
+        raised = floors.Floors(tmdb=50, regional_tmdb=80, wikipedias=5, regional_wikipedias=9)
+        self.assertEqual(raised.of({"kids": True}), (50, 5), "never harder to admit than any other title")
+
     def test_japan_is_not_regional(self):
         """Its low-vote tail is mostly anime; its popular titles clear the worldwide floor."""
         self.assertNotIn("JP", floors.REGIONAL_ORIGINS)

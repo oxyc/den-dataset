@@ -49,17 +49,21 @@ class FakeTMDB:
     thing has and the shape a stage that reused one query would get wrong.
     """
 
-    def __init__(self, pages, regional=None):
+    def __init__(self, pages, regional=None, kids=None):
         self.pages = pages
         self.regional = regional or {}
+        self.kids = kids or {}
         self.asked, self.ages = [], []
 
     def discover(self, media, params, page=1, max_age=0):
         """A scripted page is a list of ids, or of `(id, vote_count)` pairs where the count matters. A query
-        narrowed by origin is answered from `regional`, which names nothing unless a test scripts it."""
+        narrowed by origin is answered from `regional`, and one narrowed to the Kids genre from `kids`;
+        neither names anything unless a test scripts it."""
         self.asked.append((media, dict(params), page))
         self.ages.append(max_age)
-        pages = (self.regional if "with_origin_country" in params else self.pages).get(media, [[]])
+        scripted = (self.regional if "with_origin_country" in params
+                    else self.kids if "with_genres" in params else self.pages)
+        pages = scripted.get(media, [[]])
         rows = pages[page - 1] if page - 1 < len(pages) else []
         return ([{"id": value} if isinstance(value, int) else {"id": value[0], "vote_count": value[1]}
                  for value in rows], page, len(pages))
@@ -277,6 +281,14 @@ class Delta(Staged):
         self.assertEqual(params["first_air_date.gte"], "2026-09-07")
         self.assertNotIn("primary_release_date.gte", params)
 
+    def test_a_new_kids_series_below_the_floor_is_in_the_delta(self):
+        client = FakeTMDB({"tv": [[]]}, kids={"tv": [[(9001, 2), 1399]]})
+        rows = worklist.universe(context(self.out, mode="delta", since="2026-09-07"), "tv", client)
+        self.assertEqual(rows, [{"tmdbId": 9001, "mediaType": "tv", "voteCount": 2, "kids": True}],
+                         "tv 1399 is already published, Kids genre or not")
+        genre = [params for _media, params, _page in client.asked if "with_genres" in params]
+        self.assertEqual(genre[0]["first_air_date.gte"], "2026-09-07")
+
     def test_a_delta_with_no_window_is_refused(self):
         with self.assertRaises(StageError) as refused:
             worklist.universe(context(self.out, mode="delta"), "movie", FakeTMDB({}))
@@ -343,6 +355,26 @@ class Catalogue(Staged):
         self.assertEqual([(p["primary_release_date.gte"], p["primary_release_date.lte"]) for p in whole],
                          list(self.WINDOWS))
         self.assertTrue(all(p["vote_count.gte"] == str(worklist.VOTE_FLOOR) for p in whole))
+
+    def test_a_kids_series_is_listed_at_any_vote_count_and_marked(self):
+        """Bing has no TMDB votes and articles on 12 Wikipedias; at the discovery floor nothing ever listed
+        it. A Kids series the vote-floor query already found is marked rather than listed twice, and one
+        below it carries the count TMDB stated, with no regional tier: the children's floors ignore origin."""
+        client = FakeTMDB({"tv": [[(500, 40)]]}, kids={"tv": [[(500, 40), (69501, 0)]]})
+        with mock.patch.object(worklist, "catalogue_windows", return_value=self.WINDOWS[:1]):
+            rows = worklist.universe(context(self.out, mode="catalogue"), "tv", client)
+        self.assertEqual(rows, [{"tmdbId": 500, "mediaType": "tv", "voteCount": 40, "regional": False, "kids": True},
+                                {"tmdbId": 69501, "mediaType": "tv", "voteCount": 0, "kids": True}])
+        genre = [params for _media, params, _page in client.asked if "with_genres" in params]
+        self.assertEqual(genre[0]["with_genres"], str(worklist.KIDS_GENRE))
+        self.assertNotIn("vote_count.gte", genre[0])
+        self.assertEqual((genre[0]["first_air_date.gte"], genre[0]["first_air_date.lte"]), self.WINDOWS[0])
+
+    def test_films_are_not_asked_about_a_kids_genre_they_do_not_have(self):
+        client = FakeTMDB({"movie": [[(12, 55)]]})
+        with mock.patch.object(worklist, "catalogue_windows", return_value=self.WINDOWS):
+            worklist.universe(context(self.out, mode="catalogue"), "movie", client)
+        self.assertFalse(any("with_genres" in params for _media, params, _page in client.asked))
 
     def test_a_quiet_catalogue_diff_is_a_valid_empty_worklist(self):
         client = FakeTMDB({"movie": [[(11, 80)]], "tv": [[(1399, 90)]]})

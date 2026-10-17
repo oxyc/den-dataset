@@ -48,12 +48,13 @@ def api_key(env=None):
 
 
 def discover_params(media, vote_count_gte=None, release_date_gte=None, release_date_lte=None,
-                    sort_by="popularity.desc", include_adult=False, origin_countries=None):
+                    sort_by="popularity.desc", include_adult=False, origin_countries=None, genre=None):
     """The `/discover/{movie,tv}` parameters, without `api_key` or `page`.
 
     The date field is named for the media: TMDB calls it `primary_release_date` for a film and
     `first_air_date` for a series, and sending the wrong one is not an error — it is an unfiltered query
-    that looks like a filtered one. `origin_countries` are OR-ed: TMDB joins `|` as "any of".
+    that looks like a filtered one. `origin_countries` are OR-ed: TMDB joins `|` as "any of". `genre` is
+    one TMDB genre id.
     """
     params = {"sort_by": sort_by, "include_adult": "true" if include_adult else "false"}
     if vote_count_gte is not None:
@@ -66,6 +67,8 @@ def discover_params(media, vote_count_gte=None, release_date_gte=None, release_d
         params[f"{date_key}.lte"] = release_date_lte
     if origin_countries:
         params["with_origin_country"] = "|".join(sorted(origin_countries))
+    if genre is not None:
+        params["with_genres"] = str(genre)
     return params
 
 
