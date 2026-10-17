@@ -144,6 +144,9 @@
      "upstream": "Q96390788 also states P4983 102321, Q63226105's."},
     {"mediaType": "tv", "tmdbId": 105009, "item": "Q100255568",
      "why": "Tokyo Revengers: TMDB's record names IMDb tt13196080, year 2021; the item whose IMDb id and year match is Q100255568 (P345 tt13196080; years 2021), against Q63981675 (years 2017; enwiki Tokyo Revengers). The `imdb` rule chose it until oxyc/den-dataset#53 took TMDB's record out of the choice.",
-     "upstream": "Q63981675 also states P4983 105009, Q100255568's."}
+     "upstream": "Q63981675 also states P4983 105009, Q100255568's."},
+    {"mediaType": "tv", "tmdbId": 215307, "item": "Q115728642",
+     "why": "The Traitors: TMDB's record is The Traitors (UK), first aired 2022, 48 episodes, IMDb tt23743442. Q115728642 is the British series (P31 television series, P345 tt23743442, P495 United Kingdom, P449 BBC One, its seasons as parts via P527), against Q131562106 (The Traitors (British TV series) series 3, a season of television series: P179 Q115728642, P1113 12 episodes).",
+     "upstream": "Q131562106 (series 3) states the series' P4983 215307 and P345 tt23743442."}
   ]
 }
