@@ -200,8 +200,13 @@ def floor_values(floors):
 
 def below_floor(votes, floors, today):
     """One below-floor verdict as the checkpoint keeps it: the UTC day it was made, and the TMDB count and
-    the floors it was judged by."""
+    the floors it was judged by — `floors.children` for a children's series (`judged_by`)."""
     return {"on": today, "votes": votes, "floors": floor_values(floors)}
+
+
+def judged_by(floors, label, kids):
+    """The floors a verdict about `label` is reached and kept under: the children's for a `kids` row."""
+    return floors.children if label in kids else floors
 
 
 #: How long the weekly catalogue pass trusts a below-floor verdict (`standing`'s `carry_days`): the 8-week
@@ -251,7 +256,7 @@ def lifetime(label, carry_days):
     return carry_days + zlib.crc32(label.encode("utf-8")) % carry_days if carry_days else 0
 
 
-def standing(judged, today, floors, worklist_votes, carry_days=0):
+def standing(judged, today, floors, worklist_votes, carry_days=0, kids=frozenset()):
     """The keys whose below-floor verdict still holds for this batch, and so are not asked about again.
 
     A below-floor verdict is about one day's counts. A vote count only climbs, so it must be judged again
@@ -274,12 +279,16 @@ def standing(judged, today, floors, worklist_votes, carry_days=0):
     A plotless verdict (`no_plot`) is the other kind in the same map: the title cleared the gate and no
     article gave it a plot. It holds for the same `lifetime`, whatever the floors and the count do, so a
     title that gains an article is asked again when it expires, and at once under another `PLOT_RULES`.
+
+    A children's series (`kids`) is judged by `floors.children`, so a verdict about one holds only if it was
+    reached under those: one from before the series was marked is asked again.
     """
     def same_count(label, held):
         if label not in worklist_votes:
             return True
         if "side" in held:
-            return tmdb_side(worklist_votes[label], floor_values(floors)) == held["side"]
+            values = floor_values(judged_by(floors, label, kids))
+            return tmdb_side(worklist_votes[label], values) == held["side"]
         return worklist_votes[label] == held.get("votes")
 
     def fresh(label, held):
@@ -289,7 +298,7 @@ def standing(judged, today, floors, worklist_votes, carry_days=0):
     def holds(label, held):
         if is_no_plot(held):
             return held.get("rules") == PLOT_RULES
-        return held.get("floors") == floor_values(floors) and same_count(label, held)
+        return held.get("floors") == floor_values(judged_by(floors, label, kids)) and same_count(label, held)
 
     return {label for label, held in judged.items() if fresh(label, held) and holds(label, held)}
 
@@ -563,10 +572,10 @@ def settle_source_claims(results, claims):
 
 #: Fields a batch row never carries (oxyc/den-dataset#53): every one TMDB's detail call supplied, which
 #: older batches still hold, and the two admission reads in memory. `regional` is the worklist's TMDB tier
-#: and `originCountry` Wikidata's P495, read to pick the floors (`pipeline/floors.py`); after the gate
-#: nothing does. Batches already on disk keep theirs; nothing that reads a batch reads these.
-NOT_WRITTEN = frozenset({"voteCount", "originCountry", "regional", "originalLanguage", "title", "year", "genres",
-                         "genreIDs", "keywords", "keywordIDs", "director", "topCast"})
+#: and `originCountry` Wikidata's P495, read to pick the floors (`pipeline/floors.py`), as is `kids`; after
+#: the gate nothing does. Batches already on disk keep theirs; nothing that reads a batch reads these.
+NOT_WRITTEN = frozenset({"voteCount", "originCountry", "regional", "kids", "originalLanguage", "title", "year",
+                         "genres", "genreIDs", "keywords", "keywordIDs", "director", "topCast"})
 
 
 def written(record):
@@ -625,8 +634,9 @@ def read_worklist(path):
     The counts are the TMDB votes `/discover` stated when the universe was built (`pipeline/worklist.entry`)
     — what the admission gate judges by. A row that states none is absent from the map, never zero: the
     export dump carries no count, and zero is below every floor. `regional` rides the same way. The keys
-    whose row says `"admitted": true` come back as the last element: a plan built from an out-dir an
-    earlier build admitted them into (`admit`).
+    whose row says `"admitted": true` come back fourth: a plan built from an out-dir an earlier build
+    admitted them into (`admit`). Last are the keys whose row says `"kids": true`, the children's series
+    `pipeline/floors.py` judges by its own floors.
     """
     try:
         with open(path, encoding="utf-8") as handle:
@@ -637,7 +647,8 @@ def read_worklist(path):
         tiers = {key(*pair): bool(row["regional"]) for pair, row in zip(entries, rows)
                  if row.get("regional") is not None}
         planned = frozenset(key(*pair) for pair, row in zip(entries, rows) if row.get("admitted") is True)
-        return entries, votes, tiers, planned
+        kids = frozenset(key(*pair) for pair, row in zip(entries, rows) if row.get("kids") is True)
+        return entries, votes, tiers, planned, kids
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise StageError(f"enrich: {path} is not a worklist of {{tmdbId, mediaType}} rows ({error})")
 
@@ -689,7 +700,9 @@ def admit(records, floors, today, cache, worklist_votes=None, excluded=None, cat
         if votes(record) is None and (label in catalogue or label in planned):
             kept[label] = SHIPPED if label in catalogue else PLANNED
     records = [r for r in records if key(r["mediaType"], r["tmdbId"]) not in kept]
-    untiered = [r for r in records if r.get("regional") is None and (votes(r) or 0) < floors.tmdb]
+    # A children's series is judged by its own floors whatever its origin, so its origin is not asked.
+    untiered = [r for r in records
+                if r.get("regional") is None and not r.get("kids") and (votes(r) or 0) < floors.tmdb]
     for media in sorted({record["mediaType"] for record in untiered}):
         found = wikidata.origins([r["tmdbId"] for r in untiered if r["mediaType"] == media], media, cache,
                                  excluded=excluded.get(media))
@@ -762,7 +775,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     if token:
         # Read now, so a malformed reserve refuses the run instead of being swallowed as a failed fast path.
         enterprise.gate.headroom()
-    worklist, worklist_votes, worklist_tiers, planned = read_worklist(worklist_path)
+    worklist, worklist_votes, worklist_tiers, planned, kids = read_worklist(worklist_path)
     ck_path = checkpoint_path(out_dir)
     present = os.path.exists(ck_path)
     checkpoint = read_checkpoint(ck_path)
@@ -776,7 +789,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
         processed |= unrecorded(out_dir, checkpoint["nextBatch"])
     today = today or datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     judged = checkpoint["judgedBelow"]
-    held = standing(judged, today, floors, worklist_votes, carry_days)
+    held = standing(judged, today, floors, worklist_votes, carry_days, kids)
     settled = processed | held
     pending = [entry for entry in worklist if key(*entry) not in settled][:limit]
     if not pending:
@@ -789,7 +802,8 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
     # stated one.
     records = [dict({"tmdbId": tmdb_id, "mediaType": media},
                     **({"regional": worklist_tiers[key(media, tmdb_id)]} if key(media, tmdb_id) in worklist_tiers
-                       else {}))
+                       else {}),
+                    **({"kids": True} if key(media, tmdb_id) in kids else {}))
                for media, tmdb_id in pending]
 
     try:
@@ -822,7 +836,7 @@ def run(worklist_path, out_dir, floors=floor_rules.DEFAULT, limit=LIMIT, exclude
             # `standing`. The cache makes the re-judging nearly free.
             counts["belowFloor"] += 1
             below.add(label)
-            judged[label] = below_floor(worklist_votes.get(label), floors, today)
+            judged[label] = below_floor(worklist_votes.get(label), judged_by(floors, label, kids), today)
         elif exclude_anime and is_anime(kinds.get(label, ())):
             # Opt-IN: excluding anime by default silently cost the corpus 1,498 titles, the entire
             # Ghibli catalogue among them.

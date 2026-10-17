@@ -15,6 +15,8 @@ About **5 new titles a day** reach the catalogue. Release years whose admissions
 | Genre & mood labels, facts delta | TypeSafe (Jev); classify and critique in one call since #187 | ~$0.0008 | ~$1.45 | measured, daily run 2026-09-30, less the measured 13% on those two |
 | **Total** | | **~$0.0019** | **~$3.35** | |
 
+The children's tier (`pipeline/floors.py`, 2026-10-17) adds a one-off backlog: 1,623 Kids-genre series clear its floors, fewer once the plotless ones are parked, so ~$3 at this rate, drained under the daily caps.
+
 Fan picks were ~$0.003 a title in the keyed format, online (daily run 2026-09-30). Premise tags were Claude Haiku 4.5 until #183: $0.0017 a title at 5 a call, $0.0012 at 40 (#146's real batches). An early estimate of $0.009 a title was about 5× too high. Fallback calls (a refused title asked again online, then by Claude) and a job finished online after it expired cost standard price on top.
 
 **Caching doesn't help here.** Prompt caching only pays when the same prefix repeats within minutes, and the daily job makes about one call per step a day. Haiku 4.5's premise prompt (~2k tokens) is also below its minimum cacheable prefix.

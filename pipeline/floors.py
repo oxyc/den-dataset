@@ -77,6 +77,19 @@ same way, and whatever builds a plan from an out-dir writes it for every title t
 (`pipeline/build_worklist.py` does). With it, the replay admitted all 200 and no flag is needed. A new
 title, and any row that states a count, is judged as above. Both Wikipedia floors at 0 still admit every
 title, for a list nothing records as admitted.
+
+**A children's series is judged by the regional floors, wherever it is from** (`kids` on its worklist row,
+which `pipeline/worklist` sets for TMDB's Kids genre). TMDB's count is a count of adults rating what they
+watched, and preschool television is watched by people who do not rate it: of 75 named preschool series
+sampled on 2026-10-17, the corpus held 27, and the TMDB count was what kept most of the rest out — Bing (0
+votes, 12 Wikipedias, a `Plot` section), Pocoyo (0, 33), Molly of Denali (1, 25), Pororo (9, 24). Fifteen
+of them were never even enumerated, being below the discovery floor, so the worklist lists the Kids genre
+with no vote floor at all. Their articles are not the problem: about 30 of the 48 missing had a section
+`lib/plot.py` takes, so the plot rule is unchanged and a series with no plot is still parked. What the
+regional floors still refuse is the thinly documented tail (Trash Truck: 8 votes, a 3-Wikipedia stub with
+an episode table and no premise is admitted here and then parked plotless). Of TMDB's 8,255 Kids series that
+day, 7,770 were not in the catalogue and 1,623 of those clear these floors, 1,207 on their Wikipedias alone;
+5,166 have no Wikidata item stating their TMDB id, which no floor reaches.
 """
 from dataclasses import dataclass
 
@@ -99,8 +112,11 @@ class Floors:
 
         Every title is in the worldwide tier; a regional title is in both. `regional` is the worklist's
         answer, from `/discover`, and decides when present; otherwise `originCountry` — Wikidata's P495 —
-        does. A title with neither is judged worldwide, since nothing says it is regional.
+        does. A title with neither is judged worldwide, since nothing says it is regional. A children's
+        series (`kids`) is judged by `children`, whatever its origin.
         """
+        if record.get("kids"):
+            return self.children.tmdb, self.children.wikipedias
         regional = record.get("regional")
         if regional is None:
             regional = bool(REGIONAL_ORIGINS & set(record.get("originCountry") or ()))
@@ -114,6 +130,14 @@ class Floors:
         """What discovery enumerates at: a title below every TMDB floor can still be admitted on its
         Wikipedia count only if something enumerated it, so this is the lowest floor any tier uses."""
         return min(self.tmdb, self.regional_tmdb)
+
+    @property
+    def children(self):
+        """The floors a children's series is judged by: the lowest of each, in both tiers. A below-floor
+        verdict about one records these (`pipeline/enrich.below_floor`), so a verdict reached under the
+        worldwide floors before this tier existed does not hold for it."""
+        tmdb, wikipedias = self.lowest_tmdb, min(self.wikipedias, self.regional_wikipedias)
+        return Floors(tmdb, tmdb, wikipedias, wikipedias)
 
 
 DEFAULT = Floors()

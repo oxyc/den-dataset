@@ -34,6 +34,11 @@ asks TMDB nothing (oxyc/den-dataset#53). `regional` is whether the same query, n
 origins, names the title too: one more paged query per media rather than a question per title. An
 `export` row has neither: the daily dump states popularity, not votes or origins.
 
+**`catalogue` and `delta` also list TMDB's Kids-genre series with no vote floor, marked `kids`.** Preschool
+television is not rated by the people who watch it, so the discovery floor never enumerated Bing or Pocoyo
+however many Wikipedias have an article on them; `pipeline/floors.py` says what the gate then judges them
+by. TMDB has a Kids genre for series only, so films are enumerated as before.
+
 **An incremental diff writes the same two filenames as a full run**, which is why `pipeline/daily.py` keeps
 its lists under `<out-dir>/<mode>/`. Point the two outputs there with `--set` rather than moving the whole
 out-dir, so the genres & moods it must skip are still found beside everything else: forty delta rows
@@ -85,6 +90,10 @@ CATALOGUE_FIRST_YEAR = 1870
 #: a brand-new release with no votes has no plot worth classifying, and every id listed costs a detail call
 #: each day it stays below the floors, since below-floor ids are never checkpointed.
 VOTE_FLOOR = floor_rules.DEFAULT.lowest_tmdb
+
+#: TMDB's Kids genre, which only series carry. Listed with no vote floor (`with_children`): about 8,250
+#: series on 2026-10-17, 900 of them already above `VOTE_FLOOR`.
+KIDS_GENRE = 10762
 
 #: How many titles a `discover` seed collects. The pilot's number, pinned here for the same reason.
 DISCOVER_COUNT = 500
@@ -223,6 +232,23 @@ def discovered(client, media, limit=None, max_age=0, **query):
     return [dict(row, regional=row["tmdbId"] in regional) for row in rows]
 
 
+def with_children(client, rows, media, max_age=0, **query):
+    """`rows`, with every Kids-genre series the same query names at ANY vote count marked `kids` and the
+    ones below the vote floor added. Films are returned as they are: TMDB gives them no Kids genre.
+
+    The added rows carry no `regional`: the children's floors apply whatever the origin, so asking the
+    regional query about them would answer nothing the gate reads.
+    """
+    if media != "tv":
+        return rows
+    children = collect(client, media, tmdb_api.discover_params(media, genre=KIDS_GENRE, **query),
+                       max_age=max_age)
+    kids = {row["tmdbId"] for row in children}
+    listed = {row["tmdbId"] for row in rows}
+    return ([dict(row, kids=True) if row["tmdbId"] in kids else row for row in rows]
+            + [dict(row, kids=True) for row in children if row["tmdbId"] not in listed])
+
+
 def catalogue_windows(today=None):
     """Release-year slices through next year, as inclusive ISO-date pairs.
 
@@ -245,16 +271,20 @@ def full_catalogue(client, media, windows=None, today=None):
     """Every row currently discoverable at the lowest admission floor, across bounded date slices."""
     found = {}
     for start, end in windows or catalogue_windows(today):
-        rows = discovered(client, media, max_age=max_age(end, today), vote_count_gte=VOTE_FLOOR,
-                          release_date_gte=start, release_date_lte=end, sort_by=SORT_BY)
+        query = dict(release_date_gte=start, release_date_lte=end, sort_by=SORT_BY)
+        rows = discovered(client, media, max_age=max_age(end, today), vote_count_gte=VOTE_FLOOR, **query)
+        rows = with_children(client, rows, media, max_age=max_age(end, today), **query)
         for row in rows:
             previous = found.get(row["tmdbId"])
             if previous is None:
                 found[row["tmdbId"]] = row
             else:
                 # A boundary duplicate, or a TMDB correction during the pull: retain the strongest current
-                # evidence and never lose regional admission because the other occurrence lacked it.
+                # evidence and never lose regional or children's admission because the other occurrence
+                # lacked it.
                 previous["regional"] = previous.get("regional", False) or row.get("regional", False)
+                if row.get("kids"):
+                    previous["kids"] = True
                 if row.get("voteCount", -1) > previous.get("voteCount", -1):
                     previous["voteCount"] = row["voteCount"]
     return sorted(found.values(), key=lambda row: (-(row.get("voteCount") or -1), row["tmdbId"]))
@@ -302,8 +332,9 @@ def universe(ctx, media, client=None):
     # of them are below the floor. A dated `vote_count.desc` slice selects the same titles in a few paged
     # calls. The trade: a re-release or a late metadata fix on an OLD title is not picked up — acceptable,
     # because a periodic full pass covers drift and paying per id daily does not scale.
-    return [row for row in discovered(client, media, max_age=RECENT_MAX_AGE, vote_count_gte=VOTE_FLOOR,
-                                      release_date_gte=ctx.since, sort_by=SORT_BY)
+    query = dict(release_date_gte=ctx.since, sort_by=SORT_BY)
+    rows = discovered(client, media, max_age=RECENT_MAX_AGE, vote_count_gte=VOTE_FLOOR, **query)
+    return [row for row in with_children(client, rows, media, max_age=RECENT_MAX_AGE, **query)
             if row["tmdbId"] not in known]
 
 

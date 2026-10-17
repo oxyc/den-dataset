@@ -172,11 +172,12 @@ class Batch(unittest.TestCase):
             answer = dict(answer, resolvedArticle=article)
         return answer
 
-    def worklist(self, *entries, votes=None, tiers=None, planned=()):
+    def worklist(self, *entries, votes=None, tiers=None, planned=(), kids=()):
         """A worklist whose rows state `VOTES` TMDB votes — the shape `/discover` and the delta write —
         unless `votes` names another count per `(media, id)`; None there is an export row, which states
         none. `tiers` names a row's `regional` answer; a row it does not name states none. A row `planned`
-        names says `"admitted": true`, as a plan built from an earlier out-dir writes it."""
+        names says `"admitted": true`, as a plan built from an earlier out-dir writes it, and one `kids`
+        names says `"kids": true`, as the worklist marks a Kids-genre series."""
         path = os.path.join(self.out, "worklist.json")
         rows = []
         for media, tmdb_id in entries:
@@ -188,14 +189,16 @@ class Batch(unittest.TestCase):
                 row["regional"] = tiers[(media, tmdb_id)]
             if (media, tmdb_id) in planned:
                 row["admitted"] = True
+            if (media, tmdb_id) in kids:
+                row["kids"] = True
             rows.append(row)
         with open(path, "w") as fh:
             json.dump(rows, fh)
         return path
 
-    def run_batch(self, entries, votes=None, tiers=None, planned=(), **kwargs):
-        return enrich.run(self.worklist(*entries, votes=votes, tiers=tiers, planned=planned), self.out,
-                          cache=self.cache, **kwargs)
+    def run_batch(self, entries, votes=None, tiers=None, planned=(), kids=(), **kwargs):
+        return enrich.run(self.worklist(*entries, votes=votes, tiers=tiers, planned=planned, kids=kids),
+                          self.out, cache=self.cache, **kwargs)
 
     def rows(self, batch_id=1):
         with open(enrich.batch_path(self.out, batch_id)) as fh:
@@ -226,7 +229,7 @@ class Batch(unittest.TestCase):
         self.assertEqual((report["admittedByTmdb"], report["votesFromWorklist"]), (1, 1))
         row = self.rows()["movie:1"]
         tmdb_sourced = {"title", "year", "genres", "keywords", "keywordIDs", "director", "topCast",
-                        "originalLanguage", "voteCount", "genreIDs", "originCountry", "regional"}
+                        "originalLanguage", "voteCount", "genreIDs", "originCountry", "regional", "kids"}
         self.assertEqual(tmdb_sourced & set(row), set())
         self.assertIs(row["animated"], True)
         self.assertEqual(enrich.NOT_WRITTEN, frozenset(tmdb_sourced))
@@ -726,6 +729,30 @@ class Batch(unittest.TestCase):
         self.assertEqual(written, {"movie:1"})
         self.assertEqual(self.origin_calls, [])
 
+    def test_a_childrens_series_is_judged_by_the_childrens_floors_whatever_its_origin(self):
+        """Bing: no TMDB votes, but articles on 12 Wikipedias. A Kids-genre series clears at 3 Wikipedias
+        (or 15 votes) wherever it is from, a series with the same counts that is not one does not, and the
+        origin of a children's series is not asked. A refused one is recorded under the children's floors."""
+        self.wikis.update({("tv", 1): 4, ("tv", 2): 4, ("tv", 3): 2})
+        report = self.run_batch([("tv", 1), ("tv", 2), ("tv", 3)], votes={("tv", n): 0 for n in (1, 2, 3)},
+                                kids={("tv", 1), ("tv", 3)})
+        self.assertEqual(set(self.rows()), {"tv:1"})
+        self.assertEqual((report["admittedByWikipedias"], report["belowFloor"]), (1, 2))
+        self.assertEqual(self.origin_calls, [("tv", [2])])
+        self.assertNotIn("kids", self.rows()["tv:1"], "read to pick the floors, never written")
+        judged = self.checkpoint()["judgedBelow"]
+        self.assertEqual((judged["tv:2"]["floors"], judged["tv:3"]["floors"]), ([50, 15, 10, 3], [15, 15, 3, 3]))
+
+    def test_a_verdict_from_before_a_series_was_marked_childrens_is_judged_again(self):
+        """Blippi was refused under the worldwide floors before the Kids genre was listed. That verdict says
+        nothing about the children's floors, so a carried one does not hold for it."""
+        put(enrich.checkpoint_path(self.out), json.dumps({"processed": [], "judgedBelow": {
+            "tv:1": {"on": self.DAY, "floors": [50, 15, 10, 3], "side": 1}}}))
+        self.wikis[("tv", 1)] = 5
+        report = self.run_batch([("tv", 1)], votes={("tv", 1): 29}, kids={("tv", 1)}, today=self.DAY,
+                                carry_days=enrich.CARRY_DAYS)
+        self.assertEqual((report["admittedByTmdb"], report["admittedByWikipedias"]), (1, 0))
+
     def test_a_row_with_no_tier_is_judged_in_the_tier_wikidatas_p495_names(self):
         """An export row, or a hand-made list: `/discover` stated nothing, so Wikidata's country of origin
         picks the floors. Asked once per media, and only about the titles whose count does not clear every
@@ -805,6 +832,12 @@ class Batch(unittest.TestCase):
                               {"tmdbId": 2, "mediaType": "movie", "admitted": "no"},
                               {"tmdbId": 3, "mediaType": "movie"}]))
         self.assertEqual(enrich.read_worklist(path)[3], frozenset({"movie:1"}))
+
+    def test_only_a_literal_true_says_kids(self):
+        path = os.path.join(self.out, "plan.json")
+        put(path, json.dumps([{"tmdbId": 1, "mediaType": "tv", "kids": True},
+                              {"tmdbId": 2, "mediaType": "tv", "kids": "yes"}]))
+        self.assertEqual(enrich.read_worklist(path)[4], frozenset({"tv:1"}))
 
     def test_an_unreadable_catalogue_is_a_refusal_not_an_empty_one(self):
         """Read as empty, it would judge every shipped title on a list of ids again, silently."""
