@@ -3,7 +3,8 @@
 #
 #   pipeline/hand-off-day.sh "<why this run cannot finish the day>" ["<cpu model, when it is not on the blocklist>"]
 #
-# Reads ATTEMPT, SPEND, WEEKS and GH_TOKEN from the job. The new run gets the same spend and revisit inputs
+# Reads ATTEMPT, SPEND, WEEKS, WEEKLY_NOW and GH_TOKEN from the job. The new run gets the same spend, revisit
+# and weekly-now inputs
 # and the next try number; on the sixth try nothing is handed on and the day is skipped, so the next schedule
 # tries again. Called before anything is bought (a CPU outside the box's space), or after the day stopped on a
 # service that did not answer, once the cache and the paid-answers ledger are kept, so the next run resumes.
@@ -23,7 +24,7 @@ if [ "$state" = exhausted ]; then
 fi
 echo "::notice::$why; handing the day to try $((ATTEMPT + 1))"
 gh workflow run daily.yml -R "$GITHUB_REPOSITORY" --ref main \
-  -f spend="$SPEND" -f revisit_weeks="$WEEKS" -f host_attempt="$((ATTEMPT + 1))"
+  -f spend="$SPEND" -f revisit_weeks="$WEEKS" -f weekly_now="${WEEKLY_NOW:-false}" -f host_attempt="$((ATTEMPT + 1))"
 gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
 sleep 300
 exit 1

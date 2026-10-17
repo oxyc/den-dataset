@@ -56,6 +56,10 @@ on:
         description: "Buy the day's classify, critique and genres & moods answers"
         type: boolean
         default: false
+      weekly_now:
+        description: "Submit the weekly Batch steps (fan picks, premise tags) today rather than on their day"
+        type: boolean
+        default: false
       host_attempt:
         description: "Set by a run that handed the day on from a host whose kernels differ from the box's"
         required: false
@@ -87,6 +91,7 @@ jobs:
       # What a handed-off run is started with (pipeline/hand-off-day.sh), and what the day runs.
       ATTEMPT: ${{ inputs.host_attempt || '1' }}
       WEEKS: ${{ inputs.revisit_weeks || vars.DEN_REVISIT_WEEKS || '8' }}
+      WEEKLY_NOW: ${{ format('{0}', inputs.weekly_now == true) }}
       # format() so a dispatch's `false` is a non-empty string and is not replaced by the schedule's variable.
       SPEND: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.spend) || format('{0}', vars.DEN_DAILY_SPEND == 'true') }}
     steps:
@@ -221,6 +226,7 @@ jobs:
                 --premise-max-spend-usd "$PREMISE_MAX_SPEND_USD"
                 --max-spend-usd-month "$MAX_SPEND_USD_MONTH")
           [ -n "$WEEKS" ] && args+=(--revisit-weeks "$WEEKS")
+          [ "$WEEKLY_NOW" = "true" ] && args+=(--weekly-now)
           if [ "$SPEND" = "true" ]; then
             args+=(--spend)
             [ "$SPEND_TYPESAFE" = "true" ] && args+=(--spend-typesafe) || args+=(--no-spend-typesafe)
