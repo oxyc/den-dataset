@@ -314,14 +314,25 @@ class Gates(Staged):
         with open(os.path.join(index, "labels.jsonl"), encoding="utf-8") as fh:
             self.assertEqual(fh.read(), before)
 
-    def test_the_recorded_embedder_is_kept_as_written(self):
+    def test_a_run_that_writes_nothing_keeps_the_recorded_runtime(self):
         """Equality leaves the runtime string out, so a service that moved from t/0 to t/1 is the same
-        embedder. The record still says what built the rows; rewriting it would move the manifest's
-        `embedderRuntime` to a build that embedded none of them."""
+        embedder. A run that wrote no row leaves the record alone; rewriting it would move the manifest's
+        `embedderRuntime` to a build that embedded none of the rows."""
         self.write_embedder_record_only()
-        self.run_stage(limit=1)
+        _, summary = self.run_stage(limit=0)
+        self.assertEqual(summary["written"], 0)
         with open(os.path.join(self.out, "index", "embedder.json"), encoding="utf-8") as fh:
             self.assertEqual(json.load(fh)["runtime"], "t/0")
+
+    def test_a_run_that_writes_rows_records_its_runtime(self):
+        """The rows this run wrote came from t/1, so the record (and the manifest's `embedderRuntime`)
+        names t/1 rather than the build that started the store."""
+        self.write_embedder_record_only()
+        _, summary = self.run_stage(limit=1)
+        self.assertEqual(summary["written"], 1)
+        with open(os.path.join(self.out, "index", "embedder.json"), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh), {"model": "bge-m3", "dims": 8, "vectorEpoch": 1, "runtime": "t/1",
+                                             "maxTokens": 1024})
 
     def write_embedder_record_only(self):
         os.makedirs(os.path.join(self.out, "index"), exist_ok=True)

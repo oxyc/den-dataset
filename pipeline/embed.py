@@ -151,8 +151,8 @@ def has_rows(path):
 
 def gate_embedder(ctx, url):
     """The service against the store, the space and the cap. Decides and writes nothing. Returns the
-    verified space, and the identity to record — None when the store already records one, which is kept
-    as written: a newer runtime string is the same embedder, not a fact to overwrite the build with."""
+    verified space, the service's identity, and the identity the store already records (None on first
+    use). Only the runtime string may differ between the two: it is the same embedder."""
     path = ctx.path(artifacts.EMBEDDER)
     now = denembed.identity(url)
     previous = denembed.stored_identity(read_json(path))
@@ -187,7 +187,7 @@ def gate_embedder(ctx, url):
     except denembed.CanaryFailure as failure:
         raise StageError(f"embed: {failure}") from None
     say(f"embedder: {denembed.label(now)}")
-    return stamp, (now if previous is None else None)
+    return stamp, now, previous
 
 
 def gate_composition(ctx):
@@ -440,10 +440,10 @@ def run(ctx):
         say(f"{len(unlabelled)} listed title(s) have no genres & moods and cannot be composed, "
             f"e.g. {sorted(unlabelled)[:3]}")
     url = denembed.base_url()
-    stamp = identity = None
+    stamp = identity = recorded = None
     if not (ctx.dump_docs or ctx.plan):
         try:
-            stamp, identity = gate_embedder(ctx, url)
+            stamp, identity, recorded = gate_embedder(ctx, url)
         except (http.HTTPError, ValueError, KeyError) as unreachable:
             raise StageError(f"embed: den-embed at {url} could not be asked ({unreachable})") from None
     first_composition = gate_composition(ctx)
@@ -455,7 +455,7 @@ def run(ctx):
     if not ctx.plan:
         if stamp is not None:
             write_pretty(ctx.path(artifacts.EMBEDDING_SPACE), stamp)
-        if identity is not None:
+        if identity is not None and recorded is None:
             write_pretty(ctx.path(artifacts.EMBEDDER), identity)
         if first_composition:
             write_pretty(ctx.path(artifacts.COMPOSITION), SHIPPED_COMPOSITION)
@@ -502,6 +502,10 @@ def run(ctx):
             except http.HTTPError as refused:
                 raise StageError(f"embed: den-embed refused a request ({refused}). Everything before it is "
                                  f"in the stores; re-run to continue from there.") from None
+        # The record names the runtime that last wrote rows, which is what the manifest's `embedderRuntime`
+        # reports. A run that wrote none leaves it alone: that service built nothing in the store.
+        if written and recorded is not None and recorded["runtime"] != identity["runtime"]:
+            write_pretty(ctx.path(artifacts.EMBEDDER), identity)
         made = vectors_store
     # One JSON line on stdout, which `pipeline/embed-corpus-run.sh` reads `written` from to know when the
     # corpus is done.
