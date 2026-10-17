@@ -1,0 +1,3465 @@
+{
+ "generated_by": "docs/dataflow/gen.py",
+ "state": "origin/main + origin/port-enrich + origin/port-tranche-3, merged with `git merge-tree` (pipeline/ merges cleanly; 6 files conflict)",
+ "nodes": [
+  {
+   "id": "src_tmdb_export",
+   "label": "TMDB daily ID exports<br/>files.tmdb.org",
+   "kind": "source",
+   "group": "g_tmdb",
+   "phase": "p1",
+   "licence": "tmdb"
+  },
+  {
+   "id": "src_tmdb_api",
+   "label": "TMDB API<br/>/discover · /{media}/{id}",
+   "kind": "source",
+   "group": "g_tmdb",
+   "phase": "p1",
+   "licence": "tmdb"
+  },
+  {
+   "id": "src_wdqs",
+   "label": "Wikidata SPARQL<br/>query.wikidata.org",
+   "kind": "source",
+   "group": "g_wiki",
+   "phase": "p1",
+   "licence": "wd"
+  },
+  {
+   "id": "src_wp_action",
+   "label": "Wikipedia action API<br/>{lang}.wikipedia.org",
+   "kind": "source",
+   "group": "g_wiki",
+   "phase": "p1",
+   "licence": "wp"
+  },
+  {
+   "id": "src_wp_ent",
+   "label": "Wikimedia Enterprise<br/>structured-contents",
+   "kind": "source",
+   "group": "g_wiki",
+   "phase": "p1",
+   "licence": "wp"
+  },
+  {
+   "id": "src_ent_auth",
+   "label": "Enterprise login<br/>auth.enterprise.wikimedia.com",
+   "kind": "source",
+   "group": "g_wiki",
+   "phase": "p1",
+   "licence": ""
+  },
+  {
+   "id": "src_jev",
+   "label": "Jev decision model<br/>api.typesafe.ai (paid)",
+   "kind": "source",
+   "group": "g_models",
+   "phase": "p2",
+   "licence": "model"
+  },
+  {
+   "id": "src_subagents",
+   "label": "Claude subagents<br/>genre &amp; mood labelling",
+   "kind": "source",
+   "group": "g_models",
+   "phase": "p2",
+   "licence": "model"
+  },
+  {
+   "id": "src_haiku",
+   "label": "Haiku subagents<br/>premise tags",
+   "kind": "source",
+   "group": "g_models",
+   "phase": "p3",
+   "licence": "model"
+  },
+  {
+   "id": "src_denembed",
+   "label": "den-embed<br/>self-hosted bge-m3",
+   "kind": "source",
+   "group": "g_models",
+   "phase": "p4",
+   "licence": ""
+  },
+  {
+   "id": "src_imdb",
+   "label": "IMDb title.ratings<br/>datasets.imdbws.com",
+   "kind": "source",
+   "group": "g_imdb",
+   "phase": "p6",
+   "licence": "imdb"
+  },
+  {
+   "id": "cache_tmdb",
+   "label": "TMDB response cache<br/>.cache/tmdb, 180 d",
+   "kind": "cache",
+   "group": "g_tmdb",
+   "phase": "p1",
+   "licence": "tmdb"
+  },
+  {
+   "id": "cache_wiki",
+   "label": "Wikipedia + SPARQL cache<br/>.cache/wiki, 180 d",
+   "kind": "cache",
+   "group": "g_wiki",
+   "phase": "p1",
+   "licence": "wp+wd"
+  },
+  {
+   "id": "file_denenv",
+   "label": "credentials<br/>den.env",
+   "kind": "file",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": ""
+  },
+  {
+   "id": "ext_den_labels",
+   "label": "genre &amp; mood labels the app once bundled<br/>den …/labels-t02.json (deleted in fce66d6)",
+   "kind": "file",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": "model"
+  },
+  {
+   "id": "op_hand",
+   "label": "operator, by hand<br/>docs/OPERATE.md 6a",
+   "kind": "file",
+   "group": "g_facts",
+   "phase": "p5",
+   "licence": ""
+  },
+  {
+   "id": "file_canary",
+   "label": "embedding known answers<br/>data/embed-canary.json",
+   "kind": "file",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "ours"
+  },
+  {
+   "id": "file_premise_v2",
+   "label": "premise tag strings, v2<br/>data/premise-tags-v2.json",
+   "kind": "file",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": "model"
+  },
+  {
+   "id": "file_premise_v1",
+   "label": "premise tag strings, v1<br/>data/premise-tags-v1.json",
+   "kind": "file",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": "model"
+  },
+  {
+   "id": "file_golden",
+   "label": "hand-labelled test set<br/>data/eval/golden-large.json",
+   "kind": "file",
+   "group": "g_publish",
+   "phase": "p6",
+   "licence": "ours"
+  },
+  {
+   "id": "file_taxonomy",
+   "label": "genre &amp; mood vocabulary, read as data<br/>Sources/DenDataset/Taxonomy.swift",
+   "kind": "file",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": "ours"
+  },
+  {
+   "id": "file_prompt",
+   "label": "Jev prompt<br/>scripts/v2/prompts/facets-v2.md",
+   "kind": "file",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": "ours"
+  },
+  {
+   "id": "file_classify_vocab",
+   "label": "labelling vocabulary + instructions<br/>classify/vocab.json, SPEC.md (no code producer)",
+   "kind": "file",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": "ours"
+  },
+  {
+   "id": "file_classify_ckpt",
+   "label": "retired classify checkpoint<br/>classify-checkpoint.json",
+   "kind": "file",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "ours"
+  },
+  {
+   "id": "vector_labels_prev",
+   "label": "genre &amp; mood labels, previous generation<br/>labels-t02.json (already in the out-dir)",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "model"
+  },
+  {
+   "id": "sc_build_worklist",
+   "label": "scripts/build-worklist.py",
+   "kind": "script",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": ""
+  },
+  {
+   "id": "sc_delta_run",
+   "label": "daily freshness pass<br/>scripts/delta-run.sh",
+   "kind": "script",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": ""
+  },
+  {
+   "id": "sc_backfill_prov",
+   "label": "scripts/backfill-plot-provenance.py",
+   "kind": "script",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": ""
+  },
+  {
+   "id": "sc_run_delta",
+   "label": "Jev critique pass<br/>scripts/v2/run_delta.py",
+   "kind": "script",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": ""
+  },
+  {
+   "id": "sc_merge_classify",
+   "label": "scripts/v2/merge_classify_labels.py",
+   "kind": "script",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": ""
+  },
+  {
+   "id": "sc_classify_backfill",
+   "label": "scripts/v2/build_classify_backfill.py",
+   "kind": "script",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": ""
+  },
+  {
+   "id": "sc_premise_worklist",
+   "label": "scripts/v2/build_premise_worklist.py",
+   "kind": "script",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": ""
+  },
+  {
+   "id": "sc_merge_premise",
+   "label": "scripts/v2/merge_premise_tags.py",
+   "kind": "script",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": ""
+  },
+  {
+   "id": "sc_embed_premise",
+   "label": "scripts/v2/embed_premise_v2.py",
+   "kind": "script",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": ""
+  },
+  {
+   "id": "sc_premise_labels",
+   "label": "scripts/v2/build_premise_labels.py",
+   "kind": "script",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": ""
+  },
+  {
+   "id": "sc_merge_premise_cov",
+   "label": "scripts/merge-premise-coverage.py",
+   "kind": "script",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": ""
+  },
+  {
+   "id": "sc_build_premise_tags",
+   "label": "scripts/build-premise-tags.py<br/>(registered producer)",
+   "kind": "script",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": ""
+  },
+  {
+   "id": "sc_embed_tags",
+   "label": "scripts/v2/embed_tags.py<br/>(registered producer)",
+   "kind": "script",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": ""
+  },
+  {
+   "id": "sc_derive_docfacts",
+   "label": "scripts/v2/derive_doc_facts.py",
+   "kind": "script",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": ""
+  },
+  {
+   "id": "sc_embed_docs",
+   "label": "scripts/v2/embed_docs.py<br/>on the box",
+   "kind": "script",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": ""
+  },
+  {
+   "id": "sc_import_box",
+   "label": "scripts/v2/import_box_vectors.py",
+   "kind": "script",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": ""
+  },
+  {
+   "id": "sc_recluster",
+   "label": "scripts/recluster.py",
+   "kind": "script",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": ""
+  },
+  {
+   "id": "sc_merge_facts",
+   "label": "scripts/merge-facts.py",
+   "kind": "script",
+   "group": "g_facts",
+   "phase": "p5",
+   "licence": ""
+  },
+  {
+   "id": "af_worklist_reembed",
+   "label": "shipped ids, popularity order<br/>worklist-{movie,tv}.json",
+   "kind": "artifact",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": "tmdb-ids"
+  },
+  {
+   "id": "af_classify_phase",
+   "label": "genre &amp; mood labelling batches<br/>classify/{in,out}/batch-*.json",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": "model"
+  },
+  {
+   "id": "af_premise_batches",
+   "label": "premise tagging batches<br/>gen/{in,out}/batch-*.json",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": "wp+model"
+  },
+  {
+   "id": "af_premise_v2_bin",
+   "label": "premise vectors as embedded<br/>vectors-premise-v2.bin + premise-v2-ids.json",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": "model"
+  },
+  {
+   "id": "af_premise_v1_realigned",
+   "label": "v1 premise vectors, re-embedded<br/>vectors-premise-v1-realigned.bin + keys (no code producer)",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": "model"
+  },
+  {
+   "id": "af_premise_ids",
+   "label": "premise row order<br/>premise-ids.json",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": "ours"
+  },
+  {
+   "id": "af_coverage_fill",
+   "label": "coverage-fill premise vectors<br/>vectors-{label}.bin + keys",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": "model"
+  },
+  {
+   "id": "af_docs",
+   "label": "composed documents<br/>docs.jsonl (--dump-docs)",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "wp+wd+model"
+  },
+  {
+   "id": "af_box_vectors",
+   "label": "vectors embedded on the box<br/>vectors.jsonl, keys.json, embedding-space.json",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "wp-emb"
+  },
+  {
+   "id": "af_report",
+   "label": "coverage report + gzip twin<br/>report.json, labels-t02.json.gz",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "ours"
+  },
+  {
+   "id": "af_recluster_report",
+   "label": "new-cluster candidates<br/>recluster-&lt;date&gt;.json",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "ours"
+  },
+  {
+   "id": "af_facts_ckpt",
+   "label": "facts scrape checkpoints<br/>facts-fields / -entities / -source-types",
+   "kind": "artifact",
+   "group": "g_facts",
+   "phase": "p5",
+   "licence": "wd"
+  },
+  {
+   "id": "gate_spend",
+   "label": "--spend<br/>(SPENDS)",
+   "kind": "gate",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": ""
+  },
+  {
+   "id": "gate_publish",
+   "label": "--publish<br/>(PUBLISHES)",
+   "kind": "gate",
+   "group": "g_publish",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "gate_mode",
+   "label": "--mode refusal",
+   "kind": "gate",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": ""
+  },
+  {
+   "id": "gate_classify_validate",
+   "label": "labelling batch validator<br/>validate_classify_batch.py",
+   "kind": "gate",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": ""
+  },
+  {
+   "id": "gate_canary",
+   "label": "embed canary",
+   "kind": "gate",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": ""
+  },
+  {
+   "id": "gate_embedgates",
+   "label": "embedder · composition<br/>· token-fit refusals",
+   "kind": "gate",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": ""
+  },
+  {
+   "id": "gate_shipguard",
+   "label": "blocks prose fields in labels<br/>SHIP_GUARD",
+   "kind": "gate",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": ""
+  },
+  {
+   "id": "gate_prose",
+   "label": "corpus prose refusal",
+   "kind": "gate",
+   "group": "g_store",
+   "phase": "p5",
+   "licence": ""
+  },
+  {
+   "id": "gate_provenance",
+   "label": "no vendor-content sections<br/>PROVENANCE / VENDOR_ALLOWED",
+   "kind": "gate",
+   "group": "g_store",
+   "phase": "p5",
+   "licence": ""
+  },
+  {
+   "id": "gate_guards",
+   "label": "publish guards<br/>producers · counts · identity<br/>· filename-version · consistency",
+   "kind": "gate",
+   "group": "g_publish",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "gate_grounding",
+   "label": "grounding ratchet<br/>check-plot-invariants.py",
+   "kind": "gate",
+   "group": "g_publish",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "gate_quality",
+   "label": "quality report<br/>eval-taxonomy.py (not enforced)",
+   "kind": "gate",
+   "group": "g_publish",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "gate_box_sync",
+   "label": "sha256 + den-atlas check<br/>on the staged set",
+   "kind": "gate",
+   "group": "g_consumers",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "gate_fetch_verify",
+   "label": "per-blob sha256",
+   "kind": "gate",
+   "group": "g_consumers",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "gate_signature",
+   "label": "signature vs pinned key",
+   "kind": "gate",
+   "group": "g_consumers",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "rel_corpus",
+   "label": "corpus release<br/>corpus-&lt;ver&gt; (by hand)",
+   "kind": "release",
+   "group": "g_release",
+   "phase": "p6",
+   "licence": "wd+model"
+  },
+  {
+   "id": "con_atlas_fetch",
+   "label": "den-atlas<br/>scripts/fetch-dataset.sh",
+   "kind": "consumer",
+   "group": "g_consumers",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "con_box_sync",
+   "label": "den deploy/<br/>atlas-dataset-sync.sh",
+   "kind": "consumer",
+   "group": "g_consumers",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "con_atlas",
+   "label": "den-atlas<br/>mmaps the store",
+   "kind": "consumer",
+   "group": "g_consumers",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "con_edge",
+   "label": "den-edge<br/>/atlas relay + Den Web",
+   "kind": "consumer",
+   "group": "g_consumers",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "con_tv",
+   "label": "Den TV app",
+   "kind": "consumer",
+   "group": "g_consumers",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "con_signer",
+   "label": "den scripts/sign-dataset.swift<br/>(offline)",
+   "kind": "consumer",
+   "group": "g_consumers",
+   "phase": "p6",
+   "licence": ""
+  },
+  {
+   "id": "st_worklist",
+   "label": "stage: worklist",
+   "kind": "stage",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": "",
+   "source": "origin/port-tranche-3:pipeline/worklist.py:48"
+  },
+  {
+   "id": "st_fetch",
+   "label": "stage: fetch",
+   "kind": "stage",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": "",
+   "source": "origin/port-enrich:pipeline/fetch.py:37"
+  },
+  {
+   "id": "st_articles",
+   "label": "stage: articles",
+   "kind": "stage",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": "",
+   "source": "origin/port-tranche-3:pipeline/articles.py:53"
+  },
+  {
+   "id": "st_classify",
+   "label": "stage: classify",
+   "kind": "stage",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": "",
+   "source": "origin/main:pipeline/classify.py:42"
+  },
+  {
+   "id": "st_docfacts",
+   "label": "stage: docfacts",
+   "kind": "stage",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "",
+   "source": "origin/port-tranche-3:pipeline/docfacts.py:41"
+  },
+  {
+   "id": "st_embed",
+   "label": "stage: embed",
+   "kind": "stage",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "",
+   "source": "origin/port-tranche-3:pipeline/embed.py:55"
+  },
+  {
+   "id": "st_finalize",
+   "label": "stage: finalize",
+   "kind": "stage",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:53"
+  },
+  {
+   "id": "st_facts",
+   "label": "stage: facts",
+   "kind": "stage",
+   "group": "g_facts",
+   "phase": "p5",
+   "licence": "",
+   "source": "origin/port-tranche-3:pipeline/facts.py:48"
+  },
+  {
+   "id": "st_corpus",
+   "label": "stage: corpus",
+   "kind": "stage",
+   "group": "g_store",
+   "phase": "p5",
+   "licence": "",
+   "source": "origin/main:pipeline/corpus.py:38"
+  },
+  {
+   "id": "st_store",
+   "label": "stage: store",
+   "kind": "stage",
+   "group": "g_store",
+   "phase": "p5",
+   "licence": "",
+   "source": "origin/main:pipeline/store.py:30"
+  },
+  {
+   "id": "st_publish",
+   "label": "stage: publish",
+   "kind": "stage",
+   "group": "g_publish",
+   "phase": "p6",
+   "licence": "",
+   "source": "origin/main:pipeline/publish.py:46"
+  },
+  {
+   "id": "export_movie",
+   "label": "TMDB movie id dump<br/>movie_ids.json",
+   "kind": "artifact",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": "tmdb",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:35"
+  },
+  {
+   "id": "export_tv",
+   "label": "TMDB series id dump<br/>tv_series_ids.json",
+   "kind": "artifact",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": "tmdb",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:43"
+  },
+  {
+   "id": "universe_movie",
+   "label": "movie ids to enrich<br/>universe-movie.json",
+   "kind": "artifact",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": "tmdb-ids",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:60"
+  },
+  {
+   "id": "universe_tv",
+   "label": "series ids to enrich<br/>universe-tv.json",
+   "kind": "artifact",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": "tmdb-ids",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:65"
+  },
+  {
+   "id": "articles",
+   "label": "Wikipedia article dump<br/>articles.jsonl",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": "wp+tmdb-fields",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:26"
+  },
+  {
+   "id": "combined",
+   "label": "Jev answers: facets, scores,<br/>genre/theme/mood yes-no<br/>combined-v1-r2*.jsonl",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": "model+tmdb-fields",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:78"
+  },
+  {
+   "id": "combined_manifest",
+   "label": "Jev run provenance<br/>combined-v1-r2*.jsonl.manifest.json",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": "ours",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:88"
+  },
+  {
+   "id": "delta",
+   "label": "Jev answers: critique,<br/>technique, audience<br/>delta-v1*.jsonl",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p2",
+   "licence": "model+tmdb-fields",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:95"
+  },
+  {
+   "id": "enriched",
+   "label": "enriched title records<br/>enriched",
+   "kind": "artifact",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": "tmdb+wp+wd",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:107"
+  },
+  {
+   "id": "enrich_checkpoint",
+   "label": "enrich resume state<br/>enrich-checkpoint.json",
+   "kind": "artifact",
+   "group": "g_fetch",
+   "phase": "p1",
+   "licence": "ours",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:117"
+  },
+  {
+   "id": "doc_facts",
+   "label": "director + genre facts<br/>for the embedding document<br/>doc-facts.json",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "wd",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:125"
+  },
+  {
+   "id": "embed_labels",
+   "label": "embed store: label rows<br/>index/labels.jsonl",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "model",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:145"
+  },
+  {
+   "id": "embed_vectors",
+   "label": "embed store: vectors<br/>index/vectors.jsonl",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "wp-emb",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:151"
+  },
+  {
+   "id": "composition",
+   "label": "document-shape record<br/>index/composition.json",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "ours",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:160"
+  },
+  {
+   "id": "embedder",
+   "label": "embedder identity<br/>index/embedder.json",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "ours",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:169"
+  },
+  {
+   "id": "embedding_space",
+   "label": "verified embedding space<br/>index/embedding-space.json",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "ours",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:179"
+  },
+  {
+   "id": "corpus",
+   "label": "per-title corpus<br/>corpus-&lt;ver&gt;.jsonl.gz",
+   "kind": "artifact",
+   "group": "g_store",
+   "phase": "p5",
+   "licence": "wd+model",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:130"
+  },
+  {
+   "id": "entities",
+   "label": "entity names<br/>corpus-&lt;ver&gt;-entities.json.gz",
+   "kind": "artifact",
+   "group": "g_store",
+   "phase": "p5",
+   "licence": "wd",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:137"
+  },
+  {
+   "id": "corpus_facts",
+   "label": "Wikidata facts,<br/>titles with a vector<br/>facts-&lt;ver&gt;.pre-merge.json",
+   "kind": "artifact",
+   "group": "g_facts",
+   "phase": "p5",
+   "licence": "wd",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:189"
+  },
+  {
+   "id": "delta_ids",
+   "label": "ids needing facts,<br/>no vector<br/>facts-delta-ids.txt",
+   "kind": "artifact",
+   "group": "g_facts",
+   "phase": "p5",
+   "licence": "tmdb-ids",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:198"
+  },
+  {
+   "id": "delta_facts",
+   "label": "Wikidata facts,<br/>titles without a vector<br/>facts-&lt;ver&gt;.delta.json",
+   "kind": "artifact",
+   "group": "g_facts",
+   "phase": "p5",
+   "licence": "wd",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:207"
+  },
+  {
+   "id": "facts",
+   "label": "merged Wikidata facts<br/>facts-&lt;ver&gt;.json",
+   "kind": "artifact",
+   "group": "g_facts",
+   "phase": "p5",
+   "licence": "wd",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:215"
+  },
+  {
+   "id": "vectors",
+   "label": "plot vectors<br/>vectors-bge-m3.bin",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "wp-emb",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:221"
+  },
+  {
+   "id": "vector_labels",
+   "label": "genre &amp; mood labels<br/>labels-t02.json",
+   "kind": "artifact",
+   "group": "g_embed",
+   "phase": "p4",
+   "licence": "model",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:229"
+  },
+  {
+   "id": "premise_vectors",
+   "label": "premise-tag vectors<br/>vectors-premise.bin",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": "model",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:236"
+  },
+  {
+   "id": "premise_labels",
+   "label": "genre &amp; mood labels,<br/>premise row order<br/>labels-premise.json",
+   "kind": "artifact",
+   "group": "g_classify",
+   "phase": "p3",
+   "licence": "model",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:245"
+  },
+  {
+   "id": "store",
+   "label": "the store<br/>den-&lt;ver&gt;.store",
+   "kind": "artifact",
+   "group": "g_store",
+   "phase": "p5",
+   "licence": "wd+model+wp-emb",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:254"
+  },
+  {
+   "id": "manifest",
+   "label": "release manifest<br/>dataset.meta.json",
+   "kind": "artifact",
+   "group": "g_store",
+   "phase": "p4",
+   "licence": "ours",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:264"
+  },
+  {
+   "id": "release",
+   "label": "data-latest release<br/>data-latest",
+   "kind": "release",
+   "group": "g_release",
+   "phase": "p6",
+   "licence": "wd+model+wp-emb",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:273"
+  }
+ ],
+ "edges": [
+  {
+   "id": "e1",
+   "from": "export_movie",
+   "to": "st_worklist",
+   "label": "reads --file",
+   "source": "origin/port-tranche-3:pipeline/worklist.py:82",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e2",
+   "from": "export_tv",
+   "to": "st_worklist",
+   "label": "reads --file",
+   "source": "origin/port-tranche-3:pipeline/worklist.py:83",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e3",
+   "from": "vector_labels_prev",
+   "to": "st_worklist",
+   "label": "reads --known (previous generation)",
+   "source": "origin/port-tranche-3:pipeline/worklist.py:84",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ],
+   "declared_artifact": "vector_labels",
+   "previous_generation": true
+  },
+  {
+   "id": "e4",
+   "from": "st_worklist",
+   "to": "universe_movie",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/worklist.py:87",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e5",
+   "from": "st_worklist",
+   "to": "universe_tv",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/worklist.py:87",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e6",
+   "from": "universe_movie",
+   "to": "st_fetch",
+   "label": "reads --worklist",
+   "source": "origin/port-enrich:pipeline/fetch.py:47",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e7",
+   "from": "universe_tv",
+   "to": "st_fetch",
+   "label": "reads --worklist",
+   "source": "origin/port-enrich:pipeline/fetch.py:47",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e8",
+   "from": "st_fetch",
+   "to": "enriched",
+   "label": "writes",
+   "source": "origin/port-enrich:pipeline/fetch.py:53",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e9",
+   "from": "st_fetch",
+   "to": "enrich_checkpoint",
+   "label": "writes",
+   "source": "origin/port-enrich:pipeline/fetch.py:53",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e10",
+   "from": "enriched",
+   "to": "st_articles",
+   "label": "reads --enriched",
+   "source": "origin/port-tranche-3:pipeline/articles.py:67",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e11",
+   "from": "st_articles",
+   "to": "articles",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/articles.py:68",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e12",
+   "from": "articles",
+   "to": "st_classify",
+   "label": "reads --articles",
+   "source": "origin/main:pipeline/classify.py:55",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e13",
+   "from": "enriched",
+   "to": "st_classify",
+   "label": "reads --enriched-dir",
+   "source": "origin/main:pipeline/classify.py:56",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e14",
+   "from": "st_classify",
+   "to": "combined",
+   "label": "writes",
+   "source": "origin/main:pipeline/classify.py:61",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e15",
+   "from": "st_classify",
+   "to": "combined_manifest",
+   "label": "writes",
+   "source": "origin/main:pipeline/classify.py:61",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e16",
+   "from": "gate_spend",
+   "to": "st_classify",
+   "label": "den run skips it unless --spend",
+   "source": "origin/main:pipeline/classify.py:48",
+   "inferred": false,
+   "origin": "declared SPENDS"
+  },
+  {
+   "id": "e17",
+   "from": "vector_labels_prev",
+   "to": "st_docfacts",
+   "label": "reads --labels (previous generation)",
+   "source": "origin/port-tranche-3:pipeline/docfacts.py:55",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ],
+   "declared_artifact": "vector_labels",
+   "previous_generation": true
+  },
+  {
+   "id": "e18",
+   "from": "st_docfacts",
+   "to": "doc_facts",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/docfacts.py:57",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e19",
+   "from": "vector_labels_prev",
+   "to": "st_embed",
+   "label": "reads --labels (previous generation)",
+   "source": "origin/port-tranche-3:pipeline/embed.py:62",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ],
+   "declared_artifact": "vector_labels",
+   "previous_generation": true
+  },
+  {
+   "id": "e20",
+   "from": "enriched",
+   "to": "st_embed",
+   "label": "reads --enriched-dir",
+   "source": "origin/port-tranche-3:pipeline/embed.py:63",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e21",
+   "from": "doc_facts",
+   "to": "st_embed",
+   "label": "reads --doc-facts",
+   "source": "origin/port-tranche-3:pipeline/embed.py:64",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e22",
+   "from": "st_embed",
+   "to": "embed_labels",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/embed.py:70",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e23",
+   "from": "st_embed",
+   "to": "embed_vectors",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/embed.py:71",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e24",
+   "from": "st_embed",
+   "to": "composition",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/embed.py:72",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e25",
+   "from": "st_embed",
+   "to": "embedder",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/embed.py:73",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e26",
+   "from": "st_embed",
+   "to": "embedding_space",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/embed.py:74",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e27",
+   "from": "embed_labels",
+   "to": "st_finalize",
+   "label": "reads --embed-labels",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:64",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e28",
+   "from": "embed_vectors",
+   "to": "st_finalize",
+   "label": "reads --embed-vectors",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:64",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e29",
+   "from": "embedder",
+   "to": "st_finalize",
+   "label": "reads --embedder",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:64",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e30",
+   "from": "embedding_space",
+   "to": "st_finalize",
+   "label": "reads --embedding-space",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:64",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e31",
+   "from": "st_finalize",
+   "to": "vector_labels",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:65",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e32",
+   "from": "st_finalize",
+   "to": "vectors",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:65",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e33",
+   "from": "st_finalize",
+   "to": "manifest",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:65",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e34",
+   "from": "vector_labels",
+   "to": "st_facts",
+   "label": "reads --labels",
+   "source": "origin/port-tranche-3:pipeline/facts.py:66",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e35",
+   "from": "delta_ids",
+   "to": "st_facts",
+   "label": "reads --delta-ids",
+   "source": "origin/port-tranche-3:pipeline/facts.py:66",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e36",
+   "from": "st_facts",
+   "to": "corpus_facts",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/facts.py:69",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e37",
+   "from": "st_facts",
+   "to": "delta_facts",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/facts.py:69",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e38",
+   "from": "st_facts",
+   "to": "facts",
+   "label": "writes",
+   "source": "origin/port-tranche-3:pipeline/facts.py:69",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e39",
+   "from": "combined",
+   "to": "st_corpus",
+   "label": "reads --combined",
+   "source": "origin/main:pipeline/corpus.py:46",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e40",
+   "from": "delta",
+   "to": "st_corpus",
+   "label": "reads --delta",
+   "source": "origin/main:pipeline/corpus.py:47",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e41",
+   "from": "facts",
+   "to": "st_corpus",
+   "label": "reads --facts",
+   "source": "origin/main:pipeline/corpus.py:48",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e42",
+   "from": "vector_labels",
+   "to": "st_corpus",
+   "label": "reads --labels",
+   "source": "origin/main:pipeline/corpus.py:49",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e43",
+   "from": "premise_labels",
+   "to": "st_corpus",
+   "label": "reads --premise-labels",
+   "source": "origin/main:pipeline/corpus.py:50",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e44",
+   "from": "st_corpus",
+   "to": "corpus",
+   "label": "writes",
+   "source": "origin/main:pipeline/corpus.py:53",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e45",
+   "from": "st_corpus",
+   "to": "entities",
+   "label": "writes",
+   "source": "origin/main:pipeline/corpus.py:53",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e46",
+   "from": "corpus",
+   "to": "st_store",
+   "label": "reads --corpus",
+   "source": "origin/main:pipeline/store.py:35",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e47",
+   "from": "entities",
+   "to": "st_store",
+   "label": "reads --entities",
+   "source": "origin/main:pipeline/store.py:36",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e48",
+   "from": "facts",
+   "to": "st_store",
+   "label": "reads --facts",
+   "source": "origin/main:pipeline/store.py:37",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e49",
+   "from": "vectors",
+   "to": "st_store",
+   "label": "reads --vectors",
+   "source": "origin/main:pipeline/store.py:38",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e50",
+   "from": "vector_labels",
+   "to": "st_store",
+   "label": "reads --vector-labels",
+   "source": "origin/main:pipeline/store.py:39",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e51",
+   "from": "premise_vectors",
+   "to": "st_store",
+   "label": "reads --premise-vectors",
+   "source": "origin/main:pipeline/store.py:40",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e52",
+   "from": "premise_labels",
+   "to": "st_store",
+   "label": "reads --premise-labels",
+   "source": "origin/main:pipeline/store.py:41",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e53",
+   "from": "st_store",
+   "to": "store",
+   "label": "writes",
+   "source": "origin/main:pipeline/store.py:44",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e54",
+   "from": "store",
+   "to": "st_publish",
+   "label": "reads --store",
+   "source": "origin/main:pipeline/publish.py:54",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e55",
+   "from": "manifest",
+   "to": "st_publish",
+   "label": "reads --manifest",
+   "source": "origin/main:pipeline/publish.py:54",
+   "inferred": false,
+   "origin": "declared INPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e56",
+   "from": "st_publish",
+   "to": "release",
+   "label": "writes",
+   "source": "origin/main:pipeline/publish.py:56",
+   "inferred": false,
+   "origin": "declared OUTPUTS",
+   "declared_in": [
+    "origin/main",
+    "origin/port-enrich",
+    "origin/port-tranche-3"
+   ]
+  },
+  {
+   "id": "e57",
+   "from": "gate_publish",
+   "to": "st_publish",
+   "label": "den run skips it unless --publish",
+   "source": "origin/main:pipeline/publish.py:46",
+   "inferred": false,
+   "origin": "declared PUBLISHES"
+  },
+  {
+   "id": "e58",
+   "from": "sc_build_worklist",
+   "to": "export_movie",
+   "label": "registered producer",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:35",
+   "inferred": false,
+   "origin": "catalogue producer"
+  },
+  {
+   "id": "e59",
+   "from": "sc_build_worklist",
+   "to": "export_tv",
+   "label": "registered producer",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:43",
+   "inferred": false,
+   "origin": "catalogue producer"
+  },
+  {
+   "id": "e60",
+   "from": "sc_run_delta",
+   "to": "delta",
+   "label": "registered producer",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:95",
+   "inferred": false,
+   "origin": "catalogue producer"
+  },
+  {
+   "id": "e61",
+   "from": "op_hand",
+   "to": "delta_ids",
+   "label": "registered producer",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:198",
+   "inferred": false,
+   "origin": "catalogue producer"
+  },
+  {
+   "id": "e62",
+   "from": "sc_embed_tags",
+   "to": "premise_vectors",
+   "label": "registered producer",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:236",
+   "inferred": false,
+   "origin": "catalogue producer"
+  },
+  {
+   "id": "e63",
+   "from": "sc_build_premise_tags",
+   "to": "premise_labels",
+   "label": "registered producer",
+   "source": "origin/port-tranche-3:pipeline/artifacts.py:245",
+   "inferred": false,
+   "origin": "catalogue producer"
+  },
+  {
+   "id": "e64",
+   "from": "src_tmdb_export",
+   "to": "sc_build_worklist",
+   "label": "GET {kind}_ids_<date>.json.gz (plain http)",
+   "source": "origin/main:scripts/build-worklist.py:41",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e65",
+   "from": "sc_build_worklist",
+   "to": "export_movie",
+   "label": "writes movie_ids.json.gz; gunzip by hand",
+   "source": "origin/main:scripts/build-worklist.py:37",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e66",
+   "from": "sc_build_worklist",
+   "to": "export_tv",
+   "label": "writes tv_series_ids.json.gz; gunzip by hand",
+   "source": "origin/main:scripts/build-worklist.py:37",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e67",
+   "from": "ext_den_labels",
+   "to": "sc_build_worklist",
+   "label": "LABELS default, read before any fetch",
+   "source": "origin/main:scripts/build-worklist.py:29",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e68",
+   "from": "sc_build_worklist",
+   "to": "af_worklist_reembed",
+   "label": "shipped ids, popularity order",
+   "source": "origin/main:scripts/build-worklist.py:73",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e69",
+   "from": "af_worklist_reembed",
+   "to": "st_fetch",
+   "label": "--set universe_*=worklist-*.json",
+   "source": "origin/port-enrich:docs/OPERATE.md:188",
+   "inferred": true,
+   "origin": "traced"
+  },
+  {
+   "id": "e70",
+   "from": "src_tmdb_api",
+   "to": "st_worklist",
+   "label": "/discover pages (discover, delta)",
+   "source": "origin/port-tranche-3:pipeline/worklist.py:156",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e71",
+   "from": "gate_mode",
+   "to": "st_worklist",
+   "label": "no default universe",
+   "source": "origin/port-tranche-3:pipeline/worklist.py:94",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e72",
+   "from": "src_tmdb_api",
+   "to": "st_fetch",
+   "label": "detail + keywords + credits per id",
+   "source": "origin/port-enrich:pipeline/enrich.py:166",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e73",
+   "from": "cache_tmdb",
+   "to": "st_fetch",
+   "label": "cached detail body",
+   "source": "origin/port-enrich:lib/tmdb.py:193",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e74",
+   "from": "st_fetch",
+   "to": "cache_tmdb",
+   "label": "stores detail body (never /discover)",
+   "source": "origin/port-enrich:lib/tmdb.py:199",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e75",
+   "from": "src_wdqs",
+   "to": "st_fetch",
+   "label": "mapping SPARQL: article, source work, sitelinks, creators, runtime",
+   "source": "origin/port-enrich:pipeline/enrich.py:360",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e76",
+   "from": "st_fetch",
+   "to": "cache_wiki",
+   "label": "stores SPARQL body",
+   "source": "origin/port-enrich:lib/wikidata.py:344",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e77",
+   "from": "src_wp_action",
+   "to": "st_fetch",
+   "label": "action=parse wikitext, en then other languages",
+   "source": "origin/port-enrich:lib/plot.py:205",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e78",
+   "from": "cache_wiki",
+   "to": "st_fetch",
+   "label": "cached action/SPARQL bodies",
+   "source": "origin/port-enrich:pipeline/enrich.py:326",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e79",
+   "from": "st_fetch",
+   "to": "cache_wiki",
+   "label": "stores action=parse body",
+   "source": "origin/main:lib/wikipedia.py:157",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e80",
+   "from": "src_wp_ent",
+   "to": "st_fetch",
+   "label": "pre-sectioned plot; never cached",
+   "source": "origin/port-enrich:lib/plot.py:341",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e81",
+   "from": "src_ent_auth",
+   "to": "st_fetch",
+   "label": "24 h bearer (enterprise_login)",
+   "source": "origin/port-enrich:scripts/lib/den-env.sh:42",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e82",
+   "from": "file_denenv",
+   "to": "st_fetch",
+   "label": "TMDB_API_KEY + Enterprise credentials",
+   "source": "origin/port-enrich:scripts/lib/den-env.sh:24",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e83",
+   "from": "sc_delta_run",
+   "to": "st_worklist",
+   "label": "--mode delta --since, lists into delta/",
+   "source": "origin/port-tranche-3:scripts/delta-run.sh:67",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e84",
+   "from": "vector_labels_prev",
+   "to": "sc_delta_run",
+   "label": "published genre & mood labels as --known",
+   "source": "origin/port-tranche-3:scripts/delta-run.sh:53",
+   "inferred": false,
+   "origin": "traced",
+   "previous_generation": true
+  },
+  {
+   "id": "e85",
+   "from": "sc_delta_run",
+   "to": "enriched",
+   "label": "one pipeline.enrich batch per media",
+   "source": "origin/port-enrich:scripts/delta-run.sh:83",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e86",
+   "from": "enriched",
+   "to": "sc_backfill_prov",
+   "label": "--enriched-dir",
+   "source": "origin/main:scripts/backfill-plot-provenance.py:200",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e87",
+   "from": "cache_wiki",
+   "to": "sc_backfill_prov",
+   "label": "replays grounding from cached bodies",
+   "source": "origin/main:scripts/backfill-plot-provenance.py:203",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e88",
+   "from": "sc_backfill_prov",
+   "to": "enriched",
+   "label": "adds plotArticleRole / Redirected",
+   "source": "origin/main:scripts/backfill-plot-provenance.py:201",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e89",
+   "from": "src_wp_action",
+   "to": "st_articles",
+   "label": "whole article, re-read",
+   "source": "origin/port-tranche-3:pipeline/articles.py:195",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e90",
+   "from": "cache_wiki",
+   "to": "st_articles",
+   "label": "answers nearly all of it",
+   "source": "origin/port-tranche-3:pipeline/articles.py:225",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e91",
+   "from": "st_classify",
+   "to": "src_jev",
+   "label": "one typed request per title",
+   "source": "origin/main:scripts/v2/run_combined.py:280",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e92",
+   "from": "src_jev",
+   "to": "st_classify",
+   "label": "answers (jev-1.13.0)",
+   "source": "origin/main:scripts/v2/typesafe_client.py:28",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e93",
+   "from": "file_taxonomy",
+   "to": "st_classify",
+   "label": "vocabulary parsed + hashed into the manifest",
+   "source": "origin/main:scripts/v2/combined_questions.py:14",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e94",
+   "from": "file_prompt",
+   "to": "st_classify",
+   "label": "prompt",
+   "source": "origin/main:scripts/v2/combined_questions.py:15",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e95",
+   "from": "file_denenv",
+   "to": "st_classify",
+   "label": "TYPESAFE_API_KEY",
+   "source": "origin/main:scripts/v2/typesafe_client.py:50",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e96",
+   "from": "file_denenv",
+   "to": "sc_run_delta",
+   "label": "TYPESAFE_API_KEY",
+   "source": "origin/main:scripts/v2/typesafe_client.py:50",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e97",
+   "from": "file_taxonomy",
+   "to": "sc_run_delta",
+   "label": "--taxonomy default",
+   "source": "origin/main:scripts/v2/run_delta.py:36",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e98",
+   "from": "file_prompt",
+   "to": "sc_run_delta",
+   "label": "--prompt default",
+   "source": "origin/main:scripts/v2/run_delta.py:35",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e99",
+   "from": "articles",
+   "to": "sc_run_delta",
+   "label": "--articles",
+   "source": "origin/main:scripts/v2/run_delta.py:49",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e100",
+   "from": "enriched",
+   "to": "sc_run_delta",
+   "label": "--enriched-dir",
+   "source": "origin/main:scripts/v2/run_delta.py:50",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e101",
+   "from": "sc_run_delta",
+   "to": "src_jev",
+   "label": "paid_run: no --spend gate",
+   "source": "origin/main:scripts/v2/run_delta.py:69",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e102",
+   "from": "sc_run_delta",
+   "to": "delta",
+   "label": "writes delta-v1*.jsonl",
+   "source": "origin/main:scripts/v2/run_delta.py:65",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e103",
+   "from": "af_classify_phase",
+   "to": "src_subagents",
+   "label": "in/batch-NNNN.json",
+   "source": "origin/main:scripts/v2/classify/AGENT.md:16",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e104",
+   "from": "file_classify_vocab",
+   "to": "src_subagents",
+   "label": "the only labels allowed",
+   "source": "origin/main:scripts/v2/classify/AGENT.md:14",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e105",
+   "from": "src_subagents",
+   "to": "af_classify_phase",
+   "label": "out/batch-NNNN.json, one agent per batch",
+   "source": "origin/main:scripts/v2/classify/AGENT.md:17",
+   "inferred": true,
+   "origin": "traced"
+  },
+  {
+   "id": "e106",
+   "from": "af_classify_phase",
+   "to": "sc_classify_backfill",
+   "label": "rows a batch dropped",
+   "source": "origin/main:scripts/v2/build_classify_backfill.py:40",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e107",
+   "from": "file_classify_vocab",
+   "to": "sc_classify_backfill",
+   "label": "vocab.json",
+   "source": "origin/main:scripts/v2/build_classify_backfill.py:33",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e108",
+   "from": "sc_classify_backfill",
+   "to": "af_classify_phase",
+   "label": "re-batches them into in/",
+   "source": "origin/main:scripts/v2/build_classify_backfill.py:68",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e109",
+   "from": "af_classify_phase",
+   "to": "gate_classify_validate",
+   "label": "each in/out pair",
+   "source": "origin/main:scripts/v2/validate_classify_batch.py:114",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e110",
+   "from": "file_classify_vocab",
+   "to": "gate_classify_validate",
+   "label": "vocab.json",
+   "source": "origin/main:scripts/v2/validate_classify_batch.py:103",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e111",
+   "from": "gate_classify_validate",
+   "to": "sc_merge_classify",
+   "label": "merge acts on what the validator reports",
+   "source": "origin/port-tranche-3:scripts/v2/merge_classify_labels.py:12",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e112",
+   "from": "af_classify_phase",
+   "to": "sc_merge_classify",
+   "label": "--phase in/ + out/",
+   "source": "origin/port-tranche-3:scripts/v2/merge_classify_labels.py:73",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e113",
+   "from": "file_classify_vocab",
+   "to": "sc_merge_classify",
+   "label": "vocab.json",
+   "source": "origin/port-tranche-3:scripts/v2/merge_classify_labels.py:66",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e114",
+   "from": "vector_labels_prev",
+   "to": "sc_merge_classify",
+   "label": "--labels: the labels to extend",
+   "source": "origin/port-tranche-3:scripts/v2/merge_classify_labels.py:69",
+   "inferred": false,
+   "origin": "traced",
+   "previous_generation": true
+  },
+  {
+   "id": "e115",
+   "from": "sc_merge_classify",
+   "to": "vector_labels_prev",
+   "label": "adds ~9,010 titles in place (undeclared writer)",
+   "source": "origin/port-tranche-3:scripts/v2/merge_classify_labels.py:136",
+   "inferred": false,
+   "origin": "traced",
+   "previous_generation": true
+  },
+  {
+   "id": "e116",
+   "from": "combined",
+   "to": "sc_premise_worklist",
+   "label": "--combined, every shard",
+   "source": "origin/main:scripts/v2/build_premise_worklist.py:114",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e117",
+   "from": "articles",
+   "to": "sc_premise_worklist",
+   "label": "--articles, section text",
+   "source": "origin/main:scripts/v2/build_premise_worklist.py:99",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e118",
+   "from": "file_premise_v2",
+   "to": "sc_premise_worklist",
+   "label": "skip titles already tagged",
+   "source": "origin/main:scripts/v2/build_premise_worklist.py:69",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e119",
+   "from": "file_premise_v1",
+   "to": "sc_premise_worklist",
+   "label": "skip tagged titles; merge-only list",
+   "source": "origin/main:scripts/v2/build_premise_worklist.py:148",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e120",
+   "from": "sc_premise_worklist",
+   "to": "af_premise_batches",
+   "label": "gen/in: premise sections only",
+   "source": "origin/main:scripts/v2/build_premise_worklist.py:178",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e121",
+   "from": "af_premise_batches",
+   "to": "src_haiku",
+   "label": "one subagent per batch",
+   "source": "origin/main:scripts/v2/llm_phase.py:5",
+   "inferred": true,
+   "origin": "traced"
+  },
+  {
+   "id": "e122",
+   "from": "src_haiku",
+   "to": "af_premise_batches",
+   "label": "gen/out/batch-NNNN.json",
+   "source": "origin/main:scripts/v2/llm_phase.py:5",
+   "inferred": true,
+   "origin": "traced"
+  },
+  {
+   "id": "e123",
+   "from": "af_premise_batches",
+   "to": "sc_merge_premise",
+   "label": "--phase gen",
+   "source": "origin/main:scripts/v2/merge_premise_tags.py:87",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e124",
+   "from": "sc_merge_premise",
+   "to": "file_premise_v2",
+   "label": "writes the committed tags",
+   "source": "origin/main:scripts/v2/merge_premise_tags.py:4",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e125",
+   "from": "file_premise_v2",
+   "to": "sc_embed_premise",
+   "label": "--tags",
+   "source": "origin/main:scripts/v2/embed_premise_v2.py:84",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e126",
+   "from": "file_premise_v1",
+   "to": "sc_embed_premise",
+   "label": "--v1-tags: reuse unchanged strings",
+   "source": "origin/main:scripts/v2/embed_premise_v2.py:103",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e127",
+   "from": "af_premise_v1_realigned",
+   "to": "sc_embed_premise",
+   "label": "--base-vectors / --base-keys",
+   "source": "origin/main:scripts/v2/embed_premise_v2.py:85",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e128",
+   "from": "file_canary",
+   "to": "sc_embed_premise",
+   "label": "canary gate first",
+   "source": "origin/main:scripts/v2/embed_premise_v2.py:100",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e129",
+   "from": "sc_embed_premise",
+   "to": "src_denembed",
+   "label": "embeds tag strings",
+   "source": "origin/main:scripts/v2/embed_premise_v2.py:90",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e130",
+   "from": "sc_embed_premise",
+   "to": "af_premise_v2_bin",
+   "label": "writes blob + row order",
+   "source": "origin/main:scripts/v2/embed_premise_v2.py:156",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e131",
+   "from": "af_premise_v2_bin",
+   "to": "premise_vectors",
+   "label": "copied by hand; no code renames v2",
+   "source": "origin/port-tranche-3:docs/OPERATE.md:76",
+   "inferred": true,
+   "origin": "traced"
+  },
+  {
+   "id": "e132",
+   "from": "af_premise_v2_bin",
+   "to": "sc_premise_labels",
+   "label": "--ids premise-v2-ids.json",
+   "source": "origin/main:scripts/v2/build_premise_labels.py:38",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e133",
+   "from": "vector_labels",
+   "to": "sc_premise_labels",
+   "label": "--labels, record per title",
+   "source": "origin/main:scripts/v2/build_premise_labels.py:39",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e134",
+   "from": "sc_premise_labels",
+   "to": "premise_labels",
+   "label": "writes labels-premise.json in blob order",
+   "source": "origin/main:scripts/v2/build_premise_labels.py:68",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e135",
+   "from": "sc_embed_tags",
+   "to": "af_coverage_fill",
+   "label": "writes vectors-{label}.bin",
+   "source": "origin/main:scripts/v2/embed_tags.py:164",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e136",
+   "from": "af_coverage_fill",
+   "to": "sc_merge_premise_cov",
+   "label": "coverage-fill keys + vectors",
+   "source": "origin/main:scripts/merge-premise-coverage.py:52",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e137",
+   "from": "premise_vectors",
+   "to": "sc_merge_premise_cov",
+   "label": "base blob",
+   "source": "origin/main:scripts/merge-premise-coverage.py:44",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e138",
+   "from": "premise_labels",
+   "to": "sc_merge_premise_cov",
+   "label": "base labels",
+   "source": "origin/main:scripts/merge-premise-coverage.py:50",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e139",
+   "from": "af_premise_ids",
+   "to": "sc_merge_premise_cov",
+   "label": "base row order",
+   "source": "origin/main:scripts/merge-premise-coverage.py:49",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e140",
+   "from": "vector_labels",
+   "to": "sc_merge_premise_cov",
+   "label": "genre & mood labels for the filled rows",
+   "source": "origin/main:scripts/merge-premise-coverage.py:87",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e141",
+   "from": "sc_merge_premise_cov",
+   "to": "premise_vectors",
+   "label": "writes the merged blob (second writer)",
+   "source": "origin/main:scripts/merge-premise-coverage.py:83",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e142",
+   "from": "sc_merge_premise_cov",
+   "to": "premise_labels",
+   "label": "writes merged labels (second writer)",
+   "source": "origin/main:scripts/merge-premise-coverage.py:101",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e143",
+   "from": "sc_merge_premise_cov",
+   "to": "af_premise_ids",
+   "label": "writes merged row order",
+   "source": "origin/main:scripts/merge-premise-coverage.py:97",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e144",
+   "from": "af_premise_ids",
+   "to": "sc_build_premise_tags",
+   "label": "positional mediaType",
+   "source": "origin/main:scripts/build-premise-tags.py:26",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e145",
+   "from": "premise_labels",
+   "to": "sc_build_premise_tags",
+   "label": "READS it; the registry calls this its producer",
+   "source": "origin/main:scripts/build-premise-tags.py:27",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e146",
+   "from": "sc_build_premise_tags",
+   "to": "file_premise_v1",
+   "label": "writes the v1 tags",
+   "source": "origin/main:scripts/build-premise-tags.py:23",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e147",
+   "from": "st_finalize",
+   "to": "vector_labels_prev",
+   "label": "this run's labels are the next run's input",
+   "source": "origin/port-tranche-3:pipeline/__init__.py:35",
+   "inferred": false,
+   "origin": "traced",
+   "previous_generation": true
+  },
+  {
+   "id": "e148",
+   "from": "src_wdqs",
+   "to": "st_docfacts",
+   "label": "P57 director + P136 genre, 100 ids/query",
+   "source": "origin/port-tranche-3:pipeline/docfacts.py:140",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e149",
+   "from": "cache_wiki",
+   "to": "st_docfacts",
+   "label": "cached SPARQL bodies",
+   "source": "origin/port-tranche-3:pipeline/docfacts.py:133",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e150",
+   "from": "st_docfacts",
+   "to": "cache_wiki",
+   "label": "stores SPARQL body",
+   "source": "origin/port-enrich:lib/wikidata.py:141",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e151",
+   "from": "facts",
+   "to": "sc_derive_docfacts",
+   "label": "--facts: the previous generation's facts",
+   "source": "origin/port-tranche-3:scripts/v2/derive_doc_facts.py:38",
+   "inferred": false,
+   "origin": "traced",
+   "previous_generation": true
+  },
+  {
+   "id": "e152",
+   "from": "sc_derive_docfacts",
+   "to": "doc_facts",
+   "label": "--out doc-facts.json",
+   "source": "origin/port-tranche-3:scripts/v2/derive_doc_facts.py:39",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e153",
+   "from": "file_canary",
+   "to": "st_embed",
+   "label": "known answers, every run",
+   "source": "origin/port-tranche-3:pipeline/embed.py:174",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e154",
+   "from": "gate_canary",
+   "to": "st_embed",
+   "label": "no vector without a verified space",
+   "source": "origin/port-tranche-3:pipeline/embed.py:272",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e155",
+   "from": "gate_embedgates",
+   "to": "st_embed",
+   "label": "refuses a mixed store",
+   "source": "origin/port-tranche-3:pipeline/embed.py:147",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e156",
+   "from": "st_embed",
+   "to": "src_denembed",
+   "label": "GET /health identity",
+   "source": "origin/port-tranche-3:lib/denembed.py:60",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e157",
+   "from": "st_embed",
+   "to": "src_denembed",
+   "label": "POST /embed/batch, 7 docs a request",
+   "source": "origin/port-tranche-3:lib/denembed.py:94",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e158",
+   "from": "src_denembed",
+   "to": "st_embed",
+   "label": "int8[1024] per document",
+   "source": "origin/port-tranche-3:pipeline/embed.py:278",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e159",
+   "from": "st_embed",
+   "to": "af_docs",
+   "label": "--dump-docs: compose, embed nothing",
+   "source": "origin/port-tranche-3:pipeline/embed.py:332",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e160",
+   "from": "af_docs",
+   "to": "sc_embed_docs",
+   "label": "--docs",
+   "source": "origin/port-tranche-3:scripts/v2/embed_docs.py:86",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e161",
+   "from": "file_canary",
+   "to": "sc_embed_docs",
+   "label": "--canary",
+   "source": "origin/port-tranche-3:scripts/v2/embed_docs.py:91",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e162",
+   "from": "sc_embed_docs",
+   "to": "src_denembed",
+   "label": "embeds on the serving box",
+   "source": "origin/port-tranche-3:scripts/v2/embed_docs.py:88",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e163",
+   "from": "sc_embed_docs",
+   "to": "af_box_vectors",
+   "label": "writes vectors.jsonl (:97), embedding-space.json (:129), keys.json (:162)",
+   "source": "origin/port-tranche-3:scripts/v2/embed_docs.py:97",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e164",
+   "from": "af_box_vectors",
+   "to": "sc_import_box",
+   "label": "--vectors / --embed-space",
+   "source": "origin/main:scripts/v2/import_box_vectors.py:57",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e165",
+   "from": "file_canary",
+   "to": "sc_import_box",
+   "label": "space checked against the canary",
+   "source": "origin/main:scripts/v2/import_box_vectors.py:71",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e166",
+   "from": "vector_labels_prev",
+   "to": "sc_import_box",
+   "label": "--labels: record per title",
+   "source": "origin/main:scripts/v2/import_box_vectors.py:58",
+   "inferred": false,
+   "origin": "traced",
+   "previous_generation": true
+  },
+  {
+   "id": "e167",
+   "from": "sc_import_box",
+   "to": "embed_labels",
+   "label": "writes the index store",
+   "source": "origin/main:scripts/v2/import_box_vectors.py:59",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e168",
+   "from": "sc_import_box",
+   "to": "embed_vectors",
+   "label": "writes the index store",
+   "source": "origin/main:scripts/v2/import_box_vectors.py:59",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e169",
+   "from": "sc_import_box",
+   "to": "embedding_space",
+   "label": "carries the verified space",
+   "source": "origin/main:scripts/v2/import_box_vectors.py:63",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e170",
+   "from": "sc_import_box",
+   "to": "embedder",
+   "label": "--embedder-health as embedder.json",
+   "source": "origin/main:scripts/v2/import_box_vectors.py:60",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e171",
+   "from": "st_finalize",
+   "to": "af_report",
+   "label": "written, read by nothing",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:312",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e172",
+   "from": "manifest",
+   "to": "st_finalize",
+   "label": "merges over the existing manifest",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:308",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e173",
+   "from": "enrich_checkpoint",
+   "to": "st_finalize",
+   "label": "read by hardcoded name, undeclared",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:224",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e174",
+   "from": "file_classify_ckpt",
+   "to": "st_finalize",
+   "label": "read by hardcoded name, undeclared",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:224",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e175",
+   "from": "gate_shipguard",
+   "to": "st_finalize",
+   "label": "refuses prose keys in labels",
+   "source": "origin/port-tranche-3:pipeline/finalize.py:269",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e176",
+   "from": "vector_labels",
+   "to": "sc_recluster",
+   "label": "--labels",
+   "source": "origin/port-tranche-3:scripts/recluster.py:137",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e177",
+   "from": "vectors",
+   "to": "sc_recluster",
+   "label": "--vectors",
+   "source": "origin/port-tranche-3:scripts/recluster.py:138",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e178",
+   "from": "sc_recluster",
+   "to": "af_recluster_report",
+   "label": "new-cluster candidates",
+   "source": "origin/port-tranche-3:scripts/recluster.py:139",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e179",
+   "from": "src_wdqs",
+   "to": "st_facts",
+   "label": "per-property SPARQL, 25 ids a batch",
+   "source": "origin/port-tranche-3:pipeline/facts.py:155",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e180",
+   "from": "cache_wiki",
+   "to": "st_facts",
+   "label": "cached sparql-facts bodies",
+   "source": "origin/port-tranche-3:lib/wikidata_facts.py:240",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e181",
+   "from": "st_facts",
+   "to": "cache_wiki",
+   "label": "stores sparql-facts body",
+   "source": "origin/port-tranche-3:lib/wikidata_facts.py:249",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e182",
+   "from": "src_wdqs",
+   "to": "st_facts",
+   "label": "titles, entity names, instance-of: uncached",
+   "source": "origin/port-tranche-3:pipeline/facts.py:160",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e183",
+   "from": "st_facts",
+   "to": "af_facts_ckpt",
+   "label": "checkpoints per pass",
+   "source": "origin/port-tranche-3:pipeline/facts.py:262",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e184",
+   "from": "st_facts",
+   "to": "sc_merge_facts",
+   "label": "corpus pass first; first file wins",
+   "source": "origin/port-tranche-3:pipeline/facts.py:301",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e185",
+   "from": "gate_prose",
+   "to": "st_corpus",
+   "label": "refuses answer keys that look like prose",
+   "source": "origin/main:scripts/v2/consolidate_corpus.py:176",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e186",
+   "from": "gate_provenance",
+   "to": "st_store",
+   "label": "no vendor-content section",
+   "source": "origin/main:scripts/v2/build_store.py:197",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e187",
+   "from": "st_store",
+   "to": "manifest",
+   "label": "stamps store name, hash, inputs, facet-gate counts: only with --stamp-meta, which den leaves empty",
+   "source": "origin/main:pipeline/store.py:65",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e188",
+   "from": "st_publish",
+   "to": "manifest",
+   "label": "prunes retired keys; stamps counts (:275), grounding census (:322), storeRebuild (:256)",
+   "source": "origin/port-tranche-3:scripts/publish-dataset.sh:75",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e189",
+   "from": "release",
+   "to": "st_publish",
+   "label": "published meta, for comparison",
+   "source": "origin/port-tranche-3:scripts/publish-dataset.sh:177",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e190",
+   "from": "gate_guards",
+   "to": "st_publish",
+   "label": "any refusal ends the publish",
+   "source": "origin/port-tranche-3:scripts/publish-dataset.sh:370",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e191",
+   "from": "enriched",
+   "to": "gate_grounding",
+   "label": "--enriched-dir",
+   "source": "origin/port-tranche-3:scripts/publish-dataset.sh:322",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e192",
+   "from": "vector_labels",
+   "to": "gate_grounding",
+   "label": "--labels",
+   "source": "origin/port-tranche-3:scripts/publish-dataset.sh:322",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e193",
+   "from": "gate_grounding",
+   "to": "st_publish",
+   "label": "refuses an increase in shared articles",
+   "source": "origin/port-tranche-3:scripts/publish-dataset.sh:329",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e194",
+   "from": "vector_labels",
+   "to": "gate_quality",
+   "label": "genre & mood labels scored",
+   "source": "origin/port-tranche-3:scripts/publish-dataset.sh:429",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e195",
+   "from": "file_golden",
+   "to": "gate_quality",
+   "label": "--golden",
+   "source": "origin/port-tranche-3:scripts/publish-dataset.sh:430",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e196",
+   "from": "gate_quality",
+   "to": "st_publish",
+   "label": "report only: || true",
+   "source": "origin/port-tranche-3:scripts/publish-dataset.sh:430",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e197",
+   "from": "corpus",
+   "to": "rel_corpus",
+   "label": "uploaded by hand",
+   "source": "origin/main:LICENSES.md:13",
+   "inferred": true,
+   "origin": "traced"
+  },
+  {
+   "id": "e198",
+   "from": "entities",
+   "to": "rel_corpus",
+   "label": "uploaded by hand",
+   "source": "origin/main:LICENSES.md:13",
+   "inferred": true,
+   "origin": "traced"
+  },
+  {
+   "id": "e199",
+   "from": "release",
+   "to": "con_atlas_fetch",
+   "label": "dataset.meta.json, then the store",
+   "source": "den-atlas@dc57baa:scripts/fetch-dataset.sh:13",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e200",
+   "from": "gate_fetch_verify",
+   "to": "con_atlas_fetch",
+   "label": "refuses a blob whose sha differs",
+   "source": "den-atlas@dc57baa:scripts/fetch-dataset.sh:136",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e201",
+   "from": "release",
+   "to": "con_box_sync",
+   "label": "daily timer on the box",
+   "source": "den@61b5601:deploy/atlas-dataset-sync.sh:29",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e202",
+   "from": "gate_box_sync",
+   "to": "con_box_sync",
+   "label": "sha256 of every blob",
+   "source": "den@61b5601:deploy/atlas-dataset-sync.sh:213",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e203",
+   "from": "gate_box_sync",
+   "to": "con_box_sync",
+   "label": "den-atlas check on the staged set",
+   "source": "den@61b5601:deploy/atlas-dataset-sync.sh:240",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e204",
+   "from": "con_atlas_fetch",
+   "to": "con_atlas",
+   "label": "./data/dataset.meta.json → storeFile",
+   "source": "den-atlas@dc57baa:src/dataset.rs:71",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e205",
+   "from": "con_box_sync",
+   "to": "con_atlas",
+   "label": "the mounted data dir",
+   "source": "den@61b5601:deploy/atlas-dataset-sync.sh:2",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e206",
+   "from": "src_imdb",
+   "to": "con_atlas",
+   "label": "joined on the store's imdb column at run time",
+   "source": "den-atlas@dc57baa:src/ratings.rs:25",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e207",
+   "from": "con_atlas",
+   "to": "src_denembed",
+   "label": "query vectors: must be the same space",
+   "source": "den-atlas@dc57baa:src/main.rs:290",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e208",
+   "from": "con_atlas",
+   "to": "con_tv",
+   "label": "/dataset.json descriptor",
+   "source": "den-atlas@dc57baa:src/handler.rs:257",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e209",
+   "from": "con_atlas",
+   "to": "con_tv",
+   "label": "/index/row · labels · score · /recommend · /embed",
+   "source": "den@61b5601:Sources/DenKit/Addons/AddonClient+Index.swift:99",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e210",
+   "from": "gate_signature",
+   "to": "con_tv",
+   "label": "skips a pinned provider that fails",
+   "source": "den@61b5601:App/Den/Shell/AppModel+Indexes.swift:132",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e211",
+   "from": "con_atlas",
+   "to": "con_edge",
+   "label": "/atlas/* relayed for Den Web",
+   "source": "den-edge@4ddf577:src/relay.rs:2",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e212",
+   "from": "manifest",
+   "to": "con_signer",
+   "label": "signs dataset.meta.json",
+   "source": "den@61b5601:scripts/sign-dataset.swift:8",
+   "inferred": false,
+   "origin": "traced"
+  },
+  {
+   "id": "e213",
+   "from": "con_signer",
+   "to": "manifest",
+   "label": "signature pasted in by hand, then republished",
+   "source": "den@61b5601:scripts/sign-dataset.swift:9",
+   "inferred": true,
+   "origin": "traced"
+  }
+ ],
+ "licence_evidence": [
+  {
+   "node": "articles",
+   "claim": "TMDB title/year copied into each article row",
+   "source": "origin/port-tranche-3:pipeline/articles.py:157"
+  },
+  {
+   "node": "combined",
+   "claim": "TMDB title/year copied into each pass row",
+   "source": "origin/main:scripts/v2/run_combined.py:357"
+  },
+  {
+   "node": "enriched",
+   "claim": "title, year, genres, keywords, cast from the TMDB detail body",
+   "source": "origin/port-enrich:lib/tmdb.py:164"
+  },
+  {
+   "node": "store",
+   "claim": "every section's source declared; VENDOR_ALLOWED is empty",
+   "source": "origin/main:scripts/v2/build_store.py:158"
+  },
+  {
+   "node": "cache_tmdb",
+   "claim": "180 d is a compliance boundary for TMDB",
+   "source": "origin/main:lib/cache.py:171"
+  }
+ ],
+ "branch_declarations": {
+  "origin/main": {
+   "only_here": [
+    [
+     "corpus_facts",
+     "facts"
+    ],
+    [
+     "delta_facts",
+     "facts"
+    ]
+   ],
+   "missing_here": [
+    [
+     "delta_ids",
+     "facts"
+    ],
+    [
+     "embed_labels",
+     "finalize"
+    ],
+    [
+     "embed_vectors",
+     "finalize"
+    ],
+    [
+     "embedder",
+     "finalize"
+    ],
+    [
+     "embedding_space",
+     "finalize"
+    ],
+    [
+     "facts",
+     "corpus_facts"
+    ],
+    [
+     "facts",
+     "delta_facts"
+    ],
+    [
+     "finalize",
+     "manifest"
+    ],
+    [
+     "finalize",
+     "vector_labels"
+    ],
+    [
+     "finalize",
+     "vectors"
+    ],
+    [
+     "vector_labels",
+     "facts"
+    ]
+   ],
+   "stages": [
+    "worklist",
+    "fetch",
+    "articles",
+    "classify",
+    "docfacts",
+    "embed",
+    "facts",
+    "corpus",
+    "store",
+    "publish"
+   ],
+   "producers": {
+    "universe_movie": "pipeline/worklist.py",
+    "universe_tv": "pipeline/worklist.py",
+    "enriched": "Sources/taxonomy-backfill/main.swift",
+    "enrich_checkpoint": "Sources/taxonomy-backfill/main.swift",
+    "articles": "pipeline/articles.py",
+    "combined": "scripts/v2/run_combined.py",
+    "combined_manifest": "scripts/v2/run_combined.py",
+    "doc_facts": "pipeline/docfacts.py",
+    "embed_labels": "Sources/taxonomy-backfill/main.swift",
+    "embed_vectors": "Sources/taxonomy-backfill/main.swift",
+    "composition": "Sources/taxonomy-backfill/main.swift",
+    "embedder": "Sources/taxonomy-backfill/main.swift",
+    "embedding_space": "Sources/taxonomy-backfill/main.swift",
+    "facts": "scripts/merge-facts.py",
+    "corpus": "scripts/v2/consolidate_corpus.py",
+    "entities": "scripts/v2/consolidate_corpus.py",
+    "store": "scripts/v2/build_store.py",
+    "release": "scripts/publish-dataset.sh",
+    "export_movie": "scripts/build-worklist.py",
+    "export_tv": "scripts/build-worklist.py",
+    "vector_labels": "Sources/taxonomy-backfill/main.swift",
+    "corpus_facts": "Sources/taxonomy-backfill/main.swift",
+    "delta_facts": "Sources/taxonomy-backfill/main.swift",
+    "delta": "scripts/v2/run_delta.py",
+    "premise_labels": "scripts/build-premise-tags.py",
+    "vectors": "Sources/taxonomy-backfill/main.swift",
+    "premise_vectors": "scripts/v2/embed_tags.py",
+    "manifest": "Sources/taxonomy-backfill/main.swift"
+   }
+  },
+  "origin/port-enrich": {
+   "only_here": [
+    [
+     "corpus_facts",
+     "facts"
+    ],
+    [
+     "delta_facts",
+     "facts"
+    ]
+   ],
+   "missing_here": [
+    [
+     "delta_ids",
+     "facts"
+    ],
+    [
+     "embed_labels",
+     "finalize"
+    ],
+    [
+     "embed_vectors",
+     "finalize"
+    ],
+    [
+     "embedder",
+     "finalize"
+    ],
+    [
+     "embedding_space",
+     "finalize"
+    ],
+    [
+     "facts",
+     "corpus_facts"
+    ],
+    [
+     "facts",
+     "delta_facts"
+    ],
+    [
+     "finalize",
+     "manifest"
+    ],
+    [
+     "finalize",
+     "vector_labels"
+    ],
+    [
+     "finalize",
+     "vectors"
+    ],
+    [
+     "vector_labels",
+     "facts"
+    ]
+   ],
+   "stages": [
+    "worklist",
+    "fetch",
+    "articles",
+    "classify",
+    "docfacts",
+    "embed",
+    "facts",
+    "corpus",
+    "store",
+    "publish"
+   ],
+   "producers": {
+    "universe_movie": "pipeline/worklist.py",
+    "universe_tv": "pipeline/worklist.py",
+    "enriched": "pipeline/enrich.py",
+    "enrich_checkpoint": "pipeline/enrich.py",
+    "articles": "pipeline/articles.py",
+    "combined": "scripts/v2/run_combined.py",
+    "combined_manifest": "scripts/v2/run_combined.py",
+    "doc_facts": "pipeline/docfacts.py",
+    "embed_labels": "Sources/taxonomy-backfill/main.swift",
+    "embed_vectors": "Sources/taxonomy-backfill/main.swift",
+    "composition": "Sources/taxonomy-backfill/main.swift",
+    "embedder": "Sources/taxonomy-backfill/main.swift",
+    "embedding_space": "Sources/taxonomy-backfill/main.swift",
+    "facts": "scripts/merge-facts.py",
+    "corpus": "scripts/v2/consolidate_corpus.py",
+    "entities": "scripts/v2/consolidate_corpus.py",
+    "store": "scripts/v2/build_store.py",
+    "release": "scripts/publish-dataset.sh",
+    "export_movie": "scripts/build-worklist.py",
+    "export_tv": "scripts/build-worklist.py",
+    "vector_labels": "Sources/taxonomy-backfill/main.swift",
+    "corpus_facts": "Sources/taxonomy-backfill/main.swift",
+    "delta_facts": "Sources/taxonomy-backfill/main.swift",
+    "delta": "scripts/v2/run_delta.py",
+    "premise_labels": "scripts/build-premise-tags.py",
+    "vectors": "Sources/taxonomy-backfill/main.swift",
+    "premise_vectors": "scripts/v2/embed_tags.py",
+    "manifest": "Sources/taxonomy-backfill/main.swift"
+   }
+  },
+  "origin/port-tranche-3": {
+   "only_here": [],
+   "missing_here": [],
+   "stages": [
+    "worklist",
+    "fetch",
+    "articles",
+    "classify",
+    "docfacts",
+    "embed",
+    "finalize",
+    "facts",
+    "corpus",
+    "store",
+    "publish"
+   ],
+   "producers": {
+    "universe_movie": "pipeline/worklist.py",
+    "universe_tv": "pipeline/worklist.py",
+    "enriched": "Sources/taxonomy-backfill/main.swift",
+    "enrich_checkpoint": "Sources/taxonomy-backfill/main.swift",
+    "articles": "pipeline/articles.py",
+    "combined": "scripts/v2/run_combined.py",
+    "combined_manifest": "scripts/v2/run_combined.py",
+    "doc_facts": "pipeline/docfacts.py",
+    "embed_labels": "pipeline/embed.py",
+    "embed_vectors": "pipeline/embed.py",
+    "composition": "pipeline/embed.py",
+    "embedder": "pipeline/embed.py",
+    "embedding_space": "pipeline/embed.py",
+    "vector_labels": "pipeline/finalize.py",
+    "vectors": "pipeline/finalize.py",
+    "manifest": "pipeline/finalize.py",
+    "corpus_facts": "pipeline/facts.py",
+    "delta_facts": "pipeline/facts.py",
+    "facts": "pipeline/facts.py",
+    "corpus": "scripts/v2/consolidate_corpus.py",
+    "entities": "scripts/v2/consolidate_corpus.py",
+    "store": "scripts/v2/build_store.py",
+    "release": "scripts/publish-dataset.sh",
+    "export_movie": "scripts/build-worklist.py",
+    "export_tv": "scripts/build-worklist.py",
+    "delta_ids": "docs/OPERATE.md",
+    "delta": "scripts/v2/run_delta.py",
+    "premise_labels": "scripts/build-premise-tags.py",
+    "premise_vectors": "scripts/v2/embed_tags.py"
+   }
+  }
+ },
+ "phases": {
+  "p1": "Universe and enrichment",
+  "p2": "Articles, Jev answers and genre & mood labels",
+  "p3": "Premise tags",
+  "p4": "Embedding",
+  "p5": "Facts, corpus and store",
+  "p6": "Publish, releases and consumers"
+ },
+ "groups": {
+  "g_tmdb": "TMDB<br/>ID dumps, API, .cache/tmdb",
+  "g_wiki": "Wikipedia + Wikidata<br/>.cache/wiki",
+  "g_models": "Jev, Claude subagents<br/>den-embed",
+  "g_fetch": "worklist → fetch",
+  "g_classify": "articles → classify<br/>genre & mood labels, critique pass, premise tags",
+  "g_embed": "docfacts → embed → finalize",
+  "g_facts": "facts",
+  "g_store": "corpus → store",
+  "g_publish": "publish + guards",
+  "g_release": "GitHub releases",
+  "g_consumers": "den-atlas, den-edge<br/>TV app",
+  "g_imdb": "IMDb ratings"
+ }
+}

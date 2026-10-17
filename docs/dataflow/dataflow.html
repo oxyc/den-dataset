@@ -1,0 +1,766 @@
+<title>den-dataset Data Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap">
+<style>
+:root {
+  --ground: #f4f6f4; --panel: #ffffff; --ink: #1b2420; --muted: #5a6660; --rule: #d3dad5;
+  --accent: #2c6b70; --accent-soft: #e1eeee; --warn: #9a3a31;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #111513; --panel: #171c1a; --ink: #e2e8e4; --muted: #9aa8a1; --rule: #2c3531;
+    --accent: #7fc0c4; --accent-soft: #1d2d2e; --warn: #e79a8f;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #111513; --panel: #171c1a; --ink: #e2e8e4; --muted: #9aa8a1; --rule: #2c3531;
+  --accent: #7fc0c4; --accent-soft: #1d2d2e; --warn: #e79a8f;
+}
+body { background: var(--ground); color: var(--ink); font: 15px/1.55 "IBM Plex Sans", system-ui, sans-serif;
+  padding-inline: clamp(16px, 4vw, 48px); padding-block: 32px 64px; }
+.wrap { max-width: 1180px; margin-inline: auto; display: grid; gap: 40px; }
+h1, h2 { font-family: "IBM Plex Sans Condensed", "IBM Plex Sans", sans-serif; font-weight: 600;
+  text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: 2rem; }
+h2 { font-size: 1.35rem; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.86em; }
+header { display: grid; gap: 12px; }
+.eyebrow { font: 500 0.75rem "IBM Plex Mono", monospace; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--accent); }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 24px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.stats b { color: var(--ink); font-weight: 600; }
+.top { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 24px; align-items: start; }
+@media (max-width: 820px) { .top { grid-template-columns: minmax(0, 1fr); } }
+.legend { list-style: none; margin: 0; padding: 16px; display: grid; gap: 8px; background: var(--panel);
+  border: 1px solid var(--rule); border-radius: 6px; font-size: 0.87rem; }
+.legend h3 { margin: 0 0 4px; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.legend-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.legend li { display: flex; gap: 10px; align-items: center; }
+.sw { inline-size: 22px; block-size: 14px; border-radius: 3px; background: var(--sw); border: 1px solid #0003; flex: none; }
+.legend .lines { border-top: 1px solid var(--rule); padding-top: 8px; color: var(--muted); display: grid; gap: 4px; }
+.chart { overflow-x: auto; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; }
+.chart pre { margin: 0; min-width: 900px; }
+.phase { display: grid; gap: 10px; }
+.meta { color: var(--muted); font-size: 0.87rem; }
+nav { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.9rem; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); }
+table { border-collapse: collapse; min-width: 1100px; font-size: 0.85rem; }
+th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--rule); }
+th { font-size: 0.72rem; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
+  background: var(--accent-soft); position: sticky; top: 0; }
+td.mono { white-space: normal; word-break: break-word; }
+.note { border-left: 3px solid var(--warn); padding: 4px 0 4px 14px; color: var(--ink); max-width: 76ch; }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">oxyc/den-dataset · pipeline data flow</div>
+  <h1>den-dataset Data Flow</h1>
+  <p>The pipeline as it stands once <code>port-enrich</code> (#51) and <code>port-tranche-3</code> land on
+  <code>main</code>: enrich, finalize, facts, embed and recluster run in Python. Swift files remain in the
+  tree: <code>Package.swift</code>, <code>main.swift</code>, and <code>Taxonomy.swift</code>, which the classify
+  pass reads as data. The stage-to-artifact edges are read from each stage's
+  <code>INPUTS</code>/<code>OUTPUTS</code>; everything else was traced by hand to a line. Every edge and its
+  citation is in <code>edges.json</code>.</p>
+  <p>"Genre &amp; mood labels" means the per-title primary genre, subgenres, moods and themes, stored in
+  <code>labels-t02.json</code>.</p>
+  <div class="stats"><span><b>117</b> nodes</span><span><b>213</b> edges</span>
+  <span><b>57</b> from the declarations</span><span><b>8</b> inferred (dotted)</span></div>
+  <nav><a href="#p1">Universe and enrichment</a><a href="#p2">Articles, Jev answers and genre &amp; mood labels</a><a href="#p3">Premise tags</a><a href="#p4">Embedding</a><a href="#p5">Facts, corpus and store</a><a href="#p6">Publish, releases and consumers</a><a href="#artifacts">Artifact table</a></nav>
+</header>
+
+<section class="top" id="overview">
+  <div class="phase">
+    <h2>Overview</h2>
+    <p class="meta">Every node in the detail diagrams, collapsed into its phase. An arrow is drawn wherever an edge
+    crosses between two groups, labelled with the artifacts it carries.</p>
+    <div class="chart"><pre class="mermaid">
+flowchart LR
+  classDef source fill:#e7dcf3,stroke:#6b4d91,color:#1b1426
+  classDef stage fill:#cfe5e6,stroke:#2c6b70,color:#0f2224,stroke-width:2px
+  classDef artifact fill:#f3f5f2,stroke:#7c8a82,color:#1b2420
+  classDef cache fill:#f6e7c8,stroke:#9a6f1f,color:#2b2008
+  classDef release fill:#d7ebd3,stroke:#3f7a38,color:#12240f,stroke-width:2px
+  classDef consumer fill:#d8e2f3,stroke:#3d5f95,color:#101b2c
+  classDef gate fill:#f6d6d2,stroke:#a3423a,color:#2e0e0b
+  classDef script fill:#eceae4,stroke:#6f6a5c,color:#221f18,stroke-dasharray:4 3
+  classDef file fill:#fbf6e9,stroke:#8b7b52,color:#241e0e
+  classDef ghost fill:none,stroke:#9aa59f,color:#6a756f,stroke-dasharray:2 3
+  g_tmdb{{&quot;TMDB&lt;br/&gt;ID dumps, API, .cache/tmdb&quot;}}:::source
+  g_wiki{{&quot;Wikipedia + Wikidata&lt;br/&gt;.cache/wiki&quot;}}:::source
+  g_models{{&quot;Jev, Claude subagents&lt;br/&gt;den-embed&quot;}}:::source
+  g_fetch[&quot;worklist → fetch&quot;]:::stage
+  g_classify[&quot;articles → classify&lt;br/&gt;genre &amp; mood labels, critique pass, premise tags&quot;]:::stage
+  g_embed[&quot;docfacts → embed → finalize&quot;]:::stage
+  g_facts[&quot;facts&quot;]:::stage
+  g_store[&quot;corpus → store&quot;]:::stage
+  g_publish[&quot;publish + guards&quot;]:::stage
+  g_release[/&quot;GitHub releases&quot;\]:::release
+  g_consumers([&quot;den-atlas, den-edge&lt;br/&gt;TV app&quot;]):::consumer
+  g_imdb{{&quot;IMDb ratings&quot;}}:::source
+  g_classify --&gt;|&quot;genre &amp; mood labels, previous generation&quot;| g_embed
+  g_classify --&gt;|&quot;genre &amp; mood labelling batches +1&quot;| g_models
+  g_classify --&gt;|&quot;Jev answers: facets, scores, genre/theme/mood yes-no +3&quot;| g_store
+  g_consumers --&gt; g_models
+  g_consumers --&gt;|&quot;release manifest&quot;| g_store
+  g_embed --&gt;|&quot;genre &amp; mood labels, previous generation +1&quot;| g_classify
+  g_embed --&gt;|&quot;genre &amp; mood labels&quot;| g_facts
+  g_embed --&gt;|&quot;genre &amp; mood labels, previous generation&quot;| g_fetch
+  g_embed --&gt; g_models
+  g_embed --&gt;|&quot;genre &amp; mood labels&quot;| g_publish
+  g_embed --&gt;|&quot;release manifest +2&quot;| g_store
+  g_facts --&gt;|&quot;merged Wikidata facts&quot;| g_embed
+  g_facts --&gt;|&quot;merged Wikidata facts&quot;| g_store
+  g_fetch --&gt;|&quot;enriched title records&quot;| g_classify
+  g_fetch --&gt;|&quot;enriched title records +1&quot;| g_embed
+  g_fetch --&gt;|&quot;enriched title records&quot;| g_publish
+  g_imdb --&gt; g_consumers
+  g_models --&gt;|&quot;genre &amp; mood labelling batches +1&quot;| g_classify
+  g_models --&gt; g_embed
+  g_publish --&gt;|&quot;data-latest release&quot;| g_release
+  g_publish --&gt;|&quot;release manifest&quot;| g_store
+  g_release --&gt;|&quot;data-latest release&quot;| g_consumers
+  g_release --&gt;|&quot;data-latest release&quot;| g_publish
+  g_store --&gt;|&quot;release manifest&quot;| g_consumers
+  g_store --&gt;|&quot;release manifest&quot;| g_embed
+  g_store --&gt;|&quot;the store +1&quot;| g_publish
+  g_store --&gt;|&quot;per-title corpus +1&quot;| g_release
+  g_tmdb --&gt;|&quot;TMDB response cache&quot;| g_fetch
+  g_wiki --&gt;|&quot;Wikipedia + SPARQL cache&quot;| g_classify
+  g_wiki --&gt;|&quot;Wikipedia + SPARQL cache&quot;| g_embed
+  g_wiki --&gt;|&quot;Wikipedia + SPARQL cache&quot;| g_facts
+  g_wiki --&gt;|&quot;Wikipedia + SPARQL cache&quot;| g_fetch
+</pre></div>
+  </div>
+  <aside class="legend">
+    <h3>Legend</h3>
+    <ul class="legend-list">
+    <li><span class="sw sw-source" style="--sw:#e7dcf3"></span>External source or model</li>
+<li><span class="sw sw-stage" style="--sw:#cfe5e6"></span>Stage in STAGES</li>
+<li><span class="sw sw-script" style="--sw:#eceae4"></span>Side pass outside STAGES</li>
+<li><span class="sw sw-artifact" style="--sw:#f3f5f2"></span>Artifact (file in the out-dir)</li>
+<li><span class="sw sw-cache" style="--sw:#f6e7c8"></span>Response cache</li>
+<li><span class="sw sw-file" style="--sw:#fbf6e9"></span>Committed file or hand input</li>
+<li><span class="sw sw-release" style="--sw:#d7ebd3"></span>GitHub release</li>
+<li><span class="sw sw-consumer" style="--sw:#d8e2f3"></span>Consumer</li>
+<li><span class="sw sw-gate" style="--sw:#f6d6d2"></span>Gate or guard</li>
+    </ul>
+    <div class="lines"><span>solid arrow: done by the cited code</span><span>dotted arrow: done by hand or
+    by an agent; the cited line documents it</span>
+    <span>circle end: a gate that can refuse</span><span>dashed outline: node from another phase</span>
+    <span>"previous generation": the file the last run left, read before this run rewrites it</span></div>
+  </aside>
+</section>
+
+<p class="note">The release carries two files: <code>den-5b1c3213b6a1.store</code> and <code>dataset.meta.json</code>
+(checked on data-latest, 2026-09-22). The corpus release <code>corpus-&lt;ver&gt;</code> is uploaded by hand: no code
+in the repo creates it and no publish guard checks it. Two other hand-made releases carried TMDB titles and years
+and were deleted on 2026-09-22 (<code>articles-2026-09-19</code>, <code>raw-2026-09-20</code>). Their source files
+still carry those fields.</p>
+
+
+<section class="phase" id="p1">
+  <h2>Universe and enrichment</h2>
+  <p class="meta">23 nodes here, 9 from neighbouring phases (dashed outline), 53 edges</p>
+  <div class="chart"><pre class="mermaid">
+flowchart LR
+  classDef source fill:#e7dcf3,stroke:#6b4d91,color:#1b1426
+  classDef stage fill:#cfe5e6,stroke:#2c6b70,color:#0f2224,stroke-width:2px
+  classDef artifact fill:#f3f5f2,stroke:#7c8a82,color:#1b2420
+  classDef cache fill:#f6e7c8,stroke:#9a6f1f,color:#2b2008
+  classDef release fill:#d7ebd3,stroke:#3f7a38,color:#12240f,stroke-width:2px
+  classDef consumer fill:#d8e2f3,stroke:#3d5f95,color:#101b2c
+  classDef gate fill:#f6d6d2,stroke:#a3423a,color:#2e0e0b
+  classDef script fill:#eceae4,stroke:#6f6a5c,color:#221f18,stroke-dasharray:4 3
+  classDef file fill:#fbf6e9,stroke:#8b7b52,color:#241e0e
+  classDef ghost fill:none,stroke:#9aa59f,color:#6a756f,stroke-dasharray:2 3
+  af_worklist_reembed(&quot;shipped ids, popularity order&lt;br/&gt;worklist-{movie,tv}.json&quot;):::artifact
+  cache_tmdb[(&quot;TMDB response cache&lt;br/&gt;.cache/tmdb, 180 d&quot;)]:::cache
+  cache_wiki[(&quot;Wikipedia + SPARQL cache&lt;br/&gt;.cache/wiki, 180 d&quot;)]:::cache
+  enrich_checkpoint(&quot;enrich resume state&lt;br/&gt;enrich-checkpoint.json&quot;):::artifact
+  enriched(&quot;enriched title records&lt;br/&gt;enriched&quot;):::artifact
+  export_movie(&quot;TMDB movie id dump&lt;br/&gt;movie_ids.json&quot;):::artifact
+  export_tv(&quot;TMDB series id dump&lt;br/&gt;tv_series_ids.json&quot;):::artifact
+  ext_den_labels[/&quot;genre &amp; mood labels the app once bundled&lt;br/&gt;den …/labels-t02.json (deleted in fce66d6)&quot;/]:::file
+  file_denenv[/&quot;credentials&lt;br/&gt;den.env&quot;/]:::file
+  gate_mode{&quot;--mode refusal&quot;}:::gate
+  sc_backfill_prov[[&quot;scripts/backfill-plot-provenance.py&quot;]]:::script
+  sc_build_worklist[[&quot;scripts/build-worklist.py&quot;]]:::script
+  sc_delta_run[[&quot;daily freshness pass&lt;br/&gt;scripts/delta-run.sh&quot;]]:::script
+  src_ent_auth{{&quot;Enterprise login&lt;br/&gt;auth.enterprise.wikimedia.com&quot;}}:::source
+  src_tmdb_api{{&quot;TMDB API&lt;br/&gt;/discover · /{media}/{id}&quot;}}:::source
+  src_tmdb_export{{&quot;TMDB daily ID exports&lt;br/&gt;files.tmdb.org&quot;}}:::source
+  src_wdqs{{&quot;Wikidata SPARQL&lt;br/&gt;query.wikidata.org&quot;}}:::source
+  src_wp_action{{&quot;Wikipedia action API&lt;br/&gt;{lang}.wikipedia.org&quot;}}:::source
+  src_wp_ent{{&quot;Wikimedia Enterprise&lt;br/&gt;structured-contents&quot;}}:::source
+  st_fetch[&quot;stage: fetch&quot;]:::stage
+  st_worklist[&quot;stage: worklist&quot;]:::stage
+  universe_movie(&quot;movie ids to enrich&lt;br/&gt;universe-movie.json&quot;):::artifact
+  universe_tv(&quot;series ids to enrich&lt;br/&gt;universe-tv.json&quot;):::artifact
+  gate_grounding{&quot;grounding ratchet&lt;br/&gt;check-plot-invariants.py&quot;}:::ghost
+  sc_run_delta[[&quot;Jev critique pass&lt;br/&gt;scripts/v2/run_delta.py&quot;]]:::ghost
+  st_articles[&quot;stage: articles&quot;]:::ghost
+  st_classify[&quot;stage: classify&quot;]:::ghost
+  st_docfacts[&quot;stage: docfacts&quot;]:::ghost
+  st_embed[&quot;stage: embed&quot;]:::ghost
+  st_facts[&quot;stage: facts&quot;]:::ghost
+  st_finalize[&quot;stage: finalize&quot;]:::ghost
+  vector_labels_prev(&quot;genre &amp; mood labels, previous generation&lt;br/&gt;labels-t02.json (already in the out-dir)&quot;):::ghost
+  export_movie --&gt;|&quot;reads --file&quot;| st_worklist
+  export_tv --&gt;|&quot;reads --file&quot;| st_worklist
+  vector_labels_prev --&gt;|&quot;reads --known (previous generation)&quot;| st_worklist
+  st_worklist --&gt;|&quot;writes&quot;| universe_movie
+  st_worklist --&gt;|&quot;writes&quot;| universe_tv
+  universe_movie --&gt;|&quot;reads --worklist&quot;| st_fetch
+  universe_tv --&gt;|&quot;reads --worklist&quot;| st_fetch
+  st_fetch --&gt;|&quot;writes&quot;| enriched
+  st_fetch --&gt;|&quot;writes&quot;| enrich_checkpoint
+  enriched --&gt;|&quot;reads --enriched&quot;| st_articles
+  enriched --&gt;|&quot;reads --enriched-dir&quot;| st_classify
+  enriched --&gt;|&quot;reads --enriched-dir&quot;| st_embed
+  sc_build_worklist --&gt;|&quot;registered producer&quot;| export_movie
+  sc_build_worklist --&gt;|&quot;registered producer&quot;| export_tv
+  src_tmdb_export --&gt;|&quot;GET {kind}_ids_&lt;date&gt;.json.gz (plain http)&quot;| sc_build_worklist
+  sc_build_worklist --&gt;|&quot;writes movie_ids.json.gz; gunzip by hand&quot;| export_movie
+  sc_build_worklist --&gt;|&quot;writes tv_series_ids.json.gz; gunzip by hand&quot;| export_tv
+  ext_den_labels --&gt;|&quot;LABELS default, read before any fetch&quot;| sc_build_worklist
+  sc_build_worklist --&gt;|&quot;shipped ids, popularity order&quot;| af_worklist_reembed
+  af_worklist_reembed -.-&gt;|&quot;--set universe_*=worklist-*.json&quot;| st_fetch
+  src_tmdb_api --&gt;|&quot;/discover pages (discover, delta)&quot;| st_worklist
+  gate_mode -.-o|&quot;no default universe&quot;| st_worklist
+  src_tmdb_api --&gt;|&quot;detail + keywords + credits per id&quot;| st_fetch
+  cache_tmdb --&gt;|&quot;cached detail body&quot;| st_fetch
+  st_fetch --&gt;|&quot;stores detail body (never /discover)&quot;| cache_tmdb
+  src_wdqs --&gt;|&quot;mapping SPARQL: article, source work, sitelinks, creators, runtime&quot;| st_fetch
+  st_fetch --&gt;|&quot;stores SPARQL body&quot;| cache_wiki
+  src_wp_action --&gt;|&quot;action=parse wikitext, en then other languages&quot;| st_fetch
+  cache_wiki --&gt;|&quot;cached action/SPARQL bodies&quot;| st_fetch
+  st_fetch --&gt;|&quot;stores action=parse body&quot;| cache_wiki
+  src_wp_ent --&gt;|&quot;pre-sectioned plot; never cached&quot;| st_fetch
+  src_ent_auth --&gt;|&quot;24 h bearer (enterprise_login)&quot;| st_fetch
+  file_denenv --&gt;|&quot;TMDB_API_KEY + Enterprise credentials&quot;| st_fetch
+  sc_delta_run --&gt;|&quot;--mode delta --since, lists into delta/&quot;| st_worklist
+  vector_labels_prev --&gt;|&quot;published genre &amp; mood labels as --known&quot;| sc_delta_run
+  sc_delta_run --&gt;|&quot;one pipeline.enrich batch per media&quot;| enriched
+  enriched --&gt;|&quot;--enriched-dir&quot;| sc_backfill_prov
+  cache_wiki --&gt;|&quot;replays grounding from cached bodies&quot;| sc_backfill_prov
+  sc_backfill_prov --&gt;|&quot;adds plotArticleRole / Redirected&quot;| enriched
+  src_wp_action --&gt;|&quot;whole article, re-read&quot;| st_articles
+  cache_wiki --&gt;|&quot;answers nearly all of it&quot;| st_articles
+  file_denenv --&gt;|&quot;TYPESAFE_API_KEY&quot;| st_classify
+  file_denenv --&gt;|&quot;TYPESAFE_API_KEY&quot;| sc_run_delta
+  enriched --&gt;|&quot;--enriched-dir&quot;| sc_run_delta
+  src_wdqs --&gt;|&quot;P57 director + P136 genre, 100 ids/query&quot;| st_docfacts
+  cache_wiki --&gt;|&quot;cached SPARQL bodies&quot;| st_docfacts
+  st_docfacts --&gt;|&quot;stores SPARQL body&quot;| cache_wiki
+  enrich_checkpoint --&gt;|&quot;read by hardcoded name, undeclared&quot;| st_finalize
+  src_wdqs --&gt;|&quot;per-property SPARQL, 25 ids a batch&quot;| st_facts
+  cache_wiki --&gt;|&quot;cached sparql-facts bodies&quot;| st_facts
+  st_facts --&gt;|&quot;stores sparql-facts body&quot;| cache_wiki
+  src_wdqs --&gt;|&quot;titles, entity names, instance-of: uncached&quot;| st_facts
+  enriched --&gt;|&quot;--enriched-dir&quot;| gate_grounding
+</pre></div>
+</section>
+<section class="phase" id="p2">
+  <h2>Articles, Jev answers and genre &amp; mood labels</h2>
+  <p class="meta">17 nodes here, 7 from neighbouring phases (dashed outline), 39 edges</p>
+  <div class="chart"><pre class="mermaid">
+flowchart LR
+  classDef source fill:#e7dcf3,stroke:#6b4d91,color:#1b1426
+  classDef stage fill:#cfe5e6,stroke:#2c6b70,color:#0f2224,stroke-width:2px
+  classDef artifact fill:#f3f5f2,stroke:#7c8a82,color:#1b2420
+  classDef cache fill:#f6e7c8,stroke:#9a6f1f,color:#2b2008
+  classDef release fill:#d7ebd3,stroke:#3f7a38,color:#12240f,stroke-width:2px
+  classDef consumer fill:#d8e2f3,stroke:#3d5f95,color:#101b2c
+  classDef gate fill:#f6d6d2,stroke:#a3423a,color:#2e0e0b
+  classDef script fill:#eceae4,stroke:#6f6a5c,color:#221f18,stroke-dasharray:4 3
+  classDef file fill:#fbf6e9,stroke:#8b7b52,color:#241e0e
+  classDef ghost fill:none,stroke:#9aa59f,color:#6a756f,stroke-dasharray:2 3
+  af_classify_phase(&quot;genre &amp; mood labelling batches&lt;br/&gt;classify/{in,out}/batch-*.json&quot;):::artifact
+  articles(&quot;Wikipedia article dump&lt;br/&gt;articles.jsonl&quot;):::artifact
+  combined(&quot;Jev answers: facets, scores,&lt;br/&gt;genre/theme/mood yes-no&lt;br/&gt;combined-v1-r2*.jsonl&quot;):::artifact
+  combined_manifest(&quot;Jev run provenance&lt;br/&gt;combined-v1-r2*.jsonl.manifest.json&quot;):::artifact
+  delta(&quot;Jev answers: critique,&lt;br/&gt;technique, audience&lt;br/&gt;delta-v1*.jsonl&quot;):::artifact
+  file_classify_vocab[/&quot;labelling vocabulary + instructions&lt;br/&gt;classify/vocab.json, SPEC.md (no code producer)&quot;/]:::file
+  file_prompt[/&quot;Jev prompt&lt;br/&gt;scripts/v2/prompts/facets-v2.md&quot;/]:::file
+  file_taxonomy[/&quot;genre &amp; mood vocabulary, read as data&lt;br/&gt;Sources/DenDataset/Taxonomy.swift&quot;/]:::file
+  gate_classify_validate{&quot;labelling batch validator&lt;br/&gt;validate_classify_batch.py&quot;}:::gate
+  gate_spend{&quot;--spend&lt;br/&gt;(SPENDS)&quot;}:::gate
+  sc_classify_backfill[[&quot;scripts/v2/build_classify_backfill.py&quot;]]:::script
+  sc_merge_classify[[&quot;scripts/v2/merge_classify_labels.py&quot;]]:::script
+  sc_run_delta[[&quot;Jev critique pass&lt;br/&gt;scripts/v2/run_delta.py&quot;]]:::script
+  src_jev{{&quot;Jev decision model&lt;br/&gt;api.typesafe.ai (paid)&quot;}}:::source
+  src_subagents{{&quot;Claude subagents&lt;br/&gt;genre &amp; mood labelling&quot;}}:::source
+  st_articles[&quot;stage: articles&quot;]:::stage
+  st_classify[&quot;stage: classify&quot;]:::stage
+  cache_wiki[(&quot;Wikipedia + SPARQL cache&lt;br/&gt;.cache/wiki, 180 d&quot;)]:::ghost
+  enriched(&quot;enriched title records&lt;br/&gt;enriched&quot;):::ghost
+  file_denenv[/&quot;credentials&lt;br/&gt;den.env&quot;/]:::ghost
+  sc_premise_worklist[[&quot;scripts/v2/build_premise_worklist.py&quot;]]:::ghost
+  src_wp_action{{&quot;Wikipedia action API&lt;br/&gt;{lang}.wikipedia.org&quot;}}:::ghost
+  st_corpus[&quot;stage: corpus&quot;]:::ghost
+  vector_labels_prev(&quot;genre &amp; mood labels, previous generation&lt;br/&gt;labels-t02.json (already in the out-dir)&quot;):::ghost
+  enriched --&gt;|&quot;reads --enriched&quot;| st_articles
+  st_articles --&gt;|&quot;writes&quot;| articles
+  articles --&gt;|&quot;reads --articles&quot;| st_classify
+  enriched --&gt;|&quot;reads --enriched-dir&quot;| st_classify
+  st_classify --&gt;|&quot;writes&quot;| combined
+  st_classify --&gt;|&quot;writes&quot;| combined_manifest
+  gate_spend -.-o|&quot;den run skips it unless --spend&quot;| st_classify
+  combined --&gt;|&quot;reads --combined&quot;| st_corpus
+  delta --&gt;|&quot;reads --delta&quot;| st_corpus
+  sc_run_delta --&gt;|&quot;registered producer&quot;| delta
+  src_wp_action --&gt;|&quot;whole article, re-read&quot;| st_articles
+  cache_wiki --&gt;|&quot;answers nearly all of it&quot;| st_articles
+  st_classify --&gt;|&quot;one typed request per title&quot;| src_jev
+  src_jev --&gt;|&quot;answers (jev-1.13.0)&quot;| st_classify
+  file_taxonomy --&gt;|&quot;vocabulary parsed + hashed into the manifest&quot;| st_classify
+  file_prompt --&gt;|&quot;prompt&quot;| st_classify
+  file_denenv --&gt;|&quot;TYPESAFE_API_KEY&quot;| st_classify
+  file_denenv --&gt;|&quot;TYPESAFE_API_KEY&quot;| sc_run_delta
+  file_taxonomy --&gt;|&quot;--taxonomy default&quot;| sc_run_delta
+  file_prompt --&gt;|&quot;--prompt default&quot;| sc_run_delta
+  articles --&gt;|&quot;--articles&quot;| sc_run_delta
+  enriched --&gt;|&quot;--enriched-dir&quot;| sc_run_delta
+  sc_run_delta --&gt;|&quot;paid_run: no --spend gate&quot;| src_jev
+  sc_run_delta --&gt;|&quot;writes delta-v1*.jsonl&quot;| delta
+  af_classify_phase --&gt;|&quot;in/batch-NNNN.json&quot;| src_subagents
+  file_classify_vocab --&gt;|&quot;the only labels allowed&quot;| src_subagents
+  src_subagents -.-&gt;|&quot;out/batch-NNNN.json, one agent per batch&quot;| af_classify_phase
+  af_classify_phase --&gt;|&quot;rows a batch dropped&quot;| sc_classify_backfill
+  file_classify_vocab --&gt;|&quot;vocab.json&quot;| sc_classify_backfill
+  sc_classify_backfill --&gt;|&quot;re-batches them into in/&quot;| af_classify_phase
+  af_classify_phase --&gt;|&quot;each in/out pair&quot;| gate_classify_validate
+  file_classify_vocab --&gt;|&quot;vocab.json&quot;| gate_classify_validate
+  gate_classify_validate -.-o|&quot;merge acts on what the validator reports&quot;| sc_merge_classify
+  af_classify_phase --&gt;|&quot;--phase in/ + out/&quot;| sc_merge_classify
+  file_classify_vocab --&gt;|&quot;vocab.json&quot;| sc_merge_classify
+  vector_labels_prev --&gt;|&quot;--labels: the labels to extend&quot;| sc_merge_classify
+  sc_merge_classify --&gt;|&quot;adds ~9,010 titles in place (undeclared writer)&quot;| vector_labels_prev
+  combined --&gt;|&quot;--combined, every shard&quot;| sc_premise_worklist
+  articles --&gt;|&quot;--articles, section text&quot;| sc_premise_worklist
+</pre></div>
+</section>
+<section class="phase" id="p3">
+  <h2>Premise tags</h2>
+  <p class="meta">17 nodes here, 7 from neighbouring phases (dashed outline), 36 edges</p>
+  <div class="chart"><pre class="mermaid">
+flowchart LR
+  classDef source fill:#e7dcf3,stroke:#6b4d91,color:#1b1426
+  classDef stage fill:#cfe5e6,stroke:#2c6b70,color:#0f2224,stroke-width:2px
+  classDef artifact fill:#f3f5f2,stroke:#7c8a82,color:#1b2420
+  classDef cache fill:#f6e7c8,stroke:#9a6f1f,color:#2b2008
+  classDef release fill:#d7ebd3,stroke:#3f7a38,color:#12240f,stroke-width:2px
+  classDef consumer fill:#d8e2f3,stroke:#3d5f95,color:#101b2c
+  classDef gate fill:#f6d6d2,stroke:#a3423a,color:#2e0e0b
+  classDef script fill:#eceae4,stroke:#6f6a5c,color:#221f18,stroke-dasharray:4 3
+  classDef file fill:#fbf6e9,stroke:#8b7b52,color:#241e0e
+  classDef ghost fill:none,stroke:#9aa59f,color:#6a756f,stroke-dasharray:2 3
+  af_coverage_fill(&quot;coverage-fill premise vectors&lt;br/&gt;vectors-{label}.bin + keys&quot;):::artifact
+  af_premise_batches(&quot;premise tagging batches&lt;br/&gt;gen/{in,out}/batch-*.json&quot;):::artifact
+  af_premise_ids(&quot;premise row order&lt;br/&gt;premise-ids.json&quot;):::artifact
+  af_premise_v1_realigned(&quot;v1 premise vectors, re-embedded&lt;br/&gt;vectors-premise-v1-realigned.bin + keys (no code producer)&quot;):::artifact
+  af_premise_v2_bin(&quot;premise vectors as embedded&lt;br/&gt;vectors-premise-v2.bin + premise-v2-ids.json&quot;):::artifact
+  file_premise_v1[/&quot;premise tag strings, v1&lt;br/&gt;data/premise-tags-v1.json&quot;/]:::file
+  file_premise_v2[/&quot;premise tag strings, v2&lt;br/&gt;data/premise-tags-v2.json&quot;/]:::file
+  premise_labels(&quot;genre &amp; mood labels,&lt;br/&gt;premise row order&lt;br/&gt;labels-premise.json&quot;):::artifact
+  premise_vectors(&quot;premise-tag vectors&lt;br/&gt;vectors-premise.bin&quot;):::artifact
+  sc_build_premise_tags[[&quot;scripts/build-premise-tags.py&lt;br/&gt;(registered producer)&quot;]]:::script
+  sc_embed_premise[[&quot;scripts/v2/embed_premise_v2.py&quot;]]:::script
+  sc_embed_tags[[&quot;scripts/v2/embed_tags.py&lt;br/&gt;(registered producer)&quot;]]:::script
+  sc_merge_premise[[&quot;scripts/v2/merge_premise_tags.py&quot;]]:::script
+  sc_merge_premise_cov[[&quot;scripts/merge-premise-coverage.py&quot;]]:::script
+  sc_premise_labels[[&quot;scripts/v2/build_premise_labels.py&quot;]]:::script
+  sc_premise_worklist[[&quot;scripts/v2/build_premise_worklist.py&quot;]]:::script
+  src_haiku{{&quot;Haiku subagents&lt;br/&gt;premise tags&quot;}}:::source
+  articles(&quot;Wikipedia article dump&lt;br/&gt;articles.jsonl&quot;):::ghost
+  combined(&quot;Jev answers: facets, scores,&lt;br/&gt;genre/theme/mood yes-no&lt;br/&gt;combined-v1-r2*.jsonl&quot;):::ghost
+  file_canary[/&quot;embedding known answers&lt;br/&gt;data/embed-canary.json&quot;/]:::ghost
+  src_denembed{{&quot;den-embed&lt;br/&gt;self-hosted bge-m3&quot;}}:::ghost
+  st_corpus[&quot;stage: corpus&quot;]:::ghost
+  st_store[&quot;stage: store&quot;]:::ghost
+  vector_labels(&quot;genre &amp; mood labels&lt;br/&gt;labels-t02.json&quot;):::ghost
+  premise_labels --&gt;|&quot;reads --premise-labels&quot;| st_corpus
+  premise_vectors --&gt;|&quot;reads --premise-vectors&quot;| st_store
+  premise_labels --&gt;|&quot;reads --premise-labels&quot;| st_store
+  sc_embed_tags --&gt;|&quot;registered producer&quot;| premise_vectors
+  sc_build_premise_tags --&gt;|&quot;registered producer&quot;| premise_labels
+  combined --&gt;|&quot;--combined, every shard&quot;| sc_premise_worklist
+  articles --&gt;|&quot;--articles, section text&quot;| sc_premise_worklist
+  file_premise_v2 --&gt;|&quot;skip titles already tagged&quot;| sc_premise_worklist
+  file_premise_v1 --&gt;|&quot;skip tagged titles; merge-only list&quot;| sc_premise_worklist
+  sc_premise_worklist --&gt;|&quot;gen/in: premise sections only&quot;| af_premise_batches
+  af_premise_batches -.-&gt;|&quot;one subagent per batch&quot;| src_haiku
+  src_haiku -.-&gt;|&quot;gen/out/batch-NNNN.json&quot;| af_premise_batches
+  af_premise_batches --&gt;|&quot;--phase gen&quot;| sc_merge_premise
+  sc_merge_premise --&gt;|&quot;writes the committed tags&quot;| file_premise_v2
+  file_premise_v2 --&gt;|&quot;--tags&quot;| sc_embed_premise
+  file_premise_v1 --&gt;|&quot;--v1-tags: reuse unchanged strings&quot;| sc_embed_premise
+  af_premise_v1_realigned --&gt;|&quot;--base-vectors / --base-keys&quot;| sc_embed_premise
+  file_canary --&gt;|&quot;canary gate first&quot;| sc_embed_premise
+  sc_embed_premise --&gt;|&quot;embeds tag strings&quot;| src_denembed
+  sc_embed_premise --&gt;|&quot;writes blob + row order&quot;| af_premise_v2_bin
+  af_premise_v2_bin -.-&gt;|&quot;copied by hand; no code renames v2&quot;| premise_vectors
+  af_premise_v2_bin --&gt;|&quot;--ids premise-v2-ids.json&quot;| sc_premise_labels
+  vector_labels --&gt;|&quot;--labels, record per title&quot;| sc_premise_labels
+  sc_premise_labels --&gt;|&quot;writes labels-premise.json in blob order&quot;| premise_labels
+  sc_embed_tags --&gt;|&quot;writes vectors-{label}.bin&quot;| af_coverage_fill
+  af_coverage_fill --&gt;|&quot;coverage-fill keys + vectors&quot;| sc_merge_premise_cov
+  premise_vectors --&gt;|&quot;base blob&quot;| sc_merge_premise_cov
+  premise_labels --&gt;|&quot;base labels&quot;| sc_merge_premise_cov
+  af_premise_ids --&gt;|&quot;base row order&quot;| sc_merge_premise_cov
+  vector_labels --&gt;|&quot;genre &amp; mood labels for the filled rows&quot;| sc_merge_premise_cov
+  sc_merge_premise_cov --&gt;|&quot;writes the merged blob (second writer)&quot;| premise_vectors
+  sc_merge_premise_cov --&gt;|&quot;writes merged labels (second writer)&quot;| premise_labels
+  sc_merge_premise_cov --&gt;|&quot;writes merged row order&quot;| af_premise_ids
+  af_premise_ids --&gt;|&quot;positional mediaType&quot;| sc_build_premise_tags
+  premise_labels --&gt;|&quot;READS it; the registry calls this its producer&quot;| sc_build_premise_tags
+  sc_build_premise_tags --&gt;|&quot;writes the v1 tags&quot;| file_premise_v1
+</pre></div>
+</section>
+<section class="phase" id="p4">
+  <h2>Embedding</h2>
+  <p class="meta">27 nodes here, 19 from neighbouring phases (dashed outline), 69 edges</p>
+  <div class="chart"><pre class="mermaid">
+flowchart LR
+  classDef source fill:#e7dcf3,stroke:#6b4d91,color:#1b1426
+  classDef stage fill:#cfe5e6,stroke:#2c6b70,color:#0f2224,stroke-width:2px
+  classDef artifact fill:#f3f5f2,stroke:#7c8a82,color:#1b2420
+  classDef cache fill:#f6e7c8,stroke:#9a6f1f,color:#2b2008
+  classDef release fill:#d7ebd3,stroke:#3f7a38,color:#12240f,stroke-width:2px
+  classDef consumer fill:#d8e2f3,stroke:#3d5f95,color:#101b2c
+  classDef gate fill:#f6d6d2,stroke:#a3423a,color:#2e0e0b
+  classDef script fill:#eceae4,stroke:#6f6a5c,color:#221f18,stroke-dasharray:4 3
+  classDef file fill:#fbf6e9,stroke:#8b7b52,color:#241e0e
+  classDef ghost fill:none,stroke:#9aa59f,color:#6a756f,stroke-dasharray:2 3
+  af_box_vectors(&quot;vectors embedded on the box&lt;br/&gt;vectors.jsonl, keys.json, embedding-space.json&quot;):::artifact
+  af_docs(&quot;composed documents&lt;br/&gt;docs.jsonl (--dump-docs)&quot;):::artifact
+  af_recluster_report(&quot;new-cluster candidates&lt;br/&gt;recluster-#lt;date#gt;.json&quot;):::artifact
+  af_report(&quot;coverage report + gzip twin&lt;br/&gt;report.json, labels-t02.json.gz&quot;):::artifact
+  composition(&quot;document-shape record&lt;br/&gt;index/composition.json&quot;):::artifact
+  doc_facts(&quot;director + genre facts&lt;br/&gt;for the embedding document&lt;br/&gt;doc-facts.json&quot;):::artifact
+  embed_labels(&quot;embed store: label rows&lt;br/&gt;index/labels.jsonl&quot;):::artifact
+  embed_vectors(&quot;embed store: vectors&lt;br/&gt;index/vectors.jsonl&quot;):::artifact
+  embedder(&quot;embedder identity&lt;br/&gt;index/embedder.json&quot;):::artifact
+  embedding_space(&quot;verified embedding space&lt;br/&gt;index/embedding-space.json&quot;):::artifact
+  file_canary[/&quot;embedding known answers&lt;br/&gt;data/embed-canary.json&quot;/]:::file
+  file_classify_ckpt[/&quot;retired classify checkpoint&lt;br/&gt;classify-checkpoint.json&quot;/]:::file
+  gate_canary{&quot;embed canary&quot;}:::gate
+  gate_embedgates{&quot;embedder · composition&lt;br/&gt;· token-fit refusals&quot;}:::gate
+  gate_shipguard{&quot;blocks prose fields in labels&lt;br/&gt;SHIP_GUARD&quot;}:::gate
+  manifest(&quot;release manifest&lt;br/&gt;dataset.meta.json&quot;):::artifact
+  sc_derive_docfacts[[&quot;scripts/v2/derive_doc_facts.py&quot;]]:::script
+  sc_embed_docs[[&quot;scripts/v2/embed_docs.py&lt;br/&gt;on the box&quot;]]:::script
+  sc_import_box[[&quot;scripts/v2/import_box_vectors.py&quot;]]:::script
+  sc_recluster[[&quot;scripts/recluster.py&quot;]]:::script
+  src_denembed{{&quot;den-embed&lt;br/&gt;self-hosted bge-m3&quot;}}:::source
+  st_docfacts[&quot;stage: docfacts&quot;]:::stage
+  st_embed[&quot;stage: embed&quot;]:::stage
+  st_finalize[&quot;stage: finalize&quot;]:::stage
+  vector_labels(&quot;genre &amp; mood labels&lt;br/&gt;labels-t02.json&quot;):::artifact
+  vector_labels_prev(&quot;genre &amp; mood labels, previous generation&lt;br/&gt;labels-t02.json (already in the out-dir)&quot;):::artifact
+  vectors(&quot;plot vectors&lt;br/&gt;vectors-bge-m3.bin&quot;):::artifact
+  cache_wiki[(&quot;Wikipedia + SPARQL cache&lt;br/&gt;.cache/wiki, 180 d&quot;)]:::ghost
+  con_atlas([&quot;den-atlas&lt;br/&gt;mmaps the store&quot;]):::ghost
+  con_signer([&quot;den scripts/sign-dataset.swift&lt;br/&gt;(offline)&quot;]):::ghost
+  enrich_checkpoint(&quot;enrich resume state&lt;br/&gt;enrich-checkpoint.json&quot;):::ghost
+  enriched(&quot;enriched title records&lt;br/&gt;enriched&quot;):::ghost
+  facts(&quot;merged Wikidata facts&lt;br/&gt;facts-#lt;ver#gt;.json&quot;):::ghost
+  gate_grounding{&quot;grounding ratchet&lt;br/&gt;check-plot-invariants.py&quot;}:::ghost
+  gate_quality{&quot;quality report&lt;br/&gt;eval-taxonomy.py (not enforced)&quot;}:::ghost
+  sc_delta_run[[&quot;daily freshness pass&lt;br/&gt;scripts/delta-run.sh&quot;]]:::ghost
+  sc_embed_premise[[&quot;scripts/v2/embed_premise_v2.py&quot;]]:::ghost
+  sc_merge_classify[[&quot;scripts/v2/merge_classify_labels.py&quot;]]:::ghost
+  sc_merge_premise_cov[[&quot;scripts/merge-premise-coverage.py&quot;]]:::ghost
+  sc_premise_labels[[&quot;scripts/v2/build_premise_labels.py&quot;]]:::ghost
+  src_wdqs{{&quot;Wikidata SPARQL&lt;br/&gt;query.wikidata.org&quot;}}:::ghost
+  st_corpus[&quot;stage: corpus&quot;]:::ghost
+  st_facts[&quot;stage: facts&quot;]:::ghost
+  st_publish[&quot;stage: publish&quot;]:::ghost
+  st_store[&quot;stage: store&quot;]:::ghost
+  st_worklist[&quot;stage: worklist&quot;]:::ghost
+  vector_labels_prev --&gt;|&quot;reads --known (previous generation)&quot;| st_worklist
+  vector_labels_prev --&gt;|&quot;reads --labels (previous generation)&quot;| st_docfacts
+  st_docfacts --&gt;|&quot;writes&quot;| doc_facts
+  vector_labels_prev --&gt;|&quot;reads --labels (previous generation)&quot;| st_embed
+  enriched --&gt;|&quot;reads --enriched-dir&quot;| st_embed
+  doc_facts --&gt;|&quot;reads --doc-facts&quot;| st_embed
+  st_embed --&gt;|&quot;writes&quot;| embed_labels
+  st_embed --&gt;|&quot;writes&quot;| embed_vectors
+  st_embed --&gt;|&quot;writes&quot;| composition
+  st_embed --&gt;|&quot;writes&quot;| embedder
+  st_embed --&gt;|&quot;writes&quot;| embedding_space
+  embed_labels --&gt;|&quot;reads --embed-labels&quot;| st_finalize
+  embed_vectors --&gt;|&quot;reads --embed-vectors&quot;| st_finalize
+  embedder --&gt;|&quot;reads --embedder&quot;| st_finalize
+  embedding_space --&gt;|&quot;reads --embedding-space&quot;| st_finalize
+  st_finalize --&gt;|&quot;writes&quot;| vector_labels
+  st_finalize --&gt;|&quot;writes&quot;| vectors
+  st_finalize --&gt;|&quot;writes&quot;| manifest
+  vector_labels --&gt;|&quot;reads --labels&quot;| st_facts
+  vector_labels --&gt;|&quot;reads --labels&quot;| st_corpus
+  vectors --&gt;|&quot;reads --vectors&quot;| st_store
+  vector_labels --&gt;|&quot;reads --vector-labels&quot;| st_store
+  manifest --&gt;|&quot;reads --manifest&quot;| st_publish
+  vector_labels_prev --&gt;|&quot;published genre &amp; mood labels as --known&quot;| sc_delta_run
+  vector_labels_prev --&gt;|&quot;--labels: the labels to extend&quot;| sc_merge_classify
+  sc_merge_classify --&gt;|&quot;adds ~9,010 titles in place (undeclared writer)&quot;| vector_labels_prev
+  file_canary --&gt;|&quot;canary gate first&quot;| sc_embed_premise
+  sc_embed_premise --&gt;|&quot;embeds tag strings&quot;| src_denembed
+  vector_labels --&gt;|&quot;--labels, record per title&quot;| sc_premise_labels
+  vector_labels --&gt;|&quot;genre &amp; mood labels for the filled rows&quot;| sc_merge_premise_cov
+  st_finalize --&gt;|&quot;this run&#x27;s labels are the next run&#x27;s input&quot;| vector_labels_prev
+  src_wdqs --&gt;|&quot;P57 director + P136 genre, 100 ids/query&quot;| st_docfacts
+  cache_wiki --&gt;|&quot;cached SPARQL bodies&quot;| st_docfacts
+  st_docfacts --&gt;|&quot;stores SPARQL body&quot;| cache_wiki
+  facts --&gt;|&quot;--facts: the previous generation&#x27;s facts&quot;| sc_derive_docfacts
+  sc_derive_docfacts --&gt;|&quot;--out doc-facts.json&quot;| doc_facts
+  file_canary --&gt;|&quot;known answers, every run&quot;| st_embed
+  gate_canary -.-o|&quot;no vector without a verified space&quot;| st_embed
+  gate_embedgates -.-o|&quot;refuses a mixed store&quot;| st_embed
+  st_embed --&gt;|&quot;GET /health identity&quot;| src_denembed
+  st_embed --&gt;|&quot;POST /embed/batch, 7 docs a request&quot;| src_denembed
+  src_denembed --&gt;|&quot;int8[1024] per document&quot;| st_embed
+  st_embed --&gt;|&quot;--dump-docs: compose, embed nothing&quot;| af_docs
+  af_docs --&gt;|&quot;--docs&quot;| sc_embed_docs
+  file_canary --&gt;|&quot;--canary&quot;| sc_embed_docs
+  sc_embed_docs --&gt;|&quot;embeds on the serving box&quot;| src_denembed
+  sc_embed_docs --&gt;|&quot;writes vectors.jsonl (:97), embedding-space.json (:129), keys.json (:162)&quot;| af_box_vectors
+  af_box_vectors --&gt;|&quot;--vectors / --embed-space&quot;| sc_import_box
+  file_canary --&gt;|&quot;space checked against the canary&quot;| sc_import_box
+  vector_labels_prev --&gt;|&quot;--labels: record per title&quot;| sc_import_box
+  sc_import_box --&gt;|&quot;writes the index store&quot;| embed_labels
+  sc_import_box --&gt;|&quot;writes the index store&quot;| embed_vectors
+  sc_import_box --&gt;|&quot;carries the verified space&quot;| embedding_space
+  sc_import_box --&gt;|&quot;--embedder-health as embedder.json&quot;| embedder
+  st_finalize --&gt;|&quot;written, read by nothing&quot;| af_report
+  manifest --&gt;|&quot;merges over the existing manifest&quot;| st_finalize
+  enrich_checkpoint --&gt;|&quot;read by hardcoded name, undeclared&quot;| st_finalize
+  file_classify_ckpt --&gt;|&quot;read by hardcoded name, undeclared&quot;| st_finalize
+  gate_shipguard -.-o|&quot;refuses prose keys in labels&quot;| st_finalize
+  vector_labels --&gt;|&quot;--labels&quot;| sc_recluster
+  vectors --&gt;|&quot;--vectors&quot;| sc_recluster
+  sc_recluster --&gt;|&quot;new-cluster candidates&quot;| af_recluster_report
+  st_store --&gt;|&quot;stamps store name, hash, inputs, facet-gate counts: only with --stamp-meta, which den leaves empty&quot;| manifest
+  st_publish --&gt;|&quot;prunes retired keys; stamps counts (:275), grounding census (:322), storeRebuild (:256)&quot;| manifest
+  vector_labels --&gt;|&quot;--labels&quot;| gate_grounding
+  vector_labels --&gt;|&quot;genre &amp; mood labels scored&quot;| gate_quality
+  con_atlas --&gt;|&quot;query vectors: must be the same space&quot;| src_denembed
+  manifest --&gt;|&quot;signs dataset.meta.json&quot;| con_signer
+  con_signer -.-&gt;|&quot;signature pasted in by hand, then republished&quot;| manifest
+</pre></div>
+</section>
+<section class="phase" id="p5">
+  <h2>Facts, corpus and store</h2>
+  <p class="meta">15 nodes here, 12 from neighbouring phases (dashed outline), 34 edges</p>
+  <div class="chart"><pre class="mermaid">
+flowchart LR
+  classDef source fill:#e7dcf3,stroke:#6b4d91,color:#1b1426
+  classDef stage fill:#cfe5e6,stroke:#2c6b70,color:#0f2224,stroke-width:2px
+  classDef artifact fill:#f3f5f2,stroke:#7c8a82,color:#1b2420
+  classDef cache fill:#f6e7c8,stroke:#9a6f1f,color:#2b2008
+  classDef release fill:#d7ebd3,stroke:#3f7a38,color:#12240f,stroke-width:2px
+  classDef consumer fill:#d8e2f3,stroke:#3d5f95,color:#101b2c
+  classDef gate fill:#f6d6d2,stroke:#a3423a,color:#2e0e0b
+  classDef script fill:#eceae4,stroke:#6f6a5c,color:#221f18,stroke-dasharray:4 3
+  classDef file fill:#fbf6e9,stroke:#8b7b52,color:#241e0e
+  classDef ghost fill:none,stroke:#9aa59f,color:#6a756f,stroke-dasharray:2 3
+  af_facts_ckpt(&quot;facts scrape checkpoints&lt;br/&gt;facts-fields / -entities / -source-types&quot;):::artifact
+  corpus(&quot;per-title corpus&lt;br/&gt;corpus-#lt;ver#gt;.jsonl.gz&quot;):::artifact
+  corpus_facts(&quot;Wikidata facts,&lt;br/&gt;titles with a vector&lt;br/&gt;facts-#lt;ver#gt;.pre-merge.json&quot;):::artifact
+  delta_facts(&quot;Wikidata facts,&lt;br/&gt;titles without a vector&lt;br/&gt;facts-#lt;ver#gt;.delta.json&quot;):::artifact
+  delta_ids(&quot;ids needing facts,&lt;br/&gt;no vector&lt;br/&gt;facts-delta-ids.txt&quot;):::artifact
+  entities(&quot;entity names&lt;br/&gt;corpus-#lt;ver#gt;-entities.json.gz&quot;):::artifact
+  facts(&quot;merged Wikidata facts&lt;br/&gt;facts-#lt;ver#gt;.json&quot;):::artifact
+  gate_prose{&quot;corpus prose refusal&quot;}:::gate
+  gate_provenance{&quot;no vendor-content sections&lt;br/&gt;PROVENANCE / VENDOR_ALLOWED&quot;}:::gate
+  op_hand[/&quot;operator, by hand&lt;br/&gt;docs/OPERATE.md 6a&quot;/]:::file
+  sc_merge_facts[[&quot;scripts/merge-facts.py&quot;]]:::script
+  st_corpus[&quot;stage: corpus&quot;]:::stage
+  st_facts[&quot;stage: facts&quot;]:::stage
+  st_store[&quot;stage: store&quot;]:::stage
+  store(&quot;the store&lt;br/&gt;den-#lt;ver#gt;.store&quot;):::artifact
+  cache_wiki[(&quot;Wikipedia + SPARQL cache&lt;br/&gt;.cache/wiki, 180 d&quot;)]:::ghost
+  combined(&quot;Jev answers: facets, scores,&lt;br/&gt;genre/theme/mood yes-no&lt;br/&gt;combined-v1-r2*.jsonl&quot;):::ghost
+  delta(&quot;Jev answers: critique,&lt;br/&gt;technique, audience&lt;br/&gt;delta-v1*.jsonl&quot;):::ghost
+  manifest(&quot;release manifest&lt;br/&gt;dataset.meta.json&quot;):::ghost
+  premise_labels(&quot;genre &amp; mood labels,&lt;br/&gt;premise row order&lt;br/&gt;labels-premise.json&quot;):::ghost
+  premise_vectors(&quot;premise-tag vectors&lt;br/&gt;vectors-premise.bin&quot;):::ghost
+  rel_corpus[/&quot;corpus release&lt;br/&gt;corpus-#lt;ver#gt; (by hand)&quot;\]:::ghost
+  sc_derive_docfacts[[&quot;scripts/v2/derive_doc_facts.py&quot;]]:::ghost
+  src_wdqs{{&quot;Wikidata SPARQL&lt;br/&gt;query.wikidata.org&quot;}}:::ghost
+  st_publish[&quot;stage: publish&quot;]:::ghost
+  vector_labels(&quot;genre &amp; mood labels&lt;br/&gt;labels-t02.json&quot;):::ghost
+  vectors(&quot;plot vectors&lt;br/&gt;vectors-bge-m3.bin&quot;):::ghost
+  vector_labels --&gt;|&quot;reads --labels&quot;| st_facts
+  delta_ids --&gt;|&quot;reads --delta-ids&quot;| st_facts
+  st_facts --&gt;|&quot;writes&quot;| corpus_facts
+  st_facts --&gt;|&quot;writes&quot;| delta_facts
+  st_facts --&gt;|&quot;writes&quot;| facts
+  combined --&gt;|&quot;reads --combined&quot;| st_corpus
+  delta --&gt;|&quot;reads --delta&quot;| st_corpus
+  facts --&gt;|&quot;reads --facts&quot;| st_corpus
+  vector_labels --&gt;|&quot;reads --labels&quot;| st_corpus
+  premise_labels --&gt;|&quot;reads --premise-labels&quot;| st_corpus
+  st_corpus --&gt;|&quot;writes&quot;| corpus
+  st_corpus --&gt;|&quot;writes&quot;| entities
+  corpus --&gt;|&quot;reads --corpus&quot;| st_store
+  entities --&gt;|&quot;reads --entities&quot;| st_store
+  facts --&gt;|&quot;reads --facts&quot;| st_store
+  vectors --&gt;|&quot;reads --vectors&quot;| st_store
+  vector_labels --&gt;|&quot;reads --vector-labels&quot;| st_store
+  premise_vectors --&gt;|&quot;reads --premise-vectors&quot;| st_store
+  premise_labels --&gt;|&quot;reads --premise-labels&quot;| st_store
+  st_store --&gt;|&quot;writes&quot;| store
+  store --&gt;|&quot;reads --store&quot;| st_publish
+  op_hand --&gt;|&quot;registered producer&quot;| delta_ids
+  facts --&gt;|&quot;--facts: the previous generation&#x27;s facts&quot;| sc_derive_docfacts
+  src_wdqs --&gt;|&quot;per-property SPARQL, 25 ids a batch&quot;| st_facts
+  cache_wiki --&gt;|&quot;cached sparql-facts bodies&quot;| st_facts
+  st_facts --&gt;|&quot;stores sparql-facts body&quot;| cache_wiki
+  src_wdqs --&gt;|&quot;titles, entity names, instance-of: uncached&quot;| st_facts
+  st_facts --&gt;|&quot;checkpoints per pass&quot;| af_facts_ckpt
+  st_facts --&gt;|&quot;corpus pass first; first file wins&quot;| sc_merge_facts
+  gate_prose -.-o|&quot;refuses answer keys that look like prose&quot;| st_corpus
+  gate_provenance -.-o|&quot;no vendor-content section&quot;| st_store
+  st_store --&gt;|&quot;stamps store name, hash, inputs, facet-gate counts: only with --stamp-meta, which den leaves empty&quot;| manifest
+  corpus -.-&gt;|&quot;uploaded by hand&quot;| rel_corpus
+  entities -.-&gt;|&quot;uploaded by hand&quot;| rel_corpus
+</pre></div>
+</section>
+<section class="phase" id="p6">
+  <h2>Publish, releases and consumers</h2>
+  <p class="meta">18 nodes here, 7 from neighbouring phases (dashed outline), 30 edges</p>
+  <div class="chart"><pre class="mermaid">
+flowchart LR
+  classDef source fill:#e7dcf3,stroke:#6b4d91,color:#1b1426
+  classDef stage fill:#cfe5e6,stroke:#2c6b70,color:#0f2224,stroke-width:2px
+  classDef artifact fill:#f3f5f2,stroke:#7c8a82,color:#1b2420
+  classDef cache fill:#f6e7c8,stroke:#9a6f1f,color:#2b2008
+  classDef release fill:#d7ebd3,stroke:#3f7a38,color:#12240f,stroke-width:2px
+  classDef consumer fill:#d8e2f3,stroke:#3d5f95,color:#101b2c
+  classDef gate fill:#f6d6d2,stroke:#a3423a,color:#2e0e0b
+  classDef script fill:#eceae4,stroke:#6f6a5c,color:#221f18,stroke-dasharray:4 3
+  classDef file fill:#fbf6e9,stroke:#8b7b52,color:#241e0e
+  classDef ghost fill:none,stroke:#9aa59f,color:#6a756f,stroke-dasharray:2 3
+  con_atlas([&quot;den-atlas&lt;br/&gt;mmaps the store&quot;]):::consumer
+  con_atlas_fetch([&quot;den-atlas&lt;br/&gt;scripts/fetch-dataset.sh&quot;]):::consumer
+  con_box_sync([&quot;den deploy/&lt;br/&gt;atlas-dataset-sync.sh&quot;]):::consumer
+  con_edge([&quot;den-edge&lt;br/&gt;/atlas relay + Den Web&quot;]):::consumer
+  con_signer([&quot;den scripts/sign-dataset.swift&lt;br/&gt;(offline)&quot;]):::consumer
+  con_tv([&quot;Den TV app&quot;]):::consumer
+  file_golden[/&quot;hand-labelled test set&lt;br/&gt;data/eval/golden-large.json&quot;/]:::file
+  gate_box_sync{&quot;sha256 + den-atlas check&lt;br/&gt;on the staged set&quot;}:::gate
+  gate_fetch_verify{&quot;per-blob sha256&quot;}:::gate
+  gate_grounding{&quot;grounding ratchet&lt;br/&gt;check-plot-invariants.py&quot;}:::gate
+  gate_guards{&quot;publish guards&lt;br/&gt;producers · counts · identity&lt;br/&gt;· filename-version · consistency&quot;}:::gate
+  gate_publish{&quot;--publish&lt;br/&gt;(PUBLISHES)&quot;}:::gate
+  gate_quality{&quot;quality report&lt;br/&gt;eval-taxonomy.py (not enforced)&quot;}:::gate
+  gate_signature{&quot;signature vs pinned key&quot;}:::gate
+  rel_corpus[/&quot;corpus release&lt;br/&gt;corpus-#lt;ver#gt; (by hand)&quot;\]:::release
+  release[/&quot;data-latest release&lt;br/&gt;data-latest&quot;\]:::release
+  src_imdb{{&quot;IMDb title.ratings&lt;br/&gt;datasets.imdbws.com&quot;}}:::source
+  st_publish[&quot;stage: publish&quot;]:::stage
+  corpus(&quot;per-title corpus&lt;br/&gt;corpus-#lt;ver#gt;.jsonl.gz&quot;):::ghost
+  enriched(&quot;enriched title records&lt;br/&gt;enriched&quot;):::ghost
+  entities(&quot;entity names&lt;br/&gt;corpus-#lt;ver#gt;-entities.json.gz&quot;):::ghost
+  manifest(&quot;release manifest&lt;br/&gt;dataset.meta.json&quot;):::ghost
+  src_denembed{{&quot;den-embed&lt;br/&gt;self-hosted bge-m3&quot;}}:::ghost
+  store(&quot;the store&lt;br/&gt;den-#lt;ver#gt;.store&quot;):::ghost
+  vector_labels(&quot;genre &amp; mood labels&lt;br/&gt;labels-t02.json&quot;):::ghost
+  store --&gt;|&quot;reads --store&quot;| st_publish
+  manifest --&gt;|&quot;reads --manifest&quot;| st_publish
+  st_publish --&gt;|&quot;writes&quot;| release
+  gate_publish -.-o|&quot;den run skips it unless --publish&quot;| st_publish
+  st_publish --&gt;|&quot;prunes retired keys; stamps counts (:275), grounding census (:322), storeRebuild (:256)&quot;| manifest
+  release --&gt;|&quot;published meta, for comparison&quot;| st_publish
+  gate_guards -.-o|&quot;any refusal ends the publish&quot;| st_publish
+  enriched --&gt;|&quot;--enriched-dir&quot;| gate_grounding
+  vector_labels --&gt;|&quot;--labels&quot;| gate_grounding
+  gate_grounding -.-o|&quot;refuses an increase in shared articles&quot;| st_publish
+  vector_labels --&gt;|&quot;genre &amp; mood labels scored&quot;| gate_quality
+  file_golden --&gt;|&quot;--golden&quot;| gate_quality
+  gate_quality -.-o|&quot;report only: #124;#124; true&quot;| st_publish
+  corpus -.-&gt;|&quot;uploaded by hand&quot;| rel_corpus
+  entities -.-&gt;|&quot;uploaded by hand&quot;| rel_corpus
+  release --&gt;|&quot;dataset.meta.json, then the store&quot;| con_atlas_fetch
+  gate_fetch_verify -.-o|&quot;refuses a blob whose sha differs&quot;| con_atlas_fetch
+  release --&gt;|&quot;daily timer on the box&quot;| con_box_sync
+  gate_box_sync -.-o|&quot;sha256 of every blob&quot;| con_box_sync
+  gate_box_sync -.-o|&quot;den-atlas check on the staged set&quot;| con_box_sync
+  con_atlas_fetch --&gt;|&quot;./data/dataset.meta.json → storeFile&quot;| con_atlas
+  con_box_sync --&gt;|&quot;the mounted data dir&quot;| con_atlas
+  src_imdb --&gt;|&quot;joined on the store&#x27;s imdb column at run time&quot;| con_atlas
+  con_atlas --&gt;|&quot;query vectors: must be the same space&quot;| src_denembed
+  con_atlas --&gt;|&quot;/dataset.json descriptor&quot;| con_tv
+  con_atlas --&gt;|&quot;/index/row · labels · score · /recommend · /embed&quot;| con_tv
+  gate_signature -.-o|&quot;skips a pinned provider that fails&quot;| con_tv
+  con_atlas --&gt;|&quot;/atlas/* relayed for Den Web&quot;| con_edge
+  manifest --&gt;|&quot;signs dataset.meta.json&quot;| con_signer
+  con_signer -.-&gt;|&quot;signature pasted in by hand, then republished&quot;| manifest
+</pre></div>
+</section>
+
+<section class="phase" id="artifacts">
+  <h2>Artifact table</h2>
+  <p class="meta">Producers and readers are computed from the edges. "Registered producer" edges from
+  <code>pipeline/artifacts.py</code> are left out, because two of them name scripts that do not write the file.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Artifact</th><th>What it holds</th><th>Written by</th><th>Read by</th><th>Status</th><th>Licence class</th><th>Guard</th></tr></thead>
+    <tbody>
+<tr><td>TMDB movie id dump<br><code>movie_ids.json</code></td><td>TMDB&#x27;s daily movie id dump (one JSON per line)</td><td class="mono">scripts/build-worklist.py</td><td class="mono">stage: worklist</td><td>intermediate; gz left by build-worklist.py</td><td>TMDB-derived: never publish</td><td>worklist refuses a dump that lost lines</td></tr>
+<tr><td>TMDB series id dump<br><code>tv_series_ids.json</code></td><td>TMDB&#x27;s daily series id dump</td><td class="mono">scripts/build-worklist.py</td><td class="mono">stage: worklist</td><td>intermediate</td><td>TMDB-derived: never publish</td><td>same</td></tr>
+<tr><td>movie ids to enrich<br><code>universe-movie.json</code></td><td>worklist rows {tmdbId, mediaType}</td><td class="mono">stage: worklist</td><td class="mono">stage: fetch</td><td>intermediate</td><td>TMDB ids (identifiers)</td><td>--mode refusal</td></tr>
+<tr><td>series ids to enrich<br><code>universe-tv.json</code></td><td>worklist rows {tmdbId, mediaType}</td><td class="mono">stage: worklist</td><td class="mono">stage: fetch</td><td>intermediate</td><td>TMDB ids (identifiers)</td><td>--mode refusal</td></tr>
+<tr><td>enriched title records<br><code>enriched</code></td><td>batch-N.json: TMDB detail half + Wikipedia plot as overview + Wikidata creators/runtime</td><td class="mono">scripts/backfill-plot-provenance.py, scripts/delta-run.sh, stage: fetch</td><td class="mono">grounding ratchet, scripts/backfill-plot-provenance.py, scripts/v2/run_delta.py, stage: articles, stage: classify, stage: embed</td><td>intermediate; never published</td><td>TMDB-derived: never publish + Wikipedia text, CC BY-SA + Wikidata, CC0</td><td>overview holds Wikipedia or nothing (tmdb.title_record)</td></tr>
+<tr><td>enrich resume state<br><code>enrich-checkpoint.json</code></td><td>processed keys, next batch number, totals</td><td class="mono">stage: fetch</td><td class="mono">stage: finalize</td><td>intermediate</td><td>our bookkeeping</td><td>unreadable checkpoint refuses</td></tr>
+<tr><td>Wikipedia article dump<br><code>articles.jsonl</code></td><td>whole Wikipedia article per grounded title, revId, sections, TMDB title/year</td><td class="mono">stage: articles</td><td class="mono">scripts/v2/build_premise_worklist.py, scripts/v2/run_delta.py, stage: classify</td><td>intermediate; its release articles-2026-09-19 was deleted 2026-09-22</td><td>Wikipedia text, CC BY-SA + carries TMDB title/year</td><td>only titles with a Wikipedia plot</td></tr>
+<tr><td>Jev answers: facets, scores, genre/theme/mood yes-no<br><code>combined-v1-r2*.jsonl</code></td><td>Jev answers: applicability, 12 story facets, 4 register scores, primary genre and a yes/no per subgenre, theme and mood (<code>nouls</code>), section roles</td><td class="mono">stage: classify</td><td class="mono">scripts/v2/build_premise_worklist.py, stage: corpus</td><td>intermediate; its release raw-2026-09-20 was deleted 2026-09-22</td><td>model output + carries TMDB title/year</td><td>--spend</td></tr>
+<tr><td>Jev run provenance<br><code>combined-v1-r2*.jsonl.manifest.json</code></td><td>run id + hashes of input, prompt, vocabulary, model</td><td class="mono">stage: classify</td><td class="mono">(nothing)</td><td>intermediate</td><td>our bookkeeping</td><td>audit_combined.py</td></tr>
+<tr><td>Jev answers: critique, technique, audience<br><code>delta-v1*.jsonl</code></td><td>Jev answers: critique, technique, depicts, audience</td><td class="mono">scripts/v2/run_delta.py</td><td class="mono">stage: corpus</td><td>intermediate; its release raw-2026-09-20 was deleted 2026-09-22</td><td>model output + carries TMDB title/year</td><td>none (outside STAGES)</td></tr>
+<tr><td>director + genre facts for the embedding document<br><code>doc-facts.json</code></td><td>Wikidata director + genre per title</td><td class="mono">scripts/v2/derive_doc_facts.py, stage: docfacts</td><td class="mono">stage: embed</td><td>intermediate</td><td>Wikidata, CC0</td><td>empty result refuses</td></tr>
+<tr><td>embed store: label rows<br><code>index/labels.jsonl</code></td><td>append-only label rows, paired with vectors</td><td class="mono">scripts/v2/import_box_vectors.py, stage: embed</td><td class="mono">stage: finalize</td><td>intermediate</td><td>model output</td><td>canary, embedder, composition</td></tr>
+<tr><td>embed store: vectors<br><code>index/vectors.jsonl</code></td><td>append-only int8 vectors</td><td class="mono">scripts/v2/import_box_vectors.py, stage: embed</td><td class="mono">stage: finalize</td><td>intermediate</td><td>embedding of Wikipedia text</td><td>canary, embedder, composition</td></tr>
+<tr><td>document-shape record<br><code>index/composition.json</code></td><td>the document shape the vectors were composed in</td><td class="mono">stage: embed</td><td class="mono">(nothing)</td><td>intermediate</td><td>our bookkeeping</td><td>embed refuses another shape</td></tr>
+<tr><td>embedder identity<br><code>index/embedder.json</code></td><td>den-embed identity from /health</td><td class="mono">scripts/v2/import_box_vectors.py, stage: embed</td><td class="mono">stage: finalize</td><td>intermediate</td><td>our bookkeeping</td><td>embed refuses a different embedder</td></tr>
+<tr><td>verified embedding space<br><code>index/embedding-space.json</code></td><td>canary verdict: spaceId</td><td class="mono">scripts/v2/import_box_vectors.py, stage: embed</td><td class="mono">stage: finalize</td><td>intermediate; stamped into the manifest</td><td>our bookkeeping</td><td>canary</td></tr>
+<tr><td>genre &amp; mood labels<br><code>labels-t02.json</code></td><td>genre &amp; mood labels per title: primary genre, subgenres, moods</td><td class="mono">stage: finalize</td><td class="mono">grounding ratchet, quality report, scripts/merge-premise-coverage.py, scripts/recluster.py, scripts/v2/build_premise_labels.py, stage: corpus, stage: facts, stage: store</td><td>built; pruned from the manifest</td><td>model output</td><td>SHIP_GUARD</td></tr>
+<tr><td>genre &amp; mood labels, previous generation<br><code>labels-t02.json (already in the out-dir)</code></td><td>the same file, as left by the previous run&#x27;s finalize (plus merge_classify_labels.py additions)</td><td class="mono">scripts/v2/merge_classify_labels.py, stage: finalize</td><td class="mono">scripts/delta-run.sh, scripts/v2/import_box_vectors.py, scripts/v2/merge_classify_labels.py, stage: docfacts, stage: embed, stage: worklist</td><td>must already exist: a fresh out-dir refuses</td><td>model output</td><td>contract.require</td></tr>
+<tr><td>plot vectors<br><code>vectors-bge-m3.bin</code></td><td>plot vectors, keyed int8 blob (<code>DENVEC02</code>)</td><td class="mono">stage: finalize</td><td class="mono">scripts/recluster.py, stage: store</td><td>built; pruned from the manifest</td><td>embedding of Wikipedia text</td><td>finalize dim/alignment refusals</td></tr>
+<tr><td>release manifest<br><code>dataset.meta.json</code></td><td>dataset.meta.json: version, embedder, store name/sha/rows, storeInputs</td><td class="mono">den scripts/sign-dataset.swift, stage: finalize, stage: publish, stage: store</td><td class="mono">den scripts/sign-dataset.swift, stage: finalize, stage: publish</td><td>published last, as the commit point</td><td>our bookkeeping</td><td>publish guards, prune</td></tr>
+<tr><td>Wikidata facts, titles with a vector<br><code>facts-&lt;ver&gt;.pre-merge.json</code></td><td>Wikidata facts for titles with a vector</td><td class="mono">stage: facts</td><td class="mono">(nothing)</td><td>intermediate</td><td>Wikidata, CC0</td><td>skipped batch refuses the merge</td></tr>
+<tr><td>ids needing facts, no vector<br><code>facts-delta-ids.txt</code></td><td>hand-written list of vectorless ids</td><td class="mono">(none in code)</td><td class="mono">stage: facts</td><td>intermediate</td><td>TMDB ids (identifiers)</td><td>facts refuses without it</td></tr>
+<tr><td>Wikidata facts, titles without a vector<br><code>facts-&lt;ver&gt;.delta.json</code></td><td>Wikidata facts for vectorless titles</td><td class="mono">stage: facts</td><td class="mono">(nothing)</td><td>intermediate</td><td>Wikidata, CC0</td><td>skipped batch refuses the merge</td></tr>
+<tr><td>merged Wikidata facts<br><code>facts-&lt;ver&gt;.json</code></td><td>merged facts, entities, genreMap</td><td class="mono">stage: facts</td><td class="mono">scripts/v2/derive_doc_facts.py, stage: corpus, stage: store</td><td>built; factsFile pruned</td><td>Wikidata, CC0</td><td>record-count guard (dormant)</td></tr>
+<tr><td>per-title corpus<br><code>corpus-&lt;ver&gt;.jsonl.gz</code></td><td>one row per title: facts, genre &amp; mood labels, premise labels, every model answer</td><td class="mono">stage: corpus</td><td class="mono">corpus release, stage: store</td><td>intermediate; hand-published as corpus-&lt;ver&gt;</td><td>Wikidata, CC0 + model output</td><td>--expect, prose refusal</td></tr>
+<tr><td>entity names<br><code>corpus-&lt;ver&gt;-entities.json.gz</code></td><td>Q-id → name for every referenced entity</td><td class="mono">stage: corpus</td><td class="mono">corpus release, stage: store</td><td>intermediate; hand-published</td><td>Wikidata, CC0</td><td>check-producers glob</td></tr>
+<tr><td>premise-tag vectors<br><code>vectors-premise.bin</code></td><td>embeddings of premise tags</td><td class="mono">premise vectors as embedded, scripts/merge-premise-coverage.py</td><td class="mono">scripts/merge-premise-coverage.py, stage: store</td><td>built; pruned from the manifest</td><td>model output</td><td>canary (in embed_premise_v2.py)</td></tr>
+<tr><td>genre &amp; mood labels, premise row order<br><code>labels-premise.json</code></td><td>genre &amp; mood labels in premise-blob row order</td><td class="mono">scripts/merge-premise-coverage.py, scripts/v2/build_premise_labels.py</td><td class="mono">scripts/build-premise-tags.py, scripts/merge-premise-coverage.py, stage: corpus, stage: store</td><td>built; pruned from the manifest</td><td>model output</td><td>row-order refusals</td></tr>
+<tr><td>the store<br><code>den-&lt;ver&gt;.store</code></td><td>den-&lt;ver&gt;.store: every section den-atlas serves</td><td class="mono">stage: store</td><td class="mono">stage: publish</td><td>PUBLISHED on data-latest</td><td>Wikidata, CC0 + model output + embedding of Wikipedia text</td><td>PROVENANCE, publish guards</td></tr>
+<tr><td>data-latest release<br><code>data-latest</code></td><td>data-latest GitHub release: store + meta</td><td class="mono">stage: publish</td><td class="mono">den deploy/, den-atlas, stage: publish</td><td>PUBLISHED</td><td>Wikidata, CC0 + model output + embedding of Wikipedia text</td><td>--publish</td></tr>
+<tr><td>TMDB response cache<br><code>.cache/tmdb, 180 d</code></td><td>raw TMDB detail bodies, overviews included</td><td class="mono">stage: fetch</td><td class="mono">stage: fetch</td><td>cached 180 d (compliance TTL)</td><td>TMDB-derived: never publish</td><td>credentials stripped from keys</td></tr>
+<tr><td>Wikipedia + SPARQL cache<br><code>.cache/wiki, 180 d</code></td><td>action=parse bodies (host in key) + SPARQL bodies</td><td class="mono">stage: docfacts, stage: facts, stage: fetch</td><td class="mono">scripts/backfill-plot-provenance.py, stage: articles, stage: docfacts, stage: facts, stage: fetch</td><td>cached 180 d</td><td>Wikipedia text, CC BY-SA + Wikidata, CC0</td><td>never Enterprise</td></tr>
+<tr><td>shipped ids, popularity order<br><code>worklist-{movie,tv}.json</code></td><td>the ids already shipped, popularity order</td><td class="mono">scripts/build-worklist.py</td><td class="mono">stage: fetch</td><td>intermediate</td><td>TMDB ids (identifiers)</td><td>none</td></tr>
+<tr><td>genre &amp; mood labelling batches<br><code>classify/{in,out}/batch-*.json</code></td><td>genre &amp; mood labelling batches and answers; the first in/ batches have no code producer</td><td class="mono">Claude subagents, scripts/v2/build_classify_backfill.py</td><td class="mono">Claude subagents, labelling batch validator, scripts/v2/build_classify_backfill.py, scripts/v2/merge_classify_labels.py</td><td>intermediate</td><td>model output</td><td>validate_classify_batch.py; merge refuses invented keys</td></tr>
+<tr><td>labelling vocabulary + instructions<br><code>classify/vocab.json, SPEC.md (no code producer)</code></td><td>the labels a labelling agent may use, and its instructions</td><td class="mono">(none in code)</td><td class="mono">Claude subagents, labelling batch validator, scripts/v2/build_classify_backfill.py, scripts/v2/merge_classify_labels.py</td><td>out-dir only; no code producer</td><td>our bookkeeping</td><td>none</td></tr>
+<tr><td>genre &amp; mood vocabulary, read as data<br><code>Sources/DenDataset/Taxonomy.swift</code></td><td>the genre &amp; mood vocabulary, as a Swift source file the classify pass parses</td><td class="mono">(none in code)</td><td class="mono">scripts/v2/run_delta.py, stage: classify</td><td>committed</td><td>our bookkeeping</td><td>hashed into the Jev manifest</td></tr>
+<tr><td>premise tagging batches<br><code>gen/{in,out}/batch-*.json</code></td><td>premise evidence batches and Haiku tags</td><td class="mono">Haiku subagents, scripts/v2/build_premise_worklist.py</td><td class="mono">Haiku subagents, scripts/v2/merge_premise_tags.py</td><td>intermediate</td><td>Wikipedia text, CC BY-SA + model output</td><td>validate_premise_batch.py</td></tr>
+<tr><td>premise vectors as embedded<br><code>vectors-premise-v2.bin + premise-v2-ids.json</code></td><td>premise blob as embedded, and its row order</td><td class="mono">scripts/v2/embed_premise_v2.py</td><td class="mono">premise-tag vectors, scripts/v2/build_premise_labels.py</td><td>intermediate</td><td>model output</td><td>canary + reuse probe</td></tr>
+<tr><td>v1 premise vectors, re-embedded<br><code>vectors-premise-v1-realigned.bin + keys (no code producer)</code></td><td>v1 premise strings re-embedded, the base v2 extends</td><td class="mono">(none in code)</td><td class="mono">scripts/v2/embed_premise_v2.py</td><td>intermediate; no code producer</td><td>model output</td><td>reuse probe</td></tr>
+<tr><td>premise row order<br><code>premise-ids.json</code></td><td>premise blob row order</td><td class="mono">scripts/merge-premise-coverage.py</td><td class="mono">scripts/build-premise-tags.py, scripts/merge-premise-coverage.py</td><td>intermediate</td><td>our bookkeeping</td><td>alignment refusal</td></tr>
+<tr><td>coverage-fill premise vectors<br><code>vectors-{label}.bin + keys</code></td><td>premise vectors for titles v1 missed</td><td class="mono">scripts/v2/embed_tags.py</td><td class="mono">scripts/merge-premise-coverage.py</td><td>intermediate</td><td>model output</td><td>none</td></tr>
+<tr><td>composed documents<br><code>docs.jsonl (--dump-docs)</code></td><td>composed documents, for embedding elsewhere</td><td class="mono">stage: embed</td><td class="mono">scripts/v2/embed_docs.py</td><td>intermediate</td><td>Wikipedia text, CC BY-SA + Wikidata, CC0 + model output</td><td>none</td></tr>
+<tr><td>vectors embedded on the box<br><code>vectors.jsonl, keys.json, embedding-space.json</code></td><td>vectors embedded on the box + verified space</td><td class="mono">scripts/v2/embed_docs.py</td><td class="mono">scripts/v2/import_box_vectors.py</td><td>intermediate</td><td>embedding of Wikipedia text</td><td>space checked against the canary</td></tr>
+<tr><td>coverage report + gzip twin<br><code>report.json, labels-t02.json.gz</code></td><td>coverage report and gzip twin</td><td class="mono">stage: finalize</td><td class="mono">(nothing)</td><td>written, read by nothing</td><td>our bookkeeping</td><td>none</td></tr>
+<tr><td>new-cluster candidates<br><code>recluster-&lt;date&gt;.json</code></td><td>new-cluster candidates for a human</td><td class="mono">scripts/recluster.py</td><td class="mono">(nothing)</td><td>report</td><td>our bookkeeping</td><td>none</td></tr>
+<tr><td>facts scrape checkpoints<br><code>facts-fields / -entities / -source-types</code></td><td>per-pass scrape checkpoints</td><td class="mono">stage: facts</td><td class="mono">(nothing)</td><td>intermediate</td><td>Wikidata, CC0</td><td>unparseable checkpoint refuses</td></tr>
+<tr><td>premise tag strings, v2<br><code>data/premise-tags-v2.json</code></td><td>44,531 titles&#x27; premise tag strings</td><td class="mono">scripts/v2/merge_premise_tags.py</td><td class="mono">scripts/v2/build_premise_worklist.py, scripts/v2/embed_premise_v2.py</td><td>committed</td><td>model output</td><td>none</td></tr>
+<tr><td>premise tag strings, v1<br><code>data/premise-tags-v1.json</code></td><td>37,533 titles&#x27; v1 tag strings</td><td class="mono">scripts/build-premise-tags.py</td><td class="mono">scripts/v2/build_premise_worklist.py, scripts/v2/embed_premise_v2.py</td><td>committed</td><td>model output</td><td>none</td></tr>
+<tr><td>embedding known answers<br><code>data/embed-canary.json</code></td><td>fixed texts and their exact int8 vectors</td><td class="mono">(none in code)</td><td class="mono">scripts/v2/embed_docs.py, scripts/v2/embed_premise_v2.py, scripts/v2/import_box_vectors.py, stage: embed</td><td>committed</td><td>our bookkeeping</td><td>is the gate</td></tr>
+    </tbody>
+  </table></div>
+</section>
+</div>
