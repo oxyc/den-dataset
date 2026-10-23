@@ -486,13 +486,23 @@ def same_candidates(listed, answered_with, answer=None):
     those answers chose, and the groups they name, are unchanged. Treating that as new candidates set aside
     29 answered Batman titles at once, and a daily run holds no article to ask them again.
 
+    An unchosen suffix may disappear too. The remaining letters still name exactly what they named when the
+    answer was bought, and a yes that all the old groups are one franchise is still evidence that their prefix
+    is; a no remains the conservative no. This is how a removed obsolete sequel chain stops being offered
+    without setting aside a title's unchanged choice among the groups before it.
+
     Only while the chosen candidate is unchanged: an answer that chose the characters letter put the title
-    with the titles it was shown, and a title it never saw does not join them. `answer` is the answer's typed
-    result; without it no choice is known and a grown candidate is not tolerated by the caller's own check."""
-    if len(listed) != len(answered_with):
-        return False
+    with the titles it was shown, and a title it never saw does not join them; likewise a removed suffix that
+    held the chosen letter invalidates the answer. `answer` is the answer's typed result; without it no choice
+    is known and either exception is not tolerated by the caller's own check."""
     letter = ((answer or {}).get("fr__group") or {}).get("choice")
     chosen = fg.LETTERS.index(letter) if letter in fg.LETTERS else None
+    if len(listed) < len(answered_with):
+        if listed != answered_with[:len(listed)] or chosen is None or chosen >= len(listed):
+            return False
+        answered_with = answered_with[:len(listed)]
+    elif len(listed) != len(answered_with):
+        return False
     for index, (now, then) in enumerate(zip(listed, answered_with)):
         if now == then:
             continue
