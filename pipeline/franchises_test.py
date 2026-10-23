@@ -525,6 +525,17 @@ class Stage(unittest.TestCase):
         got, _ = self.answered_under(was, list(was), "B")
         self.assertEqual(got["characters:movie:1"]["members"], {"movie:1": None})
 
+    def test_an_answer_holds_when_only_an_unchosen_trailing_candidate_went_away(self):
+        """A removed obsolete sequel chain after the chosen group does not change what its letter meant."""
+        was = ["Qs", "Qother"]
+        got, counts = self.answered_under(was, ["Qs"])
+        self.assertEqual(got["Qs"]["members"], {"movie:1": None})
+        self.assertNotIn("answered under other candidates", counts)
+
+        got, counts = self.answered_under(was, ["Qs"], "B")
+        self.assertEqual(got, {}, "an answer that chose the removed candidate is stale")
+        self.assertEqual(counts["answered under other candidates"], 1)
+
     def test_an_answer_is_set_aside_when_a_group_or_a_character_title_went_away(self):
         was = ["Qs", ("characters", ("movie:1", "movie:3"))]
         for now in (["Qother", ("characters", ("movie:1", "movie:3"))],
