@@ -175,6 +175,9 @@
     {"mediaType": "tv", "tmdbId": 40424, "item": "Q4041399",
      "why": "Initial D: TMDB's record first aired 1998-04-18, IMDb tt0385426 (it names Q164883, the franchise, which is not a claimant). Q4041399 (First Stage) starts 1998-04-19 with only that IMDb id, against Q4041400 (Second Stage, 1999, P345 tt0247874 and tt0385426).",
      "upstream": "Q4041400 (Second Stage) also states P4983 40424 and P345 tt0385426, First Stage's."},
+    {"mediaType": "tv", "tmdbId": 57706, "item": "Q3419007",
+     "why": "Ranma ½: TMDB's record first aired 1989-04-15, IMDb tt0096686, and names Q3419007. Q3419007 matches that title, start and IMDb id; Q103897316 is Ranma 1/2 Nettōhen, the 143-episode continuation starting 1989-10-20 with IMDb tt0096685.",
+     "upstream": "Q103897316 (Ranma 1/2 Nettōhen) states P4983 57706, the combined TMDB series' id, instead of an id specific to that continuation."},
     {"mediaType": "tv", "tmdbId": 66014, "item": "Q23136778",
      "why": "My 600-lb Life: TMDB's record first aired 2012-02-01, IMDb tt2152112, and names Q23136778. Q23136778 starts 2012-02-01 with 15 sitelinks, against Q136261530 (The 6000 lb Diaries with Dr. Now, a spin-off with no dates).",
      "upstream": "Q136261530 (The 6000 lb Diaries) also states P4983 66014 and P345 tt2152112, My 600-lb Life's."}

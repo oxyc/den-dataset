@@ -2919,6 +2919,12 @@
     },
     {
       "mediaType": "movie",
+      "tmdbId": 120303,
+      "alias": "The Vampire",
+      "why": "TMDB names the 1957 film The Vampire and records El vampiro as its original title; this is its English release title"
+    },
+    {
+      "mediaType": "movie",
       "tmdbId": 120554,
       "alias": "The Black Angel",
       "why": "reviewed: a real alternate or translated title"
@@ -4812,6 +4818,12 @@
       "tmdbId": 1571470,
       "alias": "Riff Raff",
       "why": "Manual issue #16 review found this is a translated, release, international, or documented working title of the same work; TMDB alternative-title data does not list it."
+    },
+    {
+      "mediaType": "movie",
+      "tmdbId": 1571766,
+      "alias": "Kraken",
+      "why": "TMDB names the film Kraken, its original title, and records No Way Down as its US and UK title; both names identify the same 2026 film"
     },
     {
       "mediaType": "tv",
