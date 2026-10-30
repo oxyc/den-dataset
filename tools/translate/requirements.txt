@@ -14,7 +14,7 @@ numpy==2.5.3
 regex==2026.9.10
 PyYAML==6.0.3
 packaging==26.3
-filelock==4.0.1
+filelock==4.2.1
 fsspec==2026.9.0
 tqdm==4.70.1
 typing_extensions==4.16.0
