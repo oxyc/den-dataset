@@ -39,6 +39,8 @@ jobs:
             "$sh" -n "$f" || exit 1
             echo "ok  $f ($sh)"
           done
+      - name: Live manifest authentication
+        run: bash pipeline/verify-dataset-manifest.test.sh
       # Pinned to a commit, not @master: a mutable third-party ref runs whatever that branch holds at the
       # moment CI fires, and the `actions` dependabot group below can bump a pinned SHA but not a branch.
       - uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38  # v2.0.0

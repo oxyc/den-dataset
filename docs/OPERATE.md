@@ -11,7 +11,13 @@ ready going again.
 A ready scheduled or manually dispatched run publishes itself. After `./den daily` leaves
 `checked.json`, the workflow calls `publish-dataset.sh --checked --keyless`: every gate remains in front of
 the publish, Cosign binds the exact manifest to `daily.yml` on `refs/heads/main` with GitHub OIDC, the
-Sigstore bundle is uploaded as `dataset.meta.json.bundle`, and the manifest is the final commit. The same
+Sigstore bundle is uploaded first as
+`dataset.meta.json.sha256-<sha256-of-the-exact-manifest-bytes>.bundle`, without replacement, and the fixed
+manifest is the final commit. If that pointer upload fails, its old bytes still derive the old proof; the
+new orphan proof is harmless and retrying converges. The legacy fixed-name bundle is retained unchanged
+only for the consumer-first migration fallback. Do not remove consumer fallback or old immutable proofs
+until deployed consumers, rollback generations, and in-flight readers have cleared an agreed grace window.
+The same
 checked store, manifest and corpus bundle remain downloadable as `dataset-<run id>` for 14 days.
 
 An owner-requested build uses the same path; only `main` in `oxyc/den-dataset` is allowed to run it:
