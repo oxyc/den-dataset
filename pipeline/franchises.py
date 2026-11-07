@@ -16,7 +16,8 @@ leave one answer the franchise is decided here and nobody is asked.
 order; the questions below are the same for every title, and point at the letters. The article file the
 pass reads is written here (`FRANCHISE_STATES`, one shard per content digest), so `run_combined`'s call,
 validation, resume, lock and manifest are used unchanged, as `run_delta.py` and `genres_moods` use them.
-Answers go to the shard of the same digest, and a title answered in any shard is never asked again.
+Answers go to the shard of the same digest. A title whose newest answer still matches today's candidates is
+never asked again; an incompatible answer remains in durable history while `--spend` buys its replacement.
 
 **Line pass** (paid, same run). A title that pass calls a separate adaptation is then asked one more
 question (`line_questions`): whether it continues its group's line all the same, as Red Dragon (2002), a
@@ -30,7 +31,7 @@ set (`pipeline/eval_franchises.py`) or nothing is written.
 
 The candidates each answer was asked under are read back from the states shard that sent them, because a
 letter means nothing without its list. An answer whose title's candidates have changed since is not used,
-and is counted.
+is counted, and is an explicit planned ask until current evidence can supersede it.
 """
 import argparse
 import collections
@@ -335,9 +336,16 @@ def answers_path(ctx, states_path, p=FIRST):
     return ctx.shard(p.answers)[:-len(".jsonl")] + f"-{digest}.jsonl"
 
 
+def compatible_answer_keys(asked, answers):
+    """Titles whose newest answer still gives today's candidate letters their original meaning."""
+    return {key for key, listed in asked.items()
+            if key in answers and same_candidates(listed, answers[key][1], answers[key][0])}
+
+
 def ask(ctx, asked, groups, titles, p=FIRST):
-    """Buy `p`'s answers for every asked title not yet answered. Returns how many were asked."""
-    answered = set(read_answers(ctx, p=p))
+    """Buy `p`'s missing or candidate-incompatible answers. Returns how many were asked."""
+    answers = read_answers(ctx, p=p, asked=asked)
+    answered = compatible_answer_keys(asked, answers)
     states_path, rows, states, skipped = write_states(ctx, asked, groups, titles, answered, p)
     if skipped:
         print(f"franchises: not asking {skipped}: no article", file=sys.stderr)
@@ -389,16 +397,22 @@ def selected(ctx, asked):
 
 def plan_report(ctx, asked, automatic):
     articles = _article_records(ctx)
-    answered, durable = load_answers(ctx, persist=False)
-    todo = [k for k in asked if k not in answered and k in articles]
-    line_answered = load_answers(ctx, persist=False, p=LINE)[0]
+    answered, history = load_answers(ctx, persist=False, asked=asked)
+    reusable = compatible_answer_keys(asked, answered)
+    pending = set(asked) - reusable
+    todo = [k for k in asked if k in pending and k in articles]
+    line_asked = line_targets(asked, answered)
+    line_answered, line_history = load_answers(ctx, persist=False, p=LINE, asked=line_asked)
+    line_reusable = compatible_answer_keys(line_asked, line_answered)
     # Only titles already answered can be counted: the rest reach the line pass once the first answers them.
-    line_todo = [k for k in line_targets(asked, answered) if k not in line_answered and k in articles]
+    line_todo = [k for k in line_asked if k not in line_reusable and k in articles]
     report = {"automatic": len(automatic), "asked": len(asked),
-              "alreadyAnswered": len(set(asked) & set(answered)),
-              "noArticle": sum(1 for k in asked if k not in articles), "ask": len(todo),
+              "alreadyAnswered": len(reusable),
+              "incompatibleAnswers": len(set(asked) & set(answered) - reusable),
+              "noArticle": sum(1 for k in pending if k not in articles), "ask": len(todo),
               "lineAsk": len(line_todo),
-              **decisions.projection(durable, len(todo))}
+              **decisions.projection(history, len(todo)),
+              "lineCalibration": decisions.history_totals(line_history)}
     print(json.dumps(report, indent=2))
     return report
 
@@ -406,17 +420,14 @@ def plan_report(ctx, asked, automatic):
 # --------------------------------------------------------------------------------------------- derive
 
 
-def load_answers(ctx, persist=True, p=FIRST):
+def load_answers(ctx, persist=True, p=FIRST, asked=None):
     """`key -> (answers, candidate ids)` over every answer shard of `p`, each read beside the states shard of
     the same digest and its manifest. Every paid row is audited against that frozen state and today's exact
     questions of `p`. A title answered twice is refused."""
     qs, _ = p.questions()
     compact_path = ctx.path(p.decisions)
-    durable, _ = decisions.read(compact_path, qs, PINNED_MODEL)
-    out = {key: decisions.validate_decision(key, decision, qs, PINNED_MODEL,
-                                            os.path.basename(compact_path))
-           for key, decision in durable.items()}
-    durable = dict(durable)
+    history, _ = decisions.read_history(compact_path, qs, PINNED_MODEL)
+    history = {key: list(entries) for key, entries in history.items()}
     raw_seen = set()
     states_by_digest = {os.path.basename(s)[:-len(".jsonl")].rpartition("-")[2]: s
                         for s in ctx.paths(p.states)}
@@ -462,20 +473,34 @@ def load_answers(ctx, persist=True, p=FIRST):
                 except (ValueError, rc.TypeSafeError) as refusal:
                     raise StageError(f"franchises: {path}:{n}: {refusal}") from None
                 decision = decisions.from_paid_row(key, row, asked_with[key])
-                if key in raw_seen:
-                    raise StageError(f"{key} is answered in two shards; the second is {path}")
-                if key in durable and durable[key] != decision:
-                    raise StageError(f"{key} differs between {compact_path} and {path}")
-                raw_seen.add(key)
-                durable[key] = decision
-                out[key] = (row["answers"], asked_with[key])
+                raw_identity = (key, rc.canonical(decision))
+                if raw_identity in raw_seen:
+                    raise StageError(f"{key} repeats one answer in two shards; the second is {path}")
+                raw_seen.add(raw_identity)
+                entries = history.setdefault(key, [])
+                if decision not in entries:
+                    if entries and entries[-1]["candidates"] == decision["candidates"]:
+                        raise StageError(f"{key} has two different answers for the same candidates; "
+                                         f"the second is {path}")
+                    entries.append(decision)
     if persist:
-        decisions.write(compact_path, durable, qs, PINNED_MODEL)
-    return out, durable
+        decisions.write(compact_path, history, qs, PINNED_MODEL)
+    out = {}
+    for key, entries in history.items():
+        validated = [decisions.validate_decision(key, decision, qs, PINNED_MODEL,
+                                                 os.path.basename(compact_path))
+                     for decision in entries]
+        if asked is not None and key in asked:
+            compatible = [answer for answer in validated
+                          if same_candidates(asked[key], answer[1], answer[0])]
+            out[key] = compatible[-1] if compatible else validated[-1]
+        else:
+            out[key] = validated[-1]
+    return out, history
 
 
-def read_answers(ctx, persist=True, p=FIRST):
-    return load_answers(ctx, persist, p)[0]
+def read_answers(ctx, persist=True, p=FIRST, asked=None):
+    return load_answers(ctx, persist, p, asked)[0]
 
 
 def same_candidates(listed, answered_with, answer=None):
@@ -836,8 +861,8 @@ def disambiguate_duplicate_names(franchises):
 
 
 def derive(ctx, titles, groups, automatic, asked, names, flagged):
-    answers = read_answers(ctx)
-    line = read_answers(ctx, p=LINE)
+    answers = read_answers(ctx, asked=asked)
+    line = read_answers(ctx, p=LINE, asked=line_targets(asked, answers))
     franchises, counts = resolve(titles, groups, flagged, automatic, asked, answers, names, line)
     doc, of = document(franchises, groups, titles, names)
     disambiguated = disambiguate_duplicate_names(doc)
@@ -884,12 +909,13 @@ def run(ctx, cache=None):
         bought = ask(ctx, pilot, groups, titles)
         # In the same run, so a title the franchise pass calls a separate adaptation is never derived
         # without the line pass's answer once it can be bought.
-        line_bought = ask(ctx, line_targets(pilot, read_answers(ctx)), groups, titles, LINE)
+        first = read_answers(ctx, asked=pilot)
+        line_bought = ask(ctx, line_targets(pilot, first), groups, titles, LINE)
     if ctx.spend and ctx.keys:
-        _answers, durable = load_answers(ctx)
-        _line, line_durable = load_answers(ctx, p=LINE)
-        usage = decisions.totals({**{f"first:{k}": v for k, v in durable.items()},
-                                  **{f"line:{k}": v for k, v in line_durable.items()}})
+        _answers, history = load_answers(ctx)
+        _line, line_history = load_answers(ctx, p=LINE)
+        usage = decisions.history_totals({**{f"first:{k}": v for k, v in history.items()},
+                                          **{f"line:{k}": v for k, v in line_history.items()}})
         return (f"targeted pilot — asked {bought:,}, line pass {line_bought:,}; "
                 f"{usage['calls']:,} durable decisions, "
                 f"{usage['inputTokens']:,} exact input tokens, ${usage['costUSD']:.8f}; "

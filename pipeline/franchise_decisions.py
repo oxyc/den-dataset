@@ -3,7 +3,9 @@
 
 Raw franchise states contain Wikipedia text and the answer rows contain its title and provider audit
 record.  They stay in the private work directory.  This file is the smaller decision the next stateless
-daily run needs: candidate ids, the three typed answers, the pinned model and exact token usage.
+daily run needs: candidate ids, the typed answers, the pinned model and exact token usage. Schema 2 keeps
+each title's decisions oldest-to-newest. The newest decision compatible with today's candidates is active,
+while superseded evidence and cost remain auditable.
 """
 import hashlib
 import json
@@ -16,7 +18,8 @@ from lib.typesafe_client import TypeSafe
 from . import run_combined as rc
 from .contract import StageError
 
-SCHEMA = 1
+SCHEMA = 2
+LEGACY_SCHEMA = 1
 
 
 def questions_sha(questions):
@@ -83,28 +86,55 @@ def validate_decision(key, decision, questions, pinned_model, where):
     return decision["answers"], candidates
 
 
-def read(path, questions, pinned_model):
+def _histories(doc, where):
+    """Normalize the legacy one-decision shape and v2's oldest-to-newest histories."""
+    stored = doc.get("decisions")
+    if not isinstance(stored, dict):
+        raise StageError(f"franchises: {where} decisions are not an object")
+    if doc.get("schema") == LEGACY_SCHEMA:
+        return {key: [decision] for key, decision in stored.items()}
+    if doc.get("schema") != SCHEMA:
+        raise StageError(
+            f"franchises: {where} schema is {doc.get('schema')!r}, expected {LEGACY_SCHEMA} or {SCHEMA}")
+    histories = {}
+    for key, history in stored.items():
+        if not isinstance(history, list) or not history:
+            raise StageError(f"franchises: {where} {key} has no decision history")
+        histories[key] = history
+    return histories
+
+
+def read_history(path, questions, pinned_model):
     if not os.path.exists(path):
         return {}, None
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
     where = os.path.basename(path)
-    if doc.get("schema") != SCHEMA:
-        raise StageError(f"franchises: {where} schema is {doc.get('schema')!r}, expected {SCHEMA}")
+    if doc.get("schema") not in (LEGACY_SCHEMA, SCHEMA):
+        raise StageError(
+            f"franchises: {where} schema is {doc.get('schema')!r}, expected {LEGACY_SCHEMA} or {SCHEMA}")
     expected = questions_sha(questions)
     if doc.get("questionsSha256") != expected:
         raise StageError(f"franchises: {where} was decided under other franchise questions")
     if doc.get("model") != pinned_model:
         raise StageError(f"franchises: {where} model is {doc.get('model')!r}, expected {pinned_model!r}")
-    decisions = doc.get("decisions")
-    if not isinstance(decisions, dict):
-        raise StageError(f"franchises: {where} decisions are not an object")
-    for key, decision in decisions.items():
-        validate_decision(key, decision, questions, pinned_model, where)
-    expected_usage = totals(decisions)
+    histories = _histories(doc, where)
+    for key, history in histories.items():
+        for position, decision in enumerate(history, 1):
+            validate_decision(key, decision, questions, pinned_model, f"{where} history {position}")
+        if len({rc.canonical(decision) for decision in history}) != len(history):
+            raise StageError(f"franchises: {where} {key} repeats a decision in its history")
+        if len({rc.canonical(decision["candidates"]) for decision in history}) != len(history):
+            raise StageError(f"franchises: {where} {key} has conflicting decisions for one candidate list")
+    expected_usage = history_totals(histories)
     if doc.get("usage") != expected_usage:
         raise StageError(f"franchises: {where} usage does not total its decisions")
-    return decisions, doc
+    return histories, doc
+
+
+def read(path, questions, pinned_model):
+    histories, doc = read_history(path, questions, pinned_model)
+    return {key: history[-1] for key, history in histories.items()}, doc
 
 
 def totals(decisions):
@@ -114,13 +144,20 @@ def totals(decisions):
             "costUSD": round(input_tokens * TypeSafe.RATE_PER_INPUT_TOKEN, 8)}
 
 
-def document(decisions, questions, pinned_model):
+def history_totals(histories):
+    """All historical calls remain auditable even though only each title's newest decision is active."""
+    flattened = {f"{key}:{position}": decision for key, history in histories.items()
+                 for position, decision in enumerate(history)}
+    return totals(flattened)
+
+
+def document(histories, questions, pinned_model):
     return {"schema": SCHEMA, "questionsSha256": questions_sha(questions), "model": pinned_model,
-            "decisions": dict(sorted(decisions.items())), "usage": totals(decisions)}
+            "decisions": dict(sorted(histories.items())), "usage": history_totals(histories)}
 
 
-def write(path, decisions, questions, pinned_model):
-    doc = document(decisions, questions, pinned_model)
+def write(path, histories, questions, pinned_model):
+    doc = document(histories, questions, pinned_model)
     body = json.dumps(doc, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
     try:
         with open(path, encoding="utf-8") as fh:
@@ -141,9 +178,9 @@ def write(path, decisions, questions, pinned_model):
     return doc
 
 
-def projection(decisions, calls):
+def projection(histories, calls):
     """A measured projection from completed calls. The completed spend is exact; a future token count is not."""
-    exact = totals(decisions)
+    exact = history_totals(histories)
     if not exact["calls"]:
         return {"calibration": exact, "projected": None}
     tokens = math.ceil(exact["inputTokens"] / exact["calls"] * calls)

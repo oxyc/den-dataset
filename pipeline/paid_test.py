@@ -180,7 +180,7 @@ class Ledger(unittest.TestCase):
         self.assertEqual((unfiled.data["shards"], unrestored.data["shards"]), ({}, {}))
 
     def test_franchise_decisions_are_restored_as_the_union_of_both(self):
-        doc = {"schema": "s", "questionsSha256": "q", "model": "m",
+        doc = {"schema": 1, "questionsSha256": "q", "model": "m",
                "decisions": {"movie:1": {"usage": {"inputTokens": 5, "outputTokens": 1}}},
                "usage": {}}
         with tempfile.TemporaryDirectory() as out:
@@ -193,8 +193,28 @@ class Ledger(unittest.TestCase):
             with open(path) as fh:
                 merged = json.load(fh)
         self.assertEqual(sorted(merged["decisions"]), ["movie:1", "movie:2"])
+        self.assertEqual(merged["schema"], 2)
         self.assertEqual(merged["usage"]["calls"], 2)
         self.assertEqual(merged["usage"]["inputTokens"], 12)
+
+    def test_a_ledger_superseding_history_wins_over_the_published_base(self):
+        old = {"usage": {"inputTokens": 5, "outputTokens": 1}}
+        new = {"usage": {"inputTokens": 7, "outputTokens": 2}}
+        base = {"schema": 1, "questionsSha256": "q", "model": "m",
+                "decisions": {"movie:1": old}, "usage": {}}
+        carried = {**base, "schema": 2, "decisions": {"movie:1": [old, new]}}
+        with tempfile.TemporaryDirectory() as out:
+            path = os.path.join(out, artifacts.FRANCHISE_DECISIONS.filename)
+            with open(path, "w") as fh:
+                json.dump(base, fh)
+            ledger = paid.Ledger(None)
+            ledger.data["files"][artifacts.FRANCHISE_DECISIONS.filename] = json.dumps(carried)
+            ledger.restore(Context(out_dir=out))
+            with open(path) as fh:
+                merged = json.load(fh)
+        self.assertEqual(merged["decisions"]["movie:1"], [old, new])
+        self.assertEqual(merged["usage"], {"calls": 2, "inputTokens": 12, "outputTokens": 3,
+                                            "costUSD": 5e-07})
 
 
 class KilledAndRunAgain(unittest.TestCase):

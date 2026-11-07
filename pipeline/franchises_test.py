@@ -7,6 +7,7 @@ written. The facts are shaped like the cases oxyc/den-atlas#92 measured: Spider-
 series (automatic, with eras), Beck's 1997– films and its 1993 films are two groups no Wikidata series
 links (asked; a continuing cast lets them merge), and Studio Ghibli is a studio's films typed a film series (asked).
 """
+import io
 import json
 import os
 import shutil
@@ -17,7 +18,7 @@ from unittest import mock
 from . import franchise_groups as fg
 from . import franchises
 from . import run_combined as rc
-from .contract import Context, StageError
+from .contract import Context, StageError, UpstreamError
 
 VERSION = "testver"
 #: Actors of both Beck groups: the continuing cast that lets the two merge (oxyc/den-dataset#158).
@@ -561,7 +562,7 @@ class Stage(unittest.TestCase):
         with open(facts, "w", encoding="utf-8") as fh:
             json.dump(blob, fh)
 
-    def test_an_answer_is_used_while_its_candidates_stand_and_set_aside_once_they_change(self):
+    def test_an_incompatible_answer_is_planned_superseded_and_survives_a_durable_restart(self):
         self.run_stage(spend=True)
         self.golden({**GOLDEN, "floors": {**GOLDEN["floors"], "togetherRecall": 0.0, "eraAgreement": 0.0}})
         # A new member changes the titles a group lists, not which groups a title is shown.
@@ -579,6 +580,97 @@ class Stage(unittest.TestCase):
         doc = self.derived()
         self.assertEqual(doc["derivation"]["counts"]["answered under other candidates"], 2)
         self.assertNotIn("movie:1", doc["titles"])
+
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            said = self.run_stage(plan=True)
+        self.assertIn("2 titles to ask", said)
+        report = json.loads(stdout.getvalue())
+        self.assertEqual({key: report[key] for key in
+                          ("alreadyAnswered", "incompatibleAnswers", "noArticle", "ask", "lineAsk")},
+                         {"alreadyAnswered": 5, "incompatibleAnswers": 2, "noArticle": 1,
+                          "ask": 2, "lineAsk": 0})
+        self.assertEqual(report["projected"]["calls"], report["ask"])
+        calls = len(Jev.sent)
+        self.run_stage(spend=True)
+        self.assertEqual(len(Jev.sent) - calls, 2, "only the two incompatible decisions are repaid")
+        self.assertIn("movie:1", self.derived()["titles"])
+        with open(os.path.join(self.out, "franchise-decisions-v1.json"), encoding="utf-8") as fh:
+            durable = json.load(fh)
+        self.assertEqual(durable["schema"], 2)
+        self.assertEqual(len(durable["decisions"]["movie:1"]), 2)
+        self.assertEqual(durable["usage"]["calls"], 9, "superseded cost remains auditable")
+
+        for name in list(os.listdir(self.out)):
+            if name.startswith("franchise-states-") or name.startswith("franchise-answers-v1-"):
+                os.unlink(os.path.join(self.out, name))
+        self.run_stage(spend=True)
+        self.assertEqual(len(Jev.sent) - calls, 2, "durable restart does not repay either generation")
+        self.assertIn("movie:1", self.derived()["titles"])
+
+        self.rewrite_facts(lambda records: [r.pop("mediaFranchise", None) for r in records
+                                            if r["tmdbId"] in (1, 2)])
+        self.run_stage(spend=True)
+        self.assertEqual(len(Jev.sent) - calls, 2,
+                         "when candidates revert, the compatible historical answer is reused")
+        self.assertIn("movie:1", self.derived()["titles"])
+
+    def test_an_interrupted_superseding_ask_resumes_each_replacement_once(self):
+        self.run_stage(spend=True)
+        self.golden({**GOLDEN, "floors": {**GOLDEN["floors"], "togetherRecall": 0.0,
+                                           "eraAgreement": 0.0}})
+        self.rewrite_facts(lambda records: [r.update(mediaFranchise=["Qother"]) for r in records
+                                            if r["tmdbId"] in (1, 2)])
+        before = len(Jev.sent)
+
+        class FailOneReplacement(Jev):
+            failed = False
+
+            def ask_with_metadata(self, state, questions):
+                if not type(self).failed and state["requestedTarget"]["title"].startswith("Beck"):
+                    type(self).failed = True
+                    raise rc.TypeSafeError("controlled interruption")
+                return super().ask_with_metadata(state, questions)
+
+        with mock.patch.object(franchises.rc, "TypeSafe", FailOneReplacement):
+            with self.assertRaises(UpstreamError):
+                franchises.run(Context(out_dir=self.out, spend=True), cache=object())
+        completed_before_retry = len(Jev.sent) - before
+        self.run_stage(spend=True)
+        self.assertEqual(len(Jev.sent) - before, 2,
+                         "partial output resumes; every incompatible title completes exactly once")
+        self.assertLessEqual(completed_before_retry, 1)
+        self.run_stage(spend=True)
+        self.assertEqual(len(Jev.sent) - before, 2, "the completed retry is idempotent")
+
+    def test_both_question_passes_supersede_incompatible_candidates(self):
+        class RoseannaApart(Jev):
+            def ask_with_metadata(self, state, questions):
+                if "fr__continues_line" in questions:
+                    type(self).sent.append(state)
+                    return ({"fr__continues_line": {"type": "noul", "noul": 0.9}},
+                            {"model": self.model, "usage": {"input_tokens": 900, "output_tokens": 10}})
+                answers, meta = super().ask_with_metadata(state, questions)
+                if state["requestedTarget"]["title"] == "Roseanna":
+                    answers["fr__separate_adaptation"]["noul"] = 0.9
+                return answers, meta
+
+        RoseannaApart.sent = []
+        with mock.patch.object(franchises.rc, "TypeSafe", RoseannaApart):
+            franchises.run(Context(out_dir=self.out, spend=True), cache=object())
+        self.golden({**GOLDEN, "floors": {**GOLDEN["floors"], "togetherRecall": 0.0,
+                                           "eraAgreement": 0.0}})
+        self.rewrite_facts(lambda records: [r.update(mediaFranchise=["Qghibli"]) for r in records
+                                            if r["tmdbId"] == 3])
+        before = len(RoseannaApart.sent)
+        with mock.patch.object(franchises.rc, "TypeSafe", RoseannaApart):
+            franchises.run(Context(out_dir=self.out, spend=True), cache=object())
+            franchises.run(Context(out_dir=self.out, spend=True), cache=object())
+        self.assertEqual(len(RoseannaApart.sent) - before, 2,
+                         "one replacement for FIRST and one for LINE, then no repeat")
+        for filename in ("franchise-decisions-v1.json", "franchise-line-decisions-v1.json"):
+            with open(os.path.join(self.out, filename), encoding="utf-8") as fh:
+                self.assertEqual(len(json.load(fh)["decisions"]["movie:3"]), 2)
+        self.assertNotIn("answered under other candidates", self.derived()["derivation"]["counts"])
 
     def test_a_paid_row_whose_article_provenance_was_changed_is_refused(self):
         self.run_stage(spend=True)
