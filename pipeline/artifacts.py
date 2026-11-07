@@ -154,7 +154,8 @@ FRANCHISE_ANSWERS_MANIFEST = Artifact(
 )
 
 #: The paid franchise decisions without the private article state or provider audit envelope: candidate ids,
-#: three typed answers, pinned model and token usage. This is the resume state a stateless daily run carries.
+#: typed answers, pinned model and token usage, including superseded history. This is the resume state a
+#: stateless daily run carries.
 FRANCHISE_DECISIONS = Artifact(
     name="franchise_decisions",
     filename="franchise-decisions-v1.json",

@@ -47,7 +47,7 @@ if not __package__:
 from lib import cache as caching  # noqa: E402
 
 from pipeline import artifacts, enrich  # noqa: E402
-from pipeline.franchise_decisions import totals  # noqa: E402
+from pipeline.franchise_decisions import history_totals  # noqa: E402
 
 SCHEMA = "paid-answers-v1"
 #: The paid Jev shards a run writes into its out-dir, each beside its manifest.
@@ -231,12 +231,24 @@ def merged_decisions(path, kept):
         return kept
     with open(path, encoding="utf-8") as fh:
         current = json.load(fh)
-    old = json.loads(kept)
-    same = all(old.get(k) == current.get(k) for k in ("schema", "questionsSha256", "model"))
+    carried = json.loads(kept)
+    same = all(carried.get(k) == current.get(k) for k in ("questionsSha256", "model"))
     if not same:
         return json.dumps(current, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
-    decisions = dict(sorted({**old["decisions"], **current["decisions"]}.items()))
-    return json.dumps({**current, "decisions": decisions, "usage": totals(decisions)},
+
+    def histories(doc):
+        if doc.get("schema") == 1:
+            return {key: [decision] for key, decision in doc["decisions"].items()}
+        return doc["decisions"]
+
+    # The bundle in the out-dir is the published base. The ledger was paid after it and is therefore
+    # appended last; equal entries are retained once, while a superseding decision stays newest.
+    merged = {key: list(entries) for key, entries in histories(current).items()}
+    for key, entries in histories(carried).items():
+        target = merged.setdefault(key, [])
+        target.extend(decision for decision in entries if decision not in target)
+    merged = dict(sorted(merged.items()))
+    return json.dumps({**current, "schema": 2, "decisions": merged, "usage": history_totals(merged)},
                       ensure_ascii=False, indent=1, sort_keys=True) + "\n"
 
 
