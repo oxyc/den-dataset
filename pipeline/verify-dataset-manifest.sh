@@ -9,6 +9,12 @@ manifest="$1"
 repo="${DEN_DATASET_REPO:-oxyc/den-dataset}"
 base="${DATASET_RELEASE_BASE:-https://github.com/$repo/releases/download/data-latest}"
 curl_bin="${DEN_CURL:-curl}"
+curl_max_time="${DEN_CURL_MAX_TIME:-60}"
+case "$curl_max_time" in
+  ''|*[!0-9]*) echo "error: DEN_CURL_MAX_TIME must be a positive integer" >&2; exit 2 ;;
+esac
+[ "$curl_max_time" -gt 0 ] \
+  || { echo "error: DEN_CURL_MAX_TIME must be a positive integer" >&2; exit 2; }
 cosign_bin="${DEN_COSIGN:-cosign}"
 identity="https://github.com/oxyc/den-dataset/.github/workflows/daily.yml@refs/heads/main"
 issuer="https://token.actions.githubusercontent.com"
@@ -21,7 +27,8 @@ trap 'rm -rf "$tmp"' EXIT
 # silently downgrade to the migration proof.
 fetch() {
   local name="$1" out="$2" status
-  if ! status="$("$curl_bin" -L --silent --show-error --output "$out" --write-out '%{http_code}' "$base/$name")"; then
+  if ! status="$("$curl_bin" -L --silent --show-error --max-time "$curl_max_time" \
+      --output "$out" --write-out '%{http_code}' "$base/$name")"; then
     echo "error: transport failed while fetching $name" >&2; return 1
   fi
   case "$status" in

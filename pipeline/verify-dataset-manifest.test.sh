@@ -10,12 +10,14 @@ printf '{"datasetVersion":"old"}\n' > "$MANIFEST"
 cat > "$BIN/curl" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-out=""; url=""; prev=""
+out=""; url=""; max_time=""; prev=""
 for arg in "$@"; do
   [ "$prev" = "--output" ] && out="$arg"
+  [ "$prev" = "--max-time" ] && max_time="$arg"
   prev="$arg"; [[ "$arg" = http* ]] && url="$arg"
 done
 name="${url##*/}"
+printf '%s %s\n' "$name" "$max_time" >> "$FAKE_CURL_LOG"
 if [ "${FAKE_TRANSPORT_ERROR:-}" = "$name" ]; then exit 7; fi
 if [ -f "$FAKE_ASSETS/$name" ]; then cp "$FAKE_ASSETS/$name" "$out"; printf 200
 else printf 404; fi
@@ -36,7 +38,8 @@ read -r expected_digest expected_identity expected_issuer < "$bundle"
 [ "$issuer" = "$expected_issuer" ]
 STUB
 chmod +x "$BIN/curl" "$BIN/cosign"
-export PATH="$BIN:$PATH" FAKE_ASSETS="$ASSETS" DATASET_RELEASE_BASE=https://fixture.invalid/data-latest
+export PATH="$BIN:$PATH" FAKE_ASSETS="$ASSETS" FAKE_CURL_LOG="$WORK/curl.log" \
+  DATASET_RELEASE_BASE=https://fixture.invalid/data-latest
 identity=https://github.com/oxyc/den-dataset/.github/workflows/daily.yml@refs/heads/main
 issuer=https://token.actions.githubusercontent.com
 digest() { shasum -a 256 "$MANIFEST" | cut -d' ' -f1; }
@@ -49,6 +52,21 @@ bad() { echo "not ok  $1"; fail=$((fail + 1)); }
 asset="dataset.meta.json.sha256-$(digest).bundle"
 write_proof "$asset"
 run_verify && ok "digest-addressed proof verifies" || bad "digest-addressed proof was refused"
+
+: > "$FAKE_CURL_LOG"
+DEN_CURL_MAX_TIME=7 run_verify
+if [ "$(awk 'NR == 1 { print $2 }' "$FAKE_CURL_LOG")" = 7 ]; then
+  ok "proof fetches carry the configured finite deadline"
+else
+  bad "proof fetch omitted the configured finite deadline"
+fi
+if DEN_CURL_MAX_TIME=0 run_verify; then
+  bad "a zero deadline disabled bounded proof I/O"
+elif grep -q 'must be a positive integer' "$WORK/err"; then
+  ok "the deadline cannot be disabled with zero"
+else
+  bad "a zero proof deadline failed without its configuration reason"
+fi
 
 rm -f "$ASSETS/$asset"; write_proof dataset.meta.json.bundle
 run_verify && grep -q 'migration fallback' "$WORK/err" && ok "404 alone uses the fixed migration proof" || bad "fixed migration proof failed"
