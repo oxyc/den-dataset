@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Publish the store as the den-dataset `data-latest` GitHub Release — the SINGLE SOURCE OF TRUTH for the
-# dataset artifact, which den-atlas fetches. `data-latest` is a MOVING release: this clobbers its assets on
-# every publish, so consumers always pull the current dataset.
+# dataset artifact, which den-atlas fetches. `data-latest` is a MOVING release: this clobbers its fixed
+# data assets and manifest pointer on every publish while retaining immutable manifest proofs.
 #
 # TWO DATA FILES SHIP (oxyc/den#113): `den-<version>.store` and the `dataset.meta.json` describing it. CI
-# also puts the manifest's Sigstore proof beside them as `dataset.meta.json.bundle`. The store carries what
+# also puts the manifest's Sigstore proof beside it under a name derived from the SHA-256 of the exact
+# manifest bytes. The store carries what
 # the per-blob artifacts carried — facts, labels, cards, facets, rail facets, the entity table, alias titles,
 # and both vector matrices as sections — and atlas mmaps it. Everything else in the out-dir is an INPUT to
 # that build and stays there; step 0 prunes their keys out of the manifest.
@@ -225,6 +226,44 @@ upload_one() {
   until gh release upload "$tag" -R "$REPO" --clobber "$f" </dev/null; do
     n=$((n + 1)); [ "$n" -ge 3 ] && { echo "error: failed to upload $(basename "$f") after 3 tries" >&2; return 1; }
     echo "  retry $n for $(basename "$f")…" >&2; sleep 5
+  done
+}
+
+# Upload a content-addressed asset without ever replacing it. A failed upload is ambiguous: GitHub may
+# have committed it before the client lost the response. Re-read and compare before retrying. The name
+# commits to the manifest bytes, but the comparison also refuses a release-side collision/corruption.
+upload_immutable() {
+  local f="$1" tag="${2:-data-latest}" name tmp names n=0
+  name="$(basename "$f")"
+  tmp="$(mktemp -d)"
+  while :; do
+    if ! names="$(gh release view "$tag" -R "$REPO" --json assets -q '.assets[].name')"; then
+      rm -rf "$tmp"; echo "error: could not inspect $tag before uploading $name" >&2; return 1
+    fi
+    if grep -qxF "$name" <<<"$names"; then
+      rm -f "$tmp/$name"
+      if ! gh release download "$tag" -R "$REPO" -p "$name" -D "$tmp" </dev/null; then
+        rm -rf "$tmp"; echo "error: could not compare existing immutable asset $name" >&2; return 1
+      fi
+      if cmp -s "$f" "$tmp/$name"; then
+        rm -rf "$tmp"; echo "  $name already present with identical bytes"; return 0
+      fi
+      rm -rf "$tmp"; echo "error: immutable asset $name already exists with different bytes" >&2; return 1
+    fi
+    if gh release upload "$tag" -R "$REPO" "$f" </dev/null; then
+      # Do not trust only the successful response: the next iteration verifies the durable bytes.
+      :
+    else
+      n=$((n + 1))
+      [ "$n" -ge 3 ] && {
+        # One final observation handles a server-side success followed by a client-side error.
+        names="$(gh release view "$tag" -R "$REPO" --json assets -q '.assets[].name')" || true
+        if ! grep -qxF "$name" <<<"$names"; then
+          rm -rf "$tmp"; echo "error: failed to upload immutable $name after 3 tries" >&2; return 1
+        fi
+      }
+      echo "  checking ambiguous upload of $name before retry ${n}…" >&2
+    fi
   done
 }
 
@@ -756,15 +795,16 @@ fi
 keyless_bundle=""
 if [ "$keyless" -eq 1 ]; then
   # The bundle authenticates THESE exact meta bytes. Drop a carried legacy signature first, then make and
-  # verify the proof before the first data-latest asset moves. The release bundle is uploaded immediately
-  # before the meta commit below; a failure leaves the old manifest live.
+  # verify the proof before the first data-latest asset moves. Its immutable release name is derived from
+  # these exact bytes, so an old manifest always derives its old proof even if the final pointer upload fails.
   python3 - "$meta" <<'PY'
 import json, sys
 meta = json.load(open(sys.argv[1]))
 if meta.pop("signature", None) is not None:
     json.dump(meta, open(sys.argv[1], "w"), indent=1)
 PY
-  keyless_bundle="$DIR/dataset.meta.json.bundle"
+  manifest_sha="$(shasum -a 256 "$meta" | cut -d' ' -f1)"
+  keyless_bundle="$DIR/dataset.meta.json.sha256-$manifest_sha.bundle"
   rm -f "$keyless_bundle"
   cosign_bin="${DEN_COSIGN:-cosign}"
   identity="https://github.com/oxyc/den-dataset/.github/workflows/daily.yml@refs/heads/main"
@@ -849,11 +889,13 @@ while read -r name _sha; do
 done < "$manifest_files"
 [ "$missing" -eq 0 ] || { echo "aborting: refusing to publish a meta that points at missing blobs (half-published release)" >&2; exit 1; }
 
-# The keyless proof is part of the commit. Put it beside the release before the meta that requires it, and
-# never upload a bundle on the legacy or deliberately unsigned paths (an old bundle must not look current).
+# The content-addressed keyless proof is prepared before the commit. Put it on the release before the
+# fixed manifest pointer, and never replace it: if the pointer upload fails, readers still derive the old
+# proof from the old manifest; the orphan new proof is harmless and a retry converges. The legacy fixed
+# bundle remains untouched only for migration fallback by upgraded consumers.
 if [ -n "$keyless_bundle" ]; then
-  echo "→ dataset.meta.json.bundle (workflow identity)"
-  upload_one "$keyless_bundle" || exit 1
+  echo "→ $(basename "$keyless_bundle") (immutable workflow identity)"
+  upload_immutable "$keyless_bundle" || exit 1
 fi
 
 # 5) META LAST — the atomic commit point. It declares the new datasetVersion + names the blobs, so it must be

@@ -113,6 +113,12 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # Verification precedes even parsing the live manifest: it selects the paid run's starting corpus.
+      # The same installation is reused later if this run reaches publication.
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.3
       # The live manifest, and the bundle its publish put on `corpus-<version>`. Public, read with the job's
       # own token. Without either there is nothing to start from, and a day never starts from nothing: that
       # is a whole generation, bought at once (docs/OPERATE.md, "When a run is not ready").
@@ -122,6 +128,7 @@ jobs:
         run: |
           mkdir -p "$OUT/published"
           gh release download data-latest -R "$GITHUB_REPOSITORY" -p dataset.meta.json -D "$OUT/published"
+          pipeline/verify-dataset-manifest.sh "$OUT/published/dataset.meta.json"
           version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["datasetVersion"])' \
                      "$OUT/published/dataset.meta.json")"
           gh release download "corpus-$version" -R "$GITHUB_REPOSITORY" -D "$OUT/published" \
@@ -329,11 +336,6 @@ jobs:
             ${{ env.OUT }}/bundle/
           if-no-files-found: error
           retention-days: 14
-      - name: Install Cosign
-        if: steps.day.outcome == 'success' && steps.report.outputs.store != ''
-        uses: sigstore/cosign-installer@v4.1.2
-        with:
-          cosign-release: v3.1.3
       # `./den daily` has already run publish-dataset.sh --check. `--checked` binds this publish to those
       # exact bytes, reruns every gate that can be evaluated from the artifact/current release, creates and
       # verifies the OIDC bundle, uploads it beside the store, and commits the manifest last.

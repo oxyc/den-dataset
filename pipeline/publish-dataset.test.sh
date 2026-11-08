@@ -67,7 +67,10 @@ setup() {
   WORK="$(mktemp -d)"
   DIR="$WORK/out"
   BIN="$WORK/bin"
-  mkdir -p "$DIR" "$BIN"
+  RELEASE_ASSETS="$WORK/release-assets"
+  mkdir -p "$DIR" "$BIN" "$RELEASE_ASSETS"
+  COMMIT_OBSERVATIONS="$WORK/commit-observations"
+  : > "$COMMIT_OBSERVATIONS"
   UPLOADS="$WORK/uploads"
   : > "$UPLOADS"
   cat > "$BIN/gh" <<'STUB'
@@ -77,15 +80,21 @@ setup() {
 set -euo pipefail
 case "$2" in
   view)
-    if [[ "$*" == *"--json assets"* ]]; then cat "$UPLOADS"; fi
+    if [[ "$*" == *"--json assets"* ]]; then
+      cat "$UPLOADS"
+      for f in "$RELEASE_ASSETS"/*; do [ -f "$f" ] && basename "$f"; done
+    fi
     exit 0 ;;
   download)
-    out=""; pattern=""; prev=""
+    out=""; dir=""; pattern=""; prev=""
     for a in "$@"; do
       [ "$prev" = "-O" ] && out="$a"
+      [ "$prev" = "-D" ] && dir="$a"
       [ "$prev" = "-p" ] && pattern="$a"
       prev="$a"
     done
+    [ -n "$dir" ] && out="$dir/$pattern"
+    if [ -f "$RELEASE_ASSETS/$pattern" ]; then cp "$RELEASE_ASSETS/$pattern" "$out"; exit 0; fi
     if [ "$pattern" = "dataset.meta.json" ] && [ -f "$PUBLISHED_META" ]; then
       cp "$PUBLISHED_META" "$out"; exit 0
     fi
@@ -96,7 +105,59 @@ case "$2" in
   upload)
     # data-latest's uploads in $UPLOADS, every other release's in $UPLOADS.<tag>.
     target="$UPLOADS"; [ "$3" = data-latest ] || target="$UPLOADS.$3"
-    for a in "$@"; do [ -f "$a" ] && basename "$a" >> "$target"; done
+    for a in "$@"; do
+      if [ -f "$a" ]; then
+        base="$(basename "$a")"
+        if [ "${FAKE_FAIL_UPLOAD:-}" = "$(basename "$a")" ]; then
+          echo "simulated upload failure for $(basename "$a")" >&2
+          exit 1
+        fi
+        if { [ "${FAKE_CANCEL_AFTER_UPLOAD:-}" = proof ] && \
+             [[ "$base" = dataset.meta.json.sha256-*.bundle ]]; }; then
+          cp "$a" "$RELEASE_ASSETS/$base"
+          kill -TERM "$PPID"
+          exit 143
+        fi
+        if { [ "${FAKE_AMBIGUOUS_UPLOAD:-}" = "$(basename "$a")" ] || \
+             { [ "${FAKE_AMBIGUOUS_UPLOAD:-}" = proof ] && [[ "$(basename "$a")" = dataset.meta.json.sha256-*.bundle ]]; }; } && \
+           [ ! -f "$RELEASE_ASSETS/.ambiguous-upload-reported" ]; then
+          cp "$a" "$RELEASE_ASSETS/$(basename "$a")"
+          touch "$RELEASE_ASSETS/.ambiguous-upload-reported"
+          echo "simulated lost success response for $(basename "$a")" >&2
+          exit 1
+        fi
+        if [ "$base" = dataset.meta.json ] && [ "${FAKE_MANIFEST_BARRIER:-0}" -gt 0 ]; then
+          touch "$RELEASE_ASSETS/.manifest-barrier.$PPID"
+          waits=0
+          while [ "$(find "$RELEASE_ASSETS" -name '.manifest-barrier.*' | wc -l | tr -d ' ')" \
+              -lt "$FAKE_MANIFEST_BARRIER" ]; do
+            waits=$((waits + 1))
+            [ "$waits" -lt 500 ] || { echo "manifest barrier timed out" >&2; exit 1; }
+            /bin/sleep 0.01
+          done
+        fi
+        if [ "$base" = dataset.meta.json ] && [ "${FAKE_REQUIRE_COMMIT_PROOF:-0}" = 1 ]; then
+          waits=0
+          until mkdir "$RELEASE_ASSETS/.manifest-commit-lock" 2>/dev/null; do
+            waits=$((waits + 1))
+            [ "$waits" -lt 500 ] || { echo "manifest commit lock timed out" >&2; exit 1; }
+            /bin/sleep 0.01
+          done
+          cp "$a" "$RELEASE_ASSETS/$base"
+          digest="$(shasum -a 256 "$a" | cut -d' ' -f1)"
+          proof="$RELEASE_ASSETS/dataset.meta.json.sha256-$digest.bundle"
+          if [ -f "$proof" ] && [ "$(sed -n '1p' "$proof")" = "$digest" ]; then
+            printf 'coherent %s\n' "$digest" >> "$COMMIT_OBSERVATIONS"
+          else
+            printf 'mismatch %s\n' "$digest" >> "$COMMIT_OBSERVATIONS"
+          fi
+          rmdir "$RELEASE_ASSETS/.manifest-commit-lock"
+        elif [ "$3" = data-latest ]; then
+          cp "$a" "$RELEASE_ASSETS/$base"
+        fi
+        printf '%s\n' "$base" >> "$target"
+      fi
+    done
     exit 0 ;;
   create) exit 0 ;;
 esac
@@ -117,7 +178,8 @@ case "$1" in
       [[ "$a" != -* ]] && [ "$a" != "sign-blob" ] && meta="$a"
     done
     [ -n "$bundle" ] && [ -s "$meta" ]
-    printf '%s\n%s\n' "${FAKE_COSIGN_IDENTITY:-$expected_identity}" "$expected_issuer" > "$bundle"
+    printf '%s\n%s\n%s\n' "$(shasum -a 256 "$meta" | cut -d' ' -f1)" \
+      "${FAKE_COSIGN_IDENTITY:-$expected_identity}" "$expected_issuer" > "$bundle"
     ;;
   verify-blob)
     bundle=""; identity=""; issuer=""; prev=""
@@ -129,8 +191,9 @@ case "$1" in
     done
     [ "$identity" = "$expected_identity" ]
     [ "$issuer" = "$expected_issuer" ]
-    [ "$(sed -n '1p' "$bundle")" = "$identity" ]
-    [ "$(sed -n '2p' "$bundle")" = "$issuer" ]
+    [ "$(sed -n '1p' "$bundle")" = "$(shasum -a 256 "${!#}" | cut -d' ' -f1)" ]
+    [ "$(sed -n '2p' "$bundle")" = "$identity" ]
+    [ "$(sed -n '3p' "$bundle")" = "$issuer" ]
     ;;
   *) exit 2 ;;
 esac
@@ -144,7 +207,7 @@ STUB
   printf 'unmanifested' > "$DIR/vectors-cc0.bin"
   PUBLISHED_META="$WORK/published.json"
   PUBLISHED_STORE="$WORK/published.store"
-  export UPLOADS PUBLISHED_META PUBLISHED_STORE
+  export UPLOADS PUBLISHED_META PUBLISHED_STORE RELEASE_ASSETS COMMIT_OBSERVATIONS
 }
 
 teardown() { rm -rf "$WORK"; }
@@ -1187,18 +1250,149 @@ if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
   fi
   teardown
 
+  # Cancellation is distinct from a reported transport failure: terminate the real publisher process
+  # immediately after the immutable proof becomes durable, before it can upload the fixed pointer.
+  setup
+  write_meta
+  publish_baseline
+  if checked_artifact; then
+    cp "$PUBLISHED_META" "$RELEASE_ASSETS/dataset.meta.json"
+    old_sha="$(shasum -a 256 "$PUBLISHED_META" | cut -d' ' -f1)"
+    old_proof="dataset.meta.json.sha256-$old_sha.bundle"
+    printf '%s\n%s\n%s\n' "$old_sha" \
+      "https://github.com/oxyc/den-dataset/.github/workflows/daily.yml@refs/heads/main" \
+      "https://token.actions.githubusercontent.com" > "$RELEASE_ASSETS/$old_proof"
+    cancelled_rc=0
+    FAKE_CANCEL_AFTER_UPLOAD=proof run_checked_keyless || cancelled_rc=$?
+    new_proofs="$(find "$RELEASE_ASSETS" -name 'dataset.meta.json.sha256-*.bundle' -size +0c | wc -l | tr -d ' ')"
+    if [ "$cancelled_rc" -ne 0 ] && [ "$new_proofs" -eq 2 ] && \
+       cmp -s "$PUBLISHED_META" "$RELEASE_ASSETS/dataset.meta.json" && \
+       ! grep -qx dataset.meta.json "$UPLOADS" && \
+       PATH="$BIN:$PATH" "$BIN/cosign" verify-blob --bundle "$RELEASE_ASSETS/$old_proof" \
+         --certificate-identity "https://github.com/oxyc/den-dataset/.github/workflows/daily.yml@refs/heads/main" \
+         --certificate-oidc-issuer "https://token.actions.githubusercontent.com" "$RELEASE_ASSETS/dataset.meta.json"; then
+      ok "cancellation after durable proof upload leaves the old visible pair coherent"
+    else
+      bad "proof-to-pointer cancellation did not preserve the old pair (rc=$cancelled_rc proofs=$new_proofs)"
+    fi
+  fi
+  teardown
+
+  # Two independently checked generations may overlap outside the serialized daily workflow (for
+  # example, an operator retry). Hold both at the pointer boundary, then let the stateful transport commit
+  # each. Every observed pointer must already have its own byte-bound immutable proof, regardless of which
+  # writer wins last.
+  setup
+  write_meta
+  publish_baseline
+  if checked_artifact; then
+    artifact_a="$WORK/artifact-a"
+    mv "$ARTIFACT" "$artifact_a"
+    write_meta
+    python3 - "$DIR/dataset.meta.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+meta = json.load(open(path))
+meta["publicationFixture"] = "concurrent-b"
+json.dump(meta, open(path, "w"), indent=1)
+PY
+    rm -rf "$WORK/artifact"
+    if checked_artifact; then
+      artifact_b="$ARTIFACT"
+      FAKE_MANIFEST_BARRIER=2 FAKE_REQUIRE_COMMIT_PROOF=1 PATH="$BIN:$PATH" \
+        bash "$PUBLISH" "$artifact_a" --checked --keyless > "$WORK/concurrent-a.out" 2> "$WORK/concurrent-a.err" &
+      pid_a=$!
+      FAKE_MANIFEST_BARRIER=2 FAKE_REQUIRE_COMMIT_PROOF=1 PATH="$BIN:$PATH" \
+        bash "$PUBLISH" "$artifact_b" --checked --keyless > "$WORK/concurrent-b.out" 2> "$WORK/concurrent-b.err" &
+      pid_b=$!
+      rc_a=0; wait "$pid_a" || rc_a=$?
+      rc_b=0; wait "$pid_b" || rc_b=$?
+      committed="$(grep -c '^coherent ' "$COMMIT_OBSERVATIONS" || true)"
+      mismatched="$(grep -c '^mismatch ' "$COMMIT_OBSERVATIONS" || true)"
+      live_sha="$(shasum -a 256 "$RELEASE_ASSETS/dataset.meta.json" | cut -d' ' -f1)"
+      live_proof="$RELEASE_ASSETS/dataset.meta.json.sha256-$live_sha.bundle"
+      if [ "$rc_a" -eq 0 ] && [ "$rc_b" -eq 0 ] && [ "$committed" -eq 2 ] && \
+         [ "$mismatched" -eq 0 ] && [ -f "$live_proof" ] && \
+         [ "$(sed -n '1p' "$live_proof")" = "$live_sha" ]; then
+        ok "concurrent publications expose only complete byte-bound manifest/proof generations"
+      else
+        bad "concurrent publications diverged (a=$rc_a b=$rc_b coherent=$committed mismatch=$mismatched)"
+      fi
+    fi
+  fi
+  teardown
+
   setup
   write_meta
   publish_baseline
   if checked_artifact && run_checked_keyless; then
-    [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store dataset.meta.json.bundle dataset.meta.json " ] \
+    proof="dataset.meta.json.sha256-$(shasum -a 256 "$ARTIFACT/dataset.meta.json" | cut -d' ' -f1).bundle"
+    [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store $proof dataset.meta.json " ] \
       && ok "--checked --keyless publishes the store, workflow bundle, then meta" \
       || bad "--checked --keyless uploaded $(tr '\n' ' ' < "$UPLOADS")"
-    [ -s "$ARTIFACT/dataset.meta.json.bundle" ] \
+    [ -s "$ARTIFACT/$proof" ] \
       && ok "…keeps the verified Sigstore bundle beside the meta" \
       || bad "--checked --keyless produced no bundle"
+    : > "$UPLOADS"
+    if run_checked_keyless && [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store dataset.meta.json " ]; then
+      ok "…reuses an identical immutable proof without replacing it"
+    else
+      bad "--checked --keyless did not idempotently reuse its immutable proof"
+    fi
+    printf 'collision\n' > "$RELEASE_ASSETS/$proof"
+    : > "$UPLOADS"
+    if run_checked_keyless; then
+      bad "--checked --keyless replaced a conflicting immutable proof"
+    elif ! grep -qx dataset.meta.json "$UPLOADS"; then
+      ok "…refuses an immutable proof collision before the manifest commit"
+    else
+      bad "immutable proof collision still committed the manifest"
+    fi
   else
     bad "--checked --keyless refused a checked artifact: $(tail -3 "$WORK/err.log")"
+  fi
+  teardown
+
+  # A client-side failure can follow a server-side success. The immutable uploader must observe and
+  # byte-compare that durable asset instead of blindly replacing it or reporting a false failure.
+  setup
+  write_meta
+  publish_baseline
+  if checked_artifact; then
+    ambiguous_rc=0
+    FAKE_AMBIGUOUS_UPLOAD=proof run_checked_keyless || ambiguous_rc=$?
+    proof_count="$(find "$RELEASE_ASSETS" -name 'dataset.meta.json.sha256-*.bundle' -size +0c | wc -l | tr -d ' ')"
+    meta_count="$(grep -xc dataset.meta.json "$UPLOADS" || true)"
+    if [ "$ambiguous_rc" -eq 0 ] && [ "$proof_count" -eq 1 ] && [ "$meta_count" -eq 1 ]; then
+      ok "an immutable proof upload that lands but reports failure converges safely"
+    else
+      bad "an ambiguous immutable proof upload did not converge (rc=$ambiguous_rc proofs=$proof_count commits=$meta_count; $(tail -1 "$WORK/err.log"))"
+    fi
+  fi
+  teardown
+
+  # The fixed manifest is the only pointer. Exhausting its retries after the new proof lands must leave
+  # the previously visible manifest paired with its own digest-addressed proof.
+  setup
+  write_meta
+  publish_baseline
+  if checked_artifact; then
+    cp "$PUBLISHED_META" "$RELEASE_ASSETS/dataset.meta.json"
+    old_sha="$(shasum -a 256 "$PUBLISHED_META" | cut -d' ' -f1)"
+    old_proof="dataset.meta.json.sha256-$old_sha.bundle"
+    printf '%s\n%s\n%s\n' "$old_sha" \
+      "https://github.com/oxyc/den-dataset/.github/workflows/daily.yml@refs/heads/main" \
+      "https://token.actions.githubusercontent.com" > "$RELEASE_ASSETS/$old_proof"
+    if FAKE_FAIL_UPLOAD=dataset.meta.json run_checked_keyless; then
+      bad "a simulated manifest commit failure reported success"
+    elif cmp -s "$PUBLISHED_META" "$RELEASE_ASSETS/dataset.meta.json" && \
+         PATH="$BIN:$PATH" "$BIN/cosign" verify-blob --bundle "$RELEASE_ASSETS/$old_proof" \
+           --certificate-identity "https://github.com/oxyc/den-dataset/.github/workflows/daily.yml@refs/heads/main" \
+           --certificate-oidc-issuer "https://token.actions.githubusercontent.com" "$RELEASE_ASSETS/dataset.meta.json"; then
+      ok "a failed manifest commit leaves the old manifest and old proof coherent"
+    else
+      bad "a failed manifest commit broke the visible old manifest/proof pair"
+    fi
   fi
   teardown
 
