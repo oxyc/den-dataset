@@ -75,6 +75,14 @@ REGISTRY = pipeline.producers()
 # `facetsFile`'s producer, `scripts/build-facets-bin.py`, was deleted with the TMDB language, year and vote
 # count it read off the enriched batches (oxyc/den-dataset#53).
 PRODUCERS = {a.manifest_key: REGISTRY[a.name] for a in DECLARED.values() if a.manifest_key}
+# `embed-canary.json` is the one published blob whose producer is a committed known-answer file rather
+# than a pipeline stage: the publisher copies it byte-for-byte and binds its checksum into the manifest.
+# Register that source explicitly so the ordinary published-artifact ownership guard still covers it.
+PRODUCERS["embedCanaryFile"] = (
+    "data/embed-canary.json",
+    "python3 pipeline/embed_canary.py --regenerate against a known-good native x86_64 embedder",
+    True,
+)
 
 # `factsSlimFile`, `plotFacetsFile` and `railFacetsFile` were registered here until the store carried what
 # they held. Their entries went with their producers: an entry naming a script this repo no longer has is a
