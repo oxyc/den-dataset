@@ -17,6 +17,14 @@ FAILED = daily_issue.outcome(False, False, {"verdict": "embed: the canary refuse
 OPEN = {"number": 7, "body": daily_issue.issue_body(3, "2026-10-08", RUN, "x", "")}
 
 
+class CPUBlocklist(unittest.TestCase):
+    def test_xeon_6975p_c_is_an_exact_production_entry(self):
+        path = os.path.join(HERE, "..", "data", "embed-cpu-blocklist.txt")
+        with open(path, encoding="utf-8") as fh:
+            entries = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
+        self.assertEqual(entries.count("Intel(R) Xeon(R) 6975P-C"), 1)
+
+
 class Outcome(unittest.TestCase):
     def test_ready(self):
         self.assertEqual(daily_issue.outcome(True, False, {"verdict": "ok"}, {})["kind"], "ready")
