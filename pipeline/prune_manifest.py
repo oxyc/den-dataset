@@ -42,7 +42,7 @@ import json
 import sys
 
 # The blob prefixes `data-latest` still carries.
-PUBLISHED = ("store",)
+PUBLISHED = ("store", "embedCanary")
 
 # A checksum of a property of the vector section inside the store, not a sidecar blob claim. It stays for
 # the same reason `dims` and `quantization` do, and its `Sha256` spelling makes the dataset signature cover

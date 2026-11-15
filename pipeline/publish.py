@@ -27,7 +27,8 @@ a formality:
     `DEN_ALLOW_UNOWNED_ARTIFACTS` — and so is `DEN_DATASET_REPO`, which decides which release is clobbered.
 
 `OUTPUTS` is the release, which is the one artifact in the catalogue that is not a file. See
-`artifacts.RELEASE`: the store and the manifest are what it CARRIES, and both are inputs here.
+`artifacts.RELEASE`: the store, its committed known-answer canary and the manifest are what it CARRIES.
+The store and manifest are stage inputs; the publisher copies and binds the committed canary itself.
 """
 import os
 import subprocess
@@ -48,9 +49,9 @@ PUBLISHES = True
 SPENDS = False
 SCRIPT = os.path.join(REPO, PRODUCER)
 
-#: The release carries the store and the manifest that describes it (oxyc/den#113). The store is the store
-#: stage's, so the registry reads that ownership off the order; the manifest is `finalize`'s until that
-#: stage lands.
+#: The release carries the store, its known-answer canary and the manifest that describes them. The store
+#: is the store stage's, so the registry reads that ownership off the order; the manifest is `finalize`'s
+#: until that stage lands. The publisher copies the committed canary and binds its checksum into the manifest.
 INPUTS = (artifacts.STORE, artifacts.MANIFEST)
 
 OUTPUTS = (artifacts.RELEASE,)
