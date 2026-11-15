@@ -201,7 +201,11 @@ class Batching(Staged):
     def test_ids_are_asked_for_in_batches_of_the_pinned_size(self):
         self.labels([self.record(n) for n in range(1, 251)])
         docfacts.run(self.context())
-        self.assertEqual([len(ids) for _media, ids in self.asked], [100, 100, 50])
+        batches = [ids for _media, ids in self.asked]
+        self.assertEqual(sorted(map(len, batches)), [50, 100, 100])
+        asked_ids = [tmdb_id for ids in batches for tmdb_id in ids]
+        self.assertEqual(len(asked_ids), 250)
+        self.assertCountEqual(asked_ids, range(1, 251))
 
     def test_a_batch_holds_one_media(self):
         """Two id spaces, two TMDB-id properties — `P4947` for a film and `P4983` for a series. A mixed
