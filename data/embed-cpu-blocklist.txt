@@ -4,5 +4,6 @@
 # the run's notice so it can be added here. docs/OPERATE.md, "The alignment rule", has the measurements.
 AMD EPYC 9V74 80-Core Processor
 AMD EPYC 9V45 96-Core Processor
+Intel(R) Xeon(R) 6975P-C
 Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
 INTEL(R) XEON(R) PLATINUM 8573C
