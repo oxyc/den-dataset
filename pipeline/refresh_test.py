@@ -48,8 +48,10 @@ class Refresh(unittest.TestCase):
         self.cache = caching.ResponseCache("wiki", os.path.join(self.out, ".cache"), 3600)
         self.current, self.asked = {}, []
         self.plots, self.plot_calls = {}, []
-        self.candidate_calls = []
+        self.candidate_calls, self.identity_calls = [], []
+        self.resolutions, self.candidate_articles = {}, {}
         for target, name, stub in ((enrich.plot, "plot", self.plot_stub),
+                                   (enrich, "identities", self.identities_stub),
                                    (enrich, "candidates", self.candidates_stub)):
             patch = mock.patch.object(target, name, stub)
             patch.start()
@@ -65,9 +67,33 @@ class Refresh(unittest.TestCase):
         self.asked.append((language, list(titles)))
         return {title: self.current.get((language, title)) for title in titles}
 
+    def identities_stub(self, titles, cache):
+        self.identity_calls.append(([t["tmdbId"] for t in titles], cache))
+        resolved = {}
+        for title in titles:
+            label = enrich.key(title["mediaType"], title["tmdbId"])
+            if label in self.resolutions:
+                found = self.resolutions[label]
+            elif title.get("wikidataCandidates"):
+                found = {"item": title.get("wikidataItem"),
+                         "candidates": list(title["wikidataCandidates"])}
+            else:
+                continue
+            resolved[label] = found
+        excluded = {}
+        for media in sorted({title["mediaType"] for title in titles}):
+            by_id = {title["tmdbId"]: resolved[enrich.key(media, title["tmdbId"])] for title in titles
+                     if title["mediaType"] == media and enrich.key(media, title["tmdbId"]) in resolved}
+            excluded[media] = refresh.wikidata.set_aside(by_id)
+        return resolved, excluded
+
     def candidates_stub(self, titles, cache, excluded):
-        self.candidate_calls.append(([t["tmdbId"] for t in titles], excluded))
-        return {enrich.key(t["mediaType"], t["tmdbId"]): {"article": f"Film {t['tmdbId']}"} for t in titles}
+        self.candidate_calls.append(([t["tmdbId"] for t in titles], excluded, cache))
+        return {enrich.key(t["mediaType"], t["tmdbId"]): {
+                    "article": self.candidate_articles.get(enrich.key(t["mediaType"], t["tmdbId"]),
+                                                           f"Film {t['tmdbId']}")}
+                for t in titles if self.candidate_articles.get(
+                    enrich.key(t["mediaType"], t["tmdbId"]), f"Film {t['tmdbId']}") is not None}
 
     def plot_stub(self, article, language="en", cache=None, token=None):
         self.plot_calls.append((article, language, cache, token))
@@ -264,8 +290,55 @@ class Run(Refresh):
         self.assertEqual({"title", "keywords", "voteCount", "originalLanguage", "originCountry", "genreIDs"} & set(row),
                          set())
         self.assertEqual(self.latest()["movie:6"]["wikidataItem"], "Q1")
-        self.assertIn(({"movie": {6: ["Q2"]}}), [excluded for _ids, excluded in self.candidate_calls],
+        self.assertIn(({"movie": {6: ["Q2"]}}), [excluded for _ids, excluded, _cache in self.candidate_calls],
                       "the item set aside at enrichment stays set aside")
+
+    def test_a_chosen_item_that_becomes_sole_drops_obsolete_candidate_provenance(self):
+        self.resolutions["movie:6"] = {"item": "Q1"}
+        self.refreshed()
+        row = self.latest()["movie:6"]
+        self.assertEqual((row["plotArticle"], row["overview"]), ("Film 6", PLOT))
+        self.assertNotIn("wikidataItem", row, "an uncontested item needs no persisted choice")
+        self.assertNotIn("wikidataCandidates", row)
+        changed = [cache for ids, _excluded, cache in self.candidate_calls if ids == [6]]
+        self.assertEqual(len(changed), 1)
+        self.assertIsInstance(changed[0], refresh.Fresh,
+                              "a mapping cached under the old topology must not be reused")
+
+    def test_the_other_claimant_becoming_sole_switches_the_whole_grounding(self):
+        self.resolutions["movie:6"] = {"item": "Q2"}
+        self.candidate_articles["movie:6"] = "Replacement 6"
+        replacement = "The replacement claimant's article now describes the title. " * 4
+        self.plots["Replacement 6"] = found(replacement, "Replacement 6", 206)
+        self.refreshed()
+        row = self.latest()["movie:6"]
+        self.assertEqual((row["plotArticle"], row["overview"], row["plotRevId"]),
+                         ("Replacement 6", replacement, 206))
+        self.assertNotIn("wikidataItem", row)
+        self.assertNotIn("wikidataCandidates", row)
+        call = next((excluded, cache) for ids, excluded, cache in self.candidate_calls if ids == [6])
+        self.assertEqual(call[0].get("movie"), {}, "the new sole claimant is not excluded")
+        self.assertIsInstance(call[1], refresh.Fresh)
+
+    def test_an_ambiguous_current_topology_excludes_both_items_and_withdraws_the_old_grounding(self):
+        self.resolutions["movie:6"] = {"item": None, "candidates": ["Q1", "Q2"], "rule": "ambiguous"}
+        self.candidate_articles["movie:6"] = None
+        self.refreshed()
+        row = self.latest()["movie:6"]
+        self.assertEqual(row["wikidataCandidates"], ["Q1", "Q2"])
+        self.assertNotIn("wikidataItem", row)
+        self.assertFalse(row["hasWikiPlot"])
+        for name in ("plotArticle", "plotRevId", "plotLanguage", "plotArticleRole"):
+            self.assertNotIn(name, row)
+        call = next((excluded, cache) for ids, excluded, cache in self.candidate_calls if ids == [6])
+        self.assertEqual(call[0]["movie"], {6: ["Q1", "Q2"]})
+        self.assertIsInstance(call[1], refresh.Fresh)
+
+    def test_a_stale_committed_decision_fails_closed_without_a_replacement_batch(self):
+        with mock.patch.object(enrich, "identities", side_effect=refresh.wikidata.DecisionError("decide again")):
+            with self.assertRaisesRegex(StageError, "decide again"):
+                self.refreshed()
+        self.assertEqual(self.listing(), ["batch-1.json"])
 
     def test_the_new_batches_follow_every_batch_and_the_checkpoint_moves_past_them(self):
         self.batch(7, [grounded(99, PLOT, 1)])
@@ -289,13 +362,29 @@ class Run(Refresh):
         self.assertEqual(refresh.counts(surveyed, 0)["toFetch"], 5,
                          "the failed candidates stay stale and are asked again next time")
 
+    def test_a_topology_lookup_failure_defers_the_whole_chunk_and_keeps_it_retryable(self):
+        with mock.patch.object(enrich, "identities", side_effect=http.HTTPError(0, "claimants")):
+            report = self.refreshed()
+        self.assertEqual(self.listing(), ["batch-1.json", "batch-2.json"],
+                         "only the independent exact revision backfill lands")
+        self.assertEqual((report["deferred"], report["candidateFailures"][0]["from"],
+                          report["candidateFailures"][0]["to"]), (5, 0, 5))
+        surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
+        self.assertEqual(refresh.counts(surveyed, 0)["toFetch"], 5)
+
     def test_candidate_queries_are_chunked_below_the_wdqs_limit(self):
         records = [grounded(number, PLOT, 1) for number in range(refresh.CANDIDATE_BATCH + 1)]
         replacement = lambda record, _facts, _cache, _token: ("noPlot", dict(record, hasWikiPlot=False), None)
         with mock.patch.object(enrich, "reground", side_effect=replacement):
             refresh.refetch(records, self.cache)
-        self.assertEqual([len(ids) for ids, _excluded in self.candidate_calls],
+        self.assertEqual([len(ids) for ids, _excluded, _cache in self.candidate_calls],
                          [refresh.CANDIDATE_BATCH, 1])
+        self.assertEqual(len(self.identity_calls), 1)
+        self.assertEqual(len(self.identity_calls[0][0]), refresh.CANDIDATE_BATCH + 1)
+        self.assertIsInstance(self.identity_calls[0][1], refresh.Fresh,
+                              "claimant topology must bypass the 180-day cache")
+        self.assertEqual({cache for _ids, _excluded, cache in self.candidate_calls}, {self.cache},
+                         "unchanged topology keeps the existing candidate-cache path")
 
     def test_an_unanswered_revision_check_writes_nothing(self):
         def down(titles, language="en"):

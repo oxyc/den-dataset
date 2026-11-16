@@ -58,12 +58,13 @@ BATCH = 500
 #: chunks at the same proven ceiling as ordinary enrichment while still writing 500-row output batches.
 CANDIDATE_BATCH = enrich.LIMIT
 
-#: What a refreshed record keeps from the one it replaces: its key, its `animated` flag and the Wikidata
-#: item it was resolved to. Everything else is `reground`'s to write again — and a field left over from the
-#: old grounding (a `plotArticle` on a title that lost its plot) would be a lie about the new one. Older
+#: What a refreshed record keeps from the one it replaces: its key and its `animated` flag. Its Wikidata
+#: identity is resolved again before regrounding. Everything else is `reground`'s to write again — and a
+#: field left over from the old grounding (a `plotArticle` on a title that lost its plot) would be a lie about
+#: the new one. Older
 #: batches carry TMDB fields, `genreIDs` among them (oxyc/den-dataset#53); they are not copied, and a record
 #: only given its backfilled revision sheds them through `enrich.written` too.
-KEPT = ("tmdbId", "mediaType", "animated", "wikidataItem", "wikidataCandidates")
+KEPT = ("tmdbId", "mediaType", "animated")
 
 UNCHANGED, MOVED, GONE, UNKNOWN = "unchanged", "moved", "gone", "unknown"
 
@@ -177,34 +178,39 @@ def base(record):
     return {name: record[name] for name in KEPT if name in record}
 
 
-def excluded_items(records):
-    """`media -> {tmdbId: [Q-id]}`: the claimants a record's own provenance says were set aside — what
-    `lib/wikidata.set_aside` gave the enrichment, read back off the row as `pipeline/articles` does."""
-    out = {}
-    for record in records:
-        others = [q for q in record.get("wikidataCandidates") or () if q != record.get("wikidataItem")]
-        if others:
-            out.setdefault(record["mediaType"], {})[record["tmdbId"]] = others
-    return out
-
-
 def refetch(records, cache):
     """`[(key, outcome, record)]` for one chunk: `changed`, `revised`, `plotless`, or `deferred` — a
     transient failure or a definitive one, neither of which replaces a record that had a plot.
 
-    Raises `enrich.Aborted` when Wikidata cannot say what the candidates are: nothing of the chunk is
-    written, and the next refresh finds the same titles changed.
+    Raises `enrich.Aborted` when Wikidata cannot say what the current identity or candidates are: nothing
+    of the chunk is written, and the next refresh finds the same titles changed. Resolving adds one logical
+    claimant request per `wikidata.CLAIM_BATCH` ids of each media, plus one evidence request per
+    `wikidata.EVIDENCE_BATCH` claimants of its undecided contested ids. Only titles whose topology changed
+    add fresh mapping/language/source requests; the rest retain the existing candidate-cache path.
     """
-    titles = [base(record) for record in records]
+    fresh = Fresh(cache) if cache is not None else None
     facts = {}
     try:
-        for start in range(0, len(titles), CANDIDATE_BATCH):
-            chunk = titles[start:start + CANDIDATE_BATCH]
-            facts.update(enrich.candidates(chunk, cache, excluded_items(chunk)))
+        resolved, excluded = enrich.identities(records, fresh)
+        titles, same, changed = [], [], []
+        for old in records:
+            title = base(old)
+            current = wikidata.provenance(resolved.get(enrich.key(old["mediaType"], old["tmdbId"])))
+            title.update(current)
+            titles.append(title)
+            previous = {name: old[name] for name in ("wikidataItem", "wikidataCandidates") if name in old}
+            (same if current == previous else changed).append(title)
+        # Most titles keep their topology and may reuse the mapping they were grounded under. A changed title
+        # must not: the old no-exclusion (or differently excluded) answer can merge the claimant just retired.
+        for group, candidate_cache in ((same, cache), (changed, fresh)):
+            for start in range(0, len(group), CANDIDATE_BATCH):
+                chunk = group[start:start + CANDIDATE_BATCH]
+                facts.update(enrich.candidates(chunk, candidate_cache, excluded))
+    except wikidata.DecisionError as stale:
+        raise StageError(f"refresh: {stale}") from None
     except (http.HTTPError, wikidata.WikidataError) as error:
-        raise enrich.Aborted(f"refresh: the Wikidata candidate lookup failed ({error}); nothing of this "
+        raise enrich.Aborted(f"refresh: the Wikidata identity or candidate lookup failed ({error}); nothing of this "
                              f"chunk was written — the next refresh finds it again") from error
-    fresh = Fresh(cache) if cache is not None else None
     out = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=enrich.WIKI_WORKERS) as pool:
         outcomes = pool.map(lambda r: enrich.reground(r, facts.get(enrich.key(r["mediaType"], r["tmdbId"])),
