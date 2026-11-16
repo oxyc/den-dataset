@@ -223,6 +223,10 @@ class Run(Refresh):
         self.assertEqual(self.lists(), {"changed": ["movie:1"], "plotless": ["movie:3"]})
         self.assertEqual((report["changed"], report["revised"], report["plotless"], report["deferred"],
                           report["recorded"]), (1, 2, 1, 1, 1))
+        self.assertEqual({name: report[name] for name in refresh.REQUEST_COUNTS}, {
+            "claimantRequests": 1, "evidenceRequests": 1, "candidateRequests": 2,
+            "freshCandidateRequests": 1, "cachedCandidateRequests": 1,
+        })
 
     def test_an_edit_that_left_the_plot_alone_takes_the_new_revision_and_is_in_no_list(self):
         self.refreshed()
@@ -300,7 +304,7 @@ class Run(Refresh):
         self.assertEqual((row["plotArticle"], row["overview"]), ("Film 6", PLOT))
         self.assertNotIn("wikidataItem", row, "an uncontested item needs no persisted choice")
         self.assertNotIn("wikidataCandidates", row)
-        changed = [cache for ids, _excluded, cache in self.candidate_calls if ids == [6]]
+        changed = [cache for ids, _excluded, cache in self.candidate_calls if 6 in ids]
         self.assertEqual(len(changed), 1)
         self.assertIsInstance(changed[0], refresh.Fresh,
                               "a mapping cached under the old topology must not be reused")
@@ -316,7 +320,7 @@ class Run(Refresh):
                          ("Replacement 6", replacement, 206))
         self.assertNotIn("wikidataItem", row)
         self.assertNotIn("wikidataCandidates", row)
-        call = next((excluded, cache) for ids, excluded, cache in self.candidate_calls if ids == [6])
+        call = next((excluded, cache) for ids, excluded, cache in self.candidate_calls if 6 in ids)
         self.assertEqual(call[0].get("movie"), {}, "the new sole claimant is not excluded")
         self.assertIsInstance(call[1], refresh.Fresh)
 
@@ -330,9 +334,24 @@ class Run(Refresh):
         self.assertFalse(row["hasWikiPlot"])
         for name in ("plotArticle", "plotRevId", "plotLanguage", "plotArticleRole"):
             self.assertNotIn(name, row)
-        call = next((excluded, cache) for ids, excluded, cache in self.candidate_calls if ids == [6])
+        call = next((excluded, cache) for ids, excluded, cache in self.candidate_calls if 6 in ids)
         self.assertEqual(call[0]["movie"], {6: ["Q1", "Q2"]})
         self.assertIsInstance(call[1], refresh.Fresh)
+
+    def test_an_uncontested_replacement_cannot_reuse_the_same_no_exclusion_cache_key(self):
+        """Sole Q1 and sole Q9 both persist no provenance, so only a fresh mapping distinguishes them."""
+        self.resolutions["movie:1"] = {"item": "Q9"}
+        self.candidate_articles["movie:1"] = "Replacement 1"
+        replacement = "The current sole claimant now owns this title and its article. " * 4
+        self.plots["Replacement 1"] = found(replacement, "Replacement 1", 301)
+        self.refreshed()
+        row = self.latest()["movie:1"]
+        self.assertEqual((row["plotArticle"], row["overview"], row["plotRevId"]),
+                         ("Replacement 1", replacement, 301))
+        call = next(cache for ids, _excluded, cache in self.candidate_calls if 1 in ids)
+        self.assertIsInstance(call, refresh.Fresh)
+        self.assertNotIn("wikidataItem", row)
+        self.assertNotIn("wikidataCandidates", row)
 
     def test_a_stale_committed_decision_fails_closed_without_a_replacement_batch(self):
         with mock.patch.object(enrich, "identities", side_effect=refresh.wikidata.DecisionError("decide again")):
@@ -358,6 +377,10 @@ class Run(Refresh):
         self.assertEqual(report["deferred"], 5)
         failure = report["candidateFailures"][0]
         self.assertEqual({key: failure[key] for key in ("from", "to")}, {"from": 0, "to": 5})
+        self.assertEqual({name: report[name] for name in refresh.REQUEST_COUNTS}, {
+            "claimantRequests": 1, "evidenceRequests": 1, "candidateRequests": 1,
+            "freshCandidateRequests": 0, "cachedCandidateRequests": 1,
+        }, "the report includes the logical candidate batch that failed")
         surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
         self.assertEqual(refresh.counts(surveyed, 0)["toFetch"], 5,
                          "the failed candidates stay stale and are asked again next time")
@@ -369,22 +392,29 @@ class Run(Refresh):
                          "only the independent exact revision backfill lands")
         self.assertEqual((report["deferred"], report["candidateFailures"][0]["from"],
                           report["candidateFailures"][0]["to"]), (5, 0, 5))
+        self.assertEqual({name: report[name] for name in refresh.REQUEST_COUNTS}, {
+            "claimantRequests": 1, "evidenceRequests": 0, "candidateRequests": 0,
+            "freshCandidateRequests": 0, "cachedCandidateRequests": 0,
+        })
         surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
         self.assertEqual(refresh.counts(surveyed, 0)["toFetch"], 5)
 
-    def test_candidate_queries_are_chunked_below_the_wdqs_limit(self):
+    def test_more_than_150_provenance_empty_titles_keep_the_fresh_candidate_ceiling(self):
         records = [grounded(number, PLOT, 1) for number in range(refresh.CANDIDATE_BATCH + 1)]
         replacement = lambda record, _facts, _cache, _token: ("noPlot", dict(record, hasWikiPlot=False), None)
         with mock.patch.object(enrich, "reground", side_effect=replacement):
-            refresh.refetch(records, self.cache)
+            _outcomes, requests = refresh.refetch(records, self.cache)
         self.assertEqual([len(ids) for ids, _excluded, _cache in self.candidate_calls],
                          [refresh.CANDIDATE_BATCH, 1])
         self.assertEqual(len(self.identity_calls), 1)
         self.assertEqual(len(self.identity_calls[0][0]), refresh.CANDIDATE_BATCH + 1)
         self.assertIsInstance(self.identity_calls[0][1], refresh.Fresh,
                               "claimant topology must bypass the 180-day cache")
-        self.assertEqual({cache for _ids, _excluded, cache in self.candidate_calls}, {self.cache},
-                         "unchanged topology keeps the existing candidate-cache path")
+        self.assertTrue(all(isinstance(cache, refresh.Fresh)
+                            for _ids, _excluded, cache in self.candidate_calls),
+                        "empty provenance cannot prove which sole claimant supplied the cached answer")
+        self.assertEqual((requests["candidateRequests"], requests["freshCandidateRequests"],
+                          requests["cachedCandidateRequests"]), (2, 2, 0))
 
     def test_an_unanswered_revision_check_writes_nothing(self):
         def down(titles, language="en"):

@@ -30,7 +30,8 @@ Titles the refresh only recorded a revision for go into the same batches, so the
   * `plotless.txt` — titles that had a plot and have none now. Their classify and critique rows were read
     from an article they no longer have and no new run will answer them, so they are withdrawn:
     `pipeline/consolidate_corpus.py withdraw --keys …/plotless.txt`.
-  * `report.json`  — the counts.
+  * `report.json`  — outcome counts and the logical claimant, evidence and candidate batches asked. Candidate
+    counts name both cache routes, so the cost of safely freshening topology-unknown rows stays visible.
 
 A title whose revision moved and whose plot did not (an edit to its Reception section) is in neither
 list: its record takes the new revision and nothing downstream has anything to redo.
@@ -178,6 +179,23 @@ def base(record):
     return {name: record[name] for name in KEPT if name in record}
 
 
+REQUEST_COUNTS = ("claimantRequests", "evidenceRequests", "candidateRequests",
+                  "freshCandidateRequests", "cachedCandidateRequests")
+
+
+def identity_request_counts(records, resolved):
+    """Logical claimant/evidence batches `enrich.identities` asked, whether answered live or from cache."""
+    claimants, evidence = 0, 0
+    for media in sorted({record["mediaType"] for record in records}):
+        ids = {record["tmdbId"] for record in records if record["mediaType"] == media}
+        claimants += -(-len(ids) // wikidata.CLAIM_BATCH)
+        qids = {qid for label, found in resolved.items() if label.startswith(f"{media}:")
+                and found.get("candidates") and found.get("rule") != "decision"
+                for qid in found["candidates"]}
+        evidence += -(-len(qids) // wikidata.EVIDENCE_BATCH)
+    return {"claimantRequests": claimants, "evidenceRequests": evidence}
+
+
 def refetch(records, cache):
     """`[(key, outcome, record)]` for one chunk: `changed`, `revised`, `plotless`, or `deferred` — a
     transient failure or a definitive one, neither of which replaces a record that had a plot.
@@ -185,32 +203,42 @@ def refetch(records, cache):
     Raises `enrich.Aborted` when Wikidata cannot say what the current identity or candidates are: nothing
     of the chunk is written, and the next refresh finds the same titles changed. Resolving adds one logical
     claimant request per `wikidata.CLAIM_BATCH` ids of each media, plus one evidence request per
-    `wikidata.EVIDENCE_BATCH` claimants of its undecided contested ids. Only titles whose topology changed
-    add fresh mapping/language/source requests; the rest retain the existing candidate-cache path.
+    `wikidata.EVIDENCE_BATCH` claimants of its undecided contested ids. Titles with no persisted provenance
+    also take the fresh candidate path: two different sole claimants both persist `{}`, so the old row cannot
+    prove that topology stayed the same. Only an unchanged contested topology can safely reuse candidates.
     """
     fresh = Fresh(cache) if cache is not None else None
-    facts = {}
+    facts, requests = {}, dict.fromkeys(REQUEST_COUNTS, 0)
+    by_media = {media: {record["tmdbId"] for record in records if record["mediaType"] == media}
+                for media in {record["mediaType"] for record in records}}
+    requests["claimantRequests"] = sum(-(-len(ids) // wikidata.CLAIM_BATCH) for ids in by_media.values())
     try:
         resolved, excluded = enrich.identities(records, fresh)
-        titles, same, changed = [], [], []
+        requests.update(identity_request_counts(records, resolved))
+        titles, cached, fresh_titles = [], [], []
         for old in records:
             title = base(old)
             current = wikidata.provenance(resolved.get(enrich.key(old["mediaType"], old["tmdbId"])))
             title.update(current)
             titles.append(title)
             previous = {name: old[name] for name in ("wikidataItem", "wikidataCandidates") if name in old}
-            (same if current == previous else changed).append(title)
-        # Most titles keep their topology and may reuse the mapping they were grounded under. A changed title
-        # must not: the old no-exclusion (or differently excluded) answer can merge the claimant just retired.
-        for group, candidate_cache in ((same, cache), (changed, fresh)):
+            (cached if current and current == previous else fresh_titles).append(title)
+        # Persisted contested provenance can prove its topology stayed the same. Empty provenance cannot:
+        # sole Q1 and sole Q2 both persist {}, and the old no-exclusion mapping can still answer for Q1.
+        for group, candidate_cache, count in ((cached, cache, "cachedCandidateRequests"),
+                                              (fresh_titles, fresh, "freshCandidateRequests")):
             for start in range(0, len(group), CANDIDATE_BATCH):
                 chunk = group[start:start + CANDIDATE_BATCH]
+                requests["candidateRequests"] += 1
+                requests[count] += 1
                 facts.update(enrich.candidates(chunk, candidate_cache, excluded))
     except wikidata.DecisionError as stale:
         raise StageError(f"refresh: {stale}") from None
     except (http.HTTPError, wikidata.WikidataError) as error:
-        raise enrich.Aborted(f"refresh: the Wikidata identity or candidate lookup failed ({error}); nothing of this "
-                             f"chunk was written — the next refresh finds it again") from error
+        aborted = enrich.Aborted(f"refresh: the Wikidata identity or candidate lookup failed ({error}); nothing "
+                                 f"of this chunk was written — the next refresh finds it again")
+        aborted.requests = requests
+        raise aborted from error
     out = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=enrich.WIKI_WORKERS) as pool:
         outcomes = pool.map(lambda r: enrich.reground(r, facts.get(enrich.key(r["mediaType"], r["tmdbId"])),
@@ -224,7 +252,7 @@ def refetch(records, cache):
             else:
                 same = found["overview"] == old.get("overview")
                 out.append((label, "revised" if same else "changed", enrich.written(found)))
-    return out
+    return out, requests
 
 
 def write_batch(out_dir, rows):
@@ -279,14 +307,15 @@ def run(ctx, cache=None, ask=wikipedia.revisions, now=None):
     lists = {name: os.path.join(run_dir, f"{name}.txt") for name in ("changed", "plotless")}
     for path in lists.values():
         open(path, "w", encoding="utf-8").close()
-    report.update(changed=0, revised=0, plotless=0, deferred=0, recorded=0, batches=[], candidateFailures=[])
+    report.update(changed=0, revised=0, plotless=0, deferred=0, recorded=0, batches=[], candidateFailures=[],
+                  **dict.fromkeys(REQUEST_COUNTS, 0))
 
     stale = [record for verdict, record, _b in surveyed.values() if verdict != UNCHANGED]
     for start in range(0, len(stale), BATCH):
         chunk = stale[start:start + BATCH]
         rows, listed = [], {"changed": [], "plotless": []}
         try:
-            outcomes = refetch(chunk, cache)
+            outcomes, request_counts = refetch(chunk, cache)
         except enrich.Aborted as error:
             # A daily refresh is incremental, and keeping the old rows is the safe answer to an upstream
             # outage. Abort used to throw away forty minutes of completed chunks on an ephemeral runner;
@@ -301,7 +330,11 @@ def run(ctx, cache=None, ask=wikipedia.revisions, now=None):
             })
             print(f"  refresh: deferred {start + 1}-{start + len(chunk)} of {len(stale)}: {error}",
                   file=sys.stderr)
+            for name, count in getattr(error, "requests", {}).items():
+                report[name] += count
             continue
+        for name, count in request_counts.items():
+            report[name] += count
         for label, outcome, record in outcomes:
             report[outcome] += 1
             if outcome == "deferred":
