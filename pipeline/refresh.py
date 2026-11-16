@@ -183,19 +183,6 @@ REQUEST_COUNTS = ("claimantRequests", "evidenceRequests", "candidateRequests",
                   "freshCandidateRequests", "cachedCandidateRequests")
 
 
-def identity_request_counts(records, resolved):
-    """Logical claimant/evidence batches `enrich.identities` asked, whether answered live or from cache."""
-    claimants, evidence = 0, 0
-    for media in sorted({record["mediaType"] for record in records}):
-        ids = {record["tmdbId"] for record in records if record["mediaType"] == media}
-        claimants += -(-len(ids) // wikidata.CLAIM_BATCH)
-        qids = {qid for label, found in resolved.items() if label.startswith(f"{media}:")
-                and found.get("candidates") and found.get("rule") != "decision"
-                for qid in found["candidates"]}
-        evidence += -(-len(qids) // wikidata.EVIDENCE_BATCH)
-    return {"claimantRequests": claimants, "evidenceRequests": evidence}
-
-
 def refetch(records, cache):
     """`[(key, outcome, record)]` for one chunk: `changed`, `revised`, `plotless`, or `deferred` — a
     transient failure or a definitive one, neither of which replaces a record that had a plot.
@@ -209,12 +196,11 @@ def refetch(records, cache):
     """
     fresh = Fresh(cache) if cache is not None else None
     facts, requests = {}, dict.fromkeys(REQUEST_COUNTS, 0)
-    by_media = {media: {record["tmdbId"] for record in records if record["mediaType"] == media}
-                for media in {record["mediaType"] for record in records}}
-    requests["claimantRequests"] = sum(-(-len(ids) // wikidata.CLAIM_BATCH) for ids in by_media.values())
+    def count(name):
+        requests[name] += 1
+
     try:
-        resolved, excluded = enrich.identities(records, fresh)
-        requests.update(identity_request_counts(records, resolved))
+        resolved, excluded = enrich.identities(records, fresh, count)
         titles, cached, fresh_titles = [], [], []
         for old in records:
             title = base(old)
@@ -225,13 +211,15 @@ def refetch(records, cache):
             (cached if current and current == previous else fresh_titles).append(title)
         # Persisted contested provenance can prove its topology stayed the same. Empty provenance cannot:
         # sole Q1 and sole Q2 both persist {}, and the old no-exclusion mapping can still answer for Q1.
-        for group, candidate_cache, count in ((cached, cache, "cachedCandidateRequests"),
-                                              (fresh_titles, fresh, "freshCandidateRequests")):
-            for start in range(0, len(group), CANDIDATE_BATCH):
-                chunk = group[start:start + CANDIDATE_BATCH]
-                requests["candidateRequests"] += 1
-                requests[count] += 1
-                facts.update(enrich.candidates(chunk, candidate_cache, excluded))
+        for group, candidate_cache, route_count in ((cached, cache, "cachedCandidateRequests"),
+                                                    (fresh_titles, fresh, "freshCandidateRequests")):
+            for media in sorted({title["mediaType"] for title in group}):
+                media_titles = [title for title in group if title["mediaType"] == media]
+                for start in range(0, len(media_titles), CANDIDATE_BATCH):
+                    chunk = media_titles[start:start + CANDIDATE_BATCH]
+                    requests["candidateRequests"] += 1
+                    requests[route_count] += 1
+                    facts.update(enrich.candidates(chunk, candidate_cache, excluded))
     except wikidata.DecisionError as stale:
         raise StageError(f"refresh: {stale}") from None
     except (http.HTTPError, wikidata.WikidataError) as error:

@@ -19,6 +19,7 @@ from . import artifacts, enrich, fetch, refresh
 from .contract import Context, StageError
 
 NOW = datetime.datetime(2026, 9, 22, 12, 0, tzinfo=datetime.timezone.utc)
+REAL_IDENTITIES = enrich.identities
 
 
 def grounded(tmdb_id, text, revision=100, article=None, language="en", media="movie", **extra):
@@ -67,7 +68,7 @@ class Refresh(unittest.TestCase):
         self.asked.append((language, list(titles)))
         return {title: self.current.get((language, title)) for title in titles}
 
-    def identities_stub(self, titles, cache):
+    def identities_stub(self, titles, cache, on_request=None):
         self.identity_calls.append(([t["tmdbId"] for t in titles], cache))
         resolved = {}
         for title in titles:
@@ -82,9 +83,17 @@ class Refresh(unittest.TestCase):
             resolved[label] = found
         excluded = {}
         for media in sorted({title["mediaType"] for title in titles}):
+            if on_request is not None:
+                on_request("claimantRequests")
             by_id = {title["tmdbId"]: resolved[enrich.key(media, title["tmdbId"])] for title in titles
                      if title["mediaType"] == media and enrich.key(media, title["tmdbId"]) in resolved}
             excluded[media] = refresh.wikidata.set_aside(by_id)
+            evidence = {qid for found in by_id.values()
+                        if found.get("candidates") and found.get("rule") != "decision"
+                        for qid in found["candidates"]}
+            if on_request is not None:
+                for _start in range(0, len(evidence), refresh.wikidata.EVIDENCE_BATCH):
+                    on_request("evidenceRequests")
         return resolved, excluded
 
     def candidates_stub(self, titles, cache, excluded):
@@ -386,7 +395,11 @@ class Run(Refresh):
                          "the failed candidates stay stale and are asked again next time")
 
     def test_a_topology_lookup_failure_defers_the_whole_chunk_and_keeps_it_retryable(self):
-        with mock.patch.object(enrich, "identities", side_effect=http.HTTPError(0, "claimants")):
+        def down(_titles, _cache, on_request):
+            on_request("claimantRequests")
+            raise http.HTTPError(0, "claimants")
+
+        with mock.patch.object(enrich, "identities", side_effect=down):
             report = self.refreshed()
         self.assertEqual(self.listing(), ["batch-1.json", "batch-2.json"],
                          "only the independent exact revision backfill lands")
@@ -398,6 +411,63 @@ class Run(Refresh):
         })
         surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
         self.assertEqual(refresh.counts(surveyed, 0)["toFetch"], 5)
+
+    def test_a_first_media_claimant_failure_does_not_count_the_unattempted_second_media(self):
+        attempted = []
+
+        def fail_first(_ids, media, _cache, decisions=None, on_request=None):
+            attempted.append(media)
+            on_request("claimantRequests")
+            raise http.HTTPError(0, "claimants")
+
+        records = [grounded(1, PLOT, media="movie"), grounded(2, PLOT, media="tv")]
+        with mock.patch.object(enrich, "identities", REAL_IDENTITIES), \
+             mock.patch.object(refresh.wikidata, "resolve", side_effect=fail_first), \
+             self.assertRaises(enrich.Aborted) as failure:
+            refresh.refetch(records, self.cache)
+        self.assertEqual(attempted, ["movie"])
+        self.assertEqual(failure.exception.requests, {
+            "claimantRequests": 1, "evidenceRequests": 0, "candidateRequests": 0,
+            "freshCandidateRequests": 0, "cachedCandidateRequests": 0,
+        })
+
+    def test_an_evidence_failure_counts_the_attempted_evidence_batch(self):
+        def fail_evidence(_ids, _media, _cache, decisions=None, on_request=None):
+            on_request("claimantRequests")
+            on_request("evidenceRequests")
+            raise http.HTTPError(0, "evidence")
+
+        with mock.patch.object(enrich, "identities", REAL_IDENTITIES), \
+             mock.patch.object(refresh.wikidata, "resolve", side_effect=fail_evidence), \
+             self.assertRaises(enrich.Aborted) as failure:
+            refresh.refetch([grounded(1, PLOT)], self.cache)
+        self.assertEqual(failure.exception.requests, {
+            "claimantRequests": 1, "evidenceRequests": 1, "candidateRequests": 0,
+            "freshCandidateRequests": 0, "cachedCandidateRequests": 0,
+        })
+
+    def test_mixed_media_use_separate_candidate_partitions_below_the_ceiling(self):
+        records = [grounded(1, PLOT, media="movie"), grounded(2, PLOT, media="tv")]
+        replacement = lambda record, _facts, _cache, _token: ("noPlot", dict(record, hasWikiPlot=False), None)
+        with mock.patch.object(enrich, "reground", side_effect=replacement):
+            _outcomes, requests = refresh.refetch(records, self.cache)
+        self.assertEqual([ids for ids, _excluded, _cache in self.candidate_calls], [[1], [2]])
+        self.assertEqual({name: requests[name] for name in refresh.REQUEST_COUNTS}, {
+            "claimantRequests": 2, "evidenceRequests": 0, "candidateRequests": 2,
+            "freshCandidateRequests": 2, "cachedCandidateRequests": 0,
+        })
+
+    def test_mixed_media_each_keep_their_own_candidate_ceiling(self):
+        records = ([grounded(number, PLOT, media="movie")
+                    for number in range(refresh.CANDIDATE_BATCH + 1)] +
+                   [grounded(1000 + number, PLOT, media="tv")
+                    for number in range(refresh.CANDIDATE_BATCH + 1)])
+        replacement = lambda record, _facts, _cache, _token: ("noPlot", dict(record, hasWikiPlot=False), None)
+        with mock.patch.object(enrich, "reground", side_effect=replacement):
+            _outcomes, requests = refresh.refetch(records, self.cache)
+        self.assertEqual([len(ids) for ids, _excluded, _cache in self.candidate_calls], [150, 1, 150, 1])
+        self.assertEqual((requests["claimantRequests"], requests["candidateRequests"],
+                          requests["freshCandidateRequests"]), (2, 4, 4))
 
     def test_more_than_150_provenance_empty_titles_keep_the_fresh_candidate_ceiling(self):
         records = [grounded(number, PLOT, 1) for number in range(refresh.CANDIDATE_BATCH + 1)]
