@@ -19,6 +19,7 @@ from . import artifacts, enrich, fetch, refresh
 from .contract import Context, StageError
 
 NOW = datetime.datetime(2026, 9, 22, 12, 0, tzinfo=datetime.timezone.utc)
+REAL_IDENTITIES = enrich.identities
 
 
 def grounded(tmdb_id, text, revision=100, article=None, language="en", media="movie", **extra):
@@ -48,8 +49,10 @@ class Refresh(unittest.TestCase):
         self.cache = caching.ResponseCache("wiki", os.path.join(self.out, ".cache"), 3600)
         self.current, self.asked = {}, []
         self.plots, self.plot_calls = {}, []
-        self.candidate_calls = []
+        self.candidate_calls, self.identity_calls = [], []
+        self.resolutions, self.candidate_articles = {}, {}
         for target, name, stub in ((enrich.plot, "plot", self.plot_stub),
+                                   (enrich, "identities", self.identities_stub),
                                    (enrich, "candidates", self.candidates_stub)):
             patch = mock.patch.object(target, name, stub)
             patch.start()
@@ -65,9 +68,41 @@ class Refresh(unittest.TestCase):
         self.asked.append((language, list(titles)))
         return {title: self.current.get((language, title)) for title in titles}
 
+    def identities_stub(self, titles, cache, on_request=None):
+        self.identity_calls.append(([t["tmdbId"] for t in titles], cache))
+        resolved = {}
+        for title in titles:
+            label = enrich.key(title["mediaType"], title["tmdbId"])
+            if label in self.resolutions:
+                found = self.resolutions[label]
+            elif title.get("wikidataCandidates"):
+                found = {"item": title.get("wikidataItem"),
+                         "candidates": list(title["wikidataCandidates"])}
+            else:
+                continue
+            resolved[label] = found
+        excluded = {}
+        for media in sorted({title["mediaType"] for title in titles}):
+            if on_request is not None:
+                on_request("claimantRequests")
+            by_id = {title["tmdbId"]: resolved[enrich.key(media, title["tmdbId"])] for title in titles
+                     if title["mediaType"] == media and enrich.key(media, title["tmdbId"]) in resolved}
+            excluded[media] = refresh.wikidata.set_aside(by_id)
+            evidence = {qid for found in by_id.values()
+                        if found.get("candidates") and found.get("rule") != "decision"
+                        for qid in found["candidates"]}
+            if on_request is not None:
+                for _start in range(0, len(evidence), refresh.wikidata.EVIDENCE_BATCH):
+                    on_request("evidenceRequests")
+        return resolved, excluded
+
     def candidates_stub(self, titles, cache, excluded):
-        self.candidate_calls.append(([t["tmdbId"] for t in titles], excluded))
-        return {enrich.key(t["mediaType"], t["tmdbId"]): {"article": f"Film {t['tmdbId']}"} for t in titles}
+        self.candidate_calls.append(([t["tmdbId"] for t in titles], excluded, cache))
+        return {enrich.key(t["mediaType"], t["tmdbId"]): {
+                    "article": self.candidate_articles.get(enrich.key(t["mediaType"], t["tmdbId"]),
+                                                           f"Film {t['tmdbId']}")}
+                for t in titles if self.candidate_articles.get(
+                    enrich.key(t["mediaType"], t["tmdbId"]), f"Film {t['tmdbId']}") is not None}
 
     def plot_stub(self, article, language="en", cache=None, token=None):
         self.plot_calls.append((article, language, cache, token))
@@ -197,6 +232,10 @@ class Run(Refresh):
         self.assertEqual(self.lists(), {"changed": ["movie:1"], "plotless": ["movie:3"]})
         self.assertEqual((report["changed"], report["revised"], report["plotless"], report["deferred"],
                           report["recorded"]), (1, 2, 1, 1, 1))
+        self.assertEqual({name: report[name] for name in refresh.REQUEST_COUNTS}, {
+            "claimantRequests": 1, "evidenceRequests": 1, "candidateRequests": 2,
+            "freshCandidateRequests": 1, "cachedCandidateRequests": 1,
+        })
 
     def test_an_edit_that_left_the_plot_alone_takes_the_new_revision_and_is_in_no_list(self):
         self.refreshed()
@@ -264,8 +303,70 @@ class Run(Refresh):
         self.assertEqual({"title", "keywords", "voteCount", "originalLanguage", "originCountry", "genreIDs"} & set(row),
                          set())
         self.assertEqual(self.latest()["movie:6"]["wikidataItem"], "Q1")
-        self.assertIn(({"movie": {6: ["Q2"]}}), [excluded for _ids, excluded in self.candidate_calls],
+        self.assertIn(({"movie": {6: ["Q2"]}}), [excluded for _ids, excluded, _cache in self.candidate_calls],
                       "the item set aside at enrichment stays set aside")
+
+    def test_a_chosen_item_that_becomes_sole_drops_obsolete_candidate_provenance(self):
+        self.resolutions["movie:6"] = {"item": "Q1"}
+        self.refreshed()
+        row = self.latest()["movie:6"]
+        self.assertEqual((row["plotArticle"], row["overview"]), ("Film 6", PLOT))
+        self.assertNotIn("wikidataItem", row, "an uncontested item needs no persisted choice")
+        self.assertNotIn("wikidataCandidates", row)
+        changed = [cache for ids, _excluded, cache in self.candidate_calls if 6 in ids]
+        self.assertEqual(len(changed), 1)
+        self.assertIsInstance(changed[0], refresh.Fresh,
+                              "a mapping cached under the old topology must not be reused")
+
+    def test_the_other_claimant_becoming_sole_switches_the_whole_grounding(self):
+        self.resolutions["movie:6"] = {"item": "Q2"}
+        self.candidate_articles["movie:6"] = "Replacement 6"
+        replacement = "The replacement claimant's article now describes the title. " * 4
+        self.plots["Replacement 6"] = found(replacement, "Replacement 6", 206)
+        self.refreshed()
+        row = self.latest()["movie:6"]
+        self.assertEqual((row["plotArticle"], row["overview"], row["plotRevId"]),
+                         ("Replacement 6", replacement, 206))
+        self.assertNotIn("wikidataItem", row)
+        self.assertNotIn("wikidataCandidates", row)
+        call = next((excluded, cache) for ids, excluded, cache in self.candidate_calls if 6 in ids)
+        self.assertEqual(call[0].get("movie"), {}, "the new sole claimant is not excluded")
+        self.assertIsInstance(call[1], refresh.Fresh)
+
+    def test_an_ambiguous_current_topology_excludes_both_items_and_withdraws_the_old_grounding(self):
+        self.resolutions["movie:6"] = {"item": None, "candidates": ["Q1", "Q2"], "rule": "ambiguous"}
+        self.candidate_articles["movie:6"] = None
+        self.refreshed()
+        row = self.latest()["movie:6"]
+        self.assertEqual(row["wikidataCandidates"], ["Q1", "Q2"])
+        self.assertNotIn("wikidataItem", row)
+        self.assertFalse(row["hasWikiPlot"])
+        for name in ("plotArticle", "plotRevId", "plotLanguage", "plotArticleRole"):
+            self.assertNotIn(name, row)
+        call = next((excluded, cache) for ids, excluded, cache in self.candidate_calls if 6 in ids)
+        self.assertEqual(call[0]["movie"], {6: ["Q1", "Q2"]})
+        self.assertIsInstance(call[1], refresh.Fresh)
+
+    def test_an_uncontested_replacement_cannot_reuse_the_same_no_exclusion_cache_key(self):
+        """Sole Q1 and sole Q9 both persist no provenance, so only a fresh mapping distinguishes them."""
+        self.resolutions["movie:1"] = {"item": "Q9"}
+        self.candidate_articles["movie:1"] = "Replacement 1"
+        replacement = "The current sole claimant now owns this title and its article. " * 4
+        self.plots["Replacement 1"] = found(replacement, "Replacement 1", 301)
+        self.refreshed()
+        row = self.latest()["movie:1"]
+        self.assertEqual((row["plotArticle"], row["overview"], row["plotRevId"]),
+                         ("Replacement 1", replacement, 301))
+        call = next(cache for ids, _excluded, cache in self.candidate_calls if 1 in ids)
+        self.assertIsInstance(call, refresh.Fresh)
+        self.assertNotIn("wikidataItem", row)
+        self.assertNotIn("wikidataCandidates", row)
+
+    def test_a_stale_committed_decision_fails_closed_without_a_replacement_batch(self):
+        with mock.patch.object(enrich, "identities", side_effect=refresh.wikidata.DecisionError("decide again")):
+            with self.assertRaisesRegex(StageError, "decide again"):
+                self.refreshed()
+        self.assertEqual(self.listing(), ["batch-1.json"])
 
     def test_the_new_batches_follow_every_batch_and_the_checkpoint_moves_past_them(self):
         self.batch(7, [grounded(99, PLOT, 1)])
@@ -285,17 +386,105 @@ class Run(Refresh):
         self.assertEqual(report["deferred"], 5)
         failure = report["candidateFailures"][0]
         self.assertEqual({key: failure[key] for key in ("from", "to")}, {"from": 0, "to": 5})
+        self.assertEqual({name: report[name] for name in refresh.REQUEST_COUNTS}, {
+            "claimantRequests": 1, "evidenceRequests": 1, "candidateRequests": 1,
+            "freshCandidateRequests": 0, "cachedCandidateRequests": 1,
+        }, "the report includes the logical candidate batch that failed")
         surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
         self.assertEqual(refresh.counts(surveyed, 0)["toFetch"], 5,
                          "the failed candidates stay stale and are asked again next time")
 
-    def test_candidate_queries_are_chunked_below_the_wdqs_limit(self):
+    def test_a_topology_lookup_failure_defers_the_whole_chunk_and_keeps_it_retryable(self):
+        def down(_titles, _cache, on_request):
+            on_request("claimantRequests")
+            raise http.HTTPError(0, "claimants")
+
+        with mock.patch.object(enrich, "identities", side_effect=down):
+            report = self.refreshed()
+        self.assertEqual(self.listing(), ["batch-1.json", "batch-2.json"],
+                         "only the independent exact revision backfill lands")
+        self.assertEqual((report["deferred"], report["candidateFailures"][0]["from"],
+                          report["candidateFailures"][0]["to"]), (5, 0, 5))
+        self.assertEqual({name: report[name] for name in refresh.REQUEST_COUNTS}, {
+            "claimantRequests": 1, "evidenceRequests": 0, "candidateRequests": 0,
+            "freshCandidateRequests": 0, "cachedCandidateRequests": 0,
+        })
+        surveyed, _requests = refresh.survey(self.latest(), self.cache, self.ask)
+        self.assertEqual(refresh.counts(surveyed, 0)["toFetch"], 5)
+
+    def test_a_first_media_claimant_failure_does_not_count_the_unattempted_second_media(self):
+        attempted = []
+
+        def fail_first(_ids, media, _cache, decisions=None, on_request=None):
+            attempted.append(media)
+            on_request("claimantRequests")
+            raise http.HTTPError(0, "claimants")
+
+        records = [grounded(1, PLOT, media="movie"), grounded(2, PLOT, media="tv")]
+        with mock.patch.object(enrich, "identities", REAL_IDENTITIES), \
+             mock.patch.object(refresh.wikidata, "resolve", side_effect=fail_first), \
+             self.assertRaises(enrich.Aborted) as failure:
+            refresh.refetch(records, self.cache)
+        self.assertEqual(attempted, ["movie"])
+        self.assertEqual(failure.exception.requests, {
+            "claimantRequests": 1, "evidenceRequests": 0, "candidateRequests": 0,
+            "freshCandidateRequests": 0, "cachedCandidateRequests": 0,
+        })
+
+    def test_an_evidence_failure_counts_the_attempted_evidence_batch(self):
+        def fail_evidence(_ids, _media, _cache, decisions=None, on_request=None):
+            on_request("claimantRequests")
+            on_request("evidenceRequests")
+            raise http.HTTPError(0, "evidence")
+
+        with mock.patch.object(enrich, "identities", REAL_IDENTITIES), \
+             mock.patch.object(refresh.wikidata, "resolve", side_effect=fail_evidence), \
+             self.assertRaises(enrich.Aborted) as failure:
+            refresh.refetch([grounded(1, PLOT)], self.cache)
+        self.assertEqual(failure.exception.requests, {
+            "claimantRequests": 1, "evidenceRequests": 1, "candidateRequests": 0,
+            "freshCandidateRequests": 0, "cachedCandidateRequests": 0,
+        })
+
+    def test_mixed_media_use_separate_candidate_partitions_below_the_ceiling(self):
+        records = [grounded(1, PLOT, media="movie"), grounded(2, PLOT, media="tv")]
+        replacement = lambda record, _facts, _cache, _token: ("noPlot", dict(record, hasWikiPlot=False), None)
+        with mock.patch.object(enrich, "reground", side_effect=replacement):
+            _outcomes, requests = refresh.refetch(records, self.cache)
+        self.assertEqual([ids for ids, _excluded, _cache in self.candidate_calls], [[1], [2]])
+        self.assertEqual({name: requests[name] for name in refresh.REQUEST_COUNTS}, {
+            "claimantRequests": 2, "evidenceRequests": 0, "candidateRequests": 2,
+            "freshCandidateRequests": 2, "cachedCandidateRequests": 0,
+        })
+
+    def test_mixed_media_each_keep_their_own_candidate_ceiling(self):
+        records = ([grounded(number, PLOT, media="movie")
+                    for number in range(refresh.CANDIDATE_BATCH + 1)] +
+                   [grounded(1000 + number, PLOT, media="tv")
+                    for number in range(refresh.CANDIDATE_BATCH + 1)])
+        replacement = lambda record, _facts, _cache, _token: ("noPlot", dict(record, hasWikiPlot=False), None)
+        with mock.patch.object(enrich, "reground", side_effect=replacement):
+            _outcomes, requests = refresh.refetch(records, self.cache)
+        self.assertEqual([len(ids) for ids, _excluded, _cache in self.candidate_calls], [150, 1, 150, 1])
+        self.assertEqual((requests["claimantRequests"], requests["candidateRequests"],
+                          requests["freshCandidateRequests"]), (2, 4, 4))
+
+    def test_more_than_150_provenance_empty_titles_keep_the_fresh_candidate_ceiling(self):
         records = [grounded(number, PLOT, 1) for number in range(refresh.CANDIDATE_BATCH + 1)]
         replacement = lambda record, _facts, _cache, _token: ("noPlot", dict(record, hasWikiPlot=False), None)
         with mock.patch.object(enrich, "reground", side_effect=replacement):
-            refresh.refetch(records, self.cache)
-        self.assertEqual([len(ids) for ids, _excluded in self.candidate_calls],
+            _outcomes, requests = refresh.refetch(records, self.cache)
+        self.assertEqual([len(ids) for ids, _excluded, _cache in self.candidate_calls],
                          [refresh.CANDIDATE_BATCH, 1])
+        self.assertEqual(len(self.identity_calls), 1)
+        self.assertEqual(len(self.identity_calls[0][0]), refresh.CANDIDATE_BATCH + 1)
+        self.assertIsInstance(self.identity_calls[0][1], refresh.Fresh,
+                              "claimant topology must bypass the 180-day cache")
+        self.assertTrue(all(isinstance(cache, refresh.Fresh)
+                            for _ids, _excluded, cache in self.candidate_calls),
+                        "empty provenance cannot prove which sole claimant supplied the cached answer")
+        self.assertEqual((requests["candidateRequests"], requests["freshCandidateRequests"],
+                          requests["cachedCandidateRequests"]), (2, 2, 0))
 
     def test_an_unanswered_revision_check_writes_nothing(self):
         def down(titles, language="en"):
