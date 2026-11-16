@@ -889,6 +889,30 @@ class OneItemPerTitle(Staged):
         self.run_stage()
         self.assertEqual(self.record()["titles"]["en"], "Boon")
 
+    def test_a_contested_checkpoint_is_rewritten_when_its_choice_becomes_the_sole_claimant(self):
+        self.wd.claimants[("tv", 2559)] = [BOON, BONN]
+        self.run_stage()
+        self.assertIn("wikidataCandidates", self.record())
+
+        self.wd.claimants[("tv", 2559)] = [BOON]
+        self.run_stage()
+        record = self.record()
+        self.assertEqual((record["titles"]["en"], record["imdbId"]), ("Boon", "tt0090400"))
+        self.assertNotIn("wikidataItem", record)
+        self.assertNotIn("wikidataCandidates", record)
+
+    def test_a_contested_checkpoint_is_rewritten_when_the_other_item_survives(self):
+        self.wd.claimants[("tv", 2559)] = [BOON, BONN]
+        self.run_stage()
+
+        self.wd.claimants[("tv", 2559)] = [BONN]
+        self.run_stage()
+        record = self.record()
+        self.assertEqual((record["titles"]["en"], record["imdbId"]),
+                         ("Bonn – Alte Freunde, neue Feinde", "tt13905034"))
+        self.assertNotIn("wikidataItem", record)
+        self.assertNotIn("wikidataCandidates", record)
+
 
 class Topology(unittest.TestCase):
     def test_the_stage_owns_both_passes_and_the_merge(self):

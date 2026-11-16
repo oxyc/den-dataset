@@ -137,10 +137,11 @@ def run(ctx, cache=None):
     cache = wikidata.cache_for() if cache is None else cache
     rows = existing(path)
     resolved, excluded = identities(outstanding(labels, {}), cache)
-    # A contested row written under another choice is asked again: one from before the choice existed
-    # merged every claimant's directors and genres, and one written as ambiguous holds none.
+    # A row written under another item topology is asked again: one from before a choice existed merged every
+    # claimant's directors and genres, one written as ambiguous holds none, and one whose duplicate claim was
+    # removed must retire the old candidate provenance even when its surviving item did not change.
     for key, found in resolved.items():
-        if found.get("candidates") and key in rows and wikidata.provenance(found) != {
+        if key in rows and wikidata.provenance(found) != {
                 name: rows[key][name] for name in ("wikidataItem", "wikidataCandidates") if name in rows[key]}:
             del rows[key]
     # The change set's titles now answered for by another item, and the weekly slice, are asked again with

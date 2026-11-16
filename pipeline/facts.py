@@ -656,17 +656,17 @@ def scrape(keys, has_vector, directory, version, out, cache, pace=PACE, again=fr
     contested = {key for key, found in resolved.items() if found.get("candidates")}
     say(f"facts: {len(contested)} titles have several Wikidata items claiming their TMDB id; "
         f"{sum(1 for key in contested if resolved[key]['item'] is None)} of them nothing singles one out of")
-    # A contested row checkpointed under another choice is scraped again rather than trusted: one from
-    # before the choice existed merged every claimant, and one checkpointed as ambiguous has nothing in it
-    # now that a decision names its item.
-    merged = sorted(key for key in contested if key in fields
-                    and wikidata.provenance(resolved[key]) != {name: fields[key][name] for name in
-                                                              ("wikidataItem", "wikidataCandidates")
-                                                              if name in fields[key]})
-    for key in merged:
+    # A row checkpointed under another item topology is scraped again rather than trusted: one from before a
+    # choice existed merged every claimant, one checkpointed as ambiguous has nothing in it after a decision,
+    # and one whose duplicate claim was removed must retire the old candidate provenance.
+    changed = sorted(key for key in resolved if key in fields
+                     and wikidata.provenance(resolved[key]) != {name: fields[key][name] for name in
+                                                               ("wikidataItem", "wikidataCandidates")
+                                                               if name in fields[key]})
+    for key in changed:
         del fields[key]
-    if merged:
-        say(f"facts: re-scraping {len(merged)} checkpointed contested titles scraped under another choice")
+    if changed:
+        say(f"facts: re-scraping {len(changed)} checkpointed titles scraped under another item topology")
     listed = sorted(key for key in set(again) & set(requested) if key in fields)
     for key in listed:
         del fields[key]
