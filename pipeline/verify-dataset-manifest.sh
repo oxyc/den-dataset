@@ -38,22 +38,48 @@ fetch() {
   esac
 }
 
+cosign_verify() {
+  "$cosign_bin" verify-blob --bundle "$1" --certificate-identity "$identity" \
+    --certificate-oidc-issuer "$issuer" "$manifest" >/dev/null
+}
+
+# A manifest published by hand with the legacy Ed25519 signer (publish-dataset.sh without --keyless) has no
+# digest-addressed proof, and the fixed-name bundle still describes the last keyless manifest. The signature
+# in the manifest is checked against the dataset key every consumer pins, so the daily run can start from it
+# and publish the next generation keyless, which restores a proof for the live bytes.
+legacy_fallback() {
+  local why="$1" python_bin="${DEN_PYTHON:-python3}"
+  if "$python_bin" "$(dirname "$0")/sign_manifest.py" verify "$manifest" >/dev/null 2>"$tmp/legacy.err"; then
+    echo "notice: $why; the manifest's legacy ed25519 signature verifies against the pinned dataset key" >&2
+    echo "verified dataset.meta.json with its legacy ed25519 signature"
+    exit 0
+  fi
+  echo "error: $why, and the legacy signature check failed: $(cat "$tmp/legacy.err")" >&2
+  exit 1
+}
+
 proof="$tmp/$asset"
 if fetch "$asset" "$proof"; then
-  :
+  cosign_verify "$proof" \
+    || { echo "error: the live manifest proof did not verify for the pinned daily workflow" >&2; exit 1; }
+  echo "verified dataset.meta.json with $asset"
+  exit 0
 else
   status=$?
   [ "$status" -eq 44 ] || exit "$status"
-  asset="dataset.meta.json.bundle"
-  proof="$tmp/$asset"
-  echo "notice: immutable proof absent; using the temporary fixed-name migration fallback" >&2
-  if fetch "$asset" "$proof"; then :; else
-    status=$?; [ "$status" -eq 44 ] && echo "error: no proof exists for the live manifest" >&2
-    exit "$status"
-  fi
 fi
 
-"$cosign_bin" verify-blob --bundle "$proof" --certificate-identity "$identity" \
-  --certificate-oidc-issuer "$issuer" "$manifest" >/dev/null \
-  || { echo "error: the live manifest proof did not verify for the pinned daily workflow" >&2; exit 1; }
-echo "verified dataset.meta.json with $asset"
+echo "notice: immutable proof absent; using the temporary fixed-name migration fallback" >&2
+asset="dataset.meta.json.bundle"
+proof="$tmp/$asset"
+if fetch "$asset" "$proof"; then
+  if cosign_verify "$proof"; then
+    echo "verified dataset.meta.json with $asset"
+    exit 0
+  fi
+  legacy_fallback "the live manifest ($digest) has no immutable proof and the fixed-name bundle was made for a different manifest"
+else
+  status=$?
+  [ "$status" -eq 44 ] || exit "$status"
+  legacy_fallback "no proof exists for the live manifest ($digest)"
+fi
