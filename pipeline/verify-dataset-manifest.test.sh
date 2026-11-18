@@ -86,5 +86,50 @@ rm -f "$ASSETS"/*; write_proof dataset.meta.json.bundle
 FAKE_TRANSPORT_ERROR="$asset" run_verify && bad "transport failure downgraded to fixed proof" \
   || { grep -q 'transport failed' "$WORK/err" && ok "non-404 transport failure never falls back" || bad "transport failure reason missing"; }
 
+# oxyc/den-dataset#314: a manifest published by hand with the legacy Ed25519 signer has no immutable proof and
+# the fixed-name bundle describes an older manifest (cosign: "invalid signature when validating ASN.1 encoded
+# signature"). Its signature, checked against the pinned key, is what lets the daily run start from it.
+SIGN="$ROOT/pipeline/sign_manifest.py"
+KEY="$WORK/signing.pem"
+python3 "$SIGN" keygen "$KEY" >/dev/null
+DEN_DATASET_PUBLIC_KEY="$(DEN_DATASET_SIGNING_KEY="$KEY" python3 "$SIGN" public-key)"
+export DEN_DATASET_PUBLIC_KEY
+legacy_manifest() {
+  printf '{"datasetVersion":"live","taxonomyVersion":"t","storeSha256":"abc"}\n' > "$MANIFEST"
+  DEN_DATASET_SIGNING_KEY="$KEY" python3 "$SIGN" sign "$MANIFEST" >/dev/null
+}
+# A fixed-name bundle for an older manifest: cosign (the stub) rejects it for these bytes.
+stale_fixed_bundle() { printf '%s %s %s\n' "0000" "$identity" "$issuer" > "$ASSETS/dataset.meta.json.bundle"; }
+
+rm -f "$ASSETS"/*; legacy_manifest; stale_fixed_bundle
+if run_verify && grep -q 'legacy ed25519 signature verifies' "$WORK/err"; then
+  ok "legacy-signed manifest with a stale fixed bundle is accepted, loudly"
+else
+  bad "legacy-signed manifest with a stale fixed bundle was refused: $(cat "$WORK/err")"
+fi
+
+rm -f "$ASSETS"/*; legacy_manifest
+run_verify && ok "legacy-signed manifest with no proof at all is accepted" \
+  || bad "legacy-signed manifest with no proof was refused: $(cat "$WORK/err")"
+
+rm -f "$ASSETS"/*; legacy_manifest; stale_fixed_bundle
+sed 's/"live"/"swapped"/' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+if run_verify; then
+  bad "a manifest altered after signing was accepted"
+elif grep -q 'does not verify against the pinned dataset key' "$WORK/err"; then
+  ok "altered legacy-signed manifest is refused with the signature reason"
+else
+  bad "altered manifest failed without the signature reason: $(cat "$WORK/err")"
+fi
+
+# An immutable proof that exists and fails is a refusal, never a downgrade to the legacy signature.
+rm -f "$ASSETS"/*; legacy_manifest
+write_proof "dataset.meta.json.sha256-$(digest).bundle" https://github.com/oxyc/den-dataset/.github/workflows/fork.yml@refs/heads/main
+run_verify && bad "an invalid immutable proof downgraded to the legacy signature" || ok "invalid immutable proof never falls back to the legacy signature"
+
+rm -f "$ASSETS"/*; legacy_manifest; stale_fixed_bundle
+DEN_DATASET_PUBLIC_KEY="ed25519:$(printf '%032d' 0 | base64)" run_verify \
+  && bad "a signature from a different key was accepted" || ok "legacy signature from a key other than the pinned one is refused"
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
