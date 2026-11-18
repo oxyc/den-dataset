@@ -92,7 +92,8 @@ FAKE_TRANSPORT_ERROR="$asset" run_verify && bad "transport failure downgraded to
 SIGN="$ROOT/pipeline/sign_manifest.py"
 KEY="$WORK/signing.pem"
 python3 "$SIGN" keygen "$KEY" >/dev/null
-export DEN_DATASET_PUBLIC_KEY="$(DEN_DATASET_SIGNING_KEY="$KEY" python3 "$SIGN" public-key)"
+DEN_DATASET_PUBLIC_KEY="$(DEN_DATASET_SIGNING_KEY="$KEY" python3 "$SIGN" public-key)"
+export DEN_DATASET_PUBLIC_KEY
 legacy_manifest() {
   printf '{"datasetVersion":"live","taxonomyVersion":"t","storeSha256":"abc"}\n' > "$MANIFEST"
   DEN_DATASET_SIGNING_KEY="$KEY" python3 "$SIGN" sign "$MANIFEST" >/dev/null
