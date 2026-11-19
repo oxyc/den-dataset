@@ -931,26 +931,41 @@ def _asked_batch(ids, build, namespace, parse, cache, extra=None, qlever=True, c
     return out
 
 
-def claimants(ids, media, cache=None):
-    """`tmdbId -> [Q-id]` for every id at least one item states, from disk where a batch was asked before."""
+def claimants(ids, media, cache=None, on_request=None):
+    """`tmdbId -> [Q-id]` for every id at least one item states, from disk where a batch was asked before.
+
+    `on_request`, when present, is called once for every logical claimant batch submitted, including one
+    whose lookup fails. It reports the same cache-independent operation boundary as this function's batching.
+    """
     ordered = sorted(set(int(i) for i in ids))
+    batches = [ordered[start:start + CLAIM_BATCH] for start in range(0, len(ordered), CLAIM_BATCH)]
+    if on_request is not None:
+        for _batch in batches:
+            on_request()
     out = {}
     for answer in in_parallel(
             lambda batch: _asked_batch(batch, lambda part: claimant_query(part, media), "sparql-claimant",
                                        parse_claimants, cache, chunk=None),
-            [ordered[start:start + CLAIM_BATCH] for start in range(0, len(ordered), CLAIM_BATCH)]):
+            batches):
         out.update(answer)
     return out
 
 
-def item_evidence(qids, media, cache=None):
-    """`Q-id -> evidence` (`parse_evidence`) for the claimants of a contested id."""
+def item_evidence(qids, media, cache=None, on_request=None):
+    """`Q-id -> evidence` (`parse_evidence`) for the claimants of a contested id.
+
+    `on_request` has the same submitted-logical-batch meaning as `claimants`' callback.
+    """
     ordered = sorted(set(qids))
+    batches = [ordered[start:start + EVIDENCE_BATCH] for start in range(0, len(ordered), EVIDENCE_BATCH)]
+    if on_request is not None:
+        for _batch in batches:
+            on_request()
     out = {}
     for answer in in_parallel(
             lambda batch: _asked_batch(batch, lambda part: evidence_query(part, media), "sparql-evidence",
                                        parse_evidence, cache, chunk=None),
-            [ordered[start:start + EVIDENCE_BATCH] for start in range(0, len(ordered), EVIDENCE_BATCH)]):
+            batches):
         out.update(answer)
     return out
 
@@ -1010,7 +1025,7 @@ def load_decisions(path=DECISIONS):
     return {(row["mediaType"], int(row["tmdbId"])): row["item"] for row in rows}
 
 
-def resolve(ids, media, cache=None, decisions=None):
+def resolve(ids, media, cache=None, decisions=None, on_request=None):
     """`tmdbId -> {"item", "candidates", "rule"}` for every id an item states: which ONE item every
     per-title query answers from.
 
@@ -1021,8 +1036,11 @@ def resolve(ids, media, cache=None, decisions=None):
     among `ids` that it no longer fits.
     """
     decisions = load_decisions() if decisions is None else decisions
+    claimant_args = (ids, media, cache)
+    claimant_rows = (claimants(*claimant_args) if on_request is None else
+                       claimants(*claimant_args, on_request=lambda: on_request("claimantRequests")))
     claimed = {tmdb_id: sorted(set(qids), key=lambda q: (len(q), q))
-               for tmdb_id, qids in claimants(ids, media, cache).items() if qids}
+               for tmdb_id, qids in claimant_rows.items() if qids}
     contested = {tmdb_id: qids for tmdb_id, qids in claimed.items() if len(qids) > 1}
     for tmdb_id in sorted(set(int(i) for i in ids)):
         decided = decisions.get((media, tmdb_id))
@@ -1035,7 +1053,11 @@ def resolve(ids, media, cache=None, decisions=None):
             raise DecisionError(f"{DECISIONS} chooses {decided} for {media}:{tmdb_id}, which is no longer one "
                                 f"of its claimants {contested[tmdb_id]}. Decide it again.")
     undecided = {tmdb_id: qids for tmdb_id, qids in contested.items() if (media, tmdb_id) not in decisions}
-    evidence = item_evidence([q for qids in undecided.values() for q in qids], media, cache) if undecided else {}
+    evidence_qids = [q for qids in undecided.values() for q in qids]
+    evidence = ((item_evidence(evidence_qids, media, cache) if on_request is None else
+                 item_evidence(evidence_qids, media, cache,
+                               on_request=lambda: on_request("evidenceRequests")))
+                if undecided else {})
     out = {}
     for tmdb_id, qids in claimed.items():
         if tmdb_id not in contested:

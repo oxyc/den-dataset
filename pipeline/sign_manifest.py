@@ -2,6 +2,7 @@
 """Sign `dataset.meta.json` so a consumer can tell this dataset from a substituted one (oxyc/den#127).
 
     sign_manifest.py sign <meta.json>      # write `signature` into the meta
+    sign_manifest.py verify <meta.json>    # check `signature` against the pinned public key
     sign_manifest.py payload <meta.json>   # print the exact bytes `sign` signs
     sign_manifest.py public-key            # print the key's public half: ed25519:<base64 of 32 raw bytes>
     sign_manifest.py keygen <path>         # write a new private key (PKCS#8 PEM, mode 0600)
@@ -155,6 +156,42 @@ def sign(meta_path, key):
     return meta["signature"]
 
 
+# RFC 8410 SubjectPublicKeyInfo header for an Ed25519 key; the 32 raw public-key bytes follow it.
+SPKI_ED25519_PREFIX = bytes.fromhex("302a300506032b6570032100")
+
+
+def verify(meta_path):
+    """Check the meta's `signature` against the pinned public key; raises SignError unless it verifies."""
+    with open(meta_path, encoding="utf-8") as fh:
+        meta = json.load(fh)
+    signature = meta.get("signature")
+    if not isinstance(signature, str) or not signature.startswith(PREFIX):
+        raise SignError("dataset.meta.json carries no ed25519 signature")
+    expected = os.environ.get("DEN_DATASET_PUBLIC_KEY") or PUBLIC_KEY
+    try:
+        raw_signature = base64.b64decode(signature[len(PREFIX):], validate=True)
+        raw_key = base64.b64decode(expected[len(PREFIX):], validate=True)
+    except ValueError:
+        raise SignError("the signature or the pinned public key is not valid base64")
+    if len(raw_signature) != 64 or len(raw_key) != 32:
+        raise SignError("the signature is not 64 bytes or the pinned public key is not 32 bytes")
+    with tempfile.TemporaryDirectory() as tmp:
+        files = {"message": payload(meta), "signature": raw_signature,
+                 "key.pem": ("-----BEGIN PUBLIC KEY-----\n"
+                             + base64.b64encode(SPKI_ED25519_PREFIX + raw_key).decode("ascii")
+                             + "\n-----END PUBLIC KEY-----\n").encode("ascii")}
+        for name, data in files.items():
+            with open(os.path.join(tmp, name), "wb") as fh:
+                fh.write(data)
+        done = subprocess.run(openssl() + ["pkeyutl", "-verify", "-rawin", "-pubin",
+                                           "-inkey", os.path.join(tmp, "key.pem"),
+                                           "-in", os.path.join(tmp, "message"),
+                                           "-sigfile", os.path.join(tmp, "signature")],
+                              capture_output=True)
+    if done.returncode != 0:
+        raise SignError("the manifest's ed25519 signature does not verify against the pinned dataset key")
+
+
 def pem(seed):
     """The PKCS#8 PEM openssl reads for the 32-byte Ed25519 seed `seed` (CryptoKit's `rawRepresentation`)."""
     der = PKCS8_ED25519_PREFIX + seed
@@ -169,10 +206,13 @@ def keygen(path):
 
 
 def main(argv):
-    usage = "usage: sign_manifest.py sign <meta.json> | payload <meta.json> | public-key | keygen <path>"
+    usage = "usage: sign_manifest.py sign <meta.json> | verify <meta.json> | payload <meta.json> | public-key | keygen <path>"
     try:
         if len(argv) == 2 and argv[0] == "sign":
             print(f"signed {argv[1]} with {key_path()}: {sign(argv[1], key_path())}")
+        elif len(argv) == 2 and argv[0] == "verify":
+            verify(argv[1])
+            print(f"verified {argv[1]} against the pinned dataset key")
         elif len(argv) == 2 and argv[0] == "payload":
             with open(argv[1], encoding="utf-8") as fh:
                 sys.stdout.write(payload(json.load(fh)).decode("utf-8") + "\n")

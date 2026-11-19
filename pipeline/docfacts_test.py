@@ -151,6 +151,35 @@ class Writing(Staged):
         self.assertEqual(self.facts()["tv:2559"], {"directors": [], "genres": [], "wikidataItem": "Q132860965",
                                                    "wikidataCandidates": ["Q116226000", "Q132860965"]})
 
+    def test_a_contested_checkpoint_is_rewritten_when_its_choice_becomes_the_sole_claimant(self):
+        self.labels([self.record(2559, "tv")])
+        self.claimants[("tv", 2559)] = ["Q132860965", "Q116226000"]
+        self.evidence = {"Q116226000": {"claims": [2559, 215780], "articles": []},
+                         "Q132860965": {"claims": [2559], "articles": []}}
+        docfacts.run(self.context())
+        self.assertIn("wikidataCandidates", self.facts()["tv:2559"])
+
+        self.asked.clear()
+        self.claimants[("tv", 2559)] = ["Q132860965"]
+        docfacts.run(self.context())
+
+        self.assertEqual(self.asked, [("tv", [2559])])
+        self.assertEqual(self.facts()["tv:2559"], {"directors": [], "genres": []})
+
+    def test_a_contested_checkpoint_is_rewritten_when_the_other_item_survives(self):
+        self.labels([self.record(2559, "tv")])
+        self.claimants[("tv", 2559)] = ["Q132860965", "Q116226000"]
+        self.evidence = {"Q116226000": {"claims": [2559, 215780], "articles": []},
+                         "Q132860965": {"claims": [2559], "articles": []}}
+        docfacts.run(self.context())
+
+        self.asked.clear()
+        self.claimants[("tv", 2559)] = ["Q116226000"]
+        docfacts.run(self.context())
+
+        self.assertEqual(self.asked, [("tv", [2559])])
+        self.assertEqual(self.facts()["tv:2559"], {"directors": [], "genres": []})
+
     def test_the_key_is_media_qualified(self):
         """TMDB's id spaces overlap — movie 95 is Armageddon, series 95 is Buffy — and the composed
         document would otherwise take one title's director for the other."""
@@ -201,7 +230,11 @@ class Batching(Staged):
     def test_ids_are_asked_for_in_batches_of_the_pinned_size(self):
         self.labels([self.record(n) for n in range(1, 251)])
         docfacts.run(self.context())
-        self.assertEqual([len(ids) for _media, ids in self.asked], [100, 100, 50])
+        batches = [ids for _media, ids in self.asked]
+        self.assertEqual(sorted(map(len, batches)), [50, 100, 100])
+        asked_ids = [tmdb_id for ids in batches for tmdb_id in ids]
+        self.assertEqual(len(asked_ids), 250)
+        self.assertCountEqual(asked_ids, range(1, 251))
 
     def test_a_batch_holds_one_media(self):
         """Two id spaces, two TMDB-id properties — `P4947` for a film and `P4983` for a series. A mixed

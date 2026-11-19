@@ -613,14 +613,15 @@ NAMES = Artifact(
     required=False,
 )
 
-#: The only artifact a release carries (oxyc/den#113). Everything above is an input to it.
+#: The only corpus artifact a release carries (oxyc/den#113). The publisher adds the tiny committed
+#: known-answer canary that proves a query embedder can read this vector space.
 STORE = Artifact(
     name="store",
     filename="den-{version}.store",
     manifest_key="storeFile",
 )
 
-#: The manifest that describes the store, and the release's commit point — it is uploaded last, so what
+#: The manifest that describes the store and known-answer canary, and the release's commit point — it is uploaded last, so what
 #: `data-latest` carries is whatever it names. The finalize stage creates it; the store writer and the
 #: publisher rewrite it in place (the stamp, the prune, the record counts, `storeRebuild`, the
 #: shared-article census), which is why every writer merges over it rather than replacing it.

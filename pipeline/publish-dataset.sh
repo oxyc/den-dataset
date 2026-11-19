@@ -3,7 +3,8 @@
 # dataset artifact, which den-atlas fetches. `data-latest` is a MOVING release: this clobbers its fixed
 # data assets and manifest pointer on every publish while retaining immutable manifest proofs.
 #
-# TWO DATA FILES SHIP (oxyc/den#113): `den-<version>.store` and the `dataset.meta.json` describing it. CI
+# THREE DATA FILES SHIP: `den-<version>.store`, the byte-exact `embed-canary.json`, and the
+# `dataset.meta.json` describing both. CI
 # also puts the manifest's Sigstore proof beside it under a name derived from the SHA-256 of the exact
 # manifest bytes. The store carries what
 # the per-blob artifacts carried — facts, labels, cards, facets, rail facets, the entity table, alias titles,
@@ -100,6 +101,40 @@ fi
 shopt -s nullglob
 meta="$DIR/dataset.meta.json"
 
+# Bind the run's known-answer instrument (the committed canary unless `DEN_EMBED_CANARY` explicitly selected
+# another) to this exact signed generation. `embeddingSpace` alone names
+# the expected vectors but not the case texts that elicit them; the signed manifest therefore carries the
+# checksum of the complete canary file too. A checked artifact carries these exact bytes onward, so
+# `--checked` validates them below instead of silently replacing them from a newer checkout.
+if [ "$checked" -eq 0 ]; then
+  canary_source="${DEN_EMBED_CANARY:-data/embed-canary.json}"
+  python3 - "$meta" "$DIR/embed-canary.json" "$canary_source" <<'PY'
+import hashlib, json, os, shutil, sys
+from pipeline import embed_canary
+
+meta_path, target, source = sys.argv[1:]
+canary = embed_canary.load(source)
+with open(meta_path, encoding="utf-8") as fh:
+    meta = json.load(fh)
+if meta.get("embeddingSpace") != canary["spaceId"]:
+    raise SystemExit(f"error: dataset embeds in {meta.get('embeddingSpace')!r}, but the committed canary "
+                     f"describes {canary['spaceId']!r}; refusing to publish an unrelated proof")
+if embed_canary.texts_sha256(canary) != canary["textsSha256"]:
+    raise SystemExit("error: committed embed canary texts do not match textsSha256")
+if embed_canary.space_id(canary["canarySet"], canary["cases"]) != canary["spaceId"]:
+    raise SystemExit("error: committed embed canary vectors do not match spaceId")
+if os.path.abspath(source) != os.path.abspath(target):
+    shutil.copyfile(source, target)
+with open(target, "rb") as fh:
+    digest = hashlib.sha256(fh.read()).hexdigest()
+meta["embedCanaryFile"] = os.path.basename(target)
+meta["embedCanarySha256"] = digest
+with open(meta_path, "w", encoding="utf-8") as fh:
+    json.dump(meta, fh, indent=1)
+    fh.write("\n")
+PY
+fi
+
 # Named `ran_by_check` so each gate that cannot run without the out-dir says it ran there, not "skipped".
 ran_by_check() { echo "$1: run by the check that passed these bytes ($DIR/checked.json)"; }
 if [ "$checked" -eq 1 ]; then
@@ -143,8 +178,8 @@ print(f"checked: {record['storeFile']} and dataset.meta.json are what the check 
 PY
 fi
 
-# 0) PRUNE — the release carries ONE artifact, `den-<ver>.store`, and the manifest that describes it
-# (oxyc/den#113). The store holds what the per-blob artifacts held: facts, labels, cards, facets, rail
+# 0) PRUNE — the release carries one CORPUS artifact, `den-<ver>.store`, its tiny compatibility canary,
+# and the manifest that describes them. The store holds what the retired per-blob artifacts held: facts, labels, cards, facets, rail
 # facets, the entity table, alias titles, and both vector matrices as sections.
 #
 # Pruned here rather than never written, because the producers that write those keys are the producers that

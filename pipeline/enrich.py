@@ -653,7 +653,7 @@ def read_worklist(path):
         raise StageError(f"enrich: {path} is not a worklist of {{tmdbId, mediaType}} rows ({error})")
 
 
-def identities(records, cache):
+def identities(records, cache, on_request=None):
     """`(key -> resolution, media -> items to leave out)`: which ONE Wikidata item answers for each title
     (`lib/wikidata.resolve`), and the claimants every Wikidata query of this batch must set aside.
 
@@ -663,7 +663,8 @@ def identities(records, cache):
     found, excluded = {}, {}
     for media in sorted({record["mediaType"] for record in records}):
         ids = [record["tmdbId"] for record in records if record["mediaType"] == media]
-        resolved = wikidata.resolve(ids, media, cache)
+        resolved = (wikidata.resolve(ids, media, cache) if on_request is None else
+                    wikidata.resolve(ids, media, cache, on_request=on_request))
         found.update({key(media, tmdb_id): value for tmdb_id, value in resolved.items()})
         excluded[media] = wikidata.set_aside(resolved)
     return found, excluded

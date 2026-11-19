@@ -129,6 +129,27 @@ class Signing(unittest.TestCase):
         self.assertEqual(sm.sign_bytes(RFC_MESSAGE, key), RFC_SIGNATURE)
         self.assertEqual(sm.public_key(key), "ed25519:" + base64.b64encode(RFC_PUBLIC).decode())
 
+    def test_verify_accepts_what_sign_wrote_and_refuses_a_swapped_store(self):
+        with open(self.meta) as fh:
+            original = json.load(fh)
+        pinned = sm.public_key(self.key)
+        with unittest.mock.patch.dict(os.environ, {"DEN_DATASET_PUBLIC_KEY": pinned}):
+            sm.sign(self.meta, self.key)
+            sm.verify(self.meta)
+            with open(self.meta) as fh:
+                signed = json.load(fh)
+            signed["storeSha256"] = "0" * 64
+            with open(self.meta, "w") as fh:
+                json.dump(signed, fh)
+            with self.assertRaises(sm.SignError) as refused:
+                sm.verify(self.meta)
+            self.assertIn("does not verify", str(refused.exception))
+            with open(self.meta, "w") as fh:
+                json.dump(original, fh)
+            with self.assertRaises(sm.SignError) as refused:
+                sm.verify(self.meta)
+            self.assertIn("no ed25519 signature", str(refused.exception))
+
     def test_a_key_that_is_not_the_pinned_one_is_refused(self):
         with unittest.mock.patch.dict(os.environ, {"DEN_DATASET_PUBLIC_KEY": sm.PUBLIC_KEY}):
             with self.assertRaises(sm.SignError) as refused:

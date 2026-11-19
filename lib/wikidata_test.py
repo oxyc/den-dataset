@@ -620,6 +620,23 @@ class OneItemPerTitle(unittest.TestCase):
                          {"wikidataItem": BOON, "wikidataCandidates": [BONN, BOON]})
         self.assertEqual(wikidata.provenance(resolved[1399]), {}, "an uncontested row is unchanged")
 
+    def test_request_callback_records_claimants_and_a_failing_evidence_batch(self):
+        events = []
+
+        def claimants(_ids, _media, _cache, on_request):
+            on_request()
+            return {2559: [BONN, BOON]}
+
+        def evidence(_qids, _media, _cache, on_request):
+            on_request()
+            raise wikidata.http.HTTPError(0, "evidence")
+
+        with mock.patch.object(wikidata, "claimants", side_effect=claimants), \
+             mock.patch.object(wikidata, "item_evidence", side_effect=evidence), \
+             self.assertRaises(wikidata.http.HTTPError):
+            wikidata.resolve([2559], "tv", None, {}, on_request=events.append)
+        self.assertEqual(events, ["claimantRequests", "evidenceRequests"])
+
     def resolve_with(self, claimed, decisions, ids=(6618,)):
         with mock.patch.object(wikidata, "claimants", return_value=claimed), \
                 mock.patch.object(wikidata, "item_evidence", return_value={}) as evidence:

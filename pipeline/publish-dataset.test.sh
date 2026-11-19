@@ -277,9 +277,10 @@ with open(path, "wb") as fh:
 MKSTORE
   store_sha="$(shasum -a 256 "$DIR/den-$version.store" | cut -d' ' -f1)"
   python3 - "$DIR/dataset.meta.json" "$version" "$labels_sha" "$store_sha" "$labels_records" "$extra" \
-    "$HERE/../data/alias-decisions.json" "$HERE/../data/award-ceremony-merges.json" <<'PY'
+    "$HERE/../data/alias-decisions.json" "$HERE/../data/award-ceremony-merges.json" \
+    "$HERE/../data/embed-canary.json" <<'PY'
 import hashlib, json, sys
-path, version, labels_sha, store_sha, records, extra, decisions, merges = sys.argv[1:9]
+path, version, labels_sha, store_sha, records, extra, decisions, merges, canary = sys.argv[1:10]
 meta = {
     "datasetVersion": version,
     "taxonomyVersion": "t02",
@@ -291,6 +292,7 @@ meta = {
     "storeFile": f"den-{version}.store",
     "storeSha256": store_sha,
     "storeRecords": int(records),
+    "embeddingSpace": json.load(open(canary))["spaceId"],
     # What the store build stamps: the committed decisions applied, and no collision left undecided.
     "aliasDecisions": {"sha256": hashlib.sha256(open(decisions, "rb").read()).hexdigest(),
                        "dropped": 0, "undecided": 0},
@@ -378,10 +380,10 @@ setup
 write_meta
 publish_baseline
 if run_publish; then
-  # THE CONTRACT (oxyc/den#113): the store and the manifest that describes it, and nothing else. The
+  # THE CONTRACT: the store, its known-answer canary, and the manifest that describes both. The
   # labels this fixture's manifest declares are in the out-dir, hashed correctly, and must NOT go out.
-  if [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store dataset.meta.json " ]; then
-    ok "a publish uploads the store and the meta, in that order, and nothing else"
+  if [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store embed-canary.json dataset.meta.json " ]; then
+    ok "a publish uploads the store, canary and meta, in that order, and nothing else"
   else
     bad "the happy path uploaded $(tr '\n' ' ' < "$UPLOADS")"
   fi
@@ -562,8 +564,8 @@ write_meta aaaaaaaaaaaa 10 '{"metadataFile":"metadata-aaaaaaaaaaaa.json","metada
 publish_baseline
 write_meta aaaaaaaaaaaa 10   # this one declares only the labels finalize writes, and the store
 if run_publish; then
-  if [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store dataset.meta.json " ]; then
-    ok "the first store-only publish goes out with no override, and carries only the store"
+  if [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store embed-canary.json dataset.meta.json " ]; then
+    ok "the first store-only publish goes out with no override, and carries only the store plus its canary"
   else
     bad "the cutover uploaded $(tr '\n' ' ' < "$UPLOADS")"
   fi
@@ -1217,7 +1219,7 @@ teardown
 # mode: `--checked` is its own entry.
 
 if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
-  # A checked artifact: the check run in $DIR, its three files copied to $WORK/artifact.
+  # A checked artifact: the check run in $DIR, its four files copied to $WORK/artifact.
   checked_artifact() {
     mkdir -p "$DIR/published"
     [ -f "$PUBLISHED_META" ] && cp "$PUBLISHED_META" "$DIR/published/dataset.meta.json"
@@ -1225,7 +1227,7 @@ if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
       || { bad "the check refused the fixture: $(tail -3 "$WORK/check.log")"; return 1; }
     ARTIFACT="$WORK/artifact"
     mkdir -p "$ARTIFACT"
-    cp "$DIR"/den-*.store "$DIR/dataset.meta.json" "$DIR/checked.json" "$ARTIFACT/"
+    cp "$DIR"/den-*.store "$DIR/embed-canary.json" "$DIR/dataset.meta.json" "$DIR/checked.json" "$ARTIFACT/"
     cp -r "$DIR/bundle" "$ARTIFACT/"
   }
   run_checked() { PATH="$BIN:$PATH" bash "$PUBLISH" "$ARTIFACT" --checked > "$WORK/out.log" 2> "$WORK/err.log"; }
@@ -1235,8 +1237,8 @@ if [ "${DEN_PUBLISH_VIA:-script}" = "script" ]; then
   write_meta
   publish_baseline
   if checked_artifact && run_checked; then
-    [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store dataset.meta.json " ] \
-      && ok "--checked publishes the store and the meta the check passed, meta last" \
+    [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store embed-canary.json dataset.meta.json " ] \
+      && ok "--checked publishes the store, canary and meta the check passed, meta last" \
       || bad "--checked uploaded $(tr '\n' ' ' < "$UPLOADS")"
     signature_verifies "$ARTIFACT/dataset.meta.json" \
       && ok "…signed" || bad "--checked published an unsigned or unverifiable meta"
@@ -1327,14 +1329,14 @@ PY
   publish_baseline
   if checked_artifact && run_checked_keyless; then
     proof="dataset.meta.json.sha256-$(shasum -a 256 "$ARTIFACT/dataset.meta.json" | cut -d' ' -f1).bundle"
-    [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store $proof dataset.meta.json " ] \
-      && ok "--checked --keyless publishes the store, workflow bundle, then meta" \
+    [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store embed-canary.json $proof dataset.meta.json " ] \
+      && ok "--checked --keyless publishes the store, canary, workflow bundle, then meta" \
       || bad "--checked --keyless uploaded $(tr '\n' ' ' < "$UPLOADS")"
     [ -s "$ARTIFACT/$proof" ] \
       && ok "…keeps the verified Sigstore bundle beside the meta" \
       || bad "--checked --keyless produced no bundle"
     : > "$UPLOADS"
-    if run_checked_keyless && [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store dataset.meta.json " ]; then
+    if run_checked_keyless && [ "$(tr '\n' ' ' < "$UPLOADS")" = "den-aaaaaaaaaaaa.store embed-canary.json dataset.meta.json " ]; then
       ok "…reuses an identical immutable proof without replacing it"
     else
       bad "--checked --keyless did not idempotently reuse its immutable proof"

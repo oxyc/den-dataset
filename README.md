@@ -31,6 +31,9 @@ sit beside it.
 Consumers hash the raw manifest before parsing it, fetch the proof named by that digest, and pin the
 workflow identity and GitHub OIDC issuer. During the consumer-first migration only, a missing immutable
 proof falls back to the legacy `dataset.meta.json.bundle`; invalid proofs and transport failures never do.
+The daily run's own start check (`pipeline/verify-dataset-manifest.sh`) additionally accepts a manifest
+published by hand with the legacy signer when no proof covers its bytes: its `ed25519:` signature must
+verify against the pinned dataset key, and the run says so. The next keyless publish restores a proof.
 The fixed manifest is the sole commit pointer, so a failed pointer upload leaves the old manifest paired
 with its old immutable proof and a retry can safely converge.
 

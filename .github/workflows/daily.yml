@@ -332,6 +332,7 @@ jobs:
           path: |
             ${{ env.OUT }}/${{ steps.report.outputs.store }}
             ${{ env.OUT }}/dataset.meta.json
+            ${{ env.OUT }}/embed-canary.json
             ${{ env.OUT }}/checked.json
             ${{ env.OUT }}/bundle/
           if-no-files-found: error
